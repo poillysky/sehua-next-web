@@ -1125,16 +1125,21 @@ def claim_build(*, region: str | None = None) -> bool:
 
 
 def abort_claim(message: str = "failed") -> None:
-    """入队后 worker 未能启动时清掉 queued。"""
+    """后台 worker 启动失败或扫库前置失败时结束 running。"""
     with _meta_lock:
-        if _build_state.get("message") == "queued":
-            _build_state.update(
-                {
-                    "running": False,
-                    "finishedAt": _now_iso(),
-                    "message": message,
-                }
-            )
+        if not (
+            _build_state.get("running")
+            or _build_state.get("message") in {"queued", "building"}
+        ):
+            return
+        _build_state.update(
+            {
+                "running": False,
+                "finishedAt": _now_iso(),
+                "message": message,
+                "updatedAt": _now_iso(),
+            }
+        )
 
 
 def _region_from_path(path: list[str], hub_fid: str = "") -> str:
@@ -1945,6 +1950,24 @@ def build_maker_fs(
                 "treePrefixCount": tree.get("prefixCount"),
                 "regions": overview,
             }
+
+        # 扫库依赖资源库；不可用时以前会静默写 0 条目
+        from .pg import ResourceDbUnavailable, get_pool
+
+        try:
+            with get_pool().connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+                    cur.fetchone()
+        except ResourceDbUnavailable as e:
+            raise ValueError(
+                f"{e}。NAS 容器内主机填 postgres、端口 5432，"
+                "并加入 sehuatang-network；勿用 127.0.0.1"
+            ) from e
+        except Exception as e:
+            raise ValueError(
+                f"资源库连不上: {e}。请检查设置→资源库 DSN 与 Docker 网络"
+            ) from e
 
         work = prefixes
         if region_id:

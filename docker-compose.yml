@@ -1,4 +1,4 @@
-# NAS 部署（对齐 sehua 目录习惯）
+# NAS 部署（对齐 sehua / sehuatang-search）
 #
 # 目录:
 #   /vol1/1000/Docker/sehua-next-web/
@@ -6,6 +6,11 @@
 #     data/           # SQLite / library / maker-fs
 #     scrape-data/    # 刮削封面与 meta
 #     config/         # app.json 管理员种子等
+#
+# 前提：主栈已 up，且存在外部网络 sehuatang-network（见 sehua docker-compose.nas.yml）。
+# 设置 → 资源库 DSN 示例（容器内访问主栈 Postgres）:
+#   主机 postgres · 端口 5432 · 库 ed2k
+#   勿填 127.0.0.1（那是容器自己）
 #
 # 启动:
 #   cd /vol1/1000/Docker/sehua-next-web
@@ -17,18 +22,17 @@ name: sehua-next-web
 
 services:
   app:
-    image: poillysky/sehua-next-web:${IMAGE_TAG:-1.0.0}
+    image: poillysky/sehua-next-web:1.0.0
     container_name: sehua-next-web
     restart: always
     ports:
       - "3020:3020"
     environment:
       TZ: Asia/Shanghai
-      SNS_COOKIE_SECURE: ${SNS_COOKIE_SECURE:-0}
+      SNS_COOKIE_SECURE: "0"
       SCRAPE_ORIGIN: http://127.0.0.1:9210
       API_INTERNAL_BASE: http://127.0.0.1:8020
       WEB_PORT: "3020"
-      # HTTPS_PROXY: http://host.docker.internal:7890
     volumes:
       - /vol1/1000/Docker/sehua-next-web/data:/app/data
       - /vol1/1000/Docker/sehua-next-web/scrape-data:/app/apps/scrape/data
@@ -36,3 +40,8 @@ services:
     dns:
       - 223.5.5.5
       - 8.8.8.8
+
+networks:
+  default:
+    name: sehuatang-network
+    external: true

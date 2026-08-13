@@ -64,7 +64,9 @@ docker compose pull
 docker compose up -d
 ```
 
-`restart: always`；数据卷为绝对路径（见 `docker-compose.yml`）。
+`restart: always`；数据卷为绝对路径；默认加入外部网络 `sehuatang-network`（与主栈 Postgres 互通）。
+
+设置 → 资源库：主机 `postgres`、端口 `5432`、库 `ed2k`（**不要**填 `127.0.0.1`，那是容器自己）。
 
 ### 本地
 

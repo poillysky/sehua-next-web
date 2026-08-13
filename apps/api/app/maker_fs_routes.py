@@ -274,8 +274,8 @@ def _run_build(
             region=region,
             from_claim=True,
         )
-    except Exception:
-        maker_fs.abort_claim("failed")
+    except Exception as e:
+        maker_fs.abort_claim(str(e) or "failed")
 
 
 @router.post("/maker-fs/build")
