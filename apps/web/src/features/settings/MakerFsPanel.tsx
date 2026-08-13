@@ -254,6 +254,7 @@ export function MakerFsPanel({
   const [catalog, setCatalog] = useState<MakerFsRegionCatalog | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [openingId, setOpeningId] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
   const [addPrefix, setAddPrefix] = useState('');
   const [addBoardName, setAddBoardName] = useState('');
@@ -315,7 +316,7 @@ export function MakerFsPanel({
   }, [running]);
 
   const openRegion = useCallback(async (region: MakerFsRegionSummary) => {
-    setBusy(true);
+    setOpeningId(region.id);
     setMsg('');
     try {
       const cat = await fetchMakerFsRegion(region.id);
@@ -325,7 +326,7 @@ export function MakerFsPanel({
       setMsg(e instanceof Error ? e.message : '读取分区失败');
       toast(e instanceof Error ? e.message : '读取分区失败', 'error');
     } finally {
-      setBusy(false);
+      setOpeningId(null);
     }
   }, [toast]);
 
@@ -342,11 +343,12 @@ export function MakerFsPanel({
     region?: string;
     label: string;
   }) {
-    setBusy(true);
     setMsg('');
     if (opts.region) setScanningId(opts.region);
-    else setScanningId(null);
+    else setScanningId('__all__');
     try {
+      // 仅启动请求短暂占 busy；等待过程中必须可下钻浏览
+      setBusy(true);
       await buildMakerFs({
         catalogsOnly: opts.catalogsOnly,
         force: opts.force,
@@ -354,8 +356,16 @@ export function MakerFsPanel({
         region: opts.region,
         workers: 8,
       });
+      try {
+        const s0 = await fetchMakerFsStatus();
+        setStatus((prev) => mergeMakerFsStatus(prev, s0));
+      } catch {
+        /* 轮询 effect 会接上 */
+      }
+      setBusy(false);
       onStatusRef.current('构建中', 'mute');
       toast(`${opts.label}已开始`, 'info');
+
       const st = await waitMakerFsBuild({
         onTick: (s) => setStatus((prev) => mergeMakerFsStatus(prev, s)),
       });
@@ -380,10 +390,12 @@ export function MakerFsPanel({
 
   async function runLibrarySync(opts?: { region?: string; label?: string }) {
     const label = opts?.label || '同步本地片库';
-    setBusy(true);
     setMsg('');
     try {
-      await materializeLibrary({ region: opts?.region });
+      setBusy(true);
+      const started = await materializeLibrary({ region: opts?.region });
+      setLibSync(started);
+      setBusy(false);
       onStatusRef.current('同步片库中', 'mute');
       toast(`${label}已开始`, 'info');
       const st = await waitLibraryMaterialize({
@@ -534,7 +546,7 @@ export function MakerFsPanel({
                   <button
                     type="button"
                     className="mfs-region-row__main"
-                    disabled={busy}
+                    disabled={openingId === r.id}
                     onClick={() => void openRegion(r)}
                   >
                     <span className="mfs-region-mark" aria-hidden>
@@ -570,7 +582,7 @@ export function MakerFsPanel({
                   <button
                     type="button"
                     className="mfs-region-chev"
-                    disabled={busy}
+                    disabled={openingId === r.id}
                     aria-label={`打开${r.label}`}
                     onClick={() => void openRegion(r)}
                   >
@@ -725,7 +737,6 @@ export function MakerFsPanel({
             <button
               type="button"
               className="mfs-toolbar__btn mfs-toolbar__btn--primary"
-              disabled={busy}
               onClick={() =>
                 setStack({ kind: 'add-prefix', region: stack.region, catalog })
               }
