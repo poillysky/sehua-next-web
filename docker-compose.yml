@@ -1,21 +1,38 @@
+# NAS 部署（对齐 sehua 目录习惯）
+#
+# 目录:
+#   /vol1/1000/Docker/sehua-next-web/
+#     docker-compose.yml
+#     data/           # SQLite / library / maker-fs
+#     scrape-data/    # 刮削封面与 meta
+#     config/         # app.json 管理员种子等
+#
+# 启动:
+#   cd /vol1/1000/Docker/sehua-next-web
+#   docker compose pull
+#   docker compose up -d
+# 访问: http://NAS_IP:3020
+
+name: sehua-next-web
+
 services:
   app:
     image: poillysky/sehua-next-web:${IMAGE_TAG:-1.0.0}
-    build:
-      context: .
-      dockerfile: Dockerfile
+    container_name: sehua-next-web
+    restart: always
     ports:
       - "3020:3020"
-    volumes:
-      - ./data:/app/data
-      - scrape-data:/app/apps/scrape/data
-      - ./config:/app/config:ro
     environment:
+      TZ: Asia/Shanghai
       SNS_COOKIE_SECURE: ${SNS_COOKIE_SECURE:-0}
       SCRAPE_ORIGIN: http://127.0.0.1:9210
       API_INTERNAL_BASE: http://127.0.0.1:8020
       WEB_PORT: "3020"
-    restart: unless-stopped
-
-volumes:
-  scrape-data:
+      # HTTPS_PROXY: http://host.docker.internal:7890
+    volumes:
+      - /vol1/1000/Docker/sehua-next-web/data:/app/data
+      - /vol1/1000/Docker/sehua-next-web/scrape-data:/app/apps/scrape/data
+      - /vol1/1000/Docker/sehua-next-web/config:/app/config
+    dns:
+      - 223.5.5.5
+      - 8.8.8.8

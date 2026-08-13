@@ -54,22 +54,28 @@ npm run dev
 
 一个镜像同时跑 **web + api + scrape**（supervisord），对外只暴露 **3020**。
 
-```bash
-# 构建
-docker build -t sehua-next-web:1.0.0 .
+### NAS（`/vol1/1000/Docker/sehua-next-web`）
 
-# 运行
+```bash
+mkdir -p /vol1/1000/Docker/sehua-next-web/{data,scrape-data,config}
+# 放入 docker-compose.yml，并把仓库 config/app.json 拷到 config/
+cd /vol1/1000/Docker/sehua-next-web
+docker compose pull
+docker compose up -d
+```
+
+`restart: always`；数据卷为绝对路径（见 `docker-compose.yml`）。
+
+### 本地
+
+```bash
+docker build -t sehua-next-web:1.0.0 .
 docker run -d --name sehua \
   -p 3020:3020 \
   -v "$PWD/data:/app/data" \
   -v sehua-scrape:/app/apps/scrape/data \
   sehua-next-web:1.0.0
-
-# 或 compose
-docker compose up -d
 ```
-
-打开 `http://localhost:3020`。资源库 Postgres DSN 在设置里配置。
 
 GitHub Actions（`.github/workflows/docker-publish.yml`）在推送 `v*` 标签或手动触发时，构建并推送到 Docker Hub：
 
