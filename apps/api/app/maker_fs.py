@@ -1969,6 +1969,37 @@ def build_maker_fs(
                 f"资源库连不上: {e}。请检查设置→资源库 DSN 与 Docker 网络"
             ) from e
 
+        # 索引按「设置→论坛管理」地区标签过滤板块；未配置时全部视为 other → 条目恒为 0
+        from .forum_region_tags import (
+            forum_allow_specs_for_search,
+            invalidate_forum_region_cache,
+            _load_overrides,
+        )
+
+        invalidate_forum_region_cache()
+        forum_overrides = _load_overrides()
+        if not forum_overrides:
+            raise ValueError(
+                "论坛地区未配置：请到 设置→论坛管理，给色花堂板块标注"
+                "「日本 / 国产 / 欧美 / 混合」后再扫描（未标注的板块不参与索引）"
+            )
+        check_regions = (
+            [region_id]
+            if region_id
+            else list(REGION_ORDER)
+        )
+        missing_tags: list[str] = []
+        for rid in check_regions:
+            db_r = db_region_for(rid) or rid
+            if not forum_allow_specs_for_search(db_r):
+                lab = (REGION_META.get(rid) or {}).get("label") or rid
+                missing_tags.append(str(lab))
+        if missing_tags and region_id:
+            raise ValueError(
+                f"本区无可用论坛标签（{'、'.join(missing_tags)}）："
+                "请在 设置→论坛管理 标注对应「日本/国产/欧美/混合」板块"
+            )
+
         work = prefixes
         if region_id:
             work = [e for e in work if e.get("region") == region_id]
@@ -2129,11 +2160,17 @@ def build_maker_fs(
             "regions": overview.get("regions") or [],
         }
         write_json(manifest_path(), manifest)
+        done_msg = "ok"
+        if built > 0 and total_covers <= 0:
+            done_msg = (
+                "完成但条目为 0：资源库已通，请检查 设置→论坛管理 的地区标签"
+                "是否覆盖资源所在板块（未标注=不索引）"
+            )
         _build_state.update(
             {
                 "running": False,
                 "finishedAt": _now_iso(),
-                "message": "ok",
+                "message": done_msg,
                 "prefixes": built,
                 "prefixTotal": len(work),
                 "covers": total_covers,
