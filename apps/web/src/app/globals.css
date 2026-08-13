@@ -1,0 +1,445 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "./app-ui.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-display);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+  /* iOS system gray + login blue — align with AuthScreen */
+  --background: #f2f2f7;
+  --foreground: #000000;
+  --card: #ffffff;
+  --card-foreground: #000000;
+  --popover: #ffffff;
+  --popover-foreground: #000000;
+  --primary: #007aff;
+  --primary-foreground: #ffffff;
+  --secondary: #e5e5ea;
+  --secondary-foreground: #1a1a1a;
+  --muted: #e5e5ea;
+  --muted-foreground: #8e8e93;
+  --accent: #e8e8ed;
+  --accent-foreground: #1a1a1a;
+  --destructive: #e0544a;
+  --border: rgba(60, 60, 67, 0.18);
+  --input: rgba(60, 60, 67, 0.18);
+  --ring: #007aff;
+  --chart-1: #007aff;
+  --chart-2: #5ac8fa;
+  --chart-3: #64d2ff;
+  --chart-4: #0a84ff;
+  --chart-5: #0040dd;
+  --radius: 0.75rem;
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+}
+
+.dark {
+  --background: #000000;
+  --foreground: #f5f5f7;
+  --card: #1c1c1e;
+  --card-foreground: #f5f5f7;
+  --popover: #1c1c1e;
+  --popover-foreground: #f5f5f7;
+  --primary: #0a84ff;
+  --primary-foreground: #ffffff;
+  --secondary: #2c2c2e;
+  --secondary-foreground: #f5f5f7;
+  --muted: #2c2c2e;
+  --muted-foreground: #98989d;
+  --accent: #2c2c2e;
+  --accent-foreground: #f5f5f7;
+  --destructive: #ff453a;
+  --border: rgba(84, 84, 88, 0.45);
+  --input: rgba(84, 84, 88, 0.45);
+  --ring: #0a84ff;
+  --chart-1: #0a84ff;
+  --chart-2: #64d2ff;
+  --chart-3: #5ac8fa;
+  --chart-4: #007aff;
+  --chart-5: #0040dd;
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html {
+    @apply text-foreground font-sans;
+    -webkit-tap-highlight-color: transparent;
+    color-scheme: light;
+    /* iOS PWA：禁单独 height:100%，否则会静默退出 cover，底栏露出白缝 */
+    --app-height: 100vh;
+    --keyboard-inset: 0px;
+    --vv-height: 100vh;
+    --vv-offset-top: 0px;
+    height: var(--app-height, 100vh);
+    overflow: hidden;
+    overscroll-behavior: none;
+    background-color: #f2f2f7;
+  }
+  html.dark {
+    color-scheme: dark;
+    background-color: #000000;
+  }
+  body {
+    margin: 0;
+    padding: 0;
+    height: var(--app-height, 100vh);
+    min-height: var(--app-height, 100vh);
+    max-height: none;
+    overflow: hidden;
+    overscroll-behavior: none;
+    background-color: #f2f2f7;
+    touch-action: manipulation;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+  .dark body {
+    background-color: #000000;
+  }
+  body > * {
+    height: var(--app-height, 100vh);
+    min-height: 0;
+  }
+}
+
+@supports (height: 100dvh) {
+  html:not([data-standalone='1']) {
+    --app-height: 100dvh;
+  }
+}
+
+html[data-standalone='1'] {
+  --app-height: 100vh;
+}
+
+html[data-standalone='1'],
+html[data-standalone='1'] body,
+html[data-standalone='1'] body > * {
+  height: var(--app-height, 100vh);
+  min-height: var(--app-height, 100vh);
+}
+
+/* env(safe-area) 偶发为 0：standalone / native 给底栏保底 */
+html[data-standalone='1'],
+html[data-shell='native'] {
+  --sab: max(env(safe-area-inset-bottom, 0px), 20px);
+  --sat: max(env(safe-area-inset-top, 0px), 20px);
+}
+
+/* 键盘 / 主页锁：钉死壳与主滚动区，禁止跟键盘被顶走 */
+html[data-keyboard='1'],
+html[data-page-lock='1'],
+html[data-scroll-lock='1'] {
+  overflow: hidden !important;
+  overscroll-behavior: none !important;
+}
+
+html[data-keyboard='1'] body,
+html[data-page-lock='1'] body,
+html[data-scroll-lock='1'] body {
+  overflow: hidden !important;
+  overscroll-behavior: none !important;
+}
+
+html[data-keyboard='1'] .app-shell,
+html[data-page-lock='1'] .app-shell,
+html[data-scroll-lock='1'] .app-shell,
+html[data-keyboard='1'] .auth-viewport,
+html[data-page-lock='1'] .auth-viewport,
+html[data-keyboard='1'] .device-content,
+html[data-page-lock='1'] .device-content {
+  overflow: hidden !important;
+  overflow-x: hidden !important;
+  overscroll-behavior: none !important;
+}
+
+html[data-keyboard='1'] .app-body,
+html[data-page-lock='1'] .app-body,
+html[data-scroll-lock='1'] .app-body {
+  overflow: hidden !important;
+  overscroll-behavior: none !important;
+  touch-action: none !important;
+}
+
+/* 键盘升起时底栏仍可点（切 Tab 会收起键盘）；仅略降透明度 */
+html[data-keyboard='1'] .app-tabbar {
+  opacity: 0.92;
+}
+
+/*
+ * Push 子页：键盘只覆盖、不改布局。
+ * 禁止用 --keyboard-inset 垫底（会整页上顶）；禁止内滚（会跟 VV 对打抖动）。
+ */
+html[data-keyboard='1'] .app-push,
+html[data-keyboard='1'] .settings-push,
+html[data-page-lock='1'] .app-push,
+html[data-page-lock='1'] .settings-push {
+  overflow: hidden !important;
+  overscroll-behavior: none !important;
+  touch-action: none !important;
+}
+
+html[data-keyboard='1'] .app-push__body,
+html[data-keyboard='1'] .settings-push__body,
+html[data-page-lock='1'] .app-push__body,
+html[data-page-lock='1'] .settings-push__body {
+  overflow: hidden !important;
+  overscroll-behavior: none !important;
+  touch-action: none !important;
+  -webkit-overflow-scrolling: auto;
+}
+
+/* 全站隐藏滚动条（仍可触摸/滚轮滚动） */
+html,
+body,
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+*::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
+  background: transparent;
+}
+
+/* Hide scrollbar on the horizontal tab container */
+.snap-x::-webkit-scrollbar {
+  display: none;
+}
+
+/* ============================================
+   Custom utilities & animations
+   ============================================ */
+
+@layer utilities {
+  .font-display {
+    font-family: var(--font-display), serif;
+  }
+}
+
+/* Gentle fade-in for page content */
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Breathing glow for timer */
+@keyframes breathe {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(0, 122, 255, 0);
+  }
+  50% {
+    box-shadow: 0 0 40px 8px rgba(0, 122, 255, 0.12);
+  }
+}
+
+/* Gentle pulse for active indicator */
+@keyframes gentle-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* Staggered card entry */
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Success check pop */
+@keyframes check-pop {
+  0% {
+    transform: scale(0);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.15);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@layer utilities {
+  .animate-fade-in-up {
+    animation: fade-in-up 0.4s ease-out both;
+  }
+  .animate-fade-in {
+    animation: fade-in 0.3s ease-out both;
+  }
+  .animate-breathe {
+    animation: breathe 4s ease-in-out infinite;
+  }
+  .animate-gentle-pulse {
+    animation: gentle-pulse 2s ease-in-out infinite;
+  }
+  .animate-slide-up {
+    animation: slide-up 0.35s ease-out both;
+  }
+  .animate-check-pop {
+    animation: check-pop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  }
+}
+
+/* Stagger children animation delays */
+.stagger-children > * {
+  animation: slide-up 0.35s ease-out both;
+}
+.stagger-children > *:nth-child(1) { animation-delay: 0ms; }
+.stagger-children > *:nth-child(2) { animation-delay: 50ms; }
+.stagger-children > *:nth-child(3) { animation-delay: 100ms; }
+.stagger-children > *:nth-child(4) { animation-delay: 150ms; }
+.stagger-children > *:nth-child(5) { animation-delay: 200ms; }
+.stagger-children > *:nth-child(6) { animation-delay: 250ms; }
+.stagger-children > *:nth-child(7) { animation-delay: 300ms; }
+.stagger-children > *:nth-child(8) { animation-delay: 350ms; }
+
+/* Warm texture overlay on body (subtle noise) */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0.018;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 256px 256px;
+}
+
+/* Smooth transitions for interactive elements */
+@layer base {
+  a, button, input, textarea, select {
+    @apply transition-colors duration-150;
+  }
+}
+
+/* ============================================
+   View Transitions (Safari 18+, Chrome 111+)
+   iOS-like push/pop page transitions
+   ============================================ */
+@supports (view-transition-name: none) {
+  ::view-transition-old(root) {
+    animation: vt-slide-out-left 250ms cubic-bezier(0.32, 0.72, 0, 1) both;
+  }
+  ::view-transition-new(root) {
+    animation: vt-slide-in-right 250ms cubic-bezier(0.32, 0.72, 0, 1) both;
+  }
+
+  /* Reverse direction for "back" navigation */
+  .vt-back::view-transition-old(root) {
+    animation: vt-slide-out-right 250ms cubic-bezier(0.32, 0.72, 0, 1) both;
+  }
+  .vt-back::view-transition-new(root) {
+    animation: vt-slide-in-left 250ms cubic-bezier(0.32, 0.72, 0, 1) both;
+  }
+}
+
+@keyframes vt-slide-out-left {
+  to {
+    opacity: 0.6;
+    transform: translateX(-25%);
+  }
+}
+
+@keyframes vt-slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(30%);
+  }
+}
+
+@keyframes vt-slide-out-right {
+  to {
+    opacity: 0.6;
+    transform: translateX(25%);
+  }
+}
+
+@keyframes vt-slide-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-30%);
+  }
+}

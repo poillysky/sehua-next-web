@@ -1,0 +1,21 @@
+services:
+  app:
+    image: ${DOCKERHUB_USERNAME:-poillysky}/sehua-next-web:${IMAGE_TAG:-1.0.0}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3020:3020"
+    volumes:
+      - ./data:/app/data
+      - scrape-data:/app/apps/scrape/data
+      - ./config:/app/config:ro
+    environment:
+      SNS_COOKIE_SECURE: ${SNS_COOKIE_SECURE:-0}
+      SCRAPE_ORIGIN: http://127.0.0.1:9210
+      API_INTERNAL_BASE: http://127.0.0.1:8020
+      WEB_PORT: "3020"
+    restart: unless-stopped
+
+volumes:
+  scrape-data:

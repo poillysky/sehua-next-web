@@ -1,0 +1,17 @@
+{
+
+  "admin": {
+
+    "username": "admin",
+
+    "password": "admin123456",
+
+    "reset_password_on_boot": false
+
+  },
+
+  "notes": "默认管理员只从本文件启动种子写入 SQLite；之后改密/业务配置走 SQLite。可用 config/app.local.json 覆盖（勿提交）。"
+
+}
+
+

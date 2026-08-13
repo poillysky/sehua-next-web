@@ -1,0 +1,301 @@
+/* iOS device preview frame (sehua-aligned) */
+:root {
+  --bg: #f2f2f7;
+  --phone-w: 390px;
+  --ios-status-h: 44px;
+  --ios-home-h: 34px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #000000;
+  }
+}
+
+.device-stage {
+  position: relative;
+  width: 100%;
+  min-height: var(--app-height, 100vh);
+  height: var(--app-height, 100vh);
+  display: grid;
+  place-items: stretch;
+  background: var(--bg);
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: manipulation;
+}
+
+html[data-shell='preview'] .device-stage {
+  place-items: center;
+  padding: 24px 16px;
+  background:
+    radial-gradient(ellipse 80% 55% at 50% 0%, #dce1ea 0%, transparent 55%),
+    linear-gradient(180deg, #c8cfda 0%, #aeb6c4 100%);
+}
+
+@media (prefers-color-scheme: dark) {
+  html[data-shell='preview'] .device-stage {
+    background:
+      radial-gradient(ellipse 80% 55% at 50% 0%, #3a3f48 0%, transparent 55%),
+      linear-gradient(180deg, #1c1f26 0%, #0e1014 100%);
+  }
+}
+
+.device-frame {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+html[data-shell='preview'] .device-frame {
+  --ios-status-h: 44px;
+  --ios-home-h: 34px;
+  --nav-safe-top: 44px;
+  --sab: 34px;
+  --sat: 44px;
+  width: min(var(--phone-w), calc(100vw - 32px));
+  /* iPhone 13/14 逻辑高度 ≈ 844 */
+  height: min(844px, calc(100dvh - 48px));
+  margin: 0 auto;
+  border-radius: 40px;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  box-shadow:
+    0 0 0 11px #1a1a1a,
+    0 0 0 12px #3a3a3a,
+    0 24px 60px rgba(0, 0, 0, 0.35);
+  /* 与登录底色一致，避免圆角处露出近白缝 */
+  background: #f2f2f7;
+  justify-self: center;
+}
+
+html:not([data-shell='preview']) .ios-notch,
+html:not([data-shell='preview']) .ios-status-bar,
+html:not([data-shell='preview']) .ios-home-indicator {
+  display: none !important;
+}
+
+@media (max-width: 480px) {
+  html[data-shell='preview'] .device-stage,
+  html[data-shell='preview'] .device-frame {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    background: var(--bg);
+  }
+
+  html[data-shell='preview'] .ios-notch,
+  html[data-shell='preview'] .ios-status-bar,
+  html[data-shell='preview'] .ios-home-indicator {
+    display: none !important;
+  }
+}
+
+html[data-standalone='1'] .device-stage,
+html[data-standalone='1'] .device-frame,
+html[data-standalone='1'] .device-bezel,
+html[data-shell='native'] .device-stage,
+html[data-shell='native'] .device-frame,
+html[data-shell='native'] .device-bezel {
+  width: 100% !important;
+  height: 100% !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  background: #f2f2f7 !important;
+}
+
+html[data-standalone='1'] .bg-effect--static,
+html[data-shell='native'] .bg-effect--static {
+  /* 真机底色与系统灰一致，避免 Home Indicator 区出现偏白渐变尾 */
+  background: #f2f2f7 !important;
+}
+
+@media (prefers-color-scheme: dark) {
+  html[data-standalone='1'] .device-stage,
+  html[data-standalone='1'] .device-frame,
+  html[data-standalone='1'] .device-bezel,
+  html[data-shell='native'] .device-stage,
+  html[data-shell='native'] .device-frame,
+  html[data-shell='native'] .device-bezel,
+  html[data-standalone='1'] .bg-effect--static,
+  html[data-shell='native'] .bg-effect--static {
+    background: #000000 !important;
+  }
+}
+
+.device-bezel {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #f2f2f7;
+  display: flex;
+  flex-direction: column;
+  border-radius: inherit;
+}
+
+.bg-effect--static {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none !important;
+  /* 与 login-bg 同系，底部不再冒近白/异色条 */
+  background:
+    radial-gradient(ellipse 120% 70% at 50% -8%, rgba(0, 122, 255, 0.12), transparent 58%),
+    linear-gradient(180deg, #f7faff 0%, #f2f2f7 55%, #f2f2f7 100%);
+}
+
+@media (prefers-color-scheme: dark) {
+  .bg-effect--static {
+    background: linear-gradient(145deg, #1d1d1d, #0d1521);
+  }
+}
+
+.ios-notch {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  z-index: 30;
+  width: 180px;
+  height: 28px;
+  transform: translateX(-50%);
+  background: #1a1a1a;
+  border-radius: 0 0 18px 18px;
+  pointer-events: none;
+}
+
+.ios-status-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--ios-status-h);
+  padding: 12px 22px 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  color: var(--ink, #000);
+  font-size: 15px;
+  font-weight: 600;
+  z-index: 20;
+  pointer-events: none;
+}
+
+.ios-status-bar__spacer {
+  flex: 1;
+}
+
+.ios-status-bar__battery {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.ios-status-bar__battery-body {
+  width: 22px;
+  height: 11px;
+  border: 1.2px solid currentColor;
+  border-radius: 2.5px;
+  padding: 1px;
+}
+
+.ios-status-bar__battery-level {
+  display: block;
+  width: 80%;
+  height: 100%;
+  border-radius: 1px;
+  background: currentColor;
+}
+
+.ios-status-bar__battery-cap {
+  width: 1.5px;
+  height: 4px;
+  border-radius: 0 1px 1px 0;
+  background: currentColor;
+  opacity: 0.45;
+}
+
+.ios-home-indicator {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  z-index: 30;
+  width: 134px;
+  height: 5px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: var(--ink, #000);
+  opacity: 0.28;
+  pointer-events: none;
+}
+
+.device-content {
+  position: relative;
+  z-index: 2;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  /* 让内部模版 h-dvh 相对手机框高度，而不是桌面视口 */
+  height: 100%;
+  background: transparent;
+  border-radius: inherit;
+}
+
+.app-overlay-root {
+  position: absolute;
+  inset: 0;
+  z-index: 600;
+  pointer-events: none;
+  overflow: visible;
+}
+
+html[data-shell='preview'] .device-content {
+  /* Home Indicator 占位；绝对定位登录层仍铺满 padding box，无色带 */
+  padding-bottom: var(--ios-home-h);
+}
+
+html[data-shell='preview'] .device-content .h-dvh,
+html[data-shell='preview'] .device-content .min-h-dvh,
+html[data-shell='native'] .h-dvh,
+html[data-shell='native'] .min-h-dvh,
+html[data-standalone='1'] .h-dvh,
+html[data-standalone='1'] .min-h-dvh {
+  height: 100% !important;
+  max-height: 100% !important;
+  min-height: 0 !important;
+}
+
+.device-content .auth-viewport,
+.device-content .login-screen,
+.device-content .auth-boot {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  /* 只用 inset 拉满，避免 height:100% 与 bottom 冲突留下底缝 */
+  width: auto;
+  height: auto;
+  max-height: none;
+  min-height: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+  border-radius: inherit;
+}
+
+/* 登录层铺到 Home Indicator 区域，底色不断开 */
+html[data-shell='preview'] .device-content .auth-viewport,
+html[data-shell='preview'] .device-content .login-screen,
+html[data-shell='preview'] .device-content .auth-boot {
+  bottom: calc(-1 * var(--ios-home-h));
+}

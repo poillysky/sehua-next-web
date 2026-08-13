@@ -1,0 +1,2688 @@
+{
+  "version": "dbmax-daily-v1",
+  "updated": "2026-08-09",
+  "updated_at": "2026-08-09T11:58:01+08:00",
+  "principle": "to 由库内最大流水号 + 余量估算；每日 00:00 增量上调",
+  "format": "CODE = PREFIX + '-' + zeroPad(n, pad)",
+  "ranges": {
+    "200GANA": {
+      "from": 1,
+      "to": 3540,
+      "pad": 4,
+      "source": "db_max=3430 → to=3540",
+      "db_max": 3430
+    },
+    "259LUXU": {
+      "from": 1,
+      "to": 1950,
+      "pad": 4,
+      "source": "db_max=1891 → to=1950",
+      "db_max": 1891
+    },
+    "300MAAN": {
+      "from": 1,
+      "to": 1010,
+      "pad": 4,
+      "source": "db_max=977 → to=1010",
+      "db_max": 977
+    },
+    "300MIUM": {
+      "from": 1,
+      "to": 1490,
+      "pad": 4,
+      "source": "db_max=1445 → to=1490",
+      "db_max": 1445
+    },
+    "326EVA": {
+      "from": 1,
+      "to": 210,
+      "pad": 4,
+      "source": "db_max=197 → to=210",
+      "db_max": 197
+    },
+    "91CM": {
+      "from": 1,
+      "to": 1230,
+      "pad": 4,
+      "source": "db_max=1190 → to=1230",
+      "db_max": 1190
+    },
+    "AARM": {
+      "from": 1,
+      "to": 370,
+      "pad": 3,
+      "source": "db_max=359 → to=370",
+      "db_max": 359
+    },
+    "ABF": {
+      "from": 1,
+      "to": 390,
+      "pad": 3,
+      "source": "db_max=374 → to=390",
+      "db_max": 374
+    },
+    "ABP": {
+      "from": 1,
+      "to": 58760,
+      "pad": 3,
+      "source": "db_max=57048 → to=58760",
+      "db_max": 57048
+    },
+    "ABS": {
+      "from": 1,
+      "to": 250,
+      "pad": 3,
+      "source": "db_max=236 → to=250",
+      "db_max": 236
+    },
+    "ABW": {
+      "from": 1,
+      "to": 380,
+      "pad": 3,
+      "source": "db_max=366 → to=380",
+      "db_max": 366
+    },
+    "ACHJ": {
+      "from": 1,
+      "to": 100,
+      "pad": 3,
+      "source": "db_max=87 → to=100",
+      "db_max": 87
+    },
+    "ADN": {
+      "from": 1,
+      "to": 830,
+      "pad": 3,
+      "source": "db_max=801 → to=830",
+      "db_max": 801
+    },
+    "AKA": {
+      "from": 1,
+      "to": 566500,
+      "pad": 3,
+      "source": "db_max=549999 → to=566500",
+      "db_max": 549999
+    },
+    "AKNR": {
+      "from": 1,
+      "to": 999,
+      "pad": 3,
+      "source": "prev (no db hit); keep to=999"
+    },
+    "ALDN": {
+      "from": 1,
+      "to": 630,
+      "pad": 3,
+      "source": "db_max=602 → to=630",
+      "db_max": 602
+    },
+    "APNS": {
+      "from": 1,
+      "to": 430,
+      "pad": 3,
+      "source": "db_max=416 → to=430",
+      "db_max": 416
+    },
+    "ARM": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=999 → to=1030",
+      "db_max": 999
+    },
+    "ATID": {
+      "from": 1,
+      "to": 720,
+      "pad": 3,
+      "source": "db_max=695 → to=720",
+      "db_max": 695
+    },
+    "ATKD": {
+      "from": 1,
+      "to": 400,
+      "pad": 3,
+      "source": "db_max=387 → to=400",
+      "db_max": 387
+    },
+    "AUKG": {
+      "from": 1,
+      "to": 680,
+      "pad": 3,
+      "source": "db_max=655 → to=680",
+      "db_max": 655
+    },
+    "AVOP": {
+      "from": 1,
+      "to": 62030,
+      "pad": 3,
+      "source": "db_max=60215 → to=62030",
+      "db_max": 60215
+    },
+    "AVSA": {
+      "from": 1,
+      "to": 470,
+      "pad": 3,
+      "source": "db_max=447 → to=470",
+      "db_max": 447
+    },
+    "BBAN": {
+      "from": 1,
+      "to": 610,
+      "pad": 3,
+      "source": "db_max=590 → to=610",
+      "db_max": 590
+    },
+    "BBI": {
+      "from": 1,
+      "to": 340,
+      "pad": 3,
+      "source": "db_max=329 → to=340",
+      "db_max": 329
+    },
+    "BDSR": {
+      "from": 1,
+      "to": 50890,
+      "pad": 3,
+      "source": "db_max=49402 → to=50890",
+      "db_max": 49402
+    },
+    "BF": {
+      "from": 1,
+      "to": 780,
+      "pad": 3,
+      "source": "db_max=754 → to=780",
+      "db_max": 754
+    },
+    "BGN": {
+      "from": 1,
+      "to": 90,
+      "pad": 3,
+      "source": "db_max=73 → to=90",
+      "db_max": 73
+    },
+    "BID": {
+      "from": 1,
+      "to": 70,
+      "pad": 3,
+      "source": "db_max=53 → to=70",
+      "db_max": 53
+    },
+    "BIJN": {
+      "from": 1,
+      "to": 300,
+      "pad": 3,
+      "source": "db_max=287 → to=300",
+      "db_max": 287
+    },
+    "BLK": {
+      "from": 1,
+      "to": 730,
+      "pad": 3,
+      "source": "db_max=702 → to=730",
+      "db_max": 702
+    },
+    "BLO": {
+      "from": 1,
+      "to": 60,
+      "pad": 3,
+      "source": "db_max=49 → to=60",
+      "db_max": 49
+    },
+    "BMW": {
+      "from": 1,
+      "to": 370,
+      "pad": 3,
+      "source": "db_max=351 → to=370",
+      "db_max": 351
+    },
+    "BOBB": {
+      "from": 1,
+      "to": 470,
+      "pad": 3,
+      "source": "db_max=456 → to=470",
+      "db_max": 456
+    },
+    "BONY": {
+      "from": 1,
+      "to": 210,
+      "pad": 3,
+      "source": "db_max=198 → to=210",
+      "db_max": 198
+    },
+    "CAWD": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=999 → to=1030",
+      "db_max": 999
+    },
+    "CEMD": {
+      "from": 1,
+      "to": 900,
+      "pad": 3,
+      "source": "db_max=872 → to=900",
+      "db_max": 872
+    },
+    "CESD": {
+      "from": 1,
+      "to": 1020,
+      "pad": 3,
+      "source": "db_max=986 → to=1020",
+      "db_max": 986
+    },
+    "CHN": {
+      "from": 1,
+      "to": 230,
+      "pad": 3,
+      "source": "db_max=220 → to=230",
+      "db_max": 220
+    },
+    "CJOD": {
+      "from": 1,
+      "to": 560,
+      "pad": 3,
+      "source": "db_max=534 → to=560",
+      "db_max": 534
+    },
+    "CLUB": {
+      "from": 1,
+      "to": 80140,
+      "pad": 3,
+      "source": "db_max=77801 → to=80140",
+      "db_max": 77801
+    },
+    "CVDX": {
+      "from": 1,
+      "to": 660,
+      "pad": 3,
+      "source": "db_max=640 → to=660",
+      "db_max": 640
+    },
+    "CWM": {
+      "from": 1,
+      "to": 270,
+      "pad": 3,
+      "source": "db_max=259 → to=270",
+      "db_max": 259
+    },
+    "DA": {
+      "from": 1,
+      "to": 580,
+      "pad": 4,
+      "source": "db_max=558 → to=580",
+      "db_max": 558
+    },
+    "DANDY": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=999 → to=1030",
+      "db_max": 999
+    },
+    "DASD": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=999 → to=1030",
+      "db_max": 999
+    },
+    "DASS": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=999 → to=1030",
+      "db_max": 999
+    },
+    "DAZD": {
+      "from": 1,
+      "to": 310,
+      "pad": 3,
+      "source": "db_max=296 → to=310",
+      "db_max": 296
+    },
+    "DEL": {
+      "from": 1,
+      "to": 999,
+      "pad": 3,
+      "source": "prev (no db hit); keep to=999"
+    },
+    "DIC": {
+      "from": 1,
+      "to": 110,
+      "pad": 3,
+      "source": "db_max=95 → to=110",
+      "db_max": 95
+    },
+    "DLDSS": {
+      "from": 1,
+      "to": 540,
+      "pad": 3,
+      "source": "db_max=520 → to=540",
+      "db_max": 520
+    },
+    "DOM": {
+      "from": 1,
+      "to": 60,
+      "pad": 4,
+      "source": "db_max=45 → to=60",
+      "db_max": 45
+    },
+    "DSUA": {
+      "from": 1,
+      "to": 99,
+      "pad": 4,
+      "source": "default 1..99（库内无命中）"
+    },
+    "DSVR": {
+      "from": 1,
+      "to": 2070,
+      "pad": 3,
+      "source": "db_max=2007 → to=2070",
+      "db_max": 2007
+    },
+    "DV": {
+      "from": 1,
+      "to": 1750,
+      "pad": 3,
+      "source": "db_max=1692 → to=1750",
+      "db_max": 1692
+    },
+    "DVAJ": {
+      "from": 1,
+      "to": 780,
+      "pad": 3,
+      "source": "db_max=749 → to=780",
+      "db_max": 749
+    },
+    "DVDES": {
+      "from": 1,
+      "to": 1000,
+      "pad": 3,
+      "source": "db_max=970 → to=1000",
+      "db_max": 970
+    },
+    "DVDMS": {
+      "from": 1,
+      "to": 9820,
+      "pad": 3,
+      "source": "db_max=9527 → to=9820",
+      "db_max": 9527
+    },
+    "DVMM": {
+      "from": 1,
+      "to": 450,
+      "pad": 3,
+      "source": "db_max=430 → to=450",
+      "db_max": 430
+    },
+    "DVPM": {
+      "from": 1,
+      "to": 999,
+      "pad": 3,
+      "source": "prev (no db hit); keep to=999"
+    },
+    "EBOD": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=999 → to=1030",
+      "db_max": 999
+    },
+    "EBWH": {
+      "from": 1,
+      "to": 62940,
+      "pad": 3,
+      "source": "db_max=61100 → to=62940",
+      "db_max": 61100
+    },
+    "EMX": {
+      "from": 1,
+      "to": 90,
+      "pad": 4,
+      "source": "db_max=80 → to=90",
+      "db_max": 80
+    },
+    "ENFD": {
+      "from": 1,
+      "to": 6180,
+      "pad": 3,
+      "source": "db_max=5993 → to=6180",
+      "db_max": 5993
+    },
+    "ESK": {
+      "from": 1,
+      "to": 330,
+      "pad": 3,
+      "source": "db_max=317 → to=330",
+      "db_max": 317
+    },
+    "EVO": {
+      "from": 1,
+      "to": 160,
+      "pad": 3,
+      "source": "db_max=142 → to=160",
+      "db_max": 142
+    },
+    "EYAN": {
+      "from": 1,
+      "to": 240,
+      "pad": 3,
+      "source": "db_max=225 → to=240",
+      "db_max": 225
+    },
+    "FAX": {
+      "from": 1,
+      "to": 560,
+      "pad": 3,
+      "source": "db_max=538 → to=560",
+      "db_max": 538
+    },
+    "FCDSS": {
+      "from": 1,
+      "to": 130,
+      "pad": 3,
+      "source": "db_max=115 → to=130",
+      "db_max": 115
+    },
+    "FJIN": {
+      "from": 1,
+      "to": 170,
+      "pad": 3,
+      "source": "db_max=159 → to=170",
+      "db_max": 159
+    },
+    "FLNS": {
+      "from": 1,
+      "to": 130,
+      "pad": 3,
+      "source": "db_max=114 → to=130",
+      "db_max": 114
+    },
+    "FNS": {
+      "from": 1,
+      "to": 250,
+      "pad": 3,
+      "source": "db_max=240 → to=250",
+      "db_max": 240
+    },
+    "FOCS": {
+      "from": 1,
+      "to": 310,
+      "pad": 3,
+      "source": "db_max=298 → to=310",
+      "db_max": 298
+    },
+    "FPRE": {
+      "from": 1,
+      "to": 250,
+      "pad": 3,
+      "source": "db_max=238 → to=250",
+      "db_max": 238
+    },
+    "FSDSS": {
+      "from": 1,
+      "to": 7390,
+      "pad": 3,
+      "source": "db_max=7172 → to=7390",
+      "db_max": 7172
+    },
+    "FSET": {
+      "from": 1,
+      "to": 920,
+      "pad": 3,
+      "source": "db_max=889 → to=920",
+      "db_max": 889
+    },
+    "FSOG": {
+      "from": 1,
+      "to": 130,
+      "pad": 4,
+      "source": "db_max=115 → to=130",
+      "db_max": 115
+    },
+    "FTN": {
+      "from": 1,
+      "to": 70,
+      "pad": 3,
+      "source": "db_max=51 → to=70",
+      "db_max": 51
+    },
+    "GANA": {
+      "from": 1,
+      "to": 3350,
+      "pad": 3,
+      "source": "db_max=3249 → to=3350",
+      "db_max": 3249
+    },
+    "GDCM": {
+      "from": 1,
+      "to": 80,
+      "pad": 4,
+      "source": "db_max=66 → to=80",
+      "db_max": 66
+    },
+    "GIGL": {
+      "from": 1,
+      "to": 800,
+      "pad": 3,
+      "source": "db_max=772 → to=800",
+      "db_max": 772
+    },
+    "GVG": {
+      "from": 1,
+      "to": 1020,
+      "pad": 3,
+      "source": "db_max=981 → to=1020",
+      "db_max": 981
+    },
+    "GVH": {
+      "from": 1,
+      "to": 900,
+      "pad": 3,
+      "source": "db_max=867 → to=900",
+      "db_max": 867
+    },
+    "HAVD": {
+      "from": 1,
+      "to": 1060,
+      "pad": 3,
+      "source": "db_max=1028 → to=1060",
+      "db_max": 1028
+    },
+    "HAWA": {
+      "from": 1,
+      "to": 400,
+      "pad": 3,
+      "source": "db_max=383 → to=400",
+      "db_max": 383
+    },
+    "HBAD": {
+      "from": 1,
+      "to": 5780,
+      "pad": 3,
+      "source": "db_max=5611 → to=5780",
+      "db_max": 5611
+    },
+    "HIKR": {
+      "from": 1,
+      "to": 270,
+      "pad": 3,
+      "source": "db_max=259 → to=270",
+      "db_max": 259
+    },
+    "HKG": {
+      "from": 1,
+      "to": 30,
+      "pad": 4,
+      "source": "db_max=18 → to=30",
+      "db_max": 18
+    },
+    "HMN": {
+      "from": 1,
+      "to": 940,
+      "pad": 3,
+      "source": "db_max=912 → to=940",
+      "db_max": 912
+    },
+    "HND": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=999 → to=1030",
+      "db_max": 999
+    },
+    "HNDB": {
+      "from": 1,
+      "to": 270,
+      "pad": 3,
+      "source": "db_max=252 → to=270",
+      "db_max": 252
+    },
+    "HNDS": {
+      "from": 1,
+      "to": 200,
+      "pad": 3,
+      "source": "db_max=183 → to=200",
+      "db_max": 183
+    },
+    "HODV": {
+      "from": 1,
+      "to": 72110,
+      "pad": 3,
+      "source": "db_max=70002 → to=72110",
+      "db_max": 70002
+    },
+    "HRDV": {
+      "from": 1,
+      "to": 770,
+      "pad": 3,
+      "source": "db_max=744 → to=770",
+      "db_max": 744
+    },
+    "HTHD": {
+      "from": 1,
+      "to": 260,
+      "pad": 3,
+      "source": "db_max=241 → to=260",
+      "db_max": 241
+    },
+    "HUNBL": {
+      "from": 1,
+      "to": 170,
+      "pad": 3,
+      "source": "db_max=159 → to=170",
+      "db_max": 159
+    },
+    "HUNT": {
+      "from": 1,
+      "to": 910,
+      "pad": 3,
+      "source": "db_max=879 → to=910",
+      "db_max": 879
+    },
+    "HUNTA": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=997 → to=1030",
+      "db_max": 997
+    },
+    "HUNTB": {
+      "from": 1,
+      "to": 780,
+      "pad": 3,
+      "source": "db_max=753 → to=780",
+      "db_max": 753
+    },
+    "HUNTC": {
+      "from": 1,
+      "to": 660,
+      "pad": 3,
+      "source": "db_max=633 → to=660",
+      "db_max": 633
+    },
+    "HZGD": {
+      "from": 1,
+      "to": 350,
+      "pad": 3,
+      "source": "db_max=335 → to=350",
+      "db_max": 335
+    },
+    "ID": {
+      "from": 1,
+      "to": 24780,
+      "pad": 5,
+      "source": "db_max=24055 → to=24780",
+      "db_max": 24055
+    },
+    "IDBD": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=998 → to=1030",
+      "db_max": 998
+    },
+    "IDG": {
+      "from": 1,
+      "to": 5830,
+      "pad": 4,
+      "source": "db_max=5659 → to=5830",
+      "db_max": 5659
+    },
+    "IENF": {
+      "from": 1,
+      "to": 470,
+      "pad": 3,
+      "source": "db_max=454 → to=470",
+      "db_max": 454
+    },
+    "IESP": {
+      "from": 1,
+      "to": 790,
+      "pad": 3,
+      "source": "db_max=762 → to=790",
+      "db_max": 762
+    },
+    "INU": {
+      "from": 1,
+      "to": 110,
+      "pad": 3,
+      "source": "db_max=100 → to=110",
+      "db_max": 100
+    },
+    "IPBD": {
+      "from": 1,
+      "to": 999,
+      "pad": 3,
+      "source": "prev (no db hit); keep to=999"
+    },
+    "IPSD": {
+      "from": 1,
+      "to": 60,
+      "pad": 3,
+      "source": "db_max=48 → to=60",
+      "db_max": 48
+    },
+    "IPTD": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=999 → to=1030",
+      "db_max": 999
+    },
+    "IPVR": {
+      "from": 1,
+      "to": 400,
+      "pad": 3,
+      "source": "db_max=382 → to=400",
+      "db_max": 382
+    },
+    "IPX": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=999 → to=1030",
+      "db_max": 999
+    },
+    "IPZ": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=998 → to=1030",
+      "db_max": 998
+    },
+    "IPZZ": {
+      "from": 1,
+      "to": 960,
+      "pad": 3,
+      "source": "db_max=928 → to=960",
+      "db_max": 928
+    },
+    "JAN": {
+      "from": 1,
+      "to": 2090,
+      "pad": 3,
+      "source": "db_max=2025 → to=2090",
+      "db_max": 2025
+    },
+    "JBD": {
+      "from": 1,
+      "to": 320,
+      "pad": 3,
+      "source": "db_max=309 → to=320",
+      "db_max": 309
+    },
+    "JBS": {
+      "from": 1,
+      "to": 40,
+      "pad": 3,
+      "source": "db_max=23 → to=40",
+      "db_max": 23
+    },
+    "JCN": {
+      "from": 1,
+      "to": 30,
+      "pad": 3,
+      "source": "db_max=20 → to=30",
+      "db_max": 20
+    },
+    "JD": {
+      "from": 1,
+      "to": 740,
+      "pad": 4,
+      "source": "db_max=712 → to=740",
+      "db_max": 712
+    },
+    "JDSY": {
+      "from": 1,
+      "to": 600,
+      "pad": 4,
+      "source": "db_max=573 → to=600",
+      "db_max": 573
+    },
+    "JFB": {
+      "from": 1,
+      "to": 510,
+      "pad": 3,
+      "source": "db_max=486 → to=510",
+      "db_max": 486
+    },
+    "JKSR": {
+      "from": 1,
+      "to": 770,
+      "pad": 3,
+      "source": "db_max=743 → to=770",
+      "db_max": 743
+    },
+    "JOB": {
+      "from": 1,
+      "to": 2080,
+      "pad": 3,
+      "source": "db_max=2017 → to=2080",
+      "db_max": 2017
+    },
+    "JRZE": {
+      "from": 1,
+      "to": 330,
+      "pad": 3,
+      "source": "db_max=311 → to=330",
+      "db_max": 311
+    },
+    "JUC": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=999 → to=1030",
+      "db_max": 999
+    },
+    "JUFD": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=998 → to=1030",
+      "db_max": 998
+    },
+    "JUFE": {
+      "from": 1,
+      "to": 650,
+      "pad": 3,
+      "source": "db_max=628 → to=650",
+      "db_max": 628
+    },
+    "JUKD": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=993 → to=1030",
+      "db_max": 993
+    },
+    "JUL": {
+      "from": 1,
+      "to": 13110,
+      "pad": 3,
+      "source": "db_max=12724 → to=13110",
+      "db_max": 12724
+    },
+    "JUNY": {
+      "from": 1,
+      "to": 170,
+      "pad": 3,
+      "source": "db_max=159 → to=170",
+      "db_max": 159
+    },
+    "JUQ": {
+      "from": 1,
+      "to": 39070,
+      "pad": 3,
+      "source": "db_max=37930 → to=39070",
+      "db_max": 37930
+    },
+    "JUR": {
+      "from": 1,
+      "to": 860,
+      "pad": 3,
+      "source": "db_max=826 → to=860",
+      "db_max": 826
+    },
+    "JURA": {
+      "from": 1,
+      "to": 10980,
+      "pad": 3,
+      "source": "db_max=10660 → to=10980",
+      "db_max": 10660
+    },
+    "JUSD": {
+      "from": 1,
+      "to": 860,
+      "pad": 3,
+      "source": "db_max=833 → to=860",
+      "db_max": 833
+    },
+    "JUX": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=997 → to=1030",
+      "db_max": 997
+    },
+    "JUY": {
+      "from": 1,
+      "to": 96440,
+      "pad": 3,
+      "source": "db_max=93624 → to=96440",
+      "db_max": 93624
+    },
+    "KAGP": {
+      "from": 1,
+      "to": 420,
+      "pad": 3,
+      "source": "db_max=400 → to=420",
+      "db_max": 400
+    },
+    "KAPD": {
+      "from": 1,
+      "to": 40,
+      "pad": 3,
+      "source": "db_max=28 → to=40",
+      "db_max": 28
+    },
+    "KAVR": {
+      "from": 1,
+      "to": 530,
+      "pad": 3,
+      "source": "db_max=512 → to=530",
+      "db_max": 512
+    },
+    "KAWD": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=992 → to=1030",
+      "db_max": 992
+    },
+    "KCM": {
+      "from": 1,
+      "to": 170,
+      "pad": 4,
+      "source": "db_max=159 → to=170",
+      "db_max": 159
+    },
+    "KIWVR": {
+      "from": 1,
+      "to": 940,
+      "pad": 3,
+      "source": "db_max=906 → to=940",
+      "db_max": 906
+    },
+    "KNB": {
+      "from": 1,
+      "to": 410,
+      "pad": 3,
+      "source": "db_max=398 → to=410",
+      "db_max": 398
+    },
+    "KRND": {
+      "from": 1,
+      "to": 50,
+      "pad": 3,
+      "source": "db_max=37 → to=50",
+      "db_max": 37
+    },
+    "KSBJ": {
+      "from": 1,
+      "to": 460,
+      "pad": 3,
+      "source": "db_max=438 → to=460",
+      "db_max": 438
+    },
+    "KWBD": {
+      "from": 1,
+      "to": 450,
+      "pad": 3,
+      "source": "db_max=436 → to=450",
+      "db_max": 436
+    },
+    "LAA": {
+      "from": 1,
+      "to": 2230,
+      "pad": 4,
+      "source": "db_max=2160 → to=2230",
+      "db_max": 2160
+    },
+    "LLS": {
+      "from": 1,
+      "to": 320,
+      "pad": 4,
+      "source": "db_max=303 → to=320",
+      "db_max": 303
+    },
+    "LULU": {
+      "from": 1,
+      "to": 2050,
+      "pad": 3,
+      "source": "db_max=1990 → to=2050",
+      "db_max": 1990
+    },
+    "LY": {
+      "from": 1,
+      "to": 80,
+      "pad": 4,
+      "source": "db_max=69 → to=80",
+      "db_max": 69
+    },
+    "MAAN": {
+      "from": 1,
+      "to": 1230,
+      "pad": 3,
+      "source": "db_max=1187 → to=1230",
+      "db_max": 1187
+    },
+    "MAD": {
+      "from": 1,
+      "to": 180,
+      "pad": 4,
+      "source": "db_max=167 → to=180",
+      "db_max": 167
+    },
+    "MAS": {
+      "from": 1,
+      "to": 130,
+      "pad": 3,
+      "source": "db_max=111 → to=130",
+      "db_max": 111
+    },
+    "MBDD": {
+      "from": 1,
+      "to": 4130,
+      "pad": 3,
+      "source": "db_max=4001 → to=4130",
+      "db_max": 4001
+    },
+    "MBRAA": {
+      "from": 1,
+      "to": 360,
+      "pad": 3,
+      "source": "db_max=349 → to=360",
+      "db_max": 349
+    },
+    "MBRBA": {
+      "from": 1,
+      "to": 150,
+      "pad": 3,
+      "source": "db_max=137 → to=150",
+      "db_max": 137
+    },
+    "MCY": {
+      "from": 1,
+      "to": 280,
+      "pad": 4,
+      "source": "db_max=263 → to=280",
+      "db_max": 263
+    },
+    "MD": {
+      "from": 1,
+      "to": 1020,
+      "pad": 4,
+      "source": "db_max=986 → to=1020",
+      "db_max": 986
+    },
+    "MDB": {
+      "from": 1,
+      "to": 1000,
+      "pad": 3,
+      "source": "db_max=970 → to=1000",
+      "db_max": 970
+    },
+    "MDBK": {
+      "from": 1,
+      "to": 440,
+      "pad": 3,
+      "source": "db_max=423 → to=440",
+      "db_max": 423
+    },
+    "MDCM": {
+      "from": 1,
+      "to": 30,
+      "pad": 4,
+      "source": "db_max=16 → to=30",
+      "db_max": 16
+    },
+    "MDHT": {
+      "from": 1,
+      "to": 40,
+      "pad": 4,
+      "source": "db_max=21 → to=40",
+      "db_max": 21
+    },
+    "MDON": {
+      "from": 1,
+      "to": 100,
+      "pad": 3,
+      "source": "db_max=90 → to=100",
+      "db_max": 90
+    },
+    "MDS": {
+      "from": 1,
+      "to": 930,
+      "pad": 3,
+      "source": "db_max=900 → to=930",
+      "db_max": 900
+    },
+    "MDSR": {
+      "from": 1,
+      "to": 30,
+      "pad": 4,
+      "source": "db_max=13 → to=30",
+      "db_max": 13
+    },
+    "MDVR": {
+      "from": 1,
+      "to": 318590,
+      "pad": 3,
+      "source": "db_max=309310 → to=318590",
+      "db_max": 309310
+    },
+    "MDWP": {
+      "from": 1,
+      "to": 50,
+      "pad": 4,
+      "source": "db_max=34 → to=50",
+      "db_max": 34
+    },
+    "MDX": {
+      "from": 1,
+      "to": 290,
+      "pad": 4,
+      "source": "db_max=271 → to=290",
+      "db_max": 271
+    },
+    "MDYD": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=999 → to=1030",
+      "db_max": 999
+    },
+    "MEYD": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=999 → to=1030",
+      "db_max": 999
+    },
+    "MFYD": {
+      "from": 1,
+      "to": 180,
+      "pad": 3,
+      "source": "db_max=169 → to=180",
+      "db_max": 169
+    },
+    "MGOLD": {
+      "from": 1,
+      "to": 80,
+      "pad": 3,
+      "source": "db_max=62 → to=80",
+      "db_max": 62
+    },
+    "MIAA": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=999 → to=1030",
+      "db_max": 999
+    },
+    "MIAB": {
+      "from": 1,
+      "to": 690,
+      "pad": 3,
+      "source": "db_max=669 → to=690",
+      "db_max": 669
+    },
+    "MIAD": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=999 → to=1030",
+      "db_max": 999
+    },
+    "MIAE": {
+      "from": 1,
+      "to": 370,
+      "pad": 3,
+      "source": "db_max=358 → to=370",
+      "db_max": 358
+    },
+    "MIBD": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=995 → to=1030",
+      "db_max": 995
+    },
+    "MIDA": {
+      "from": 1,
+      "to": 790,
+      "pad": 3,
+      "source": "db_max=762 → to=790",
+      "db_max": 762
+    },
+    "MIDD": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=998 → to=1030",
+      "db_max": 998
+    },
+    "MIDE": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=994 → to=1030",
+      "db_max": 994
+    },
+    "MIDV": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=999 → to=1030",
+      "db_max": 999
+    },
+    "MIFD": {
+      "from": 1,
+      "to": 760,
+      "pad": 3,
+      "source": "db_max=734 → to=760",
+      "db_max": 734
+    },
+    "MIGD": {
+      "from": 1,
+      "to": 810,
+      "pad": 3,
+      "source": "db_max=786 → to=810",
+      "db_max": 786
+    },
+    "MIKR": {
+      "from": 1,
+      "to": 130,
+      "pad": 3,
+      "source": "db_max=112 → to=130",
+      "db_max": 112
+    },
+    "MILD": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=999 → to=1030",
+      "db_max": 999
+    },
+    "MILK": {
+      "from": 1,
+      "to": 310,
+      "pad": 3,
+      "source": "db_max=300 → to=310",
+      "db_max": 300
+    },
+    "MIMK": {
+      "from": 1,
+      "to": 300,
+      "pad": 3,
+      "source": "db_max=286 → to=300 (outlier trim)",
+      "db_max": 286
+    },
+    "MIRD": {
+      "from": 1,
+      "to": 300,
+      "pad": 3,
+      "source": "db_max=286 → to=300",
+      "db_max": 286
+    },
+    "MISM": {
+      "from": 1,
+      "to": 470,
+      "pad": 3,
+      "source": "db_max=455 → to=470",
+      "db_max": 455
+    },
+    "MIUM": {
+      "from": 1,
+      "to": 1390,
+      "pad": 3,
+      "source": "db_max=1342 → to=1390",
+      "db_max": 1342
+    },
+    "MIZD": {
+      "from": 1,
+      "to": 560,
+      "pad": 3,
+      "source": "db_max=543 → to=560",
+      "db_max": 543
+    },
+    "MKCK": {
+      "from": 1,
+      "to": 440,
+      "pad": 3,
+      "source": "db_max=421 → to=440",
+      "db_max": 421
+    },
+    "MKMP": {
+      "from": 1,
+      "to": 770,
+      "pad": 3,
+      "source": "db_max=743 → to=770",
+      "db_max": 743
+    },
+    "MKY": {
+      "from": 1,
+      "to": 99,
+      "pad": 4,
+      "source": "default 1..99（库内无命中）"
+    },
+    "MMZ": {
+      "from": 1,
+      "to": 80,
+      "pad": 4,
+      "source": "db_max=70 → to=80",
+      "db_max": 70
+    },
+    "MOGI": {
+      "from": 1,
+      "to": 170,
+      "pad": 3,
+      "source": "db_max=160 → to=170",
+      "db_max": 160
+    },
+    "MOND": {
+      "from": 1,
+      "to": 320,
+      "pad": 3,
+      "source": "db_max=306 → to=320",
+      "db_max": 306
+    },
+    "MOT": {
+      "from": 1,
+      "to": 310,
+      "pad": 3,
+      "source": "db_max=296 → to=310",
+      "db_max": 296
+    },
+    "MPG": {
+      "from": 1,
+      "to": 160,
+      "pad": 4,
+      "source": "db_max=144 → to=160",
+      "db_max": 144
+    },
+    "MRSS": {
+      "from": 1,
+      "to": 200,
+      "pad": 3,
+      "source": "db_max=189 → to=200",
+      "db_max": 189
+    },
+    "MSD": {
+      "from": 1,
+      "to": 230,
+      "pad": 4,
+      "source": "db_max=211 → to=230",
+      "db_max": 211
+    },
+    "MSG": {
+      "from": 1,
+      "to": 20,
+      "pad": 4,
+      "source": "db_max=2 → to=20",
+      "db_max": 2
+    },
+    "MSQ": {
+      "from": 1,
+      "to": 20,
+      "pad": 4,
+      "source": "db_max=1 → to=20",
+      "db_max": 1
+    },
+    "MTALL": {
+      "from": 1,
+      "to": 170,
+      "pad": 3,
+      "source": "db_max=154 → to=170",
+      "db_max": 154
+    },
+    "MTVQ": {
+      "from": 1,
+      "to": 40,
+      "pad": 4,
+      "source": "db_max=24 → to=40",
+      "db_max": 24
+    },
+    "MUCD": {
+      "from": 1,
+      "to": 370,
+      "pad": 3,
+      "source": "db_max=359 → to=370",
+      "db_max": 359
+    },
+    "MUDR": {
+      "from": 1,
+      "to": 410,
+      "pad": 3,
+      "source": "db_max=396 → to=410",
+      "db_max": 396
+    },
+    "MUKC": {
+      "from": 1,
+      "to": 140,
+      "pad": 3,
+      "source": "db_max=127 → to=140",
+      "db_max": 127
+    },
+    "MUKD": {
+      "from": 1,
+      "to": 600,
+      "pad": 3,
+      "source": "db_max=580 → to=600",
+      "db_max": 580
+    },
+    "MVSD": {
+      "from": 1,
+      "to": 730,
+      "pad": 3,
+      "source": "db_max=702 → to=730",
+      "db_max": 702
+    },
+    "MXGS": {
+      "from": 1,
+      "to": 1490,
+      "pad": 3,
+      "source": "db_max=1439 → to=1490",
+      "db_max": 1439
+    },
+    "MXJ": {
+      "from": 1,
+      "to": 20,
+      "pad": 4,
+      "source": "db_max=7 → to=20",
+      "db_max": 7
+    },
+    "MXSPS": {
+      "from": 1,
+      "to": 720,
+      "pad": 3,
+      "source": "db_max=696 → to=720",
+      "db_max": 696
+    },
+    "MZQ": {
+      "from": 1,
+      "to": 99,
+      "pad": 4,
+      "source": "default 1..99（库内无命中）"
+    },
+    "NACR": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=999 → to=1030",
+      "db_max": 999
+    },
+    "NACT": {
+      "from": 1,
+      "to": 180,
+      "pad": 3,
+      "source": "db_max=161 → to=180",
+      "db_max": 161
+    },
+    "NAD": {
+      "from": 1,
+      "to": 20,
+      "pad": 3,
+      "source": "db_max=10 → to=20",
+      "db_max": 10
+    },
+    "NAMH": {
+      "from": 1,
+      "to": 80,
+      "pad": 3,
+      "source": "db_max=69 → to=80",
+      "db_max": 69
+    },
+    "NASH": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=992 → to=1030",
+      "db_max": 992
+    },
+    "NASS": {
+      "from": 1,
+      "to": 1010,
+      "pad": 3,
+      "source": "db_max=974 → to=1010",
+      "db_max": 974
+    },
+    "NATR": {
+      "from": 1,
+      "to": 800,
+      "pad": 3,
+      "source": "db_max=771 → to=800",
+      "db_max": 771
+    },
+    "NDRA": {
+      "from": 1,
+      "to": 140,
+      "pad": 3,
+      "source": "db_max=122 → to=140",
+      "db_max": 122
+    },
+    "NFDM": {
+      "from": 1,
+      "to": 570,
+      "pad": 3,
+      "source": "db_max=546 → to=570",
+      "db_max": 546
+    },
+    "NGOD": {
+      "from": 1,
+      "to": 360,
+      "pad": 3,
+      "source": "db_max=349 → to=360",
+      "db_max": 349
+    },
+    "NHDT": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=994 → to=1030",
+      "db_max": 994
+    },
+    "NHDTA": {
+      "from": 1,
+      "to": 100230,
+      "pad": 3,
+      "source": "db_max=97301 → to=100230",
+      "db_max": 97301
+    },
+    "NHDTB": {
+      "from": 1,
+      "to": 102910,
+      "pad": 3,
+      "source": "db_max=99904 → to=102910",
+      "db_max": 99904
+    },
+    "NHDTC": {
+      "from": 1,
+      "to": 23390,
+      "pad": 3,
+      "source": "db_max=22701 → to=23390",
+      "db_max": 22701
+    },
+    "NIMA": {
+      "from": 1,
+      "to": 100,
+      "pad": 3,
+      "source": "db_max=84 → to=100",
+      "db_max": 84
+    },
+    "NITR": {
+      "from": 1,
+      "to": 580,
+      "pad": 3,
+      "source": "db_max=556 → to=580",
+      "db_max": 556
+    },
+    "NKKD": {
+      "from": 1,
+      "to": 380,
+      "pad": 3,
+      "source": "db_max=363 → to=380",
+      "db_max": 363
+    },
+    "NMH": {
+      "from": 1,
+      "to": 99,
+      "pad": 4,
+      "source": "default 1..99（库内无命中）"
+    },
+    "NMS": {
+      "from": 1,
+      "to": 20,
+      "pad": 4,
+      "source": "db_max=4 → to=20",
+      "db_max": 4
+    },
+    "NNPJ": {
+      "from": 1,
+      "to": 610,
+      "pad": 3,
+      "source": "db_max=585 → to=610",
+      "db_max": 585
+    },
+    "NPJS": {
+      "from": 1,
+      "to": 290,
+      "pad": 3,
+      "source": "db_max=271 → to=290",
+      "db_max": 271
+    },
+    "NSFS": {
+      "from": 1,
+      "to": 520,
+      "pad": 3,
+      "source": "db_max=499 → to=520",
+      "db_max": 499
+    },
+    "NSPS": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=999 → to=1030",
+      "db_max": 999
+    },
+    "NUKA": {
+      "from": 1,
+      "to": 100,
+      "pad": 3,
+      "source": "db_max=83 → to=100",
+      "db_max": 83
+    },
+    "OAE": {
+      "from": 1,
+      "to": 330,
+      "pad": 3,
+      "source": "db_max=314 → to=330",
+      "db_max": 314
+    },
+    "OBA": {
+      "from": 1,
+      "to": 430,
+      "pad": 3,
+      "source": "db_max=414 → to=430",
+      "db_max": 414
+    },
+    "OFES": {
+      "from": 1,
+      "to": 70,
+      "pad": 3,
+      "source": "db_max=57 → to=70",
+      "db_max": 57
+    },
+    "OFJE": {
+      "from": 1,
+      "to": 720,
+      "pad": 3,
+      "source": "db_max=697 → to=720",
+      "db_max": 697
+    },
+    "ONED": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=999 → to=1030",
+      "db_max": 999
+    },
+    "ONSD": {
+      "from": 1,
+      "to": 1020,
+      "pad": 3,
+      "source": "db_max=988 → to=1020",
+      "db_max": 988
+    },
+    "ORECO": {
+      "from": 1,
+      "to": 700,
+      "pad": 3,
+      "source": "db_max=676 → to=700",
+      "db_max": 676
+    },
+    "ORECS": {
+      "from": 1,
+      "to": 440,
+      "pad": 3,
+      "source": "db_max=423 → to=440",
+      "db_max": 423
+    },
+    "ORECZ": {
+      "from": 1,
+      "to": 999,
+      "pad": 3,
+      "source": "prev (no db hit); keep to=999"
+    },
+    "OVG": {
+      "from": 1,
+      "to": 230,
+      "pad": 3,
+      "source": "db_max=214 → to=230",
+      "db_max": 214
+    },
+    "PBD": {
+      "from": 1,
+      "to": 540,
+      "pad": 3,
+      "source": "db_max=521 → to=540",
+      "db_max": 521
+    },
+    "PCA": {
+      "from": 1,
+      "to": 99,
+      "pad": 4,
+      "source": "default 1..99（库内无命中）"
+    },
+    "PFES": {
+      "from": 1,
+      "to": 150,
+      "pad": 3,
+      "source": "db_max=138 → to=150",
+      "db_max": 138
+    },
+    "PGD": {
+      "from": 1,
+      "to": 990,
+      "pad": 3,
+      "source": "db_max=959 → to=990",
+      "db_max": 959
+    },
+    "PH": {
+      "from": 1,
+      "to": 103950,
+      "pad": 6,
+      "source": "db_max=100913 → to=103950",
+      "db_max": 100913
+    },
+    "PJD": {
+      "from": 1,
+      "to": 110,
+      "pad": 3,
+      "source": "db_max=95 → to=110",
+      "db_max": 95
+    },
+    "PM": {
+      "from": 1,
+      "to": 1120,
+      "pad": 4,
+      "source": "db_max=1080 → to=1120",
+      "db_max": 1080
+    },
+    "PMC": {
+      "from": 1,
+      "to": 510,
+      "pad": 4,
+      "source": "db_max=486 → to=510",
+      "db_max": 486
+    },
+    "PME": {
+      "from": 1,
+      "to": 300,
+      "pad": 4,
+      "source": "db_max=290 → to=300",
+      "db_max": 290
+    },
+    "PMX": {
+      "from": 1,
+      "to": 210,
+      "pad": 4,
+      "source": "db_max=198 → to=210",
+      "db_max": 198
+    },
+    "PPBD": {
+      "from": 1,
+      "to": 340,
+      "pad": 3,
+      "source": "db_max=321 → to=340",
+      "db_max": 321
+    },
+    "PPPD": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=999 → to=1030",
+      "db_max": 999
+    },
+    "PPPE": {
+      "from": 1,
+      "to": 450,
+      "pad": 3,
+      "source": "db_max=431 → to=450",
+      "db_max": 431
+    },
+    "PPSD": {
+      "from": 1,
+      "to": 70,
+      "pad": 3,
+      "source": "db_max=52 → to=70",
+      "db_max": 52
+    },
+    "PPT": {
+      "from": 1,
+      "to": 150,
+      "pad": 3,
+      "source": "db_max=136 → to=150",
+      "db_max": 136
+    },
+    "PRED": {
+      "from": 1,
+      "to": 920,
+      "pad": 3,
+      "source": "db_max=886 → to=920",
+      "db_max": 886
+    },
+    "PRST": {
+      "from": 1,
+      "to": 40,
+      "pad": 3,
+      "source": "db_max=27 → to=40",
+      "db_max": 27
+    },
+    "PURETABOO": {
+      "from": 1,
+      "to": 2230,
+      "pad": 3,
+      "source": "db_max=2160 → to=2230",
+      "db_max": 2160
+    },
+    "PXD": {
+      "from": 1,
+      "to": 40,
+      "pad": 3,
+      "source": "db_max=29 → to=40",
+      "db_max": 29
+    },
+    "PXVR": {
+      "from": 1,
+      "to": 480,
+      "pad": 3,
+      "source": "db_max=463 → to=480",
+      "db_max": 463
+    },
+    "RAS": {
+      "from": 1,
+      "to": 430,
+      "pad": 4,
+      "source": "db_max=410 → to=430",
+      "db_max": 410
+    },
+    "RAW": {
+      "from": 1,
+      "to": 107350,
+      "pad": 3,
+      "source": "db_max=104220 → to=107350",
+      "db_max": 104220
+    },
+    "RBB": {
+      "from": 1,
+      "to": 250,
+      "pad": 3,
+      "source": "db_max=237 → to=250",
+      "db_max": 237
+    },
+    "RBD": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=999 → to=1030",
+      "db_max": 999
+    },
+    "RBK": {
+      "from": 1,
+      "to": 140,
+      "pad": 3,
+      "source": "db_max=130 → to=140",
+      "db_max": 130
+    },
+    "RCT": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=993 → to=1030",
+      "db_max": 993
+    },
+    "RCTD": {
+      "from": 1,
+      "to": 780,
+      "pad": 3,
+      "source": "db_max=751 → to=780",
+      "db_max": 751
+    },
+    "REAL": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=999 → to=1030",
+      "db_max": 999
+    },
+    "REBD": {
+      "from": 1,
+      "to": 1090,
+      "pad": 3,
+      "source": "db_max=1053 → to=1090",
+      "db_max": 1053
+    },
+    "REBDB": {
+      "from": 1,
+      "to": 1060,
+      "pad": 3,
+      "source": "db_max=1023 → to=1060",
+      "db_max": 1023
+    },
+    "RKI": {
+      "from": 1,
+      "to": 790,
+      "pad": 3,
+      "source": "db_max=760 → to=790",
+      "db_max": 760
+    },
+    "ROE": {
+      "from": 1,
+      "to": 550,
+      "pad": 3,
+      "source": "db_max=528 → to=550",
+      "db_max": 528
+    },
+    "ROYD": {
+      "from": 1,
+      "to": 360,
+      "pad": 3,
+      "source": "db_max=346 → to=360",
+      "db_max": 346
+    },
+    "SABA": {
+      "from": 1,
+      "to": 1020,
+      "pad": 3,
+      "source": "db_max=988 → to=1020",
+      "db_max": 988
+    },
+    "SACE": {
+      "from": 1,
+      "to": 130,
+      "pad": 3,
+      "source": "db_max=117 → to=130",
+      "db_max": 117
+    },
+    "SAMA": {
+      "from": 1,
+      "to": 920,
+      "pad": 3,
+      "source": "db_max=884 → to=920",
+      "db_max": 884
+    },
+    "SAME": {
+      "from": 1,
+      "to": 260,
+      "pad": 3,
+      "source": "db_max=246 → to=260",
+      "db_max": 246
+    },
+    "SAO": {
+      "from": 1,
+      "to": 20,
+      "pad": 4,
+      "source": "db_max=1 → to=20",
+      "db_max": 1
+    },
+    "SAT": {
+      "from": 1,
+      "to": 120,
+      "pad": 4,
+      "source": "db_max=107 → to=120",
+      "db_max": 107
+    },
+    "SAVR": {
+      "from": 1,
+      "to": 1170,
+      "pad": 3,
+      "source": "db_max=1128 → to=1170",
+      "db_max": 1128
+    },
+    "SCPX": {
+      "from": 1,
+      "to": 580,
+      "pad": 3,
+      "source": "db_max=562 → to=580",
+      "db_max": 562
+    },
+    "SDAB": {
+      "from": 1,
+      "to": 370,
+      "pad": 3,
+      "source": "db_max=353 → to=370",
+      "db_max": 353
+    },
+    "SDAM": {
+      "from": 1,
+      "to": 9280,
+      "pad": 3,
+      "source": "db_max=9003 → to=9280",
+      "db_max": 9003
+    },
+    "SDDE": {
+      "from": 1,
+      "to": 71490,
+      "pad": 3,
+      "source": "db_max=69405 → to=71490",
+      "db_max": 69405
+    },
+    "SDJS": {
+      "from": 1,
+      "to": 400,
+      "pad": 3,
+      "source": "db_max=379 → to=400",
+      "db_max": 379
+    },
+    "SDMM": {
+      "from": 1,
+      "to": 15250,
+      "pad": 3,
+      "source": "db_max=14803 → to=15250",
+      "db_max": 14803
+    },
+    "SDMT": {
+      "from": 1,
+      "to": 1010,
+      "pad": 3,
+      "source": "db_max=977 → to=1010",
+      "db_max": 977
+    },
+    "SDMU": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=999 → to=1030",
+      "db_max": 999
+    },
+    "SDNM": {
+      "from": 1,
+      "to": 580,
+      "pad": 3,
+      "source": "db_max=558 → to=580",
+      "db_max": 558
+    },
+    "SGA": {
+      "from": 1,
+      "to": 170,
+      "pad": 3,
+      "source": "db_max=157 → to=170",
+      "db_max": 157
+    },
+    "SHKD": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=999 → to=1030",
+      "db_max": 999
+    },
+    "SIRO": {
+      "from": 1,
+      "to": 51790,
+      "pad": 3,
+      "source": "db_max=50281 → to=51790",
+      "db_max": 50281
+    },
+    "SIVR": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=999 → to=1030",
+      "db_max": 999
+    },
+    "SKMJ": {
+      "from": 1,
+      "to": 800,
+      "pad": 3,
+      "source": "db_max=774 → to=800",
+      "db_max": 774
+    },
+    "SMA": {
+      "from": 1,
+      "to": 840,
+      "pad": 3,
+      "source": "db_max=806 → to=840",
+      "db_max": 806
+    },
+    "SMD": {
+      "from": 1,
+      "to": 160,
+      "pad": 4,
+      "source": "db_max=149 → to=160",
+      "db_max": 149
+    },
+    "SNIS": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=999 → to=1030",
+      "db_max": 999
+    },
+    "SNOS": {
+      "from": 1,
+      "to": 390,
+      "pad": 3,
+      "source": "db_max=370 → to=390",
+      "db_max": 370
+    },
+    "SOE": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=999 → to=1030",
+      "db_max": 999
+    },
+    "SONE": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=999 → to=1030",
+      "db_max": 999
+    },
+    "SORA": {
+      "from": 1,
+      "to": 2080,
+      "pad": 3,
+      "source": "db_max=2018 → to=2080",
+      "db_max": 2018
+    },
+    "SPND": {
+      "from": 1,
+      "to": 50,
+      "pad": 3,
+      "source": "prev (no db hit); keep to=50"
+    },
+    "SPRD": {
+      "from": 1,
+      "to": 1580,
+      "pad": 3,
+      "source": "db_max=1531 → to=1580",
+      "db_max": 1531
+    },
+    "SPS": {
+      "from": 1,
+      "to": 1000,
+      "pad": 3,
+      "source": "db_max=964 → to=1000",
+      "db_max": 964
+    },
+    "SQTE": {
+      "from": 1,
+      "to": 730,
+      "pad": 3,
+      "source": "db_max=707 → to=730",
+      "db_max": 707
+    },
+    "SRXV": {
+      "from": 1,
+      "to": 780,
+      "pad": 3,
+      "source": "db_max=756 → to=780",
+      "db_max": 756
+    },
+    "SSIS": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=999 → to=1030",
+      "db_max": 999
+    },
+    "SSNI": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=999 → to=1030",
+      "db_max": 999
+    },
+    "SSPD": {
+      "from": 1,
+      "to": 190,
+      "pad": 3,
+      "source": "db_max=176 → to=190",
+      "db_max": 176
+    },
+    "STAR": {
+      "from": 1,
+      "to": 2230,
+      "pad": 3,
+      "source": "db_max=2160 → to=2230",
+      "db_max": 2160
+    },
+    "STARS": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=999 → to=1030",
+      "db_max": 999
+    },
+    "START": {
+      "from": 1,
+      "to": 640,
+      "pad": 3,
+      "source": "db_max=616 → to=640",
+      "db_max": 616
+    },
+    "SUPA": {
+      "from": 1,
+      "to": 700,
+      "pad": 3,
+      "source": "db_max=673 → to=700",
+      "db_max": 673
+    },
+    "SUPD": {
+      "from": 1,
+      "to": 150,
+      "pad": 3,
+      "source": "db_max=135 → to=150",
+      "db_max": 135
+    },
+    "SVDVD": {
+      "from": 1,
+      "to": 1000,
+      "pad": 3,
+      "source": "db_max=968 → to=1000",
+      "db_max": 968
+    },
+    "SVVRT": {
+      "from": 1,
+      "to": 90,
+      "pad": 3,
+      "source": "db_max=80 → to=90",
+      "db_max": 80
+    },
+    "SW": {
+      "from": 1,
+      "to": 1100,
+      "pad": 3,
+      "source": "db_max=1060 → to=1100",
+      "db_max": 1060
+    },
+    "TDT": {
+      "from": 1,
+      "to": 40,
+      "pad": 3,
+      "source": "db_max=24 → to=40",
+      "db_max": 24
+    },
+    "TEK": {
+      "from": 1,
+      "to": 120,
+      "pad": 3,
+      "source": "db_max=102 → to=120",
+      "db_max": 102
+    },
+    "TG": {
+      "from": 1,
+      "to": 99,
+      "pad": 4,
+      "source": "default 1..99（库内无命中）"
+    },
+    "TM": {
+      "from": 1,
+      "to": 190,
+      "pad": 4,
+      "source": "db_max=172 → to=190",
+      "db_max": 172
+    },
+    "TMG": {
+      "from": 1,
+      "to": 150,
+      "pad": 4,
+      "source": "db_max=140 → to=150",
+      "db_max": 140
+    },
+    "TMW": {
+      "from": 1,
+      "to": 1040,
+      "pad": 4,
+      "source": "db_max=1001 → to=1040",
+      "db_max": 1001
+    },
+    "TMY": {
+      "from": 1,
+      "to": 50,
+      "pad": 4,
+      "source": "db_max=35 → to=50",
+      "db_max": 35
+    },
+    "TPPN": {
+      "from": 1,
+      "to": 280,
+      "pad": 3,
+      "source": "db_max=270 → to=280",
+      "db_max": 270
+    },
+    "TRE": {
+      "from": 1,
+      "to": 230,
+      "pad": 3,
+      "source": "db_max=219 → to=230",
+      "db_max": 219
+    },
+    "TZ": {
+      "from": 1,
+      "to": 220,
+      "pad": 4,
+      "source": "db_max=205 → to=220",
+      "db_max": 205
+    },
+    "UMD": {
+      "from": 1,
+      "to": 1050,
+      "pad": 3,
+      "source": "db_max=1013 → to=1050",
+      "db_max": 1013
+    },
+    "URE": {
+      "from": 1,
+      "to": 150,
+      "pad": 3,
+      "source": "db_max=139 → to=150",
+      "db_max": 139
+    },
+    "URVRSP": {
+      "from": 1,
+      "to": 620,
+      "pad": 3,
+      "source": "db_max=594 → to=620",
+      "db_max": 594
+    },
+    "VAGU": {
+      "from": 1,
+      "to": 310,
+      "pad": 3,
+      "source": "db_max=293 → to=310",
+      "db_max": 293
+    },
+    "VDD": {
+      "from": 1,
+      "to": 220,
+      "pad": 3,
+      "source": "db_max=207 → to=220",
+      "db_max": 207
+    },
+    "VEC": {
+      "from": 1,
+      "to": 810,
+      "pad": 3,
+      "source": "db_max=782 → to=810",
+      "db_max": 782
+    },
+    "VEMA": {
+      "from": 1,
+      "to": 280,
+      "pad": 3,
+      "source": "db_max=263 → to=280",
+      "db_max": 263
+    },
+    "VENU": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=999 → to=1030",
+      "db_max": 999
+    },
+    "VENX": {
+      "from": 1,
+      "to": 400,
+      "pad": 3,
+      "source": "db_max=379 → to=400",
+      "db_max": 379
+    },
+    "VICD": {
+      "from": 1,
+      "to": 410,
+      "pad": 3,
+      "source": "db_max=389 → to=410",
+      "db_max": 389
+    },
+    "VNDS": {
+      "from": 1,
+      "to": 7300,
+      "pad": 3,
+      "source": "db_max=7087 → to=7300",
+      "db_max": 7087
+    },
+    "VRKM": {
+      "from": 1,
+      "to": 1930,
+      "pad": 3,
+      "source": "db_max=1866 → to=1930",
+      "db_max": 1866
+    },
+    "VRTM": {
+      "from": 1,
+      "to": 540,
+      "pad": 3,
+      "source": "db_max=519 → to=540",
+      "db_max": 519
+    },
+    "WAAA": {
+      "from": 1,
+      "to": 700,
+      "pad": 3,
+      "source": "db_max=679 → to=700",
+      "db_max": 679
+    },
+    "WANZ": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=991 → to=1030",
+      "db_max": 991
+    },
+    "WDM": {
+      "from": 1,
+      "to": 99,
+      "pad": 4,
+      "source": "default 1..99（库内无命中）"
+    },
+    "XB": {
+      "from": 1,
+      "to": 920,
+      "pad": 4,
+      "source": "db_max=888 → to=920",
+      "db_max": 888
+    },
+    "XJX": {
+      "from": 1,
+      "to": 780,
+      "pad": 4,
+      "source": "db_max=757 → to=780",
+      "db_max": 757
+    },
+    "XK": {
+      "from": 1,
+      "to": 8440,
+      "pad": 4,
+      "source": "db_max=8194 → to=8440",
+      "db_max": 8194
+    },
+    "XKG": {
+      "from": 1,
+      "to": 300,
+      "pad": 4,
+      "source": "db_max=282 → to=300",
+      "db_max": 282
+    },
+    "XKKY": {
+      "from": 1,
+      "to": 110,
+      "pad": 4,
+      "source": "db_max=100 → to=110",
+      "db_max": 100
+    },
+    "XKTC": {
+      "from": 1,
+      "to": 120,
+      "pad": 4,
+      "source": "db_max=103 → to=120",
+      "db_max": 103
+    },
+    "XKVP": {
+      "from": 1,
+      "to": 170,
+      "pad": 4,
+      "source": "db_max=160 → to=170",
+      "db_max": 160
+    },
+    "XRW": {
+      "from": 1,
+      "to": 1030,
+      "pad": 3,
+      "source": "db_max=998 → to=1030",
+      "db_max": 998
+    },
+    "XSJ": {
+      "from": 1,
+      "to": 180,
+      "pad": 4,
+      "source": "db_max=164 → to=180",
+      "db_max": 164
+    },
+    "XSJKY": {
+      "from": 1,
+      "to": 130,
+      "pad": 4,
+      "source": "db_max=117 → to=130",
+      "db_max": 117
+    },
+    "XV": {
+      "from": 1,
+      "to": 1260,
+      "pad": 3,
+      "source": "db_max=1218 → to=1260",
+      "db_max": 1218
+    },
+    "XVSR": {
+      "from": 1,
+      "to": 7760,
+      "pad": 3,
+      "source": "db_max=7531 → to=7760",
+      "db_max": 7531
+    },
+    "YM": {
+      "from": 1,
+      "to": 80,
+      "pad": 4,
+      "source": "db_max=64 → to=80",
+      "db_max": 64
+    },
+    "YMDD": {
+      "from": 1,
+      "to": 520,
+      "pad": 3,
+      "source": "db_max=503 → to=520",
+      "db_max": 503
+    },
+    "YOK": {
+      "from": 1,
+      "to": 99,
+      "pad": 4,
+      "source": "default 1..99（库内无命中）"
+    },
+    "YRH": {
+      "from": 1,
+      "to": 370,
+      "pad": 3,
+      "source": "db_max=356 → to=370",
+      "db_max": 356
+    },
+    "YRZ": {
+      "from": 1,
+      "to": 100,
+      "pad": 3,
+      "source": "db_max=82 → to=100",
+      "db_max": 82
+    },
+    "YSN": {
+      "from": 1,
+      "to": 690,
+      "pad": 3,
+      "source": "db_max=661 → to=690",
+      "db_max": 661
+    },
+    "ZMX": {
+      "from": 1,
+      "to": 99,
+      "pad": 4,
+      "source": "default 1..99（库内无命中）"
+    },
+    "MDHG": {
+      "from": 1,
+      "to": 40,
+      "pad": 4,
+      "source": "db_max=27 → to=40",
+      "db_max": 27
+    },
+    "HPP": {
+      "from": 1,
+      "to": 50,
+      "pad": 4,
+      "source": "db_max=39 → to=50",
+      "db_max": 39
+    },
+    "PMS": {
+      "from": 1,
+      "to": 200,
+      "pad": 4,
+      "source": "db_max=188 → to=200",
+      "db_max": 188
+    },
+    "SZL": {
+      "from": 1,
+      "to": 50,
+      "pad": 4,
+      "source": "db_max=36 → to=50",
+      "db_max": 36
+    },
+    "MDL": {
+      "from": 1,
+      "to": 150,
+      "pad": 4,
+      "source": "db_max=140 → to=150",
+      "db_max": 140
+    },
+    "YCM": {
+      "from": 1,
+      "to": 100,
+      "pad": 4,
+      "source": "db_max=86 → to=100",
+      "db_max": 86
+    },
+    "QQOG": {
+      "from": 1,
+      "to": 60,
+      "pad": 4,
+      "source": "db_max=50 → to=60",
+      "db_max": 50
+    }
+  },
+  "skip": [
+    "10MU",
+    "1PON",
+    "ADULTTIME",
+    "ANALVIDS",
+    "BANGBROS",
+    "BANGBUS",
+    "BLACKED",
+    "BLACKEDRAW",
+    "BRATTYSIS",
+    "BRAZZERS",
+    "C0930",
+    "CARIB",
+    "CARIBPR",
+    "COSPURI",
+    "DEEPER",
+    "DIGITALPLAYGROUND",
+    "DORCEL",
+    "ELEGANTANGEL",
+    "EVILANGEL",
+    "FAKEHUB",
+    "FAKETAXI",
+    "FAMILYSTROKES",
+    "FC2",
+    "FC2PPV",
+    "GACHINCO",
+    "H0930",
+    "H4610",
+    "HEYDOUGA",
+    "HEYZO",
+    "JULESJORDAN",
+    "JVID",
+    "KIN8",
+    "KINK",
+    "LEGALPORNO",
+    "LETHALHARDCORE",
+    "MANYVIDS",
+    "MESUBUTA",
+    "MOFOS",
+    "NAUGHTYAMERICA",
+    "NUBILES",
+    "ONLYFANS",
+    "PACO",
+    "PRIVATE",
+    "PUBLICAGENT",
+    "REALITYKINGS",
+    "RHJ",
+    "RK",
+    "SPERMMANIA",
+    "TEAMSKEET",
+    "TOKYOHOT",
+    "TUSHY",
+    "VIXEN",
+    "XXX-AV"
+  ]
+}

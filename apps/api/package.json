@@ -1,0 +1,9 @@
+{
+  "name": "sehua-next-search-api",
+  "private": true,
+  "scripts": {
+    "dev": "python dev_server.py",
+    "dev:uvicorn-reload": "uvicorn app.main:app --reload --reload-dir app --host 0.0.0.0 --port 8020 --timeout-graceful-shutdown 3",
+    "dev:noreload": "uvicorn app.main:app --host 0.0.0.0 --port 8020 --timeout-graceful-shutdown 3"
+  }
+}

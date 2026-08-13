@@ -1,45 +1,59 @@
 # dependencies
-/node_modules
-/.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
-
-# testing
-/coverage
+node_modules/
+apps/**/node_modules/
 
 # next.js
-/.next/
-/out/
+apps/web/.next/
+apps/web/out/
+**/.next/
 
-# production
-/build
+# python
+apps/api/.venv/
+**/__pycache__/
+*.py[cod]
 
-# misc
+# scrape local caches
+apps/scrape/data/
+
+# testing / misc
+coverage/
 .DS_Store
 *.pem
-
-# debug
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files
-.env*.local
+# env
 .env
+.env*.local
+!.env.example
 
-# vercel
+# local probe / scratch (never ship)
+apps/api/_*.py
+apps/api/_*.json
+apps/api/_*.html
+apps/api/__pycache__/
+
+# cursor (keep rules optional — ignore local)
+.cursor/
+
+# vercel / ts
 .vercel
-
-# typescript
 *.tsbuildinfo
-next-env.d.ts
+apps/web/next-env.d.ts
 
-# data
+# data (keep folder, ignore runtime DBs & heavy caches)
+/data/*.sqlite
+/data/*.sqlite-*
 /data/*.db
 /data/*.db-shm
 /data/*.db-wal
+/data/library/
+/data/maker-fs/
+/data/scrape_maps/
+/data/*.json
+!/data/.gitkeep
+
+# local overrides
+/config/app.local.json

@@ -1,0 +1,330 @@
+[
+  {
+    "maker": "91制片厂",
+    "kind": "国产",
+    "description": "作品常见署「91制片厂」；同番号亦见果冻传媒署名。",
+    "prefixes": [
+      "91CM",
+      "YCM"
+    ],
+    "prefix_notes": {
+      "91CM": "91制片厂 / 果冻传媒",
+      "YCM": "91制片厂"
+    },
+    "cover_aspect": "16/9"
+  },
+  {
+    "maker": "兔子先生",
+    "kind": "国产",
+    "description": "作品常见署「兔子先生」「兔子先生系列」。",
+    "prefixes": [
+      "TZ"
+    ],
+    "prefix_notes": {
+      "TZ": "兔子先生"
+    },
+    "cover_aspect": "16/9"
+  },
+  {
+    "maker": "大象传媒",
+    "kind": "国产",
+    "description": "标题署名「大象传媒」；品番 DA。",
+    "prefixes": [
+      "DA"
+    ],
+    "cover_aspect": "16/9",
+    "prefix_notes": {
+      "DA": "大象传媒"
+    }
+  },
+  {
+    "maker": "天美传媒",
+    "kind": "国产",
+    "description": "作品常见署「天美传媒」。",
+    "prefixes": [
+      "TMW",
+      "TMY",
+      "TM"
+    ],
+    "prefix_notes": {
+      "TMW": "天美传媒",
+      "TMY": "天美传媒",
+      "TM": "天美传媒"
+    },
+    "cover_aspect": "16/9"
+  },
+  {
+    "maker": "性视界传媒",
+    "kind": "国产",
+    "description": "标题署名「性视界传媒」；品番 XSJKY。",
+    "prefixes": [
+      "XSJKY"
+    ],
+    "cover_aspect": "16/9",
+    "prefix_notes": {
+      "XSJKY": "性视界传媒"
+    }
+  },
+  {
+    "maker": "扣扣传媒",
+    "kind": "国产",
+    "description": "作品常见署「扣扣传媒」。",
+    "prefixes": [
+      "FSOG",
+      "QQOG"
+    ],
+    "prefix_notes": {
+      "FSOG": "扣扣传媒",
+      "QQOG": "扣扣传媒"
+    },
+    "cover_aspect": "16/9"
+  },
+  {
+    "maker": "星空无限传媒",
+    "kind": "国产",
+    "description": "作品常见署「星空传媒」「星空无限传媒」。",
+    "prefixes": [
+      "XK",
+      "XKG",
+      "XKKY",
+      "XKTC",
+      "XKVP"
+    ],
+    "prefix_notes": {
+      "XK": "星空传媒",
+      "XKG": "星空无限传媒",
+      "XKKY": "星空传媒",
+      "XKTC": "星空传媒",
+      "XKVP": "星空无限传媒"
+    },
+    "cover_aspect": "16/9"
+  },
+  {
+    "maker": "杏吧传媒",
+    "kind": "国产",
+    "description": "作品常见署「杏吧傳媒」。",
+    "prefixes": [
+      "XB"
+    ],
+    "prefix_notes": {
+      "XB": "杏吧傳媒"
+    },
+    "cover_aspect": "16/9"
+  },
+  {
+    "maker": "果冻传媒",
+    "kind": "国产",
+    "description": "作品常见署「果冻传媒」。",
+    "prefixes": [
+      "GDCM"
+    ],
+    "prefix_notes": {
+      "GDCM": "果冻传媒"
+    },
+    "cover_aspect": "16/9"
+  },
+  {
+    "maker": "爱豆传媒",
+    "kind": "国产",
+    "description": "标题署名「爱豆传媒」；品番 ID+数字。",
+    "prefixes": [
+      "ID"
+    ],
+    "cover_aspect": "16/9",
+    "prefix_notes": {
+      "ID": "爱豆传媒"
+    }
+  },
+  {
+    "maker": "猫爪影像",
+    "kind": "国产",
+    "description": "作品常见署「猫爪影像」「猫爪传媒」。",
+    "prefixes": [
+      "MMZ",
+      "MSD"
+    ],
+    "prefix_notes": {
+      "MMZ": "猫爪影像 / 猫爪传媒",
+      "MSD": "猫爪 / 麻豆署片均见"
+    },
+    "cover_aspect": "16/9"
+  },
+  {
+    "maker": "皇家华人",
+    "kind": "国产",
+    "description": "作品常见署「皇家华人」。",
+    "prefixes": [
+      "RAS"
+    ],
+    "prefix_notes": {
+      "RAS": "皇家华人"
+    },
+    "cover_aspect": "16/9"
+  },
+  {
+    "maker": "精东影业",
+    "kind": "国产",
+    "description": "作品常见署「精东影业」。",
+    "prefixes": [
+      "JD",
+      "JDSY"
+    ],
+    "prefix_notes": {
+      "JD": "精东影业",
+      "JDSY": "精东影业"
+    },
+    "cover_aspect": "16/9"
+  },
+  {
+    "maker": "绝对领域",
+    "kind": "国产",
+    "description": "作品常见署「绝对领域」。",
+    "prefixes": [
+      "LY"
+    ],
+    "prefix_notes": {
+      "LY": "绝对领域"
+    },
+    "cover_aspect": "16/9"
+  },
+  {
+    "maker": "色控传媒",
+    "kind": "国产",
+    "description": "标题署名 PsychoPorn/色控；品番 PH。",
+    "prefixes": [
+      "PH"
+    ],
+    "cover_aspect": "16/9",
+    "prefix_notes": {
+      "PH": "色控 / PsychoPorn"
+    }
+  },
+  {
+    "maker": "萝莉社",
+    "kind": "国产",
+    "description": "标题署名「蘿莉社/萝莉社」；品番 LLS。",
+    "prefixes": [
+      "LLS"
+    ],
+    "cover_aspect": "16/9",
+    "prefix_notes": {
+      "LLS": "萝莉社"
+    }
+  },
+  {
+    "maker": "蜜桃影像",
+    "kind": "国产",
+    "description": "作品常见署「蜜桃影像」「蜜桃传媒」「蜜桃影像传媒」。",
+    "prefixes": [
+      "PMX",
+      "PM",
+      "PMC",
+      "PME",
+      "PMS"
+    ],
+    "prefix_notes": {
+      "PMX": "蜜桃影像传媒",
+      "PM": "蜜桃影像 / 蜜桃传媒",
+      "PMC": "蜜桃传媒",
+      "PME": "蜜桃传媒",
+      "PMS": "蜜桃传媒"
+    },
+    "cover_aspect": "16/9"
+  },
+  {
+    "maker": "起点传媒",
+    "kind": "国产",
+    "description": "作品常见署「起点传媒」。",
+    "prefixes": [
+      "XSJ"
+    ],
+    "prefix_notes": {
+      "XSJ": "起点传媒（如《奇淫三国》）"
+    },
+    "cover_aspect": "16/9"
+  },
+  {
+    "maker": "香蕉秀",
+    "kind": "国产",
+    "description": "作品常见署「香蕉秀」。",
+    "prefixes": [
+      "XJX"
+    ],
+    "prefix_notes": {
+      "XJX": "香蕉秀"
+    },
+    "cover_aspect": "16/9"
+  },
+  {
+    "maker": "麻豆传媒",
+    "kind": "国产",
+    "description": "华语片商。标题常见「麻豆传媒」「麻豆传媒映画」。注意 MDS 与日本宇宙企画撞号。",
+    "prefixes": [
+      "MD",
+      "MDX",
+      "MDSR",
+      "MDCM",
+      "MDWP",
+      "MDHT",
+      "MAD",
+      "MDHG",
+      "MDL"
+    ],
+    "prefix_notes": {
+      "MD": "麻豆传媒映画",
+      "MDX": "麻豆传媒",
+      "MDSR": "剧情系列",
+      "MDCM": "国风系列",
+      "MDWP": "职场系列",
+      "MDHT": "奇淫旅社",
+      "MAD": "麻豆 / 麻豆爱豆",
+      "MDHG": "麻豆传媒",
+      "MDL": "剧情长篇"
+    },
+    "cover_aspect": "16/9"
+  },
+  {
+    "maker": "三只狼",
+    "kind": "国产",
+    "description": "作品常见署「三只狼」。",
+    "prefixes": [
+      "SZL"
+    ],
+    "prefix_notes": {
+      "SZL": "三只狼"
+    },
+    "cover_aspect": "16/9"
+  },
+  {
+    "maker": "辣椒原创",
+    "kind": "国产",
+    "description": "作品常见署「辣椒原创」。",
+    "prefixes": [
+      "HPP"
+    ],
+    "prefix_notes": {
+      "HPP": "辣椒原创"
+    },
+    "cover_aspect": "16/9"
+  },
+  {
+    "maker": "其它国产",
+    "kind": "国产",
+    "description": "库内仍见、但署名混杂的国产前缀；无可靠厂牌对照时不写臆测文案。",
+    "prefixes": [
+      "MCY",
+      "DOM",
+      "EMX",
+      "IDG",
+      "KCM",
+      "LAA",
+      "MPG",
+      "MSG",
+      "MTVQ",
+      "MXJ",
+      "SAT",
+      "TMG"
+    ],
+    "cover_aspect": "16/9"
+  }
+]
