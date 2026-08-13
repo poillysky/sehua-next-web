@@ -1,5 +1,6 @@
 name: Docker Hub
 
+# 对齐 sehua / telegramDL / Anzai：Hub 用户名默认 poillysky，Token 多源回退
 on:
   push:
     tags:
@@ -7,12 +8,24 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Image tag (e.g. 1.0.0)"
+        description: "镜像标签（如 1.0.0，不要带 v）"
         required: true
         default: "1.0.0"
+      dockerhub_username:
+        description: "Docker Hub 用户名（默认 poillysky）"
+        required: false
+        default: "poillysky"
+      dockerhub_token:
+        description: "Docker Hub Access Token（Secrets 读不到时可临时粘贴）"
+        required: false
+        default: ""
 
 permissions:
   contents: read
+
+env:
+  DOCKERHUB_USER: poillysky
+  DOCKERHUB_IMAGE: poillysky/sehua-next-web
 
 jobs:
   publish:
@@ -33,7 +46,18 @@ jobs:
           fi
           RAW="${RAW#v}"
           echo "version=${RAW}" >> "$GITHUB_OUTPUT"
-          echo "tags=${RAW}" >> "$GITHUB_OUTPUT"
+          echo "Image tag: ${RAW}"
+
+      - name: Check Docker Hub token
+        env:
+          TOKEN: ${{ secrets.DOCKERHUB_TOKEN || secrets.DOCKERHUB_PASSWORD || vars.DOCKERHUB_TOKEN || vars.DOCKERHUB_PASSWORD || inputs.dockerhub_token }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::Token 为空。请配置 secrets.DOCKERHUB_TOKEN，或 Run workflow 时在 dockerhub_token 栏粘贴 Access Token。"
+            echo "Token：https://hub.docker.com/settings/security"
+            exit 1
+          fi
+          echo "Token OK (length=${#TOKEN})"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -41,8 +65,8 @@ jobs:
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          username: ${{ inputs.dockerhub_username || secrets.DOCKERHUB_USERNAME || vars.DOCKERHUB_USERNAME || env.DOCKERHUB_USER }}
+          password: ${{ secrets.DOCKERHUB_TOKEN || secrets.DOCKERHUB_PASSWORD || vars.DOCKERHUB_TOKEN || vars.DOCKERHUB_PASSWORD || inputs.dockerhub_token }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -50,10 +74,37 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
+          platforms: linux/amd64
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/sehua-next-web:${{ steps.meta.outputs.version }}
-            ${{ secrets.DOCKERHUB_USERNAME }}/sehua-next-web:v${{ steps.meta.outputs.version }}
-            ${{ secrets.DOCKERHUB_USERNAME }}/sehua-next-web:latest
+            ${{ env.DOCKERHUB_IMAGE }}:${{ steps.meta.outputs.version }}
+            ${{ env.DOCKERHUB_IMAGE }}:v${{ steps.meta.outputs.version }}
+            ${{ env.DOCKERHUB_IMAGE }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false
+
+      - name: Verify Docker Hub registry tag
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.meta.outputs.version }}"
+          REPO="${{ env.DOCKERHUB_IMAGE }}"
+          TOKEN=$(curl -fsS "https://auth.docker.io/token?service=registry.docker.io&scope=repository:${REPO}:pull" | jq -r .token)
+          ok=0
+          for i in $(seq 1 12); do
+            code=$(curl -sS -o /tmp/reg_manifest.json -w "%{http_code}" \
+              -H "Authorization: Bearer ${TOKEN}" \
+              -H "Accept: application/vnd.oci.image.index.v1+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.docker.distribution.manifest.v2+json" \
+              "https://registry-1.docker.io/v2/${REPO}/manifests/${TAG}" || true)
+            echo "registry attempt $i -> HTTP $code"
+            if [ "$code" = "200" ]; then
+              ok=1
+              break
+            fi
+            sleep 5
+          done
+          if [ "$ok" != "1" ]; then
+            echo "::error::registry-1.docker.io missing ${REPO}:${TAG}"
+            cat /tmp/reg_manifest.json || true
+            exit 1
+          fi
+          echo "registry has ${REPO}:${TAG}"

@@ -1,6 +1,6 @@
 services:
   app:
-    image: ${DOCKERHUB_USERNAME:-poillysky}/sehua-next-web:${IMAGE_TAG:-1.0.0}
+    image: poillysky/sehua-next-web:${IMAGE_TAG:-1.0.0}
     build:
       context: .
       dockerfile: Dockerfile

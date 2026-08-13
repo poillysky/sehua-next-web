@@ -73,6 +73,6 @@ docker compose up -d
 
 GitHub Actions（`.github/workflows/docker-publish.yml`）在推送 `v*` 标签或手动触发时，构建并推送到 Docker Hub：
 
-`{DOCKERHUB_USERNAME}/sehua-next-web:1.0.0`
+`poillysky/sehua-next-web:1.0.0`
 
-仓库 Secrets 需配置：`DOCKERHUB_USERNAME`、`DOCKERHUB_TOKEN`。
+与 sehua / Anzai 对齐：用户名默认 `poillysky`；Token 读取 `DOCKERHUB_TOKEN`（或 `DOCKERHUB_PASSWORD` / Variables / 手动 Run workflow 粘贴）。
