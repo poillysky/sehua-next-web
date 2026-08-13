@@ -59,6 +59,31 @@ jobs:
           fi
           echo "Token OK (length=${#TOKEN})"
 
+      # 在 Docker 外先编前端：失败时日志完整可见（不必等整镜像）
+      - name: Preflight web build (plain errors)
+        working-directory: apps/web
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+          NEXT_PUBLIC_API_BASE: /api
+          API_INTERNAL_BASE: http://127.0.0.1:8020
+        run: |
+          set -o pipefail
+          npm ci
+          set +e
+          npm run build 2>&1 | tee /tmp/web-build.log
+          code=${PIPESTATUS[0]}
+          set -e
+          if [ "$code" -ne 0 ]; then
+            echo "::group::web build full log"
+            cat /tmp/web-build.log
+            echo "::endgroup::"
+            while IFS= read -r line; do
+              echo "::error title=web build::$line"
+            done < <(grep -E 'Type error:|Failed to compile|Error:|error TS' /tmp/web-build.log | head -n 40)
+            exit "$code"
+          fi
+          echo "web build OK"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -70,6 +95,8 @@ jobs:
 
       - name: Build and push
         uses: docker/build-push-action@v6
+        env:
+          BUILDKIT_PROGRESS: plain
         with:
           context: .
           file: ./Dockerfile

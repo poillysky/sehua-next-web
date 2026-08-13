@@ -163,7 +163,7 @@ export function MakerFacetCodesBody({
     getPosterCropCached().ratio,
   );
   const display = resolveCoverDisplay('');
-  const gridCols = display.cols || 2;
+  const gridCols = display.preferLandscape ? '2' : '3';
 
   const totalPages = Math.max(1, Math.ceil(total / PREFIX_CODE_PAGE_SIZE));
   const showPager = total > PREFIX_CODE_PAGE_SIZE;
