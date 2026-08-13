@@ -758,7 +758,6 @@ export function ScrapeSourcesTab({
       exportSlowConcurrency: cfg?.exportSlowConcurrency,
       exportConcurrency: cfg?.exportConcurrency,
       posterCrop: cfg?.posterCrop,
-      naming: cfg?.naming,
       metadataOptimize: cfg?.metadataOptimize,
       kindProfiles: normalizedKinds,
       regionProfiles: normalizedKinds,
@@ -1024,7 +1023,7 @@ export function ScrapeSourcesTab({
       </div>
     </div>
 
-    {editId && editSource
+    {editId && editSource && typeof document !== "undefined"
       ? createPortal(
           <AppPush
             title={editSource.name}
@@ -1173,10 +1172,7 @@ export function ScrapeSourcesTab({
               </div>
             </div>
           </AppPush>,
-          typeof document !== "undefined"
-            ? document.querySelector(".settings-screen-root") ||
-                document.body
-            : document.body,
+          document.querySelector(".settings-screen-root") || document.body,
         )
       : null}
     </>

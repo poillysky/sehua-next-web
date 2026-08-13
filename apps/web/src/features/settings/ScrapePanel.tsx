@@ -1213,7 +1213,7 @@ export function ScrapePanel({
           /* ignore */
         }
       }
-      if (opts?.toastOk) toast("已保存", "ok");
+      if (opts?.toastOk) toast("已保存", "success");
     } catch (e) {
       toast(e instanceof Error ? e.message : "保存失败", "error");
     }

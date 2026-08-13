@@ -1664,6 +1664,9 @@ export type PrefixRangeResult = {
   source?: string;
   updated?: string;
   skip?: boolean;
+  padLocked?: boolean;
+  /** 规范样例，如 SONE-001 */
+  sample?: string;
 };
 
 export type PrefixCoversResult = {
