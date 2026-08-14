@@ -1961,12 +1961,12 @@ def build_maker_fs(
                     cur.fetchone()
         except ResourceDbUnavailable as e:
             raise ValueError(
-                f"{e}。NAS 容器内主机填 postgres、端口 5432，"
-                "并加入 sehuatang-network；勿用 127.0.0.1"
+                f"{e}。请填写可从本机/容器访问的独立 Postgres 地址"
+                "（局域网 IP:端口，勿用 127.0.0.1）"
             ) from e
         except Exception as e:
             raise ValueError(
-                f"资源库连不上: {e}。请检查设置→资源库 DSN 与 Docker 网络"
+                f"资源库连不上: {e}。请检查设置→资源库 DSN（独立库主机/端口/防火墙）"
             ) from e
 
         # 索引按「设置→论坛管理」地区标签过滤板块；未配置时全部视为 other → 条目恒为 0

@@ -9,7 +9,7 @@
     "resource_db": {
       "enabled": true,
       "dsn": "postgresql://postgres:postgres@192.168.2.38:5435/ed2k",
-      "note": "synced from sehua-next-search"
+      "note": "独立资源库（与本服务分离）；容器内请用局域网 IP，勿用 127.0.0.1"
     },
     "forum.sehuatang": {
       "regionByKey": {

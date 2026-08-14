@@ -1,16 +1,15 @@
-# NAS 部署（对齐 sehua / sehuatang-search）
+# NAS 部署 — 独立服务（资源库 Postgres 另机/另容器）
 #
 # 目录:
 #   /vol1/1000/Docker/sehua-next-web/
 #     docker-compose.yml
 #     data/           # SQLite / library / maker-fs
 #     scrape-data/    # 刮削封面与 meta
-#     config/         # app.json 管理员种子等
+#     config/         # app.json（默认含独立资源库 DSN）
 #
-# 前提：主栈已 up，且存在外部网络 sehuatang-network（见 sehua docker-compose.nas.yml）。
-# 设置 → 资源库 DSN 示例（容器内访问主栈 Postgres）:
-#   主机 postgres · 端口 5432 · 库 ed2k
-#   勿填 127.0.0.1（那是容器自己）
+# 资源库：与本服务无关，用局域网可达地址（勿用 127.0.0.1 / 勿用容器名 postgres）。
+# 默认见 config/app.json → settings.resource_db
+#   例: postgresql://postgres:postgres@192.168.2.38:5435/ed2k
 #
 # 启动:
 #   cd /vol1/1000/Docker/sehua-next-web
@@ -40,8 +39,6 @@ services:
     dns:
       - 223.5.5.5
       - 8.8.8.8
-
-networks:
-  default:
-    name: sehuatang-network
-    external: true
+    # 独立网桥即可；经宿主机/局域网访问外部 Postgres（如 192.168.2.38:5435）
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
