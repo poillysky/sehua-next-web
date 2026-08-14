@@ -1,17 +1,1592 @@
 {
-
   "admin": {
-
     "username": "admin",
-
     "password": "admin123456",
-
     "reset_password_on_boot": false
-
   },
-
-  "notes": "默认管理员只从本文件启动种子写入 SQLite；之后改密/业务配置走 SQLite。可用 config/app.local.json 覆盖（勿提交）。"
-
+  "notes": "默认管理员与业务默认配置：首次启动写入 SQLite（已有键不覆盖）。敏感项可放 config/app.local.json（勿提交）。",
+  "settings": {
+    "resource_db": {
+      "enabled": true,
+      "dsn": "postgresql://postgres:postgres@192.168.2.38:5435/ed2k",
+      "note": "synced from sehua-next-search"
+    },
+    "forum.sehuatang": {
+      "regionByKey": {
+        "95:716": "other",
+        "141:689": "china",
+        "141:844": "mixed",
+        "141:867": "other",
+        "141:879": "other",
+        "141:695": "other",
+        "141:693": "other",
+        "141:696": "mixed",
+        "142:697": "other",
+        "142:698": "other",
+        "142:701": "other",
+        "142:702": "other",
+        "142:704": "mixed",
+        "142:706": "mixed",
+        "2:685": "other",
+        "2:686": "other",
+        "2:687": "other",
+        "36:660": "japan",
+        "107:593": "other",
+        "152:": "other",
+        "39:404": "japan",
+        "141:705": "japan",
+        "141:690": "western",
+        "141:691": "japan",
+        "141:692": "japan",
+        "141:866": "japan",
+        "141:694": "japan",
+        "142:699": "japan",
+        "142:700": "japan",
+        "142:703": "western",
+        "2:684": "china",
+        "36:368": "japan",
+        "36:369": "japan",
+        "36:370": "japan",
+        "36:371": "japan",
+        "36:372": "japan",
+        "36:373": "japan",
+        "36:374": "japan",
+        "36:375": "japan",
+        "36:379": "japan",
+        "36:449": "japan",
+        "36:523": "japan",
+        "36:537": "japan",
+        "36:551": "japan",
+        "36:552": "japan",
+        "36:553": "japan",
+        "36:583": "japan",
+        "36:586": "japan",
+        "36:587": "japan",
+        "36:589": "japan",
+        "36:590": "japan",
+        "36:591": "japan",
+        "36:618": "japan",
+        "36:619": "japan",
+        "36:631": "japan",
+        "36:654": "japan",
+        "36:671": "japan",
+        "36:672": "japan",
+        "36:683": "japan",
+        "36:723": "japan",
+        "36:724": "japan",
+        "36:822": "japan",
+        "37:": "japan",
+        "103:480": "japan",
+        "103:481": "japan",
+        "107:592": "japan",
+        "107:594": "other",
+        "107:595": "other",
+        "107:596": "other",
+        "107:597": "other",
+        "107:598": "other",
+        "107:599": "other",
+        "107:600": "other",
+        "107:601": "other",
+        "107:602": "other",
+        "107:603": "other",
+        "107:604": "other",
+        "107:605": "other",
+        "107:606": "other",
+        "107:607": "other",
+        "107:608": "other",
+        "107:609": "other",
+        "107:610": "other",
+        "107:611": "other",
+        "107:612": "other",
+        "107:613": "other",
+        "107:614": "other",
+        "107:615": "other",
+        "107:616": "other",
+        "107:617": "other",
+        "107:620": "other",
+        "107:621": "other",
+        "107:622": "other",
+        "107:623": "other",
+        "107:624": "other",
+        "107:625": "other",
+        "107:628": "other",
+        "107:629": "other",
+        "107:630": "other",
+        "107:633": "other",
+        "107:634": "other",
+        "107:645": "other",
+        "107:646": "other",
+        "107:650": "other",
+        "107:655": "other",
+        "107:656": "other",
+        "107:657": "other",
+        "107:658": "other",
+        "107:659": "other",
+        "107:667": "other",
+        "107:668": "other",
+        "107:669": "other",
+        "107:670": "other",
+        "160:": "japan",
+        "104:726": "japan",
+        "104:727": "japan",
+        "104:728": "japan",
+        "104:729": "japan",
+        "104:730": "japan",
+        "104:731": "japan",
+        "104:533": "japan",
+        "104:534": "japan",
+        "104:535": "japan",
+        "104:536": "japan",
+        "104:557": "japan",
+        "104:563": "japan",
+        "104:588": "japan",
+        "104:626": "japan",
+        "104:627": "japan",
+        "104:632": "japan",
+        "104:725": "japan",
+        "104:807": "japan",
+        "104:808": "japan",
+        "104:809": "japan",
+        "104:810": "japan",
+        "104:811": "japan",
+        "104:812": "japan",
+        "104:813": "japan",
+        "38:": "western",
+        "151:823": "japan",
+        "151:824": "japan",
+        "39:405": "japan"
+      }
+    },
+    "scrape": {
+      "enabled": true,
+      "origin": "http://127.0.0.1:9210",
+      "libraryRoot": "data/library",
+      "flareSolverrUrl": "http://192.168.2.38:8191/v1",
+      "proxyUrl": "http://192.168.2.88:7893",
+      "coverDownloadStrategy": "priority",
+      "exportConcurrency": 5,
+      "exportFastConcurrency": 5,
+      "exportSlowConcurrency": 5,
+      "posterCrop": {
+        "byKind": {
+          "japan_censored": "right",
+          "japan_gravure": "right",
+          "japan_uncensored": "none",
+          "japan_amateur": "face",
+          "fc2": "face",
+          "china": "none",
+          "western": "none"
+        },
+        "ratio": "full",
+        "cropDownloadedPoster": false,
+        "preferCropIfBetter": false,
+        "kindHints": {
+          "japan_censored": "缩略图多为光碟封面，海报部分出现在右侧，建议使用右侧裁剪",
+          "japan_gravure": "写真封面多为横图，可按右侧裁剪出竖版海报",
+          "japan_uncensored": "无码作品可以保留原图，也可以进行人脸识别，推荐不裁剪",
+          "japan_amateur": "素人图片尺寸不规则，建议使用人脸识别，根据人脸位置裁剪",
+          "fc2": "FC2图片尺寸不规则，建议使用人脸识别，根据人脸位置裁剪",
+          "china": "国产作品一般有完整的宽图封面，建议不裁剪保留原样",
+          "western": "欧美作品封面多为完整竖图或宽图，建议不裁剪保留原样"
+        }
+      },
+      "naming": {
+        "directoryTemplate": "{category}/{studio}/{series_name}/{number}",
+        "directoryMaxLength": 0,
+        "imageNameMode": "plain",
+        "actorLimit": 0,
+        "namingSchema": 3,
+        "byKind": {
+          "japan_censored": {
+            "directoryTemplate": "{category}/{studio}/{series_name}/{number}"
+          },
+          "japan_gravure": {
+            "directoryTemplate": "{category}/{studio}/{series_name}/{number}"
+          },
+          "japan_uncensored": {
+            "directoryTemplate": "{category}/{studio}/{series_name}/{number}"
+          },
+          "japan_amateur": {
+            "directoryTemplate": "{category}/{studio}/{series_name}/{number}"
+          },
+          "fc2": {
+            "directoryTemplate": "{category}/{studio}/{series_name}/{number}"
+          },
+          "china": {
+            "directoryTemplate": "{category}/{studio}/{series_name}/{number}"
+          },
+          "western": {
+            "directoryTemplate": "{category}/{studio}/{series_name}/{number}"
+          }
+        },
+        "directoryByKind": {
+          "japan_censored": "{category}/{studio}/{series_name}/{number}",
+          "japan_gravure": "{category}/{studio}/{series_name}/{number}",
+          "japan_uncensored": "{category}/{studio}/{series_name}/{number}",
+          "japan_amateur": "{category}/{studio}/{series_name}/{number}",
+          "fc2": "{category}/{studio}/{series_name}/{number}",
+          "china": "{category}/{studio}/{series_name}/{number}",
+          "western": "{category}/{studio}/{series_name}/{number}"
+        },
+        "kindLabels": {
+          "japan_censored": "日本有码",
+          "japan_gravure": "日本写真",
+          "japan_uncensored": "日本无码",
+          "japan_amateur": "日本素人",
+          "fc2": "FC2",
+          "china": "国产无码",
+          "western": "欧美无码"
+        },
+        "kindExamples": {
+          "japan_censored": "日本有码/S1/SONE/SONE-001",
+          "japan_gravure": "日本写真/Graphis/GRA/GRA-001",
+          "japan_uncensored": "日本无码/Caribbean/CARIB/CARIB-001",
+          "japan_amateur": "日本素人/厂牌/SIRO/SIRO-001",
+          "fc2": "FC2/作者名/FC2PPV/FC2PPV-0454667",
+          "china": "国产无码/麻豆/MD/MD-013",
+          "western": "欧美无码/Studio/ABC/ABC-001"
+        },
+        "varsDoc": []
+      },
+      "metadataOptimize": {
+        "useForumZhTitle": true,
+        "enableActorMapping": true,
+        "enableTagMapping": true,
+        "compactOutlineNewlines": true,
+        "mappingLanguage": "zh-CN"
+      },
+      "writeTree": true,
+      "writeEmby": true,
+      "kindProfiles": {
+        "japan_censored": {
+          "libraryRoot": "",
+          "writeTree": null,
+          "writeEmby": null,
+          "metaSources": [
+            "javbus",
+            "jav321",
+            "libredmm",
+            "freejavbt",
+            "iqqtv",
+            "sevenmmtv"
+          ],
+          "coverSources": [
+            "javbus",
+            "jav321",
+            "libredmm",
+            "freejavbt"
+          ],
+          "fieldPriority": {
+            "cover": [
+              "javbus",
+              "jav321",
+              "libredmm",
+              "freejavbt"
+            ],
+            "titleZh": [
+              "iqqtv",
+              "sevenmmtv",
+              "javbus"
+            ],
+            "outline": [
+              "iqqtv",
+              "jav321",
+              "libredmm"
+            ],
+            "studio": [
+              "javbus",
+              "jav321",
+              "libredmm",
+              "freejavbt"
+            ],
+            "actors": [
+              "javbus",
+              "jav321",
+              "libredmm",
+              "freejavbt"
+            ],
+            "tags": [
+              "javbus",
+              "freejavbt",
+              "libredmm",
+              "jav321"
+            ],
+            "series": [
+              "javbus",
+              "freejavbt",
+              "jav321",
+              "libredmm"
+            ]
+          }
+        },
+        "japan_gravure": {
+          "libraryRoot": "",
+          "writeTree": null,
+          "writeEmby": null,
+          "metaSources": [
+            "javbus",
+            "jav321",
+            "libredmm",
+            "freejavbt",
+            "iqqtv",
+            "sevenmmtv",
+            "airav_io"
+          ],
+          "coverSources": [
+            "javbus",
+            "jav321",
+            "libredmm",
+            "freejavbt"
+          ],
+          "fieldPriority": {
+            "cover": [
+              "javbus",
+              "jav321",
+              "libredmm",
+              "freejavbt"
+            ],
+            "titleZh": [
+              "iqqtv",
+              "sevenmmtv",
+              "airav_io"
+            ],
+            "outline": [
+              "iqqtv",
+              "jav321",
+              "libredmm"
+            ],
+            "studio": [
+              "javbus",
+              "jav321",
+              "libredmm",
+              "freejavbt"
+            ],
+            "actors": [
+              "javbus",
+              "jav321",
+              "libredmm",
+              "freejavbt"
+            ],
+            "tags": [
+              "javbus",
+              "freejavbt",
+              "libredmm",
+              "jav321"
+            ],
+            "series": [
+              "javbus",
+              "freejavbt",
+              "jav321",
+              "libredmm"
+            ]
+          }
+        },
+        "japan_uncensored": {
+          "libraryRoot": "",
+          "writeTree": null,
+          "writeEmby": null,
+          "metaSources": [
+            "javbus",
+            "carib",
+            "freejavbt",
+            "avsox",
+            "airav_io",
+            "sevenmmtv",
+            "iqqtv"
+          ],
+          "coverSources": [
+            "javbus",
+            "carib",
+            "freejavbt"
+          ],
+          "fieldPriority": {
+            "cover": [
+              "javbus",
+              "carib",
+              "freejavbt"
+            ],
+            "titleZh": [
+              "iqqtv",
+              "sevenmmtv",
+              "airav_io"
+            ],
+            "outline": [
+              "iqqtv",
+              "airav_io",
+              "carib"
+            ],
+            "studio": [
+              "carib",
+              "javbus"
+            ],
+            "actors": [
+              "javbus",
+              "sevenmmtv",
+              "airav_io"
+            ],
+            "tags": [
+              "javbus",
+              "avsox"
+            ],
+            "series": [
+              "javbus",
+              "avsox",
+              "airav_io"
+            ]
+          }
+        },
+        "japan_amateur": {
+          "libraryRoot": "",
+          "writeTree": null,
+          "writeEmby": null,
+          "metaSources": [
+            "javbus",
+            "freejavbt",
+            "libredmm",
+            "airav_io",
+            "sevenmmtv",
+            "iqqtv",
+            "miss_av"
+          ],
+          "coverSources": [
+            "javbus",
+            "freejavbt",
+            "libredmm"
+          ],
+          "fieldPriority": {
+            "cover": [
+              "javbus",
+              "freejavbt",
+              "libredmm"
+            ],
+            "titleZh": [
+              "iqqtv",
+              "sevenmmtv",
+              "airav_io"
+            ],
+            "outline": [
+              "iqqtv",
+              "airav_io",
+              "miss_av"
+            ],
+            "studio": [
+              "libredmm",
+              "javbus",
+              "airav_io"
+            ],
+            "actors": [
+              "sevenmmtv",
+              "airav_io",
+              "javbus"
+            ],
+            "tags": [
+              "javbus",
+              "libredmm"
+            ],
+            "series": [
+              "libredmm",
+              "javbus",
+              "airav_io"
+            ]
+          }
+        },
+        "fc2": {
+          "libraryRoot": "",
+          "writeTree": null,
+          "writeEmby": null,
+          "metaSources": [
+            "fc2",
+            "freejavbt",
+            "javbus",
+            "miss_av",
+            "fd2ppv",
+            "airav_io"
+          ],
+          "coverSources": [
+            "fc2",
+            "freejavbt",
+            "javbus"
+          ],
+          "fieldPriority": {
+            "cover": [
+              "fc2",
+              "freejavbt",
+              "javbus"
+            ],
+            "titleZh": [
+              "fc2",
+              "miss_av",
+              "fd2ppv"
+            ],
+            "outline": [
+              "fc2",
+              "miss_av",
+              "airav_io"
+            ],
+            "studio": [
+              "fc2",
+              "javbus"
+            ],
+            "actors": [
+              "fc2",
+              "miss_av",
+              "javbus"
+            ],
+            "tags": [
+              "fc2",
+              "javbus"
+            ],
+            "series": [
+              "fc2",
+              "javbus"
+            ]
+          }
+        },
+        "china": {
+          "libraryRoot": "",
+          "writeTree": null,
+          "writeEmby": null,
+          "metaSources": [
+            "madou",
+            "madouqu",
+            "freejavbt",
+            "xiao_huang_shu",
+            "javbus"
+          ],
+          "coverSources": [
+            "madou",
+            "madouqu",
+            "freejavbt"
+          ],
+          "fieldPriority": {
+            "cover": [
+              "madou",
+              "madouqu",
+              "freejavbt"
+            ],
+            "titleZh": [
+              "madou",
+              "madouqu",
+              "xiao_huang_shu"
+            ],
+            "outline": [
+              "madouqu",
+              "madou",
+              "xiao_huang_shu"
+            ],
+            "studio": [
+              "madou",
+              "madouqu",
+              "xiao_huang_shu"
+            ],
+            "actors": [
+              "madou",
+              "madouqu",
+              "xiao_huang_shu"
+            ],
+            "tags": [
+              "madou",
+              "madouqu",
+              "javbus"
+            ],
+            "series": [
+              "madou",
+              "madouqu"
+            ]
+          }
+        },
+        "western": {
+          "libraryRoot": "",
+          "writeTree": null,
+          "writeEmby": null,
+          "metaSources": [
+            "freejavbt",
+            "javbus",
+            "libredmm",
+            "airav_io",
+            "sevenmmtv",
+            "miss_av",
+            "iqqtv"
+          ],
+          "coverSources": [
+            "freejavbt",
+            "javbus",
+            "libredmm"
+          ],
+          "fieldPriority": {
+            "cover": [
+              "freejavbt",
+              "javbus",
+              "libredmm"
+            ],
+            "titleZh": [
+              "iqqtv",
+              "airav_io",
+              "miss_av"
+            ],
+            "outline": [
+              "iqqtv",
+              "airav_io",
+              "miss_av"
+            ],
+            "studio": [
+              "javbus",
+              "airav_io",
+              "libredmm"
+            ],
+            "actors": [
+              "airav_io",
+              "miss_av",
+              "javbus"
+            ],
+            "tags": [
+              "javbus",
+              "sevenmmtv"
+            ],
+            "series": [
+              "javbus",
+              "airav_io",
+              "libredmm"
+            ]
+          }
+        }
+      },
+      "regionProfiles": {
+        "japan_censored": {
+          "libraryRoot": "",
+          "writeTree": null,
+          "writeEmby": null,
+          "metaSources": [
+            "javbus",
+            "jav321",
+            "libredmm",
+            "freejavbt",
+            "iqqtv",
+            "sevenmmtv"
+          ],
+          "coverSources": [
+            "javbus",
+            "jav321",
+            "libredmm",
+            "freejavbt"
+          ],
+          "fieldPriority": {
+            "cover": [
+              "javbus",
+              "jav321",
+              "libredmm",
+              "freejavbt"
+            ],
+            "titleZh": [
+              "iqqtv",
+              "sevenmmtv",
+              "javbus"
+            ],
+            "outline": [
+              "iqqtv",
+              "jav321",
+              "libredmm"
+            ],
+            "studio": [
+              "javbus",
+              "jav321",
+              "libredmm",
+              "freejavbt"
+            ],
+            "actors": [
+              "javbus",
+              "jav321",
+              "libredmm",
+              "freejavbt"
+            ],
+            "tags": [
+              "javbus",
+              "freejavbt",
+              "libredmm",
+              "jav321"
+            ],
+            "series": [
+              "javbus",
+              "freejavbt",
+              "jav321",
+              "libredmm"
+            ]
+          }
+        },
+        "japan_gravure": {
+          "libraryRoot": "",
+          "writeTree": null,
+          "writeEmby": null,
+          "metaSources": [
+            "javbus",
+            "jav321",
+            "libredmm",
+            "freejavbt",
+            "iqqtv",
+            "sevenmmtv",
+            "airav_io"
+          ],
+          "coverSources": [
+            "javbus",
+            "jav321",
+            "libredmm",
+            "freejavbt"
+          ],
+          "fieldPriority": {
+            "cover": [
+              "javbus",
+              "jav321",
+              "libredmm",
+              "freejavbt"
+            ],
+            "titleZh": [
+              "iqqtv",
+              "sevenmmtv",
+              "airav_io"
+            ],
+            "outline": [
+              "iqqtv",
+              "jav321",
+              "libredmm"
+            ],
+            "studio": [
+              "javbus",
+              "jav321",
+              "libredmm",
+              "freejavbt"
+            ],
+            "actors": [
+              "javbus",
+              "jav321",
+              "libredmm",
+              "freejavbt"
+            ],
+            "tags": [
+              "javbus",
+              "freejavbt",
+              "libredmm",
+              "jav321"
+            ],
+            "series": [
+              "javbus",
+              "freejavbt",
+              "jav321",
+              "libredmm"
+            ]
+          }
+        },
+        "japan_uncensored": {
+          "libraryRoot": "",
+          "writeTree": null,
+          "writeEmby": null,
+          "metaSources": [
+            "javbus",
+            "carib",
+            "freejavbt",
+            "avsox",
+            "airav_io",
+            "sevenmmtv",
+            "iqqtv"
+          ],
+          "coverSources": [
+            "javbus",
+            "carib",
+            "freejavbt"
+          ],
+          "fieldPriority": {
+            "cover": [
+              "javbus",
+              "carib",
+              "freejavbt"
+            ],
+            "titleZh": [
+              "iqqtv",
+              "sevenmmtv",
+              "airav_io"
+            ],
+            "outline": [
+              "iqqtv",
+              "airav_io",
+              "carib"
+            ],
+            "studio": [
+              "carib",
+              "javbus"
+            ],
+            "actors": [
+              "javbus",
+              "sevenmmtv",
+              "airav_io"
+            ],
+            "tags": [
+              "javbus",
+              "avsox"
+            ],
+            "series": [
+              "javbus",
+              "avsox",
+              "airav_io"
+            ]
+          }
+        },
+        "japan_amateur": {
+          "libraryRoot": "",
+          "writeTree": null,
+          "writeEmby": null,
+          "metaSources": [
+            "javbus",
+            "freejavbt",
+            "libredmm",
+            "airav_io",
+            "sevenmmtv",
+            "iqqtv",
+            "miss_av"
+          ],
+          "coverSources": [
+            "javbus",
+            "freejavbt",
+            "libredmm"
+          ],
+          "fieldPriority": {
+            "cover": [
+              "javbus",
+              "freejavbt",
+              "libredmm"
+            ],
+            "titleZh": [
+              "iqqtv",
+              "sevenmmtv",
+              "airav_io"
+            ],
+            "outline": [
+              "iqqtv",
+              "airav_io",
+              "miss_av"
+            ],
+            "studio": [
+              "libredmm",
+              "javbus",
+              "airav_io"
+            ],
+            "actors": [
+              "sevenmmtv",
+              "airav_io",
+              "javbus"
+            ],
+            "tags": [
+              "javbus",
+              "libredmm"
+            ],
+            "series": [
+              "libredmm",
+              "javbus",
+              "airav_io"
+            ]
+          }
+        },
+        "fc2": {
+          "libraryRoot": "",
+          "writeTree": null,
+          "writeEmby": null,
+          "metaSources": [
+            "fc2",
+            "freejavbt",
+            "javbus",
+            "miss_av",
+            "fd2ppv",
+            "airav_io"
+          ],
+          "coverSources": [
+            "fc2",
+            "freejavbt",
+            "javbus"
+          ],
+          "fieldPriority": {
+            "cover": [
+              "fc2",
+              "freejavbt",
+              "javbus"
+            ],
+            "titleZh": [
+              "fc2",
+              "miss_av",
+              "fd2ppv"
+            ],
+            "outline": [
+              "fc2",
+              "miss_av",
+              "airav_io"
+            ],
+            "studio": [
+              "fc2",
+              "javbus"
+            ],
+            "actors": [
+              "fc2",
+              "miss_av",
+              "javbus"
+            ],
+            "tags": [
+              "fc2",
+              "javbus"
+            ],
+            "series": [
+              "fc2",
+              "javbus"
+            ]
+          }
+        },
+        "china": {
+          "libraryRoot": "",
+          "writeTree": null,
+          "writeEmby": null,
+          "metaSources": [
+            "madou",
+            "madouqu",
+            "freejavbt",
+            "xiao_huang_shu",
+            "javbus"
+          ],
+          "coverSources": [
+            "madou",
+            "madouqu",
+            "freejavbt"
+          ],
+          "fieldPriority": {
+            "cover": [
+              "madou",
+              "madouqu",
+              "freejavbt"
+            ],
+            "titleZh": [
+              "madou",
+              "madouqu",
+              "xiao_huang_shu"
+            ],
+            "outline": [
+              "madouqu",
+              "madou",
+              "xiao_huang_shu"
+            ],
+            "studio": [
+              "madou",
+              "madouqu",
+              "xiao_huang_shu"
+            ],
+            "actors": [
+              "madou",
+              "madouqu",
+              "xiao_huang_shu"
+            ],
+            "tags": [
+              "madou",
+              "madouqu",
+              "javbus"
+            ],
+            "series": [
+              "madou",
+              "madouqu"
+            ]
+          }
+        },
+        "western": {
+          "libraryRoot": "",
+          "writeTree": null,
+          "writeEmby": null,
+          "metaSources": [
+            "freejavbt",
+            "javbus",
+            "libredmm",
+            "airav_io",
+            "sevenmmtv",
+            "miss_av",
+            "iqqtv"
+          ],
+          "coverSources": [
+            "freejavbt",
+            "javbus",
+            "libredmm"
+          ],
+          "fieldPriority": {
+            "cover": [
+              "freejavbt",
+              "javbus",
+              "libredmm"
+            ],
+            "titleZh": [
+              "iqqtv",
+              "airav_io",
+              "miss_av"
+            ],
+            "outline": [
+              "iqqtv",
+              "airav_io",
+              "miss_av"
+            ],
+            "studio": [
+              "javbus",
+              "airav_io",
+              "libredmm"
+            ],
+            "actors": [
+              "airav_io",
+              "miss_av",
+              "javbus"
+            ],
+            "tags": [
+              "javbus",
+              "sevenmmtv"
+            ],
+            "series": [
+              "javbus",
+              "airav_io",
+              "libredmm"
+            ]
+          }
+        }
+      },
+      "sources": {
+        "airav_io": {
+          "id": "airav_io",
+          "name": "Airav_io",
+          "group": "av",
+          "enabled": true,
+          "baseUrl": "https://airav.io/cn",
+          "cookie": "",
+          "retry": 0
+        },
+        "avbase": {
+          "id": "avbase",
+          "name": "Avbase",
+          "group": "av",
+          "enabled": true,
+          "baseUrl": "https://www.avbase.net",
+          "cookie": "",
+          "retry": 0
+        },
+        "avmoo": {
+          "id": "avmoo",
+          "name": "Avmoo",
+          "group": "av",
+          "enabled": true,
+          "baseUrl": "https://avmoo.website",
+          "cookie": "",
+          "retry": 0
+        },
+        "avsox": {
+          "id": "avsox",
+          "name": "Avsox",
+          "group": "uncensored",
+          "enabled": true,
+          "baseUrl": "https://avsox.click",
+          "cookie": "",
+          "retry": 0
+        },
+        "carib": {
+          "id": "carib",
+          "name": "Carib",
+          "group": "uncensored",
+          "enabled": true,
+          "baseUrl": "https://www.caribbeancom.com",
+          "cookie": "",
+          "retry": 0
+        },
+        "dmm": {
+          "id": "dmm",
+          "name": "Dmm",
+          "group": "av",
+          "enabled": true,
+          "baseUrl": "https://www.dmm.co.jp",
+          "cookie": "",
+          "retry": 0
+        },
+        "fc2": {
+          "id": "fc2",
+          "name": "Fc2",
+          "group": "fc2",
+          "enabled": true,
+          "baseUrl": "https://adult.contents.fc2.com",
+          "cookie": "",
+          "retry": 0
+        },
+        "fc2_hub": {
+          "id": "fc2_hub",
+          "name": "Fc2_hub",
+          "group": "fc2",
+          "enabled": false,
+          "baseUrl": "https://javten.com",
+          "cookie": "",
+          "retry": 0
+        },
+        "fd2ppv": {
+          "id": "fd2ppv",
+          "name": "Fd2ppv",
+          "group": "fc2",
+          "enabled": true,
+          "baseUrl": "https://fd2ppv.cc",
+          "cookie": "",
+          "retry": 0
+        },
+        "freejavbt": {
+          "id": "freejavbt",
+          "name": "Freejavbt",
+          "group": "av",
+          "enabled": true,
+          "baseUrl": "https://freejavbt.com",
+          "cookie": "",
+          "retry": 0
+        },
+        "jav321": {
+          "id": "jav321",
+          "name": "Jav321",
+          "group": "av",
+          "enabled": true,
+          "baseUrl": "https://www.jav321.com",
+          "cookie": "",
+          "retry": 0
+        },
+        "javbus": {
+          "id": "javbus",
+          "name": "Javbus",
+          "group": "av",
+          "enabled": true,
+          "baseUrl": "https://www.javbus.com",
+          "cookie": "existmag=all; age=verified; dv=1",
+          "retry": 0
+        },
+        "javdb": {
+          "id": "javdb",
+          "name": "Javdb",
+          "group": "av",
+          "enabled": false,
+          "baseUrl": "https://javdb.com",
+          "cookie": "",
+          "retry": 0
+        },
+        "javlibrary": {
+          "id": "javlibrary",
+          "name": "Javlibrary",
+          "group": "av",
+          "enabled": true,
+          "baseUrl": "https://www.javlibrary.com/cn",
+          "cookie": "",
+          "retry": 0
+        },
+        "madou": {
+          "id": "madou",
+          "name": "Madou",
+          "group": "chinese",
+          "enabled": true,
+          "baseUrl": "https://madou.club",
+          "cookie": "",
+          "retry": 0
+        },
+        "madouqu": {
+          "id": "madouqu",
+          "name": "Madouqu",
+          "group": "chinese",
+          "enabled": true,
+          "baseUrl": "https://madouqu.com",
+          "cookie": "",
+          "retry": 0
+        },
+        "xiao_huang_shu": {
+          "id": "xiao_huang_shu",
+          "name": "Xiao_huang_shu",
+          "group": "chinese",
+          "enabled": true,
+          "baseUrl": "https://xchina.co",
+          "cookie": "",
+          "retry": 0
+        },
+        "mgstage": {
+          "id": "mgstage",
+          "name": "Mgstage",
+          "group": "av",
+          "enabled": true,
+          "baseUrl": "https://www.mgstage.com",
+          "cookie": "adc=1",
+          "retry": 0
+        },
+        "libredmm": {
+          "id": "libredmm",
+          "name": "LibreDMM",
+          "group": "av",
+          "enabled": true,
+          "baseUrl": "https://www.libredmm.com",
+          "cookie": "",
+          "retry": 0
+        },
+        "miss_av": {
+          "id": "miss_av",
+          "name": "Miss_av",
+          "group": "av",
+          "enabled": true,
+          "baseUrl": "https://missav123.com",
+          "cookie": "",
+          "retry": 0
+        },
+        "sevenmmtv": {
+          "id": "sevenmmtv",
+          "name": "7mmtv",
+          "group": "av",
+          "enabled": true,
+          "baseUrl": "https://7mmtv.sx/zh",
+          "cookie": "",
+          "retry": 0
+        },
+        "iqqtv": {
+          "id": "iqqtv",
+          "name": "Iqqtv",
+          "group": "av",
+          "enabled": true,
+          "baseUrl": "https://iqq5.xyz/cn",
+          "cookie": "",
+          "retry": 0
+        },
+        "theporndb": {
+          "id": "theporndb",
+          "name": "ThePornDB",
+          "group": "western",
+          "enabled": false,
+          "baseUrl": "https://api.theporndb.net",
+          "cookie": "",
+          "retry": 0
+        },
+        "airav": {
+          "id": "airav",
+          "name": "Airav",
+          "group": "av",
+          "enabled": true,
+          "baseUrl": "https://www.airav.wiki",
+          "cookie": "",
+          "retry": 0
+        }
+      },
+      "fieldPriority": {
+        "cover": [
+          "javbus",
+          "jav321",
+          "libredmm",
+          "freejavbt"
+        ],
+        "titleZh": [
+          "iqqtv",
+          "sevenmmtv",
+          "javbus"
+        ],
+        "outline": [
+          "iqqtv",
+          "jav321",
+          "libredmm"
+        ],
+        "studio": [
+          "javbus",
+          "jav321",
+          "libredmm",
+          "freejavbt"
+        ],
+        "actors": [
+          "javbus",
+          "jav321",
+          "libredmm",
+          "freejavbt"
+        ],
+        "tags": [
+          "javbus",
+          "freejavbt",
+          "libredmm",
+          "jav321"
+        ],
+        "series": [
+          "javbus",
+          "freejavbt",
+          "jav321",
+          "libredmm"
+        ]
+      },
+      "retry": {
+        "defaultRetry": 0
+      },
+      "scrapeTasks": [
+        {
+          "id": "cfb727db-0c86-47ea-9f7d-400475543655",
+          "name": "OFES",
+          "regions": [
+            "japan_censored"
+          ],
+          "maker": "S1 NO.1 STYLE",
+          "prefix": "OFES",
+          "code": "",
+          "mode": "incremental",
+          "fields": [
+            "cover",
+            "titleZh",
+            "outline",
+            "studio",
+            "actors",
+            "tags",
+            "series"
+          ],
+          "localFields": [
+            "titleZh",
+            "actors"
+          ],
+          "watchEnabled": false,
+          "lastStatus": "",
+          "updatedAt": "2026-08-13T15:02:52.225Z",
+          "done": 0,
+          "skipped": 0,
+          "failed": 0,
+          "total": 0,
+          "doneCodes": [],
+          "skippedCodes": [],
+          "failedCodes": []
+        },
+        {
+          "id": "8ef766b1-27d6-44fd-a51b-1636b45d63af",
+          "name": "MIMK",
+          "regions": [
+            "japan_censored"
+          ],
+          "maker": "MOODYZ",
+          "prefix": "MIMK",
+          "code": "",
+          "mode": "incremental",
+          "fields": [
+            "cover",
+            "titleZh",
+            "outline",
+            "studio",
+            "actors",
+            "tags",
+            "series"
+          ],
+          "localFields": [
+            "titleZh",
+            "actors"
+          ],
+          "watchEnabled": false,
+          "lastStatus": "完成 · 成功 2 · 跳过 233 · 失败 0",
+          "updatedAt": "2026-08-13T23:58:02Z",
+          "done": 2,
+          "skipped": 233,
+          "failed": 0,
+          "total": 235,
+          "doneCodes": [
+            "MIMK-280",
+            "MIMK-277"
+          ],
+          "skippedCodes": [
+            "MIMK-052",
+            "MIMK-053",
+            "MIMK-054",
+            "MIMK-055",
+            "MIMK-050",
+            "MIMK-057",
+            "MIMK-058",
+            "MIMK-059",
+            "MIMK-060",
+            "MIMK-063",
+            "MIMK-062",
+            "MIMK-064",
+            "MIMK-065",
+            "MIMK-056",
+            "MIMK-061",
+            "MIMK-067",
+            "MIMK-068",
+            "MIMK-069",
+            "MIMK-066",
+            "MIMK-070",
+            "MIMK-071",
+            "MIMK-072",
+            "MIMK-073",
+            "MIMK-074",
+            "MIMK-076",
+            "MIMK-077",
+            "MIMK-075",
+            "MIMK-078",
+            "MIMK-080",
+            "MIMK-081",
+            "MIMK-082",
+            "MIMK-083",
+            "MIMK-084",
+            "MIMK-079",
+            "MIMK-085",
+            "MIMK-087",
+            "MIMK-086",
+            "MIMK-090",
+            "MIMK-091",
+            "MIMK-092",
+            "MIMK-093",
+            "MIMK-088",
+            "MIMK-094",
+            "MIMK-089",
+            "MIMK-096",
+            "MIMK-099",
+            "MIMK-098",
+            "MIMK-100",
+            "MIMK-101",
+            "MIMK-103",
+            "MIMK-102",
+            "MIMK-104",
+            "MIMK-095",
+            "MIMK-105",
+            "MIMK-106",
+            "MIMK-107",
+            "MIMK-108",
+            "MIMK-109",
+            "MIMK-110",
+            "MIMK-111",
+            "MIMK-112",
+            "MIMK-113",
+            "MIMK-116",
+            "MIMK-115",
+            "MIMK-117",
+            "MIMK-118",
+            "MIMK-114",
+            "MIMK-119",
+            "MIMK-120",
+            "MIMK-121",
+            "MIMK-123",
+            "MIMK-124",
+            "MIMK-122",
+            "MIMK-127",
+            "MIMK-125",
+            "MIMK-128",
+            "MIMK-129",
+            "MIMK-130",
+            "MIMK-132",
+            "MIMK-133",
+            "MIMK-131",
+            "MIMK-135",
+            "MIMK-134",
+            "MIMK-137",
+            "MIMK-138",
+            "MIMK-139",
+            "MIMK-140",
+            "MIMK-136",
+            "MIMK-141",
+            "MIMK-142",
+            "MIMK-144",
+            "MIMK-145",
+            "MIMK-143",
+            "MIMK-146",
+            "MIMK-147",
+            "MIMK-149",
+            "MIMK-148",
+            "MIMK-151",
+            "MIMK-153",
+            "MIMK-155",
+            "MIMK-154",
+            "MIMK-156",
+            "MIMK-152",
+            "MIMK-158",
+            "MIMK-160",
+            "MIMK-159",
+            "MIMK-163",
+            "MIMK-164",
+            "MIMK-157",
+            "MIMK-165",
+            "MIMK-168",
+            "MIMK-162",
+            "MIMK-170",
+            "MIMK-172",
+            "MIMK-171",
+            "MIMK-175",
+            "MIMK-176",
+            "MIMK-177",
+            "MIMK-178",
+            "MIMK-173",
+            "MIMK-179",
+            "MIMK-180",
+            "MIMK-181",
+            "MIMK-182",
+            "MIMK-184",
+            "MIMK-185",
+            "MIMK-186",
+            "MIMK-187",
+            "MIMK-191",
+            "MIMK-192",
+            "MIMK-193",
+            "MIMK-194",
+            "MIMK-188",
+            "MIMK-190",
+            "MIMK-189",
+            "MIMK-195",
+            "MIMK-196",
+            "MIMK-197",
+            "MIMK-198",
+            "MIMK-199",
+            "MIMK-202",
+            "MIMK-203",
+            "MIMK-204",
+            "MIMK-200",
+            "MIMK-201",
+            "MIMK-205",
+            "MIMK-206",
+            "MIMK-208",
+            "MIMK-207",
+            "MIMK-209",
+            "MIMK-211",
+            "MIMK-213",
+            "MIMK-215",
+            "MIMK-212",
+            "MIMK-210",
+            "MIMK-216",
+            "MIMK-230",
+            "MIMK-232",
+            "MIMK-231",
+            "MIMK-233",
+            "MIMK-217",
+            "MIMK-245",
+            "MIMK-246",
+            "MIMK-247",
+            "MIMK-249",
+            "MIMK-250",
+            "MIMK-244",
+            "MIMK-252",
+            "MIMK-251",
+            "MIMK-253",
+            "MIMK-254",
+            "MIMK-255",
+            "MIMK-256",
+            "MIMK-257",
+            "MIMK-258",
+            "MIMK-260",
+            "MIMK-262",
+            "MIMK-263",
+            "MIMK-259",
+            "MIMK-265",
+            "MIMK-261",
+            "MIMK-267",
+            "MIMK-268",
+            "MIMK-269",
+            "MIMK-264",
+            "MIMK-266",
+            "MIMK-270",
+            "MIMK-273",
+            "MIMK-274",
+            "MIMK-272",
+            "MIMK-275",
+            "MIMK-276",
+            "MIMK-271",
+            "MIMK-279",
+            "MIMK-282",
+            "MIMK-283",
+            "MIMK-278",
+            "MIMK-284",
+            "MIMK-285",
+            "MIMK-286"
+          ],
+          "failedCodes": []
+        }
+      ],
+      "kindPrioritySchema": 20,
+      "fieldPrioritySchema": 5
+    },
+    "maker_fs_auto_daily": {
+      "enabled": true
+    }
+  }
 }
-
-

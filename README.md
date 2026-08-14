@@ -50,6 +50,8 @@ npm run dev
 
 环境变量见根目录 `.env.example`。
 
+业务默认值写在 `config/app.json` 的 `settings`（资源库 / 论坛地区 / 刮削等），首次启动写入 SQLite；已有配置不覆盖。`config/app.local.json` 可覆盖敏感项（115 / TMDB，勿提交）。强制重种：在 config 加 `"seed_settings_on_boot": true` 后重启 API。
+
 ## Docker（单镜像）
 
 一个镜像同时跑 **web + api + scrape**（supervisord），对外只暴露 **3020**。

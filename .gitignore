@@ -57,3 +57,4 @@ apps/web/next-env.d.ts
 
 # local overrides
 /config/app.local.json
+/config/_export/

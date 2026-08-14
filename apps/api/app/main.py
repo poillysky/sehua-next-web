@@ -36,7 +36,7 @@ from .auth_routes import (
     router as auth_router,
 )
 
-from .bootstrap import seed_admin_from_config
+from .bootstrap import seed_admin_from_config, seed_settings_from_config
 
 from .config_loader import config_paths
 
@@ -107,6 +107,7 @@ async def lifespan(_app: FastAPI):
     init_db()
 
     seed_admin_from_config()
+    seed_settings_from_config()
 
     prefix_ranges.start_daily_scheduler()
 
