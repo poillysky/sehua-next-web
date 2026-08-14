@@ -1973,12 +1973,11 @@ def build_maker_fs(
         from .forum_region_tags import (
             forum_allow_specs_for_search,
             invalidate_forum_region_cache,
-            _load_overrides,
+            known_forum_leaf_keys,
         )
 
         invalidate_forum_region_cache()
-        forum_overrides = _load_overrides()
-        if not forum_overrides:
+        if not known_forum_leaf_keys():
             raise ValueError(
                 "论坛地区未配置：请到 设置→论坛管理，给色花堂板块标注"
                 "「日本 / 国产 / 欧美 / 混合」后再扫描（未标注的板块不参与索引）"

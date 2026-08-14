@@ -82,4 +82,17 @@ def seed_settings_from_config(*, force: bool | None = None) -> dict[str, Any]:
         "source": [str(p) for p in config_paths()],
     }
     settings_store.put_setting(SETTINGS_SEED_META_KEY, meta)
+    if seeded:
+        log.info(
+            "settings seed done: wrote %s, skipped %s (force=%s)",
+            ",".join(seeded) or "-",
+            len(skipped),
+            force,
+        )
+    else:
+        log.info(
+            "settings seed: nothing to write (skipped %s existing keys, force=%s)",
+            len(skipped),
+            force,
+        )
     return meta
