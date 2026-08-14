@@ -184,6 +184,7 @@ export function BitmagnetDetailBody({ hash }: { hash: string }) {
                   name,
                   title: name,
                   ed2k_link: magnet,
+                  ed2k_links: magnet ? [magnet] : [],
                   link_kind: 'magnet',
                 }}
                 compact
