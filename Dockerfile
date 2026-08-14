@@ -78,13 +78,14 @@ COPY --from=web-builder /src/.next/static /app/web/.next/static
 
 COPY docker/supervisord.conf /etc/supervisor/supervisord.conf
 COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+COPY docker/healthcheck.sh /healthcheck.sh
+RUN chmod +x /entrypoint.sh /healthcheck.sh
 
 EXPOSE 3020
 VOLUME ["/app/data", "/app/apps/scrape/data"]
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-  CMD curl -fsS http://127.0.0.1:3020/ > /dev/null || exit 1
+HEALTHCHECK --interval=30s --timeout=8s --start-period=90s --retries=3 \
+  CMD /healthcheck.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["supervisord", "-n", "-c", "/etc/supervisor/supervisord.conf"]

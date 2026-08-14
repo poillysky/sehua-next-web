@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "镜像标签（如 1.0.0，不要带 v）"
+        description: "镜像标签（如 1.0.1，不要带 v）"
         required: true
-        default: "1.0.0"
+        default: "1.0.1"
       dockerhub_username:
         description: "Docker Hub 用户名（默认 poillysky）"
         required: false
@@ -59,30 +59,35 @@ jobs:
           fi
           echo "Token OK (length=${#TOKEN})"
 
-      # 在 Docker 外先编前端：失败时日志完整可见（不必等整镜像）
-      - name: Preflight web build (plain errors)
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      # 只做类型检查，避免与 Docker 内 Next build 重复
+      - name: Preflight web typecheck
         working-directory: apps/web
         env:
           NEXT_TELEMETRY_DISABLED: "1"
-          NEXT_PUBLIC_API_BASE: /api
-          API_INTERNAL_BASE: http://127.0.0.1:8020
         run: |
           set -o pipefail
           npm ci
           set +e
-          npm run build 2>&1 | tee /tmp/web-build.log
+          npx tsc -p tsconfig.json --noEmit 2>&1 | tee /tmp/web-tsc.log
           code=${PIPESTATUS[0]}
           set -e
           if [ "$code" -ne 0 ]; then
-            echo "::group::web build full log"
-            cat /tmp/web-build.log
+            echo "::group::tsc log"
+            cat /tmp/web-tsc.log
             echo "::endgroup::"
             while IFS= read -r line; do
-              echo "::error title=web build::$line"
-            done < <(grep -E 'Type error:|Failed to compile|Error:|error TS' /tmp/web-build.log | head -n 40)
+              echo "::error title=web tsc::$line"
+            done < <(grep -E 'error TS|Error:' /tmp/web-tsc.log | head -n 40)
             exit "$code"
           fi
-          echo "web build OK"
+          echo "web typecheck OK"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

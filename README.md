@@ -50,37 +50,38 @@ npm run dev
 
 环境变量见根目录 `.env.example`。
 
-业务默认值写在 `config/app.json` 的 `settings`（资源库 / 论坛地区 / 刮削等），首次启动写入 SQLite；已有配置不覆盖。`config/app.local.json` 可覆盖敏感项（115 / TMDB，勿提交）。强制重种：在 config 加 `"seed_settings_on_boot": true` 后重启 API。
+业务默认值写在 `config/app.json` 的 `settings`（论坛地区 / 刮削结构等），首次启动写入 SQLite；已有配置不覆盖。局域网 DSN、代理、Flare、115、TMDB 等放 `config/app.local.json`（已 gitignore，勿提交）。强制重种：在 config 加 `"seed_settings_on_boot": true` 后重启 API。
 
 ## Docker（单镜像）
 
-一个镜像同时跑 **web + api + scrape**（supervisord），对外只暴露 **3020**。
+一个镜像同时跑 **web + api + scrape**（supervisord），对外只暴露 **3020**。健康检查会探测 web / api / scrape 三端。
 
 ### NAS（`/vol1/1000/Docker/sehua-next-web`）
 
 ```bash
 mkdir -p /vol1/1000/Docker/sehua-next-web/{data,scrape-data,config}
 # 放入 docker-compose.yml，并把仓库 config/app.json 拷到 config/
+# 敏感项另写 config/app.local.json（DSN / 代理 / 密钥）
 cd /vol1/1000/Docker/sehua-next-web
 docker compose pull
 docker compose up -d
 ```
 
-`restart: always`；数据卷为绝对路径。资源库是**独立 Postgres**，用局域网 DSN（默认 `192.168.2.38:5435/ed2k`，见 `config/app.json`），不依赖主栈 Docker 网络。
+`restart: always`；数据卷为绝对路径。资源库是**独立 Postgres**，在设置页或 `app.local.json` 填局域网 DSN，不依赖主栈 Docker 网络。
 
 ### 本地
 
 ```bash
-docker build -t sehua-next-web:1.0.0 .
+docker build -t sehua-next-web:1.0.1 .
 docker run -d --name sehua \
   -p 3020:3020 \
   -v "$PWD/data:/app/data" \
   -v sehua-scrape:/app/apps/scrape/data \
-  sehua-next-web:1.0.0
+  sehua-next-web:1.0.1
 ```
 
 GitHub Actions（`.github/workflows/docker-publish.yml`）在推送 `v*` 标签或手动触发时，构建并推送到 Docker Hub：
 
-`poillysky/sehua-next-web:1.0.0`
+`poillysky/sehua-next-web:1.0.1`
 
 与 sehua / Anzai 对齐：用户名默认 `poillysky`；Token 读取 `DOCKERHUB_TOKEN`（或 `DOCKERHUB_PASSWORD` / Variables / 手动 Run workflow 粘贴）。

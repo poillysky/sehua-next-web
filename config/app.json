@@ -4,12 +4,12 @@
     "password": "admin123456",
     "reset_password_on_boot": false
   },
-  "notes": "默认管理员与业务默认配置：首次启动写入 SQLite（已有键不覆盖）。敏感项可放 config/app.local.json（勿提交）。",
+  "notes": "公开默认：论坛地区+刮削结构。DSN/代理/Flare/115/TMDB 放 app.local.json（勿提交）。",
   "settings": {
     "resource_db": {
-      "enabled": true,
-      "dsn": "postgresql://postgres:postgres@192.168.2.38:5435/ed2k",
-      "note": "独立资源库（与本服务分离）；容器内请用局域网 IP，勿用 127.0.0.1"
+      "enabled": false,
+      "dsn": "",
+      "note": "独立资源库；在 app.local.json 或设置页填写局域网 DSN"
     },
     "forum.sehuatang": {
       "regionByKey": {
@@ -161,8 +161,8 @@
       "enabled": true,
       "origin": "http://127.0.0.1:9210",
       "libraryRoot": "data/library",
-      "flareSolverrUrl": "http://192.168.2.38:8191/v1",
-      "proxyUrl": "http://192.168.2.88:7893",
+      "flareSolverrUrl": "",
+      "proxyUrl": "",
       "coverDownloadStrategy": "priority",
       "exportConcurrency": 5,
       "exportFastConcurrency": 5,
@@ -255,8 +255,50 @@
         "compactOutlineNewlines": true,
         "mappingLanguage": "zh-CN"
       },
-      "writeTree": true,
-      "writeEmby": true,
+      "fieldPriority": {
+        "cover": [
+          "javbus",
+          "jav321",
+          "libredmm",
+          "freejavbt"
+        ],
+        "titleZh": [
+          "iqqtv",
+          "sevenmmtv",
+          "javbus"
+        ],
+        "outline": [
+          "iqqtv",
+          "jav321",
+          "libredmm"
+        ],
+        "studio": [
+          "javbus",
+          "jav321",
+          "libredmm",
+          "freejavbt"
+        ],
+        "actors": [
+          "javbus",
+          "jav321",
+          "libredmm",
+          "freejavbt"
+        ],
+        "tags": [
+          "javbus",
+          "freejavbt",
+          "libredmm",
+          "jav321"
+        ],
+        "series": [
+          "javbus",
+          "freejavbt",
+          "jav321",
+          "libredmm"
+        ]
+      },
+      "fieldPrioritySchema": 5,
+      "kindPrioritySchema": 20,
       "kindProfiles": {
         "japan_censored": {
           "libraryRoot": "",
@@ -1045,6 +1087,9 @@
           }
         }
       },
+      "retry": {
+        "defaultRetry": 0
+      },
       "sources": {
         "airav_io": {
           "id": "airav_io",
@@ -1263,51 +1308,8 @@
           "retry": 0
         }
       },
-      "fieldPriority": {
-        "cover": [
-          "javbus",
-          "jav321",
-          "libredmm",
-          "freejavbt"
-        ],
-        "titleZh": [
-          "iqqtv",
-          "sevenmmtv",
-          "javbus"
-        ],
-        "outline": [
-          "iqqtv",
-          "jav321",
-          "libredmm"
-        ],
-        "studio": [
-          "javbus",
-          "jav321",
-          "libredmm",
-          "freejavbt"
-        ],
-        "actors": [
-          "javbus",
-          "jav321",
-          "libredmm",
-          "freejavbt"
-        ],
-        "tags": [
-          "javbus",
-          "freejavbt",
-          "libredmm",
-          "jav321"
-        ],
-        "series": [
-          "javbus",
-          "freejavbt",
-          "jav321",
-          "libredmm"
-        ]
-      },
-      "retry": {
-        "defaultRetry": 0
-      },
+      "writeEmby": true,
+      "writeTree": true,
       "scrapeTasks": [
         {
           "id": "cfb727db-0c86-47ea-9f7d-400475543655",
@@ -1581,9 +1583,7 @@
           ],
           "failedCodes": []
         }
-      ],
-      "kindPrioritySchema": 20,
-      "fieldPrioritySchema": 5
+      ]
     },
     "maker_fs_auto_daily": {
       "enabled": true

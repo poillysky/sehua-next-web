@@ -354,7 +354,7 @@ export function MakerFsPanel({
         force: opts.force,
         skipFreshHours: opts.skipFreshHours,
         region: opts.region,
-        workers: 8,
+        workers: 6,
       });
       try {
         const s0 = await fetchMakerFsStatus();

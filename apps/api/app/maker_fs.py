@@ -40,8 +40,8 @@ from .db import ROOT
 
 log = logging.getLogger(__name__)
 
-# 导出并发：受 Postgres pool max_size=8 约束，留 2 给前台查询
-DEFAULT_EXPORT_WORKERS = 8
+# 导出并发：受 Postgres pool max_size=8 约束，留余量给前台查询
+DEFAULT_EXPORT_WORKERS = 6
 DEFAULT_SKIP_FRESH_HOURS = 24
 
 MAKER_FS_ROOT = ROOT / "data" / "maker-fs"
@@ -2005,11 +2005,13 @@ def build_maker_fs(
         if limit_prefixes is not None and limit_prefixes > 0:
             work = work[:limit_prefixes]
 
-        worker_n = max(1, min(int(workers or 1), 8))
+        worker_n = max(1, min(int(workers or 1), 6))
         _build_state["workers"] = worker_n
         total_covers = 0
         built = 0
         skipped = 0
+        fail_n = 0
+        fail_samples: list[str] = []
         progress_lock = threading.Lock()
 
         # 分区进度：全量时七区各有 total；单区扫描只有该区
@@ -2117,6 +2119,11 @@ def build_maker_fs(
                 try:
                     _one(entry)
                 except Exception as e:
+                    fail_n += 1
+                    if len(fail_samples) < 5:
+                        fail_samples.append(
+                            f"{entry.get('prefix')}: {e}"
+                        )
                     log.warning(
                         "maker-fs build prefix %s: %s",
                         entry.get("prefix"),
@@ -2130,6 +2137,11 @@ def build_maker_fs(
                     try:
                         fut.result()
                     except Exception as e:
+                        fail_n += 1
+                        if len(fail_samples) < 5:
+                            fail_samples.append(
+                                f"{entry.get('prefix')}: {e}"
+                            )
                         log.warning(
                             "maker-fs build prefix %s: %s",
                             entry.get("prefix"),
@@ -2146,6 +2158,7 @@ def build_maker_fs(
             "prefixCount": built,
             "coverCount": total_covers,
             "skippedCount": skipped,
+            "failedCount": fail_n,
             "workers": worker_n,
             "skipFreshHours": skip_fresh_hours,
             "region": region_id or "",
@@ -2160,7 +2173,10 @@ def build_maker_fs(
         }
         write_json(manifest_path(), manifest)
         done_msg = "ok"
-        if built > 0 and total_covers <= 0:
+        if fail_n > 0:
+            tip = "；".join(fail_samples[:3])
+            done_msg = f"完成，{fail_n} 个前缀失败" + (f"：{tip}" if tip else "")
+        elif built > 0 and total_covers <= 0:
             done_msg = (
                 "完成但条目为 0：资源库已通，请检查 设置→论坛管理 的地区标签"
                 "是否覆盖资源所在板块（未标注=不索引）"
@@ -2174,6 +2190,7 @@ def build_maker_fs(
                 "prefixTotal": len(work),
                 "covers": total_covers,
                 "skipped": skipped,
+                "failed": fail_n,
                 "currentPrefix": "",
                 "updatedAt": _now_iso(),
             }

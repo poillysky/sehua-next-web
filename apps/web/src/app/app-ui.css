@@ -14,11 +14,31 @@
 
   --login-blue-deep: #0066d6;
 
+  --login-blue-soft: rgba(0, 122, 255, 0.12);
+
   --brand: var(--login-blue);
 
   --bg-soft: #e5e5ea;
 
   --hairline: rgba(60, 60, 67, 0.18);
+
+  --radius-card: 14px;
+
+  --radius-row: 12px;
+
+  --radius-chip: 10px;
+
+  --radius-modal: 16px;
+
+  --shadow-card: 0 1px 2px rgba(15, 40, 80, 0.04), 0 8px 24px rgba(15, 40, 80, 0.06);
+
+  --shadow-modal: 0 1px 0 rgba(255, 255, 255, 0.75) inset, 0 18px 48px rgba(15, 40, 80, 0.2);
+
+  --surface-elevated: rgba(255, 255, 255, 0.94);
+
+  --surface-bar: rgba(247, 250, 255, 0.86);
+
+  --surface-fill: rgba(120, 120, 128, 0.1);
 
   --app-bg:
     radial-gradient(ellipse 120% 70% at 50% -8%, rgba(0, 122, 255, 0.1), transparent 58%),
@@ -64,11 +84,23 @@
 
     --login-blue-deep: #0070e0;
 
+    --login-blue-soft: rgba(10, 132, 255, 0.18);
+
     --hairline: rgba(84, 84, 88, 0.45);
 
     --bg-soft: #2c2c2e;
 
     --surface-solid: rgba(28, 28, 30, 0.94);
+
+    --surface-elevated: rgba(28, 28, 30, 0.96);
+
+    --surface-bar: rgba(22, 22, 24, 0.88);
+
+    --surface-fill: rgba(120, 120, 128, 0.22);
+
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.35);
+
+    --shadow-modal: 0 18px 48px rgba(0, 0, 0, 0.55);
 
     --app-bg:
       radial-gradient(ellipse 120% 70% at 50% -8%, rgba(10, 132, 255, 0.14), transparent 58%),
@@ -5267,9 +5299,9 @@ textarea {
 
   color: #fff;
 
-  background: linear-gradient(180deg, #ffb340 0%, #f59e0b 100%);
+  background: linear-gradient(180deg, #3b9bff 0%, var(--login-blue, #007aff) 100%);
 
-  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.28);
+  box-shadow: 0 4px 14px rgba(0, 122, 255, 0.28);
 
 }
 
@@ -5835,9 +5867,9 @@ textarea {
 
 .dark .mfs-toolbar__btn--primary {
 
-  background: linear-gradient(180deg, #ffb340 0%, #e08900 100%);
+  background: linear-gradient(180deg, #409cff 0%, #0a84ff 100%);
 
-  box-shadow: 0 4px 12px rgba(255, 159, 10, 0.28);
+  box-shadow: 0 4px 14px rgba(10, 132, 255, 0.32);
 
 }
 
@@ -12937,6 +12969,244 @@ a.scrape-src-card__url:active {
 .scrape-source-add__chip {
   cursor: pointer;
   border: none;
+}
+
+/* ─── 主题统一：板块 / Push / 分组 / Toast / 片商卡片 ─── */
+
+.app-push__bar,
+.settings-push__bar {
+  min-height: 46px;
+  padding: calc(4px + var(--nav-safe-top)) 6px 6px;
+  border-bottom: 0.5px solid var(--hairline);
+  background: var(--surface-bar);
+  -webkit-backdrop-filter: saturate(180%) blur(18px);
+  backdrop-filter: saturate(180%) blur(18px);
+}
+
+.app-push__title,
+.settings-push__title {
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.022em;
+  color: var(--ink);
+}
+
+.app-push__back,
+.settings-push__back {
+  color: var(--login-blue);
+  font-size: 17px;
+  font-weight: 450;
+  min-height: 44px;
+  padding: 0 4px 0 0;
+}
+
+.app-push,
+.settings-push {
+  box-shadow: -8px 0 24px rgba(15, 40, 80, 0.06);
+}
+
+.settings-group,
+.app-hub__group,
+.mfs-panel .settings-group {
+  margin: 0 0 12px;
+  background: var(--surface-elevated);
+  border: 0.5px solid var(--hairline);
+  border-radius: var(--radius-row);
+  box-shadow: none;
+  overflow: hidden;
+}
+
+.settings-group-label,
+.app-hub__label,
+.sht-section__label,
+.mfs-panel .settings-group-label {
+  margin: 12px 4px 6px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--mute);
+  text-transform: none;
+}
+
+.app-hub__title,
+.settings-hub .settings-title,
+.sht-hub .app-hub__title {
+  font-size: 28px;
+  font-weight: 720;
+  letter-spacing: -0.03em;
+  color: var(--ink);
+}
+
+.settings-nav,
+.app-hub__row {
+  min-height: var(--row-h);
+  padding: 8px 14px;
+  gap: 12px;
+  background: transparent;
+}
+
+.settings-nav:active,
+.app-hub__row:active {
+  background: var(--login-blue-soft);
+}
+
+.settings-nav__icon,
+.app-hub__icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+}
+
+.settings-nav__title,
+.app-hub__row-title {
+  font-size: 16px;
+  font-weight: 560;
+  letter-spacing: -0.015em;
+}
+
+.settings-nav__desc,
+.app-hub__row-desc {
+  font-size: 13px;
+  color: var(--mute);
+}
+
+.settings-nav__chev,
+.app-hub__chev {
+  color: rgba(60, 60, 67, 0.36);
+  opacity: 1;
+}
+
+.sht-board-card,
+.mk-facet-card {
+  border: 0.5px solid var(--hairline);
+  border-radius: var(--radius-card);
+  background: var(--surface-elevated);
+  box-shadow: var(--shadow-card);
+}
+
+.sht-board-card:active,
+.mk-facet-card:active {
+  background: var(--login-blue-soft);
+  transform: scale(0.97);
+}
+
+.sht-board-card__mark {
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
+  background: var(--login-blue-soft);
+  color: var(--login-blue);
+}
+
+.sht-section__count,
+.mk-facet-tabs__count {
+  background: var(--surface-fill);
+  color: var(--mute);
+}
+
+.mfs-status-pill,
+.mfs-scan-chip,
+.mk-region-facet-btn,
+.mk-facet-sync-btn {
+  border-radius: 999px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.mfs-scan-chip,
+.mk-facet-sync-btn,
+.mk-region-facet-btn {
+  background: var(--login-blue-soft);
+  color: var(--login-blue);
+  border: none;
+}
+
+.mfs-region-mark {
+  background: var(--login-blue-soft);
+  color: var(--login-blue);
+  border-radius: 10px;
+}
+
+.toast {
+  border-radius: 16px;
+  box-shadow: 0 10px 28px rgba(15, 40, 80, 0.22);
+  border: 0.5px solid rgba(255, 255, 255, 0.12);
+}
+
+.prefix-grid .prefix-tile,
+.prefix-tile {
+  border-radius: 12px;
+  border: 0.5px solid var(--hairline);
+  background: var(--surface-elevated);
+  overflow: hidden;
+}
+
+.app-search,
+.mfs-panel .app-search,
+.mk-facet-search .app-search {
+  border-radius: 12px;
+  background: var(--surface-fill);
+  border: 0.5px solid transparent;
+}
+
+.app-search:focus-within {
+  background: var(--surface-elevated);
+  border-color: var(--login-blue);
+  box-shadow: 0 0 0 3px var(--login-blue-soft);
+}
+
+/* 按钮主色统一 */
+.btn.settings-actions__primary,
+.settings-actions__primary,
+.mfs-toolbar__btn--primary {
+  background: linear-gradient(180deg, #3b9bff 0%, var(--login-blue, #007aff) 100%);
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  font-weight: 600;
+  box-shadow: 0 4px 14px rgba(0, 122, 255, 0.28);
+}
+
+.btn.settings-actions__primary:active,
+.mfs-toolbar__btn--primary:active {
+  background: var(--login-blue-deep);
+  box-shadow: 0 2px 8px rgba(0, 122, 255, 0.22);
+  transform: scale(0.98);
+}
+
+.mfs-toolbar__btn--ghost {
+  background: var(--surface-fill);
+  color: var(--login-blue);
+  border: none;
+  border-radius: 999px;
+}
+
+/* 表单卡片 / 设置内嵌面板 */
+.settings-form-card,
+.scrape-param-card,
+.mk-code-meta,
+.resource-detail-card {
+  background: var(--surface-elevated);
+  border: 0.5px solid var(--hairline);
+  border-radius: var(--radius-card);
+}
+
+@media (prefers-color-scheme: dark) {
+  .settings-nav__chev,
+  .app-hub__chev {
+    color: rgba(235, 235, 245, 0.3);
+  }
+
+  .app-push,
+  .settings-push {
+    box-shadow: -8px 0 28px rgba(0, 0, 0, 0.45);
+  }
+
+  .sht-board-card,
+  .mk-facet-card,
+  .prefix-tile {
+    box-shadow: none;
+  }
 }
 
 

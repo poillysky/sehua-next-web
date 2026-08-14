@@ -82,7 +82,7 @@ def get_pool() -> ConnectionPool:
 
             min_size=1,
 
-            max_size=8,
+            max_size=10,
 
             kwargs={"row_factory": dict_row},
 
