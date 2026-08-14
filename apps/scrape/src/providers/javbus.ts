@@ -241,7 +241,8 @@ export async function scrapeJavbus(
       /404|找不到|not found|沒有找到|没有找到/i.test(html.slice(0, 2500)) &&
       !/bigImage/i.test(html)
     ) {
-      continue;
+      // 明确无详情：不再试镜像，便于快源快速判空
+      return null;
     }
     if (!new RegExp(c.replace(/-/g, "[-_]?"), "i").test(html.slice(0, 15000))) {
       continue;

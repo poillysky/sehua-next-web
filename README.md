@@ -30,6 +30,19 @@ NextWeb/
 
 ## 启动
 
+### 一键（Windows）
+
+双击根目录 `start-dev.cmd`（或 `npm run dev:all`）。会释放端口、开 3 个控制台窗口，并在健康后打开浏览器。
+
+```bat
+start-dev.cmd
+start-dev.cmd -SkipScrape
+start-dev.cmd -NoBrowser
+stop-dev.cmd
+```
+
+### 分步
+
 ```bash
 # 1) 后端
 npm run dev:api
@@ -50,7 +63,7 @@ npm run dev
 
 环境变量见根目录 `.env.example`。
 
-业务默认值写在 `config/app.json` 的 `settings`（论坛地区 / 刮削结构等），首次启动写入 SQLite；已有配置不覆盖。局域网 DSN、代理、Flare、115、TMDB 等放 `config/app.local.json`（已 gitignore，勿提交）。强制重种：在 config 加 `"seed_settings_on_boot": true` 后重启 API。
+业务默认值写在 `config/app.json` 的 `settings`（论坛地区 / 刮削结构等），首次启动写入 SQLite；已有配置不覆盖。局域网 DSN（色花 `resource_db`、Bitmagnet `bitmagnet_db`）、代理、Flare、115、TMDB 等放 `config/app.local.json`（已 gitignore，勿提交）。强制重种：在 config 加 `"seed_settings_on_boot": true` 后重启 API。
 
 ## Docker（单镜像）
 
@@ -72,16 +85,16 @@ docker compose up -d
 ### 本地
 
 ```bash
-docker build -t sehua-next-web:1.0.1 .
+docker build -t sehua-next-web:1.0.2 .
 docker run -d --name sehua \
   -p 3020:3020 \
   -v "$PWD/data:/app/data" \
   -v sehua-scrape:/app/apps/scrape/data \
-  sehua-next-web:1.0.1
+  sehua-next-web:1.0.2
 ```
 
 GitHub Actions（`.github/workflows/docker-publish.yml`）在推送 `v*` 标签或手动触发时，构建并推送到 Docker Hub：
 
-`poillysky/sehua-next-web:1.0.1`
+`poillysky/sehua-next-web:1.0.2`
 
 与 sehua / Anzai 对齐：用户名默认 `poillysky`；Token 读取 `DOCKERHUB_TOKEN`（或 `DOCKERHUB_PASSWORD` / Variables / 手动 Run workflow 粘贴）。

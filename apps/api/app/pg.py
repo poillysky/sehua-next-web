@@ -98,13 +98,26 @@ def get_pool() -> ConnectionPool:
 
 
 
-def query(sql: str, params: list[Any] | tuple[Any, ...] | None = None) -> list[dict[str, Any]]:
+def query(
+    sql: str,
+    params: list[Any] | tuple[Any, ...] | None = None,
+    *,
+    statement_timeout_ms: int | None = None,
+) -> list[dict[str, Any]]:
 
     pool = get_pool()
 
     with pool.connection() as conn:
 
         with conn.cursor() as cur:
+
+            if statement_timeout_ms is not None and statement_timeout_ms > 0:
+
+                # SET LOCAL 仅当前事务；pool.connection() 会开事务
+                cur.execute(
+                    "SELECT set_config('statement_timeout', %s, true)",
+                    [f"{int(statement_timeout_ms)}ms"],
+                )
 
             cur.execute(sql, params or [])
 

@@ -1,0 +1,20 @@
+{
+  "settings": {
+    "resource_db": {
+      "enabled": true,
+      "dsn": "postgresql://postgres:postgres@192.168.2.38:5435/ed2k",
+      "note": "色花资源库（独立 Postgres，与本容器无关）"
+    },
+    "bitmagnet_db": {
+      "enabled": true,
+      "dsn": "postgresql://postgres:postgres@192.168.2.38:5438/bitmagnet",
+      "note": "Bitmagnet 库（独立 Postgres，宿主机 5438→容器 5432）"
+    },
+    "scrape": {
+      "flareSolverrUrl": "http://192.168.2.38:8191/v1",
+      "proxyUrl": "http://192.168.2.88:7893",
+      "origin": "http://127.0.0.1:9210",
+      "enabled": true
+    }
+  }
+}

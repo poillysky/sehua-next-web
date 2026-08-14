@@ -17,6 +17,12 @@ import type {
   MatchMode,
   SortType,
 } from "@/types/resource";
+import type { SearchSource } from "./SourceSwitch";
+
+const SOURCE_LABEL: Record<SearchSource, string> = {
+  sehua: "色花堂",
+  bitmagnet: "Bt",
+};
 
 type FilterKey = "sort" | "match" | "time" | "size";
 
@@ -81,6 +87,10 @@ export function SearchFilters({
   onMatchMode,
   onFilterTime,
   onFilterSize,
+  showMatch = true,
+  searchSource,
+  onSearchSourceChange,
+  showSource = false,
 }: {
   sortType: SortType;
   matchMode: MatchMode;
@@ -90,6 +100,10 @@ export function SearchFilters({
   onMatchMode: (v: MatchMode) => void;
   onFilterTime: (v: FilterTime) => void;
   onFilterSize: (v: FilterSize) => void;
+  showMatch?: boolean;
+  searchSource?: SearchSource;
+  onSearchSourceChange?: (v: SearchSource) => void;
+  showSource?: boolean;
 }) {
   const [open, setOpen] = useState<FilterKey | null>(null);
   const [menuBox, setMenuBox] = useState<CSSProperties | null>(null);
@@ -103,7 +117,9 @@ export function SearchFilters({
     text: string;
   }[] = [
     { key: "sort", fieldLabel: "排序", text: pick(SORT_OPTS, sortType) },
-    { key: "match", fieldLabel: "匹配", text: pick(MATCH_OPTS, matchMode) },
+    ...(showMatch
+      ? [{ key: "match" as const, fieldLabel: "匹配", text: pick(MATCH_OPTS, matchMode) }]
+      : []),
     { key: "size", fieldLabel: "大小", text: pick(SIZE_OPTS, filterSize) },
     { key: "time", fieldLabel: "时间", text: pick(TIME_OPTS, filterTime) },
   ];
@@ -256,7 +272,37 @@ export function SearchFilters({
       : null;
 
   return (
-    <div className="filters-bm" aria-label="筛选">
+    <div
+      className={[
+        "filters-bm",
+        showMatch ? "" : "filters-bm--3",
+        showSource ? "filters-bm--with-source" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      aria-label="筛选"
+    >
+      {showSource && searchSource != null && onSearchSourceChange ? (
+        <div className="filters-bm__field">
+          <button
+            type="button"
+            className="filters-bm__trigger filters-bm__trigger--toggle"
+            aria-label="切换搜索来源"
+            onClick={() =>
+              onSearchSourceChange(
+                searchSource === "sehua" ? "bitmagnet" : "sehua",
+              )
+            }
+          >
+            <span className="filters-bm__label">来源</span>
+            <span className="filters-bm__value-row">
+              <span className="filters-bm__value">
+                {SOURCE_LABEL[searchSource]}
+              </span>
+            </span>
+          </button>
+        </div>
+      ) : null}
       {cells.map((c) => {
         const expanded = open === c.key;
         return (

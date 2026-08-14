@@ -184,7 +184,30 @@ export function parseEd2kLink(link: string) {
 export function parseMagnetLink(link: string) {
   const match = link.match(MAGNET_HASH_RE);
   if (!match) return null;
-  return { hash: match[1].toUpperCase(), link };
+  const hash = match[1];
+  const out: {
+    hash: string;
+    link: string;
+    filename?: string;
+    size?: number;
+  } = {
+    hash: hash.length === 40 ? hash.toUpperCase() : hash.toUpperCase(),
+    link,
+  };
+  try {
+    const q = link.includes('?') ? link.split('?').slice(1).join('?') : '';
+    const params = new URLSearchParams(q);
+    const dn = params.get('dn');
+    if (dn) out.filename = decodeURIComponent(dn.replace(/\+/g, ' ')).trim();
+    const xl = params.get('xl');
+    if (xl) {
+      const n = Number(xl);
+      if (Number.isFinite(n)) out.size = n;
+    }
+  } catch {
+    /* ignore */
+  }
+  return out;
 }
 
 export function normalizeEd2kLinks(
@@ -387,9 +410,14 @@ export function filterPreviewImagesInOrder(
   return out;
 }
 
-export function galleryPreviewImages(images?: string[] | null): string[] {
+export function galleryPreviewImages(
+  images?: string[] | null,
+  /** ≤0 表示不截断（详情页要加载全部） */
+  limit: number = MAX_PREVIEW_IMAGES,
+): string[] {
   /** 优先片商/论坛图；写真等仅 imghost 时回退，避免封面全空 */
-  const ordered = filterPreviewImagesInOrder(images, MAX_PREVIEW_IMAGES);
+  const cap = limit <= 0 ? Number.MAX_SAFE_INTEGER : limit;
+  const ordered = filterPreviewImagesInOrder(images, cap);
   const preferred = ordered.filter(
     (u) =>
       isJacketCoverUrl(u) ||
@@ -584,7 +612,8 @@ export function normalizeResourceView(item: ResourceItem): ResourceItem {
         rawImgs,
         item.title,
       )
-    : galleryPreviewImages(rawImgs);
+    : // 详情/列表同源：不过滤上限；列表卡片自行按槽位截断展示
+      galleryPreviewImages(rawImgs, 0);
   if (!previews.length) {
     previews = pickPreviewsForResource(
       item.hash,
@@ -613,6 +642,11 @@ export function normalizeResourceView(item: ResourceItem): ResourceItem {
       size = Number(parsed.size);
       break;
     }
+    const magnet = parseMagnetLink(link);
+    if (magnet?.size) {
+      size = Number(magnet.size);
+      break;
+    }
   }
 
   const description = useName
@@ -624,6 +658,62 @@ export function normalizeResourceView(item: ResourceItem): ResourceItem {
         .join("\n")
     : item.description;
 
+  const apiFiles = Array.isArray(item.files)
+    ? item.files.filter((f) => f && String(f.path || "").trim())
+    : [];
+  const apiFilesUseful = apiFiles.some((f) => {
+    const path = String(f.path || "");
+    const base = path.split("/").pop() || path;
+    const ext = String(f.extension || "")
+      .trim()
+      .replace(/^\./, "");
+    if (ext && /^[a-z0-9]{1,8}$/i.test(ext)) return true;
+    return /\.[a-z0-9]{2,5}$/i.test(base);
+  });
+
+  const builtFiles = links.map((link, index) => {
+    const parsed = parseEd2kLink(link);
+    const magnet = parsed ? null : parseMagnetLink(link);
+    const path =
+      parsed?.filename ||
+      magnet?.filename ||
+      // 无 dn 的磁力：不要把帖子标题/中文名当成「无后缀文件」
+      (parsed ? name || item.name || "" : "") ||
+      "";
+    const fromName = String(path || "");
+    let extension = "";
+    if (fromName.includes(".")) {
+      const pop = fromName.split(".").pop() || "";
+      if (
+        pop &&
+        pop.length <= 5 &&
+        !/\s/.test(pop) &&
+        /^[a-z0-9]+$/i.test(pop)
+      ) {
+        extension = pop.toLowerCase();
+      }
+    }
+    if (!extension) {
+      const blob = `${item.title || ""}\n${name || ""}\n${fromName}`;
+      const m = blob.match(
+        /(?:^|[.\s\[\(（_/|=-])(mp4|mkv|avi|wmv|rmvb|m2ts|ts|mov|flv|mpeg|mpg|m4v|webm|rm|zip|rar|7z|iso)(?:$|[.\s\]\)）_/|=-])/i,
+      );
+      if (m) extension = m[1].toLowerCase();
+    }
+    return {
+      index: index + 1,
+      path,
+      size: Number(parsed?.size || magnet?.size || size || 0),
+      extension,
+    };
+  }).filter((f) => String(f.path || "").trim());
+
+  const files = apiFilesUseful ? apiFiles : builtFiles;
+  const filesCount =
+    apiFilesUseful && apiFiles.length
+      ? Number(item.files_count || apiFiles.length)
+      : files.length || links.length;
+
   return {
     ...item,
     title: useName || item.title,
@@ -634,19 +724,9 @@ export function normalizeResourceView(item: ResourceItem): ResourceItem {
     ed2k_link: primary,
     link_kind: linkKindOf(primary) || item.link_kind,
     size: size || item.size,
-    single_file: links.length <= 1,
-    files_count: links.length,
-    files: links.map((link, index) => {
-      const parsed = parseEd2kLink(link);
-      return {
-        index: index + 1,
-        path: parsed?.filename || name || item.name,
-        size: Number(parsed?.size || size || 0),
-        extension: (parsed?.filename || name || "").includes(".")
-          ? (parsed?.filename || name).split(".").pop() || ""
-          : "",
-      };
-    }),
+    single_file: files.length <= 1,
+    files_count: filesCount,
+    files,
   };
 }
 

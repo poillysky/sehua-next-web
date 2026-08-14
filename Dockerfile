@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # Single image: web (3020) + api (8020) + scrape (9210)
-# Build: docker build -t sehua-next-web:1.0.0 .
+# Build: docker build -t sehua-next-web:1.0.1 .
 
 # ─── Web build ─────────────────────────────────────────────
 FROM node:22-bookworm-slim AS web-builder
@@ -20,7 +20,7 @@ COPY apps/scrape/package.json apps/scrape/package-lock.json ./
 # tsx 在 devDependencies，运行期仍需
 RUN npm ci
 
-# ─── Runtime (Python + Node + Chromium + supervisord) ─────
+# ─── Runtime (Python + Node + supervisord) ─────────────────
 FROM python:3.12-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -32,32 +32,23 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     API_INTERNAL_BASE=http://127.0.0.1:8020 \
     SCRAPE_ORIGIN=http://127.0.0.1:9210 \
     SNS_COOKIE_SECURE=0 \
-    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     PORT=9210 \
     HOST=127.0.0.1 \
     WEB_PORT=3020
 
-# Node 22 + supervisord + sharp/playwright libs
+# Node 22 + supervisord + sharp (libvips) libs
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl gnupg supervisor \
       libvips42 \
-      libglib2.0-0 libnss3 libnspr4 \
-      libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
-      libdbus-1-3 libxcb1 libxkbcommon0 libx11-6 \
-      libxcomposite1 libxdamage1 libxext6 libxfixes3 \
-      libxrandr2 libgbm1 libpango-1.0-0 libcairo2 \
-      libasound2 libatspi2.0-0 \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# API Python deps + Chromium
+# API Python deps (no Playwright / Chromium)
 COPY apps/api/requirements.txt /tmp/requirements.txt
 RUN pip install -r /tmp/requirements.txt \
-  && playwright install chromium \
-  && playwright install-deps chromium \
   && rm /tmp/requirements.txt
 
 # Monorepo layout (API ROOT = /app)

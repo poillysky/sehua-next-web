@@ -376,7 +376,7 @@ export function BoardsScreen() {
                 {boardQuery ? '本板无匹配结果' : '暂无资源'}
               </p>
             ) : (
-              <div className="resource-list">
+              <div className="bm-result-list">
                 {items.map((item) => (
                   <ResourceCard
                     key={item.hash}

@@ -821,10 +821,12 @@ def normalize_scrape_tasks(raw: Any) -> list[dict[str, Any]]:
         if watch_raw is None:
             watch_raw = item.get("watch_enabled")
         done_v = _int("done")
+        empty_v = _int("empty")
         skipped_v = _int("skipped")
         failed_v = _int("failed")
         total_v = _int("total")
         done_codes = _code_list(item.get("doneCodes") or item.get("done_codes"))
+        empty_codes = _code_list(item.get("emptyCodes") or item.get("empty_codes"))
         skipped_codes = _code_list(
             item.get("skippedCodes") or item.get("skipped_codes")
         )
@@ -835,11 +837,13 @@ def normalize_scrape_tasks(raw: Any) -> list[dict[str, Any]]:
         if done_codes:
             done_v = min(done_v, len(done_codes)) if done_v else len(done_codes)
             done_v = len(done_codes)
+        if empty_codes:
+            empty_v = len(empty_codes)
         if skipped_codes:
             skipped_v = len(skipped_codes)
         if failed_codes:
             failed_v = len(failed_codes)
-        processed = done_v + skipped_v + failed_v
+        processed = done_v + empty_v + skipped_v + failed_v
         # 任务卡是终身累计：合计不够时抬高合计，绝不压低成功数
         if processed > total_v:
             total_v = processed
@@ -848,7 +852,7 @@ def normalize_scrape_tasks(raw: Any) -> list[dict[str, Any]]:
         ).strip()
         if last_status.startswith("完成") and total_v >= 0:
             last_status = (
-                f"完成 · 成功 {done_v} · 跳过 {skipped_v} · 失败 {failed_v}"
+                f"完成 · 成功 {done_v} · 空号 {empty_v} · 失败 {failed_v}"
             )
         out.append(
             {
@@ -867,10 +871,12 @@ def normalize_scrape_tasks(raw: Any) -> list[dict[str, Any]]:
                     item.get("updatedAt") or item.get("updated_at") or ""
                 ).strip(),
                 "done": done_v,
+                "empty": empty_v,
                 "skipped": skipped_v,
                 "failed": failed_v,
                 "total": total_v,
                 "doneCodes": done_codes,
+                "emptyCodes": empty_codes,
                 "skippedCodes": skipped_codes,
                 "failedCodes": failed_codes,
             }
@@ -977,13 +983,19 @@ def profiles_public(
             dbc = scrape_export_log_store.count_result_codes(tid)
             nt = dict(t)
             nt["done"] = max(int(t.get("done") or 0), int(dbc.get("done") or 0))
+            nt["empty"] = max(int(t.get("empty") or 0), int(dbc.get("empty") or 0))
             nt["skipped"] = max(
                 int(t.get("skipped") or 0), int(dbc.get("skipped") or 0)
             )
             nt["failed"] = max(
                 int(t.get("failed") or 0), int(dbc.get("failed") or 0)
             )
-            processed = int(nt["done"]) + int(nt["skipped"]) + int(nt["failed"])
+            processed = (
+                int(nt["done"])
+                + int(nt["empty"])
+                + int(nt["skipped"])
+                + int(nt["failed"])
+            )
             nt["total"] = max(int(t.get("total") or 0), processed)
             enriched.append(nt)
         tasks = enriched

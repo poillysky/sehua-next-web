@@ -165,10 +165,40 @@ def parse_ed2k_link(link: str) -> dict[str, Any] | None:
 
 
 def parse_magnet_link(link: str) -> dict[str, Any] | None:
-    m = MAGNET_HASH_RE.search(link or "")
+    """解析磁力：infohash + 可选 dn（文件名）/ xl（大小）。"""
+    raw = (link or "").strip()
+    m = MAGNET_HASH_RE.search(raw)
     if not m:
         return None
-    return {"hash": m.group(1).upper(), "link": link}
+    info_hash = m.group(1)
+    # 40 位 hex 统一大写；32 位 base32 也原样保留供展示
+    if len(info_hash) == 40:
+        info_hash = info_hash.upper()
+    out: dict[str, Any] = {"hash": info_hash, "link": raw}
+    try:
+        # magnet:?xt=...&dn=...&xl=... （dn 可能 URL 编码）
+        q = raw.split("?", 1)[-1] if "?" in raw else ""
+        params: dict[str, list[str]] = {}
+        for part in q.split("&"):
+            if not part or "=" not in part:
+                continue
+            k, v = part.split("=", 1)
+            key = unquote(k).lower()
+            params.setdefault(key, []).append(v)
+        dn_list = params.get("dn") or []
+        if dn_list:
+            name = unquote(dn_list[0].replace("+", " ")).strip()
+            if name:
+                out["filename"] = name
+        xl_list = params.get("xl") or []
+        if xl_list:
+            try:
+                out["size"] = int(xl_list[0])
+            except ValueError:
+                pass
+    except Exception:
+        pass
+    return out
 
 
 def normalize_ed2k_links(

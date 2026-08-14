@@ -34,6 +34,13 @@ def test_std_code_key_strip_letter_suffix():
     assert std_code_key("DANDY-827B", pad=3) == "DANDY-827"
 
 
+def test_std_code_key_china_digit_prefix_and_plate():
+    # 国产 91CM 保留数字前缀；日板 259LUXU 仍剥板号
+    assert std_code_key("91CM-069", pad=3) == "91CM-069"
+    assert std_code_key("91CM-84", pad=3) == "91CM-084"
+    assert std_code_key("259LUXU-001", pad=3) == "LUXU-001"
+
+
 def test_search_jd0150_matches_jd150():
     pats = build_av_code_ilike_patterns("JD-0150")
     assert any("JD-150" in p or "JD150" in p for p in pats)
@@ -74,6 +81,7 @@ if __name__ == "__main__":
     test_china_preserve_written_width()
     test_std_code_key_not_force_china4()
     test_std_code_key_strip_letter_suffix()
+    test_std_code_key_china_digit_prefix_and_plate()
     test_search_jd0150_matches_jd150()
     test_search_alias_prefix_1pon_and_tokyohot()
     test_western_yyyy()

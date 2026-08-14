@@ -205,23 +205,42 @@ export async function fetchResource(hash: string): Promise<ResourceItem> {
   return ((await res.json()) as Envelope<ResourceItem>).data;
 }
 
+export type MagnetFile = {
+  index: number;
+  path: string;
+  size: number;
+  extension?: string;
+};
+
 export type MagnetHit = {
   title: string;
   path: string;
-  detailUrl: string;
+  hash?: string;
+  name?: string;
+  infoHash?: string;
+  detailUrl?: string;
+  size?: number;
   sizeText?: string;
   fileCount?: number | null;
+  files_count?: number | null;
+  files?: MagnetFile[] | null;
+  single_file?: boolean;
+  seeders?: number | null;
+  leechers?: number | null;
+  created_at?: number;
   createdAt?: string;
   magnet?: string | null;
+  magnet_uri?: string | null;
   magnets?: string[] | null;
 };
 
 export type MagnetSearchResult = {
   keyword: string;
+  keywords?: string[];
   page?: number;
   source: string;
-  baseUrl: string;
-  openUrl: string;
+  baseUrl?: string;
+  openUrl?: string;
   items: MagnetHit[];
   total: number;
   hasMore?: boolean;
@@ -231,39 +250,57 @@ export type MagnetSearchResult = {
 export async function fetchMagnetSearch(opts: {
   keyword: string;
   page?: number;
+  sortType?: string;
+  filterTime?: string;
+  filterSize?: string;
   signal?: AbortSignal;
 }): Promise<MagnetSearchResult> {
   const q = new URLSearchParams();
   q.set('keyword', opts.keyword);
   q.set('page', String(opts.page ?? 1));
+  if (opts.sortType) q.set('sortType', opts.sortType);
+  if (opts.filterTime) q.set('filterTime', opts.filterTime);
+  if (opts.filterSize) q.set('filterSize', opts.filterSize);
   const res = await apiFetch(`/magnet/search?${q}`, { signal: opts.signal });
   if (!res.ok) throw new Error(await parseError(res));
   return ((await res.json()) as Envelope<MagnetSearchResult>).data;
 }
 
-export async function fetchMagnetResolve(opts: {
-  path: string;
-  keyword: string;
-  signal?: AbortSignal;
-}): Promise<{
-  path: string;
-  magnet: string;
-  magnets?: string[];
-  detailUrl: string;
-  costMs?: number;
-}> {
+export async function fetchMagnetDetail(
+  hash: string,
+  signal?: AbortSignal,
+): Promise<MagnetHit> {
   const q = new URLSearchParams();
-  q.set('path', opts.path);
-  q.set('keyword', opts.keyword);
-  const res = await apiFetch(`/magnet/resolve?${q}`, { signal: opts.signal });
+  q.set('hash', hash);
+  const res = await apiFetch(`/magnet/detail?${q}`, { signal });
   if (!res.ok) throw new Error(await parseError(res));
-  return ((await res.json()) as Envelope<{
-    path: string;
-    magnet: string;
-    magnets?: string[];
-    detailUrl: string;
-    costMs?: number;
-  }>).data;
+  return ((await res.json()) as Envelope<MagnetHit>).data;
+}
+
+export type MagnetPreviewShot = {
+  time?: number | null;
+  screenshot: string;
+};
+
+export type MagnetPreview = {
+  hash: string;
+  name?: string;
+  file_type?: string;
+  size?: number;
+  count?: number;
+  screenshots: MagnetPreviewShot[];
+  error?: string;
+};
+
+export async function fetchMagnetPreview(
+  hash: string,
+  signal?: AbortSignal,
+): Promise<MagnetPreview> {
+  const q = new URLSearchParams();
+  q.set('hash', hash);
+  const res = await apiFetch(`/magnet/preview?${q}`, { signal });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<MagnetPreview>).data;
 }
 
 export async function fetchBoards(): Promise<BoardNavCategory[]> {
@@ -293,6 +330,39 @@ export async function putResourceDb(body: {
 
 export async function testResourceDb(dsn: string): Promise<{ ok: boolean; message: string }> {
   const res = await apiFetch('/settings/resource-db/test', {
+    method: 'POST',
+    body: JSON.stringify({ enabled: true, dsn, note: '' }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  const json = (await res.json()) as Envelope<{ ok: boolean }> & { message: string };
+  return { ok: Boolean(json.data?.ok), message: json.message || '' };
+}
+
+export type BitmagnetDbConfig = ResourceDbConfig;
+
+export async function getBitmagnetDb(): Promise<BitmagnetDbConfig> {
+  const res = await apiFetch('/settings/bitmagnet-db');
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<BitmagnetDbConfig>).data;
+}
+
+export async function putBitmagnetDb(body: {
+  enabled: boolean;
+  dsn: string;
+  note: string;
+}): Promise<BitmagnetDbConfig> {
+  const res = await apiFetch('/settings/bitmagnet-db', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<BitmagnetDbConfig>).data;
+}
+
+export async function testBitmagnetDb(
+  dsn: string,
+): Promise<{ ok: boolean; message: string }> {
+  const res = await apiFetch('/settings/bitmagnet-db/test', {
     method: 'POST',
     body: JSON.stringify({ enabled: true, dsn, note: '' }),
   });
@@ -667,11 +737,13 @@ export type ScrapeTask = {
   updatedAt?: string;
   /** 最近一次导出统计（与进度卡一致） */
   done?: number;
+  empty?: number;
   skipped?: number;
   failed?: number;
   total?: number;
   /** 各结果番号明细（点击统计框查看） */
   doneCodes?: string[];
+  emptyCodes?: string[];
   skippedCodes?: string[];
   failedCodes?: string[];
 };
@@ -801,9 +873,14 @@ export type ScrapeExportDetail = {
   events?: ScrapeExportEvent[];
 };
 
-/** 进度页预览 library 内封面 */
-export function scrapeExportFileUrl(rel: string): string {
+/** 进度页预览 library 内封面；rev=文件 mtime 破坏 iOS/PWA 图片缓存 */
+export function scrapeExportFileUrl(
+  rel: string,
+  rev?: string | number | null,
+): string {
   const q = new URLSearchParams({ rel });
+  const v = String(rev ?? '').trim();
+  if (v) q.set('v', v);
   return `${API_BASE}/scrape/export/file?${q}`;
 }
 
@@ -812,8 +889,9 @@ export function scrapeExportImageUrl(opts: {
   code?: string;
   url?: string;
   rel?: string;
+  rev?: string | number | null;
 }): string {
-  if (opts.rel) return scrapeExportFileUrl(opts.rel);
+  if (opts.rel) return scrapeExportFileUrl(opts.rel, opts.rev);
   const remote = String(opts.url || '').trim();
   if (!remote) return '';
   const q = new URLSearchParams();
@@ -861,10 +939,13 @@ export type ScrapeExportStatus = {
   done?: number;
   failed?: number;
   skipped?: number;
+  /** 空目录 / 空号种子（无详情可刮） */
+  empty?: number;
   /** 真正进入并发线程、正在刮削的数量（排队未开始的不算） */
   active?: number;
   /** 各结果番号明细（轮询可能截断；全量走 /scrape/export/codes） */
   doneCodes?: string[];
+  emptyCodes?: string[];
   skippedCodes?: string[];
   failedCodes?: string[];
   /** 轮询未带全量番号列表 */
@@ -1137,7 +1218,7 @@ export async function fetchScrapeExportStatus(
 
 export async function fetchScrapeExportCodes(opts: {
   taskId?: string;
-  bucket: 'done' | 'skipped' | 'failed' | 'active' | 'total';
+  bucket: 'done' | 'empty' | 'skipped' | 'failed' | 'active' | 'total';
   limit?: number;
   offset?: number;
   signal?: AbortSignal;
@@ -1479,6 +1560,8 @@ export type MakerFsPrefixCodeItem = {
   genres?: string[] | null;
   /** library 内刮削海报相对路径（优先展示） */
   posterLocal?: string | null;
+  /** poster 文件版本（mtime-size），用于缓存破坏 */
+  posterRev?: string | null;
   scraped?: boolean;
 };
 
@@ -1769,6 +1852,8 @@ export async function buildMakerFs(opts?: {
   skipFreshHours?: number;
   force?: boolean;
   region?: string;
+  /** 单前缀强制重扫（须同时传 region） */
+  prefix?: string;
   signal?: AbortSignal;
 }): Promise<unknown> {
   const q = new URLSearchParams();
@@ -1782,6 +1867,7 @@ export async function buildMakerFs(opts?: {
   }
   if (opts?.force) q.set('force', '1');
   if (opts?.region) q.set('region', opts.region);
+  if (opts?.prefix) q.set('prefix', opts.prefix);
   const res = await apiFetch(`/maker-fs/build?${q}`, {
     method: 'POST',
     signal: opts?.signal,
@@ -1811,7 +1897,12 @@ export type LibraryMaterializeStatus = {
 export async function fetchLibraryMaterializeStatus(
   signal?: AbortSignal,
 ): Promise<LibraryMaterializeStatus> {
-  const res = await apiFetch('/scrape/library/status', { signal });
+  // 防缓存：否则第二次同步会读到上一次 running:false / ok，误判完成或立刻抛错
+  const q = `?_=${Date.now()}`;
+  const res = await apiFetch(`/scrape/library/status${q}`, {
+    signal,
+    cache: 'no-store',
+  });
   if (!res.ok) throw new Error(await parseError(res));
   return ((await res.json()) as Envelope<LibraryMaterializeStatus>).data;
 }
@@ -1819,14 +1910,18 @@ export async function fetchLibraryMaterializeStatus(
 export async function materializeLibrary(opts?: {
   region?: string;
   sync?: boolean;
+  /** 强制抢占僵死的同步任务 */
+  force?: boolean;
   signal?: AbortSignal;
 }): Promise<LibraryMaterializeStatus> {
   const q = new URLSearchParams();
   if (opts?.region) q.set('region', opts.region);
   if (opts?.sync) q.set('sync', '1');
+  if (opts?.force) q.set('force', '1');
   const res = await apiFetch(`/scrape/library/materialize?${q}`, {
     method: 'POST',
     signal: opts?.signal,
+    cache: 'no-store',
   });
   if (!res.ok) throw new Error(await parseError(res));
   return ((await res.json()) as Envelope<LibraryMaterializeStatus>).data;
@@ -1835,18 +1930,39 @@ export async function materializeLibrary(opts?: {
 export async function waitLibraryMaterialize(opts?: {
   signal?: AbortSignal;
   intervalMs?: number;
+  /** 本次任务 claim 返回的 startedAt；避免误用上一次的 ok 状态 */
+  expectStartedAt?: string;
   onTick?: (st: LibraryMaterializeStatus) => void;
 }): Promise<LibraryMaterializeStatus> {
   const interval = Math.max(400, opts?.intervalMs ?? 900);
+  const expect = String(opts?.expectStartedAt || '').trim();
+  let sawRunning = false;
   for (;;) {
     if (opts?.signal?.aborted) {
       throw new DOMException('Aborted', 'AbortError');
     }
     const st = await fetchLibraryMaterializeStatus(opts?.signal);
     opts?.onTick?.(st);
-    if (!st.running) {
+    if (st.running) {
+      sawRunning = true;
+    } else {
+      const started = String(st.startedAt || '').trim();
+      const finished = String(st.finishedAt || '').trim();
       const msg = String(st.message || 'ok');
-      if (msg !== 'ok' && msg !== 'queued') {
+      // 还在等本轮任务登记/跑完：startedAt 对不上时继续轮询
+      if (expect && started && started !== expect) {
+        await new Promise((r) => setTimeout(r, interval));
+        continue;
+      }
+      if (expect && !sawRunning && !finished) {
+        await new Promise((r) => setTimeout(r, interval));
+        continue;
+      }
+      // queued 已改为「收集索引…」；兼容旧文案
+      if (msg === 'queued' || msg === '收集索引…') {
+        throw new Error(msg === 'queued' ? '收集索引超时，请重试' : `${msg}超时，请重试`);
+      }
+      if (msg !== 'ok') {
         throw new Error(msg);
       }
       return st;

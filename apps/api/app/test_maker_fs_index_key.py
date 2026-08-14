@@ -129,6 +129,41 @@ def test_rekey_amateur_hub():
     assert out["200GANA-0409"].get("forumTitle") == "t"
 
 
+def test_fill_digit_range_policy():
+    from app.maker_fs import (
+        _discovered_digit_bounds,
+        _filled_range_total,
+        _iter_filled_digit_codes,
+        should_fill_digit_range,
+    )
+
+    assert should_fill_digit_range("japan_censored", "SNOS") is True
+    assert should_fill_digit_range("japan_censored", "SONE") is True
+    assert should_fill_digit_range("fc2", "FC2PPV") is False
+    assert should_fill_digit_range("western", "BLACKED") is False
+    assert should_fill_digit_range("japan_censored", "HEYZO") is False
+    assert should_fill_digit_range("china", "JD") is True
+    assert list(_iter_filled_digit_codes("SNOS", 1, 3, 3)) == [
+        "SNOS-001",
+        "SNOS-002",
+        "SNOS-003",
+    ]
+    assert _filled_range_total(1, 290) == 290
+    covers = {
+        "SNOS-001": {},
+        "SNOS-005": {},
+        "SNOS-290": {},
+        "SNOS-726": {},  # 离群，稳健上限应砍掉
+    }
+    # 样本少时用真实 max；多样本才稳健裁切——这里 4 个不够 10，max=726
+    assert _discovered_digit_bounds(covers, "SNOS") == (1, 726)
+    many = {f"SNOS-{i:03d}": {} for i in range(1, 30)}
+    many["SNOS-726"] = {}
+    lo, hi = _discovered_digit_bounds(many, "SNOS")
+    assert lo == 1
+    assert hi < 726  # 稳健上限不应保留离群
+
+
 if __name__ == "__main__":
     test_digit_pad_basic_and_suffix()
     test_china_keep_leading_zeros()
@@ -140,4 +175,5 @@ if __name__ == "__main__":
     test_fixed_std_special_forms()
     test_rekey_merges_suffix_and_drops_over_to()
     test_rekey_amateur_hub()
+    test_fill_digit_range_policy()
     print("ok")

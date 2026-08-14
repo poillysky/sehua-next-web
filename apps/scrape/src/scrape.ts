@@ -494,7 +494,7 @@ function hitEnoughForCore(
   const tags = listFieldSources(fp, "tags");
   const studio = listFieldSources(fp, "studio");
   const pub = listFieldSources(fp, "publisher");
-  const series = listFieldSources(fp, "series");
+  // series 白名单：不参与早停强制
   const triedSet = new Set(tried || []);
 
   if (
@@ -505,7 +505,7 @@ function hitEnoughForCore(
     !tags.length &&
     !studio.length &&
     !pub.length &&
-    !series.length
+    !listFieldSources(fp, "series").length
   ) {
     return hits.some(
       (h) =>
@@ -549,9 +549,7 @@ function hitEnoughForCore(
   if (!fieldDoneOrExhausted(hasUsablePublisher(hits), pub, triedSet)) {
     return false;
   }
-  if (!fieldDoneOrExhausted(hitHasSeries(hits), series, triedSet)) {
-    return false;
-  }
+  // 系列：白名单，不强制有值，也不为等系列源拖慢早停
   return true;
 }
 
@@ -821,6 +819,64 @@ const FLARE_HEAVY_SOURCES = new Set<string>([
 
 function sourceLikelyNeedsFlare(id: string): boolean {
   return FLARE_HEAVY_SOURCES.has(String(id || "").trim());
+}
+
+/** 快源「无详情」错误（可直接判空号，不必再耗时走慢源） */
+function isNoDetailRunError(err: string): boolean {
+  const s = String(err || "").trim().toLowerCase();
+  if (!s) return false;
+  if (s === "not_found" || s === "notfound") return true;
+  return (
+    s.includes("未找到详情") ||
+    s.includes("详情页不存在") ||
+    s.includes("not found") ||
+    s.includes("no detail") ||
+    s.includes("detail not found") ||
+    s.includes("无有效字段")
+  );
+}
+
+/** 判空主探源：这些确认无详情即可不等 iqqtv 等次级源 */
+const EMPTY_PROBE_SOURCES = new Set<string>([
+  "javbus",
+  "jav321",
+  "libredmm",
+  "freejavbt",
+]);
+
+function runIsNoDetail(run: SourceRun): boolean {
+  if (Boolean(run.ok)) return false;
+  return isNoDetailRunError(String(run.error || ""));
+}
+
+/**
+ * 快通道已跑过的 meta 源是否全部「无详情」。
+ * 有任一成功 / 非无详情错误 → false（仍可交慢源补）。
+ */
+function allFastMetaRunsNoDetail(runs: SourceRun[]): boolean {
+  const meta = runs.filter(
+    (r) =>
+      String(r.mode || "") === "meta" &&
+      !sourceLikelyNeedsFlare(String(r.id || "")),
+  );
+  if (!meta.length) return false;
+  if (meta.some((r) => Boolean(r.ok))) return false;
+  return meta.every((r) => isNoDetailRunError(String(r.error || "")));
+}
+
+/** 主探源是否已全部返回无详情（可提前结束同波等待） */
+function emptyProbeSourcesAllNoDetail(
+  wave: SourceId[],
+  runs: SourceRun[],
+  mode: "meta" | "cover",
+): boolean {
+  const primary = wave.filter((id) => EMPTY_PROBE_SOURCES.has(id));
+  if (!primary.length) return false;
+  const metaRuns = runs.filter((r) => String(r.mode || "") === mode);
+  return primary.every((id) => {
+    const r = metaRuns.find((x) => String(x.id || "") === id);
+    return Boolean(r && runIsNoDetail(r));
+  });
 }
 
 /** 快通道：只跑不过盾源；过盾源留给慢通道补刮。 */
@@ -1098,8 +1154,26 @@ async function collectHits(
         enough = true;
         break;
       }
+      // 无数据：主探源（javbus/jav321/libredmm/freejavbt）全无详情
+      // → 立刻结束本波，不等 iqqtv 等次级源拖满超时
+      if (
+        mode === "meta" &&
+        hits.length === 0 &&
+        emptyProbeSourcesAllNoDetail(wave, runs, mode)
+      ) {
+        pending = [];
+        break;
+      }
     }
     if (enough || stopWhen(hits, tried)) break;
+    // 本波已确认空号主探：不再进后续过盾波
+    if (
+      mode === "meta" &&
+      hits.length === 0 &&
+      emptyProbeSourcesAllNoDetail(wave, runs, mode)
+    ) {
+      break;
+    }
   }
 
   return { hits, tried, runs };
@@ -1505,6 +1579,26 @@ export async function scrapeOne(
     );
   }
 
+  // 快源主探已确认无详情 → 立即空号（不再跑中文/女优回退、封面、慢源）
+  const fastEmptyNow = () =>
+    channel === "fast" &&
+    allFastMetaRunsNoDetail(sourceRuns) &&
+    !hitEnoughForCore(hits, fp, preferTitle, preferActors, tried);
+
+  if (fastEmptyNow()) {
+    return {
+      code,
+      title: "",
+      source: "none",
+      scrapeKind: orders.kind,
+      sourcesTried: tried,
+      sourceRuns,
+      scrapedAt: new Date().toISOString(),
+      ok: false,
+      message: "not_found",
+    };
+  }
+
   if (!localEnough && titleZhFallback.length) {
     appendCollectRun(
       acc,
@@ -1533,6 +1627,21 @@ export async function scrapeOne(
         { stopWhen: hitHasActors, runnerCache },
       ),
     );
+  }
+
+  // 回退后再次检查：快源仍全无详情 → 空号
+  if (fastEmptyNow()) {
+    return {
+      code,
+      title: "",
+      source: "none",
+      scrapeKind: orders.kind,
+      sourcesTried: tried,
+      sourceRuns,
+      scrapedAt: new Date().toISOString(),
+      ok: false,
+      message: "not_found",
+    };
   }
 
   // 仅当设置页/任务字段源序里明确挂了 dmm 才 CID 补抓。
@@ -1578,6 +1687,20 @@ export async function scrapeOne(
     deferredFlare.length > 0 &&
     !hitEnoughForCore(hits, fp, preferTitle, preferActors, tried)
   ) {
+    // 快源全员确认无详情：立即空号，不再 needs_flare 耗时走慢源
+    if (allFastMetaRunsNoDetail(sourceRuns)) {
+      return {
+        code,
+        title: "",
+        source: "none",
+        scrapeKind: orders.kind,
+        sourcesTried: tried,
+        sourceRuns,
+        scrapedAt: new Date().toISOString(),
+        ok: false,
+        message: "not_found",
+      };
+    }
     return {
       code,
       title: "",
@@ -1749,6 +1872,16 @@ export async function scrapeOne(
   }
   if (!allowSeries) delete fieldSources.series;
 
+  const allMetaNoDetail = (() => {
+    const metaRuns = sourceRuns.filter(
+      (r) => String(r.mode || "") === "meta" || !r.mode,
+    );
+    const use = metaRuns.length ? metaRuns : sourceRuns;
+    if (!use.length) return false;
+    if (use.some((r) => Boolean(r.ok))) return false;
+    return use.every((r) => isNoDetailRunError(String(r.error || "")));
+  })();
+
   const meta: ScrapeMeta = {
     code,
     // 无详情时不要用番号冒充 title，避免上游误判「元数据成功」
@@ -1784,13 +1917,16 @@ export async function scrapeOne(
     coverLocal: gotCover ? coverDest : null,
     posterLocal,
     ok: Boolean(partial?.title || gotCover),
+    // not_found 仅当全部源确认无详情；否则 no_meta 交给上游记失败重试
     message: partial?.title
       ? gotCover
         ? "ok"
         : "meta_ok_cover_fail"
       : gotCover
         ? "cover_fallback"
-        : "not_found",
+        : allMetaNoDetail
+          ? "not_found"
+          : "no_meta",
   };
 
   writeMeta(dirs, meta);

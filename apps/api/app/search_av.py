@@ -558,11 +558,21 @@ def _parse_std(raw: str) -> ParsedMakerCode | None:
     )
     if not m:
         return None
-    prefix = m.group(2).upper()
+    leading = (m.group(1) or "").strip()
+    letters = m.group(2).upper()
+    num = m.group(3)
+    # 默认丢掉前缀数字板号（259LUXU → LUXU）；国产 91CM 等保留
+    prefix = letters
+    if leading:
+        combined = f"{leading}{letters}"
+        try:
+            if combined in _china_prefix_set():
+                prefix = combined
+        except Exception:
+            pass
     shape = resolve_maker_shape(prefix)
     if shape in {"fc2", "fc2ppv", "date6", "alnum_id"}:
         return None
-    num = m.group(3)
     return ParsedMakerCode("std", f"{prefix}-{num}", [prefix, num], prefix)
 
 

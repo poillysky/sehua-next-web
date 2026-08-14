@@ -27,7 +27,7 @@ const FLAKY_COVER_HOST =
 function coversForHit(it: LibraryFacetCodeItem): string[] {
   const raw: string[] = [];
   const local = String(it.posterLocal || '').trim();
-  if (local) raw.push(scrapeExportFileUrl(local));
+  if (local) raw.push(scrapeExportFileUrl(local, it.posterRev));
   const remote =
     it.coverUrls && it.coverUrls.length > 0
       ? [...it.coverUrls]
@@ -42,6 +42,12 @@ function coversForHit(it: LibraryFacetCodeItem): string[] {
   const flaky = urls.filter((u) => FLAKY_COVER_HOST.test(u));
   const ordered = good.length ? [...good, ...flaky] : flaky;
   return ordered.map((u) => proxiedCoverUrl(u)).filter(Boolean);
+}
+
+function facetHasCover(it: LibraryFacetCodeItem): boolean {
+  if (String(it.posterLocal || '').trim()) return true;
+  if (String(it.coverUrl || '').trim()) return true;
+  return (it.coverUrls || []).some((u) => Boolean(String(u || '').trim()));
 }
 
 function FacetTileCover({
@@ -63,10 +69,11 @@ function FacetTileCover({
   useEffect(() => {
     setIdx(0);
     setGone(false);
-  }, [item.code, item.posterLocal, item.coverUrl]);
+  }, [item.code, item.posterLocal, item.posterRev, item.coverUrl]);
 
   if (!candidates.length || gone || !src) {
-    return <span className="prefix-tile__empty" aria-hidden />;
+    // 无封面 URL / 本地 poster：不渲染占位图
+    return null;
   }
 
   return (
@@ -136,7 +143,14 @@ export function MakerFacetCodesBody({
       .then((data) => {
         if (ac.signal.aborted) return;
         setTotal(data.total || 0);
-        setItems(data.items || []);
+        const next = (data.items || []).filter((it) => {
+          if (facetHasCover(it)) return true;
+          if (String(it.forumTitle || '').trim()) return true;
+          if ((it.forumActors || []).some((a) => String(a || '').trim()))
+            return true;
+          return false;
+        });
+        setItems(next);
       })
       .catch(() => {
         if (ac.signal.aborted) return;
@@ -191,6 +205,7 @@ export function MakerFacetCodesBody({
             <div className="prefix-grid" data-cols={gridCols}>
               {items.map((it, index) => {
                 const { actors, title } = makerFsIndexLines(it, regionId);
+                const hasCover = facetHasCover(it);
                 return (
                   <button
                     key={`${it.studio}|${it.prefix}|${it.code}`}
@@ -205,28 +220,40 @@ export function MakerFacetCodesBody({
                     }
                   >
                     <span
-                      className="prefix-tile__media"
+                      className={
+                        hasCover
+                          ? 'prefix-tile__media'
+                          : 'prefix-tile__media prefix-tile__media--nocover'
+                      }
                       style={{ aspectRatio: tileAspect }}
                     >
-                      <FacetTileCover
-                        item={it}
-                        cropMode={cropMode}
-                        fallbackPosition={objectPosition}
-                        loading={index < 8 ? 'eager' : 'lazy'}
-                      />
-                      <span className="prefix-tile__overlay">
-                        {actors ? (
-                          <span
-                            className="prefix-tile__actors allow-select"
-                            title={actors}
-                          >
-                            {actors}
+                      {hasCover ? (
+                        <>
+                          <FacetTileCover
+                            item={it}
+                            cropMode={cropMode}
+                            fallbackPosition={objectPosition}
+                            loading={index < 8 ? 'eager' : 'lazy'}
+                          />
+                          <span className="prefix-tile__overlay">
+                            {actors ? (
+                              <span
+                                className="prefix-tile__actors allow-select"
+                                title={actors}
+                              >
+                                {actors}
+                              </span>
+                            ) : null}
+                            <span className="prefix-tile__code allow-select">
+                              {it.code}
+                            </span>
                           </span>
-                        ) : null}
-                        <span className="prefix-tile__code allow-select">
+                        </>
+                      ) : (
+                        <span className="prefix-tile__code prefix-tile__code--solo allow-select">
                           {it.code}
                         </span>
-                      </span>
+                      )}
                     </span>
                     {title ? (
                       <span className="prefix-tile__meta">

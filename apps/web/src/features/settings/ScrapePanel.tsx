@@ -103,22 +103,22 @@ function hasProgressCard(st: ScrapeExportStatus | null, exporting: boolean) {
 /** 任务卡统计：优先用字段，否则从 lastStatus 文案解析；合计不够时抬高，不压成功数 */
 function reconcileStats(s: {
   done: number;
-  skipped: number;
+  empty: number;
   failed: number;
   total: number;
 }): {
   done: number;
-  skipped: number;
+  empty: number;
   failed: number;
   total: number;
 } {
   const done = Math.max(0, Number(s.done) || 0);
-  const skipped = Math.max(0, Number(s.skipped) || 0);
+  const empty = Math.max(0, Number(s.empty) || 0);
   const failed = Math.max(0, Number(s.failed) || 0);
   let total = Math.max(0, Number(s.total) || 0);
-  const processed = done + skipped + failed;
+  const processed = done + empty + failed;
   if (processed > total) total = processed;
-  return { done, skipped, failed, total };
+  return { done, empty, failed, total };
 }
 
 function uniqCodes(codes: string[] | null | undefined): string[] {
@@ -133,78 +133,92 @@ function uniqCodes(codes: string[] | null | undefined): string[] {
   return out;
 }
 
-/** 任务终身桶合并：成功 > 失败 > 跳过（无详情失败勿被增量跳过盖掉） */
+/** 任务终身桶合并：成功 > 空号 > 失败（全源无详情归空号，可从失败迁出） */
 function mergeLifetimeBuckets(
-  base: { done: string[]; skipped: string[]; failed: string[] },
-  extra: { done: string[]; skipped: string[]; failed: string[] },
+  base: { done: string[]; empty: string[]; failed: string[] },
+  extra: { done: string[]; empty: string[]; failed: string[] },
 ): {
   doneCodes: string[];
-  skippedCodes: string[];
+  emptyCodes: string[];
   failedCodes: string[];
   done: number;
-  skipped: number;
+  empty: number;
   failed: number;
   total: number;
 } {
   const doneCodes = uniqCodes([...base.done, ...extra.done]);
   const doneSet = new Set(doneCodes);
-  const failedCodes = uniqCodes(
-    [...base.failed, ...extra.failed].filter((c) => !doneSet.has(c)),
+  const emptyCodes = uniqCodes(
+    [...base.empty, ...extra.empty].filter((c) => !doneSet.has(c)),
   );
-  const failSet = new Set(failedCodes);
-  const skippedCodes = uniqCodes(
-    [...base.skipped, ...extra.skipped].filter(
-      (c) => !doneSet.has(c) && !failSet.has(c),
+  const emptySet = new Set(emptyCodes);
+  const failedCodes = uniqCodes(
+    [...base.failed, ...extra.failed].filter(
+      (c) => !doneSet.has(c) && !emptySet.has(c),
     ),
   );
   const done = doneCodes.length;
-  const skipped = skippedCodes.length;
+  const empty = emptyCodes.length;
   const failed = failedCodes.length;
   return {
     doneCodes,
-    skippedCodes,
+    emptyCodes,
     failedCodes,
     done,
-    skipped,
+    empty,
     failed,
-    total: done + skipped + failed,
+    total: done + empty + failed,
   };
 }
 
 function taskStats(task: ScrapeTask): {
   done: number;
-  skipped: number;
+  empty: number;
   failed: number;
   total: number;
 } {
   const hasNum =
     task.done != null ||
+    task.empty != null ||
     task.skipped != null ||
     task.failed != null ||
     task.total != null;
   if (hasNum) {
     const done = Number(task.done || 0);
-    const skipped = Number(task.skipped || 0);
+    const empty = Number(task.empty || 0);
     const failed = Number(task.failed || 0);
-    const total =
-      Number(task.total || 0) || done + skipped + failed;
-    return reconcileStats({ done, skipped, failed, total });
+    const total = Number(task.total || 0) || done + empty + failed;
+    return reconcileStats({ done, empty, failed, total });
+  }
+  const mEmpty = String(task.lastStatus || "").match(
+    /成功\s*(\d+)\s*·\s*空号\s*(\d+)\s*·\s*(?:数据不全|失败)\s*(\d+)/,
+  );
+  if (mEmpty) {
+    const done = Number(mEmpty[1]);
+    const empty = Number(mEmpty[2]);
+    const failed = Number(mEmpty[3]);
+    return reconcileStats({
+      done,
+      empty,
+      failed,
+      total: done + empty + failed,
+    });
   }
   const m = String(task.lastStatus || "").match(
-    /成功\s*(\d+)\s*·\s*跳过\s*(\d+)\s*·\s*失败\s*(\d+)/,
+    /成功\s*(\d+)\s*·\s*跳过\s*(\d+)\s*·\s*(?:数据不全|失败)\s*(\d+)/,
   );
   if (m) {
     const done = Number(m[1]);
-    const skipped = Number(m[2]);
+    const empty = Number(m[2]);
     const failed = Number(m[3]);
     return reconcileStats({
       done,
-      skipped,
+      empty,
       failed,
-      total: done + skipped + failed,
+      total: done + empty + failed,
     });
   }
-  return { done: 0, skipped: 0, failed: 0, total: 0 };
+  return { done: 0, empty: 0, failed: 0, total: 0 };
 }
 
 /** 进度快照是否属于该任务（必须 taskId 一致，禁止厂牌/前缀回退串卡） */
@@ -295,9 +309,10 @@ function resolveTaskBadge(
     }
     if (msg === "ok" || msg === "") {
       const failed = Number(progress.failed || 0);
-      if (failed > 0) return { badge: "有失败", tone: "err", live: true };
+      if (failed > 0) return { badge: "数据不全", tone: "err", live: true };
       const processed =
         Number(progress.done || 0) +
+        Number(progress.empty || 0) +
         Number(progress.skipped || 0) +
         failed;
       if (processed > 0 || Number(progress.total || 0) > 0) {
@@ -321,8 +336,8 @@ function resolveTaskBadge(
   // 过期的「running / 排队中」：全局已不是本任务时，回退到存档结果语义
   if (ls === "running" || ls === "排队中") {
     const stats = taskStats(task);
-    if (stats.failed > 0) return { badge: "有失败", tone: "err", live: false };
-    if (stats.done + stats.skipped > 0 || stats.total > 0) {
+    if (stats.failed > 0) return { badge: "数据不全", tone: "err", live: false };
+    if (stats.done + stats.empty > 0 || stats.total > 0) {
       return { badge: "已完成", tone: "ok", live: false };
     }
     return { badge: "待开始", tone: "idle", live: false };
@@ -336,11 +351,14 @@ function resolveTaskBadge(
   if (ls.includes("已取消") || ls === "cancelled") {
     return { badge: "已取消", tone: "idle", live: false };
   }
-  if (ls.includes("失败") && !ls.startsWith("完成")) {
-    return { badge: "有失败", tone: "err", live: false };
+  if (
+    (ls.includes("数据不全") || ls.includes("失败")) &&
+    !ls.startsWith("完成")
+  ) {
+    return { badge: "数据不全", tone: "err", live: false };
   }
-  if (/失败\s*[1-9]/.test(ls)) {
-    return { badge: "有失败", tone: "err", live: false };
+  if (/(?:数据不全|失败)\s*[1-9]/.test(ls)) {
+    return { badge: "数据不全", tone: "err", live: false };
   }
   if (ls.startsWith("完成") || ls.includes("成功")) {
     return { badge: "已完成", tone: "ok", live: false };
@@ -542,12 +560,12 @@ function applyScrapeConfig(
     (d.scrapeTasks || []).slice(0, 12).map((t) => {
       const s = taskStats(t);
       const prevDone = Number(t.done || 0);
-      const prevSkip = Number(t.skipped || 0);
+      const prevEmpty = Number(t.empty || 0);
       const prevFail = Number(t.failed || 0);
       const prevTotal = Number(t.total || 0);
       if (
         s.done === prevDone &&
-        s.skipped === prevSkip &&
+        s.empty === prevEmpty &&
         s.failed === prevFail &&
         s.total === prevTotal
       ) {
@@ -555,12 +573,13 @@ function applyScrapeConfig(
       }
       const ls = String(t.lastStatus || "");
       const nextStatus = ls.startsWith("完成")
-        ? `完成 · 成功 ${s.done} · 跳过 ${s.skipped} · 失败 ${s.failed}`
+        ? `完成 · 成功 ${s.done} · 空号 ${s.empty} · 数据不全 ${s.failed}`
         : t.lastStatus;
       return {
         ...t,
         done: s.done,
-        skipped: s.skipped,
+        empty: s.empty,
+        skipped: 0,
         failed: s.failed,
         total: s.total || t.total,
         lastStatus: nextStatus,
@@ -619,7 +638,7 @@ export function ScrapePanel({
     title: string;
     mode: "cancel" | "delete-running";
   } | null>(null);
-  /** 任务卡统计点击：成功/跳过/失败/进行中/合计 番号明细 */
+  /** 任务卡统计点击：成功/空号/失败/进行中/合计 番号明细 */
   const [statCodesOpen, setStatCodesOpen] = useState<{
     title: string;
     status: string;
@@ -825,9 +844,9 @@ export function ScrapePanel({
                     Number(t.done || 0),
                     Number(st.done || 0),
                   );
-                  const nextSkip = Math.max(
-                    Number(t.skipped || 0),
-                    Number(st.skipped || 0),
+                  const nextEmpty = Math.max(
+                    Number(t.empty || 0),
+                    Number(st.empty || 0),
                   );
                   const nextFail = Math.max(
                     Number(t.failed || 0),
@@ -836,11 +855,11 @@ export function ScrapePanel({
                   const nextTotal = Math.max(
                     Number(t.total || 0),
                     Number(st.total || 0),
-                    nextDone + nextSkip + nextFail,
+                    nextDone + nextEmpty + nextFail,
                   );
                   if (
                     nextDone !== Number(t.done || 0) ||
-                    nextSkip !== Number(t.skipped || 0) ||
+                    nextEmpty !== Number(t.empty || 0) ||
                     nextFail !== Number(t.failed || 0) ||
                     nextTotal !== Number(t.total || 0)
                   ) {
@@ -848,7 +867,8 @@ export function ScrapePanel({
                     next = {
                       ...t,
                       done: nextDone,
-                      skipped: nextSkip,
+                      empty: nextEmpty,
+                      skipped: 0,
                       failed: nextFail,
                       total: nextTotal,
                     };
@@ -858,12 +878,18 @@ export function ScrapePanel({
                   const merged = mergeLifetimeBuckets(
                     {
                       done: t.doneCodes || [],
-                      skipped: t.skippedCodes || [],
+                      empty: [
+                        ...(t.emptyCodes || []),
+                        ...(t.skippedCodes || []),
+                      ],
                       failed: t.failedCodes || [],
                     },
                     {
                       done: st.doneCodes || [],
-                      skipped: st.skippedCodes || [],
+                      empty: [
+                        ...(st.emptyCodes || []),
+                        ...(st.skippedCodes || []),
+                      ],
                       failed: st.failedCodes || [],
                     },
                   );
@@ -872,10 +898,10 @@ export function ScrapePanel({
                     Number(st.done || 0),
                     merged.done,
                   );
-                  const nextSkip = Math.max(
-                    Number(t.skipped || 0),
-                    Number(st.skipped || 0),
-                    merged.skipped,
+                  const nextEmpty = Math.max(
+                    Number(t.empty || 0),
+                    Number(st.empty || 0),
+                    merged.empty,
                   );
                   const nextFail = Math.max(
                     Number(t.failed || 0),
@@ -885,30 +911,32 @@ export function ScrapePanel({
                   const nextTotal = Math.max(
                     Number(t.total || 0),
                     Number(st.total || 0),
-                    nextDone + nextSkip + nextFail,
+                    nextDone + nextEmpty + nextFail,
                   );
                   const previewCap = 200;
                   const nextDoneCodes = merged.doneCodes.slice(-previewCap);
-                  const nextSkipCodes = merged.skippedCodes.slice(-previewCap);
+                  const nextEmptyCodes = merged.emptyCodes.slice(-previewCap);
                   const nextFailCodes = merged.failedCodes.slice(-previewCap);
                   if (
                     nextDone !== Number(t.done || 0) ||
-                    nextSkip !== Number(t.skipped || 0) ||
+                    nextEmpty !== Number(t.empty || 0) ||
                     nextFail !== Number(t.failed || 0) ||
                     nextTotal !== Number(t.total || 0) ||
                     nextDoneCodes.length !== (t.doneCodes || []).length ||
-                    nextSkipCodes.length !== (t.skippedCodes || []).length ||
+                    nextEmptyCodes.length !== (t.emptyCodes || []).length ||
                     nextFailCodes.length !== (t.failedCodes || []).length
                   ) {
                     dirty = true;
                     next = {
                       ...t,
                       done: nextDone,
-                      skipped: nextSkip,
+                      empty: nextEmpty,
+                      skipped: 0,
                       failed: nextFail,
                       total: nextTotal,
                       doneCodes: nextDoneCodes,
-                      skippedCodes: nextSkipCodes,
+                      emptyCodes: nextEmptyCodes,
+                      skippedCodes: [],
                       failedCodes: nextFailCodes,
                     };
                   }
@@ -1188,10 +1216,12 @@ export function ScrapePanel({
         watchEnabled: Boolean(draft.watchEnabled),
         lastStatus: prev?.lastStatus || "",
         done: prev?.done,
+        empty: prev?.empty,
         skipped: prev?.skipped,
         failed: prev?.failed,
         total: prev?.total,
         doneCodes: prev?.doneCodes,
+        emptyCodes: prev?.emptyCodes,
         skippedCodes: prev?.skippedCodes,
         failedCodes: prev?.failedCodes,
         updatedAt: now,
@@ -1247,34 +1277,57 @@ export function ScrapePanel({
     const mineQueued = taskIsQueued(progress, task);
     setControlBusy(true);
     try {
+      // 先清断点/内存计数并打 discard 标记，避免随后 cancel 收尾把旧数字 max 写回
+      let st: ScrapeExportStatus | null = null;
+      try {
+        st = await resetScrapeExportCheckpoint(task.id);
+      } catch {
+        /* 无断点也可忽略 */
+      }
       if (mine || mineQueued) {
         try {
-          const st = await clearScrapeExport({ taskId: task.id });
-          setProgress(hasProgressCard(st, false) ? st : null);
-          setExporting(
-            Boolean(st.running) || Boolean(st.queue && st.queue.length),
-          );
+          st = await clearScrapeExport({ taskId: task.id });
         } catch {
           /* 已 idle */
         }
       }
-      try {
-        const st = await resetScrapeExportCheckpoint(task.id);
-        // 重置后进度快照应已清零；勿沿用旧 progress 抬高卡片
-        setProgress(hasProgressCard(st, false) ? st : null);
-      } catch {
-        /* 无断点也可忽略 */
-      }
+      const zeroed: ScrapeExportStatus | null = st
+        ? {
+            ...st,
+            done: 0,
+            empty: 0,
+            skipped: 0,
+            failed: 0,
+            total: 0,
+            doneCodes: [],
+            emptyCodes: [],
+            skippedCodes: [],
+            failedCodes: [],
+            pauseSaved: false,
+            resumable: false,
+            paused: false,
+          }
+        : null;
+      setProgress(
+        zeroed && hasProgressCard(zeroed, Boolean(zeroed.running))
+          ? zeroed
+          : null,
+      );
+      setExporting(
+        Boolean(zeroed?.running) || Boolean(zeroed?.queue && zeroed.queue.length),
+      );
       const next = scrapeTasks.map((t) =>
         t.id === task.id
           ? {
               ...t,
               lastStatus: "",
               done: 0,
+              empty: 0,
               skipped: 0,
               failed: 0,
               total: 0,
               doneCodes: [],
+              emptyCodes: [],
               skippedCodes: [],
               failedCodes: [],
               updatedAt: new Date().toISOString(),
@@ -1342,10 +1395,12 @@ export function ScrapePanel({
       watchEnabled: Boolean(draft.watchEnabled),
       lastStatus: "running",
       done: Number(prev?.done || 0),
+      empty: Number(prev?.empty || 0),
       skipped: Number(prev?.skipped || 0),
       failed: Number(prev?.failed || 0),
       total: Number(prev?.total || 0),
       doneCodes: [...(prev?.doneCodes || [])],
+      emptyCodes: [...(prev?.emptyCodes || [])],
       skippedCodes: [...(prev?.skippedCodes || [])],
       failedCodes: [...(prev?.failedCodes || [])],
       updatedAt: now,
@@ -1855,14 +1910,14 @@ export function ScrapePanel({
                   );
                   const cancelling =
                     liveActive && progress?.message === "cancelling";
-                  // 成功/跳过/失败/合计：以任务卡数字为准
+                  // 成功/空号/失败/合计：以任务卡数字为准
                   // 仅真正在跑/暂停时才合并实时进度，避免重置后被旧 progress 抬回
                   const archivedStats = taskStats(task);
                   const progressStats =
                     liveActive && progress
                       ? reconcileStats({
                           done: Number(progress.done ?? 0),
-                          skipped: Number(progress.skipped ?? 0),
+                          empty: Number(progress.empty ?? 0),
                           failed: Number(progress.failed ?? 0),
                           total: Number(progress.total ?? 0),
                         })
@@ -1872,9 +1927,9 @@ export function ScrapePanel({
                       archivedStats.done,
                       progressStats?.done ?? 0,
                     ),
-                    skipped: Math.max(
-                      archivedStats.skipped,
-                      progressStats?.skipped ?? 0,
+                    empty: Math.max(
+                      archivedStats.empty,
+                      progressStats?.empty ?? 0,
                     ),
                     failed: Math.max(
                       archivedStats.failed,
@@ -1884,26 +1939,26 @@ export function ScrapePanel({
                       archivedStats.total,
                       progressStats?.total ?? 0,
                       archivedStats.done +
-                        archivedStats.skipped +
+                        archivedStats.empty +
                         archivedStats.failed,
                       (progressStats?.done ?? 0) +
-                        (progressStats?.skipped ?? 0) +
+                        (progressStats?.empty ?? 0) +
                         (progressStats?.failed ?? 0),
                     ),
                   });
                   const sessionStats = liveActive
                     ? reconcileStats({
                         done: Number(progress?.done ?? 0),
-                        skipped: Number(progress?.skipped ?? 0),
+                        empty: Number(progress?.empty ?? 0),
                         failed: Number(progress?.failed ?? 0),
                         total: Number(progress?.total ?? 0),
                       })
                     : stats;
                   const processed =
-                    stats.done + stats.skipped + stats.failed;
+                    stats.done + stats.empty + stats.failed;
                   const sessionProcessed =
                     sessionStats.done +
-                    sessionStats.skipped +
+                    sessionStats.empty +
                     sessionStats.failed;
                   // 真正进入并发线程的数量；排队未开始的不算
                   const inProgress = liveActive
@@ -2136,22 +2191,26 @@ export function ScrapePanel({
                           [
                             ["成功", stats.done, "ok", "done"],
                             ["进行中", inProgress, "run", "active"],
-                            ["跳过", stats.skipped, "mute", "skipped"],
-                            ["失败", stats.failed, "err", "failed"],
+                            ["空号", stats.empty, "mute", "empty"],
+                            ["数据不全", stats.failed, "err", "failed"],
                             ["合计", stats.total, "total", "total"],
                           ] as const
                         ).map(([label, n, tone, kind]) => {
                           const codesFor = (): string[] => {
                             if (kind === "done")
                               return [...(task.doneCodes || [])];
-                            if (kind === "skipped")
-                              return [...(task.skippedCodes || [])];
+                            if (kind === "empty")
+                              return [
+                                ...(task.emptyCodes || []),
+                                ...(task.skippedCodes || []),
+                              ];
                             if (kind === "failed")
                               return [...(task.failedCodes || [])];
                             if (kind === "active")
                               return [...(progress?.activeCodes || [])];
                             const all = [
                               ...(task.doneCodes || []),
+                              ...(task.emptyCodes || []),
                               ...(task.skippedCodes || []),
                               ...(task.failedCodes || []),
                               ...(liveActive
@@ -2181,10 +2240,14 @@ export function ScrapePanel({
                                   ) {
                                     try {
                                       if (kind === "total") {
-                                        const [d, s, f] = await Promise.all([
+                                        const [d, e, s, f] = await Promise.all([
                                           fetchScrapeExportCodes({
                                             taskId: task.id,
                                             bucket: "done",
+                                          }),
+                                          fetchScrapeExportCodes({
+                                            taskId: task.id,
+                                            bucket: "empty",
                                           }),
                                           fetchScrapeExportCodes({
                                             taskId: task.id,
@@ -2198,20 +2261,37 @@ export function ScrapePanel({
                                         codes = [
                                           ...new Set([
                                             ...d.codes,
+                                            ...e.codes,
                                             ...s.codes,
                                             ...f.codes,
                                           ]),
                                         ];
                                       } else if (
                                         kind === "done" ||
-                                        kind === "skipped" ||
+                                        kind === "empty" ||
                                         kind === "failed"
                                       ) {
-                                        const r = await fetchScrapeExportCodes({
-                                          taskId: task.id,
-                                          bucket: kind,
-                                        });
-                                        codes = r.codes;
+                                        if (kind === "empty") {
+                                          const [e, s] = await Promise.all([
+                                            fetchScrapeExportCodes({
+                                              taskId: task.id,
+                                              bucket: "empty",
+                                            }),
+                                            fetchScrapeExportCodes({
+                                              taskId: task.id,
+                                              bucket: "skipped",
+                                            }),
+                                          ]);
+                                          codes = [
+                                            ...new Set([...e.codes, ...s.codes]),
+                                          ];
+                                        } else {
+                                          const r = await fetchScrapeExportCodes({
+                                            taskId: task.id,
+                                            bucket: kind,
+                                          });
+                                          codes = r.codes;
+                                        }
                                       }
                                     } catch {
                                       /* 回退本地预览列表 */

@@ -7,6 +7,7 @@ from typing import Any
 from .db import connect
 
 RESOURCE_DB_KEY = "resource_db"
+BITMAGNET_DB_KEY = "bitmagnet_db"
 SCRAPE_KEY = "scrape"
 P115_KEY = "p115"
 TMDB_KEY = "tmdb"

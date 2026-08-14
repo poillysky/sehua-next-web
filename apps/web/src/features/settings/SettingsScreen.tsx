@@ -22,12 +22,14 @@ import {
   fetchScrapeExportStatus,
   getP115,
   getResourceDb,
+  getBitmagnetDb,
   getScrape,
   getTmdb,
 } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { UserManagePanel } from './UserManagePanel';
 import { ResourceDbPanel } from './ResourceDbPanel';
+import { BitmagnetDbPanel } from './BitmagnetDbPanel';
 import { P115Panel } from './P115Panel';
 import { MakerFsPanel } from './MakerFsPanel';
 import { TmdbPanel } from './TmdbPanel';
@@ -40,6 +42,7 @@ type Panel =
   | 'hub'
   | 'users'
   | 'db'
+  | 'bitmagnet'
   | 'p115'
   | 'makerfs'
   | 'tmdb'
@@ -69,9 +72,16 @@ const ENTRIES: Entry[] = [
   {
     id: 'db',
     title: '资源数据库',
-    desc: 'Postgres · 搜索库',
+    desc: 'Postgres · 色花搜索库',
     Icon: Database,
     accent: 'blue',
+  },
+  {
+    id: 'bitmagnet',
+    title: 'Bitmagnet 库',
+    desc: 'Postgres · 本地磁力索引',
+    Icon: Database,
+    accent: 'teal',
   },
   {
     id: 'p115',
@@ -127,6 +137,7 @@ const ENTRIES: Entry[] = [
 const emptyMeta: Record<Exclude<Panel, 'hub'>, { text: string; tone: Tone }> = {
   users: { text: '…', tone: 'mute' },
   db: { text: '…', tone: 'mute' },
+  bitmagnet: { text: '…', tone: 'mute' },
   p115: { text: '…', tone: 'mute' },
   makerfs: { text: '…', tone: 'mute' },
   covercrop: { text: '…', tone: 'mute' },
@@ -160,6 +171,15 @@ export function SettingsScreen() {
       else setEntryStatus('db', '未配置', 'warn');
     } catch {
       setEntryStatus('db', '异常', 'warn');
+    }
+
+    try {
+      const cfg = await getBitmagnetDb();
+      if (cfg.enabled && cfg.dsn) setEntryStatus('bitmagnet', '已启用', 'ok');
+      else if (cfg.dsn) setEntryStatus('bitmagnet', '未启用', 'warn');
+      else setEntryStatus('bitmagnet', '未配置', 'warn');
+    } catch {
+      setEntryStatus('bitmagnet', '异常', 'warn');
     }
 
     try {
@@ -285,6 +305,12 @@ export function SettingsScreen() {
         <ResourceDbPanel
           onBack={() => setPanel('hub')}
           onStatus={(text, tone) => setEntryStatus('db', text, tone)}
+        />
+      ) : null}
+      {panel === 'bitmagnet' ? (
+        <BitmagnetDbPanel
+          onBack={() => setPanel('hub')}
+          onStatus={(text, tone) => setEntryStatus('bitmagnet', text, tone)}
         />
       ) : null}
       {panel === 'p115' ? (

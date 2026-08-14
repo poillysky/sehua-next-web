@@ -1698,7 +1698,8 @@ export async function scrapeIqqtv(
     if (!/player\.php/i.test(href)) return;
     detailPath = href;
   };
-  $s("span.title a, a.ga_click").each((_, el) => {
+  // ga_click 常是时长链（title=02:25:05）；番号多在 a.ga_name / span.title a
+  $s("span.title a, a.ga_name, a.ga_click").each((_, el) => {
     const href = String($s(el).attr("href") || "");
     const title = String(
       $s(el).attr("title") || $s(el).text() || "",
@@ -1863,13 +1864,13 @@ export async function scrapeFreejavbt(codeRaw: string): Promise<PartialFromSourc
       ) {
         continue;
       }
-      // 软 404 / 推荐页
+      // 软 404 / 推荐页：此 slug 无详情，换路径无意义
       if (
         /あなたは好きかもしれません|你可能喜欢|404|找不到|Not Found/i.test(html) &&
         !pageMentionsCode(html, code) &&
         !pageMentionsCode(html, slug)
       ) {
-        continue;
+        return null;
       }
       if (!pageMentionsCode(html, code) && !pageMentionsCode(html, slug)) {
         continue;

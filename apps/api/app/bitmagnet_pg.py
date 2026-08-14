@@ -1,0 +1,76 @@
+"""Postgres pool for Bitmagnet DB (separate DSN from resource_db)."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
+
+from . import settings_store
+
+_pool: ConnectionPool | None = None
+_pool_dsn: str | None = None
+
+
+class BitmagnetDbUnavailable(Exception):
+    def __init__(self, message: str = "Bitmagnet 库未配置或不可用"):
+        super().__init__(message)
+        self.message = message
+
+
+def _load_dsn() -> str:
+    raw = settings_store.get_setting(settings_store.BITMAGNET_DB_KEY) or {}
+    enabled = bool(raw.get("enabled"))
+    dsn = str(raw.get("dsn") or "").strip()
+    if not enabled or not dsn:
+        raise BitmagnetDbUnavailable("请先在设置中启用并填写 Bitmagnet 库 DSN")
+    return dsn
+
+
+def get_pool() -> ConnectionPool:
+    global _pool, _pool_dsn
+    dsn = _load_dsn()
+    if _pool is None or _pool_dsn != dsn:
+        if _pool is not None:
+            try:
+                _pool.close()
+            except Exception:
+                pass
+        _pool = ConnectionPool(
+            conninfo=dsn,
+            min_size=1,
+            max_size=8,
+            kwargs={"row_factory": dict_row},
+            open=True,
+        )
+        _pool_dsn = dsn
+    return _pool
+
+
+def query(
+    sql: str, params: list[Any] | tuple[Any, ...] | None = None
+) -> list[dict[str, Any]]:
+    pool = get_pool()
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, params or [])
+            if cur.description is None:
+                return []
+            return list(cur.fetchall())
+
+
+def close_pool() -> None:
+    global _pool, _pool_dsn
+    if _pool is not None:
+        try:
+            _pool.close()
+        except Exception:
+            pass
+    _pool = None
+    _pool_dsn = None
+
+
+def is_configured() -> bool:
+    raw = settings_store.get_setting(settings_store.BITMAGNET_DB_KEY) or {}
+    return bool(raw.get("enabled") and str(raw.get("dsn") or "").strip())

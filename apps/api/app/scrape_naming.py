@@ -2,7 +2,9 @@
 
 七区默认路径：
 - 有码/写真/无码/素人：日本有码/S1/SONE/SONE-001
-- FC2：FC2/作者/FC2PPV/FC2PPV-0454667
+- FC2：与索引一致，两套分开
+  · FC2/作者/FC2/FC2-0454667
+  · FC2/作者/FC2PPV/FC2-PPV-0454667
 - 国产/欧美：国产无码/麻豆/MD/MD-013
 """
 
@@ -51,7 +53,7 @@ KIND_PATH_EXAMPLES: dict[str, str] = {
     "japan_gravure": "日本写真/Graphis/GRA/GRA-001",
     "japan_uncensored": "日本无码/Caribbean/CARIB/CARIB-001",
     "japan_amateur": "日本素人/厂牌/SIRO/SIRO-001",
-    "fc2": "FC2/作者名/FC2PPV/FC2PPV-0454667",
+    "fc2": "FC2/作者名/FC2/FC2-0454667 或 FC2/作者名/FC2PPV/FC2-PPV-0454667",
     "china": "国产无码/麻豆/MD/MD-013",
     "western": "欧美无码/Studio/ABC/ABC-001",
 }
@@ -169,9 +171,12 @@ def _safe_segment(name: str) -> str:
 
 def _split_code(code: str) -> tuple[str, str, str]:
     c = str(code or "").strip().upper().replace("_", "-")
-    m = re.match(r"^FC2(?:-?PPV)?-?(\d+)$", c)
+    m = re.match(r"^FC2-?PPV-?(\d+)$", c)
     if m:
         return "FC2PPV", m.group(1), "F"
+    m = re.match(r"^FC2-?(\d+)$", c)
+    if m:
+        return "FC2", m.group(1), "F"
     if "-" in c:
         pre, suf = c.split("-", 1)
         return pre, suf, (pre[:1] if pre else "")
@@ -181,11 +186,14 @@ def _split_code(code: str) -> tuple[str, str, str]:
     return c, "", (c[:1] if c else "")
 
 
-def _normalize_fc2_number(number: str, serial: str) -> str:
-    digits = re.sub(r"\D", "", serial or "")
-    if not digits:
-        digits = re.sub(r"\D", "", number)
-    return f"FC2PPV-{digits}" if digits else "FC2PPV"
+def _fc2_is_ppv(code: str, prefix: str = "") -> bool:
+    u = str(code or "").strip().upper().replace("_", "-")
+    if re.search(r"FC2-?PPV", u):
+        return True
+    if re.match(r"^FC2-\d", u):
+        return False
+    p = str(prefix or "").strip().upper().replace("-", "")
+    return p in {"FC2PPV", "FC2PPVFC2"}
 
 
 def build_naming_context(
@@ -203,15 +211,33 @@ def build_naming_context(
         region=str(target.get("region") or meta.get("region") or ""),
         code=code,
     )
-    number = str(code or meta.get("code") or "").strip().upper()
+    number = str(code or meta.get("code") or "").strip().upper().replace("_", "-")
     prefix, serial, first_letter = _split_code(number)
-    target_prefix = str(target.get("prefix") or prefix or "").strip().upper() or prefix
+    target_prefix = (
+        str(target.get("prefix") or meta.get("prefix") or prefix or "")
+        .strip()
+        .upper()
+        .replace("_", "-")
+        or prefix
+    )
 
     if kid == "fc2":
-        prefix = "FC2PPV"
-        target_prefix = "FC2PPV"
-        number = _normalize_fc2_number(number, serial)
-        serial = number.split("-", 1)[-1] if "-" in number else serial
+        # 索引什么样落盘什么样：前缀/番号用索引原值，不再收成统一 FC2PPV-*
+        if target_prefix in {"FC2-PPV", "FC2PPV"}:
+            prefix = "FC2PPV"
+            target_prefix = "FC2PPV"
+        elif target_prefix == "FC2" or re.match(r"^FC2-\d", number):
+            prefix = "FC2"
+            target_prefix = "FC2"
+        elif _fc2_is_ppv(number, target_prefix):
+            prefix = "FC2PPV"
+            target_prefix = "FC2PPV"
+        else:
+            prefix = "FC2"
+            target_prefix = "FC2"
+        # number 保持索引键（如 FC2-PPV-745325 / FC2-745325），不改写
+        if "-" in number:
+            serial = number.split("-", 1)[-1]
         first_letter = "F"
 
     actors_raw = meta.get("actors") if isinstance(meta.get("actors"), list) else []

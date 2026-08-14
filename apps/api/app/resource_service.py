@@ -16,6 +16,7 @@ from .resource_format import (
     RESOURCE_SELECT,
     SOURCE_META_JOIN,
     format_resource,
+    format_resources,
 )
 from .search_av import (
     apply_av_code_boundary_filter,
@@ -42,7 +43,7 @@ from .region_board_allowlist import (
 )
 from .search_prefer import build_prefer_filter_sql
 
-# Bitmagnet service.ts：1 week / 1 month / 1 year（非固定 7/31/365 day）
+# Bitmagnet service.ts?1 week / 1 month / 1 year???? 7/31/365 day?
 TIME_FILTERS = {
     "gt-1day": "AND r.created_at > now() - interval '1 day'",
     "gt-7day": "AND r.created_at > now() - interval '1 week'",
@@ -50,7 +51,7 @@ TIME_FILTERS = {
     "gt-365day": "AND r.created_at > now() - interval '1 year'",
 }
 
-# Bitmagnet：中间档 BETWEEN（两端 inclusive）；gt5gb 用 >
+# Bitmagnet???? BETWEEN??? inclusive??gt5gb ? >
 SIZE_FILTERS = {
     "lt100mb": "AND r.size < 100 * 1024 * 1024::bigint",
     "gt100mb-lt500mb": (
@@ -71,12 +72,12 @@ SIZE_FILTERS = {
 SORT_SQL = {
     "default": "r.created_at DESC",
     "size": "r.size DESC NULLS LAST, r.created_at DESC",
-    # links_count 来自 FILTER_META（轻量）；enrich 后再用 LIST_META 取全量 links
+    # links_count ?? FILTER_META?????enrich ??? LIST_META ??? links
     "count": "coalesce(rs.links_count, 1) DESC, r.created_at DESC",
     "date": "r.created_at DESC",
 }
 
-# Bitmagnet UNION 臂内排序（主表列，无 rs）
+# Bitmagnet UNION ?????????? rs?
 _BM_ARM_ORDER = {
     "default": "r.created_at DESC",
     "date": "r.created_at DESC",
@@ -94,6 +95,10 @@ _trgm_ok: bool | None = None
 _SEARCH_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _SEARCH_CACHE_TTL = 30.0
 _SEARCH_CACHE_MAX = 64
+# 搜索 SQL 超时（毫秒）；超时后前端可重试/收窄时间范围
+_SEARCH_STATEMENT_TIMEOUT_MS = 8000
+# 精确 COUNT 上限：超过则返回 cap（列表不依赖精确总数）
+_SEARCH_COUNT_CAP = 1000
 
 
 def _search_cache_get(key: str) -> dict[str, Any] | None:
@@ -136,7 +141,7 @@ def _page_params(p: int, ps: int) -> tuple[int, int, int]:
 
 
 def _list_enrich_sql(from_filtered: str = "filtered") -> str:
-    """Bitmagnet：CTE 筛完后再挂 LIST_META（预览等大字段）。"""
+    """Bitmagnet?CTE ????? LIST_META?????????"""
     return f"""
 SELECT {RESOURCE_SELECT}
 FROM {from_filtered} r
@@ -148,7 +153,7 @@ _browse_indexes_ready = False
 
 
 def _ensure_browse_indexes() -> None:
-    """整板最新依赖 board_fid 索引；旧库可能没有。"""
+    """?????? board_fid ??????????"""
     global _browse_indexes_ready
     if _browse_indexes_ready:
         return
@@ -173,10 +178,10 @@ def browse_resources(
     keyword: str | None = None,
     with_total_count: bool = False,
 ) -> dict[str, Any]:
-    """板块最新 / 板内搜索。
+    """???? / ?????
 
-    有 board_fid 时从 resource_sources 起查（``fid`` 或 ``fid:%``），
-    默认不算 COUNT（``ps+1`` 判 has_more），避免 5–10s 全表聚合。
+    ? board_fid ?? resource_sources ???``fid`` ? ``fid:%``??
+    ???? COUNT?``ps+1`` ? has_more???? 5?10s ?????
     """
     page, page_size, offset = _page_params(p, ps)
     kind = (link_kind or "").strip()
@@ -202,10 +207,10 @@ def browse_resources(
     parent = (board_parent or "").strip()
     fetch_limit = page_size if with_total_count else page_size + 1
 
-    # —— 快路径：按 board_fid（含子版 fid:%）——
+    # ?? ????? board_fid???? fid:%???
     if fid:
         _ensure_browse_indexes()
-        # 根板 141 → 141 + 141:%；子版 141:689 → 精确 + 更深子路径
+        # ?? 141 ? 141 + 141:%??? 141:689 ? ?? + ?????
         fid_params: list[Any] = [fid, f"{fid}:%%", *kw_params]
         list_sql = f"""
 WITH filtered AS (
@@ -245,14 +250,14 @@ WHERE (rs.board_fid = %s OR rs.board_fid LIKE %s)
             rows = rows[:page_size]
             total = offset + len(rows) + (1 if has_more else 0)
         return {
-            "resources": [format_resource(r) for r in rows],
+            "resources": format_resources(rows, prefetch_torrents=False),
             "total_count": total,
             "page": page,
             "page_size": page_size,
             "has_more": has_more,
         }
 
-    # —— 板名路径（兼容旧客户端；无索引，尽量不算 COUNT）——
+    # ?? ???????????????????? COUNT???
     where = ["TRUE", PUBLIC_RESOURCE_FILTER.strip()]
     params: list[Any] = []
     if link_sql:
@@ -262,12 +267,12 @@ WHERE (rs.board_fid = %s OR rs.board_fid LIKE %s)
         where.append(
             "AND (rs.board_name = %s OR rs.board_name LIKE %s OR rs.board_name LIKE %s)"
         )
-        params.extend([parent, f"{parent} · %", f"{parent}-%"])
+        params.extend([parent, f"{parent} ? %", f"{parent}-%"])
     elif board_name:
         where.append(
-            "AND replace(COALESCE(rs.board_name, ''), '-', ' · ') = %s"
+            "AND replace(COALESCE(rs.board_name, ''), '-', ' ? ') = %s"
         )
-        params.append(board_name.replace("-", " · "))
+        params.append(board_name.replace("-", " ? "))
     if kw_sql:
         where.append(kw_sql)
         params.extend(kw_params)
@@ -324,7 +329,7 @@ WHERE {where_sql}
         total = offset + len(rows) + (1 if has_more else 0)
 
     return {
-        "resources": [format_resource(r) for r in rows],
+        "resources": format_resources(rows, prefetch_torrents=False),
         "total_count": total,
         "page": page,
         "page_size": page_size,
@@ -347,7 +352,8 @@ LIMIT 1
     rows = pg.query(sql, [h])
     if not rows:
         return None
-    return format_resource(rows[0])
+    # 色花详情不拉外网 .torrent 补文件树（会卡住首屏）；文件列表前端也不再展示
+    return format_resource(rows[0], enrich_magnets=False)
 
 
 def _av_union_count(
@@ -389,7 +395,7 @@ def _filter_rows_by_region(
     *,
     include_optional: bool = True,
 ) -> list[dict[str, Any]]:
-    """快路径取数后按四国白名单裁板（避免 board_fid SQL 关掉 AV/Bitmagnet）。"""
+    """????????????????? board_fid SQL ?? AV/Bitmagnet??"""
     if not region:
         return rows
     return [
@@ -416,7 +422,7 @@ def _av_union_list(
     )
     file_reject = " AND r.filename !~* %s" if reject else ""
     title_reject = " AND rs.title !~* %s" if reject else ""
-    # 上限抬到 480，配合 region 应用层裁板时的过量取数
+    # ???? 480??? region ???????????
     arm_limit = min(max(fetch_limit + offset, fetch_limit), 480)
     sql = f"""
 WITH hits AS (
@@ -471,7 +477,7 @@ WHERE {where_sql}
 
 
 def _search_list_sql(where_sql: str, order: str, *, with_meta: bool) -> str:
-    """filtered CTE → LIST_META enrich。with_meta 时挂轻量 FILTER_META（prefer/count）。"""
+    """filtered CTE ? LIST_META enrich?with_meta ???? FILTER_META?prefer/count??"""
     join = FILTER_META_JOIN if with_meta else ""
     return f"""
 WITH filtered AS (
@@ -491,7 +497,7 @@ def _bitmagnet_filename_count(
     file_params: list[Any],
     extra_where: str,
 ) -> int:
-    """Bitmagnet：只计主表命中（与 list 主路径一致）。"""
+    """Bitmagnet????????? list ???????"""
     sql = f"""
 SELECT COUNT(*)::int AS total
 FROM ed2k_resources r
@@ -510,23 +516,31 @@ def _bitmagnet_union_count(
     title_params: list[Any],
     extra_where: str,
 ) -> int:
-    """filename ∪ title 去重计数。"""
+    """filename ∪ title 命中数；封顶避免全库 COUNT 拖死。"""
     sql = f"""
 SELECT COUNT(*)::int AS total FROM (
-  SELECT r.hash FROM ed2k_resources r
-  WHERE ({file_sql})
-  {PUBLIC_RESOURCE_FILTER}
-  {extra_where}
-  UNION
-  SELECT r.hash FROM resource_sources rs
-  JOIN ed2k_resources r ON r.hash = rs.hash
-  WHERE ({title_sql})
-  {PUBLIC_RESOURCE_FILTER}
-  {extra_where}
+  SELECT hash FROM (
+    SELECT r.hash FROM ed2k_resources r
+    WHERE ({file_sql})
+    {PUBLIC_RESOURCE_FILTER}
+    {extra_where}
+    UNION
+    SELECT r.hash FROM resource_sources rs
+    JOIN ed2k_resources r ON r.hash = rs.hash
+    WHERE ({title_sql})
+    {PUBLIC_RESOURCE_FILTER}
+    {extra_where}
+  ) u
+  LIMIT %s
 ) t
 """
-    rows = pg.query(sql, [*file_params, *title_params])
-    return int(rows[0]["total"]) if rows else 0
+    rows = pg.query(
+        sql,
+        [*file_params, *title_params, _SEARCH_COUNT_CAP + 1],
+        statement_timeout_ms=_SEARCH_STATEMENT_TIMEOUT_MS,
+    )
+    n = int(rows[0]["total"]) if rows else 0
+    return min(n, _SEARCH_COUNT_CAP)
 
 
 def _bitmagnet_filename_list(
@@ -538,7 +552,7 @@ def _bitmagnet_filename_list(
     fetch_limit: int,
     offset: int,
 ) -> list[dict[str, Any]]:
-    """Bitmagnet 同构：只扫主表 name/filename，LIMIT 后再 enrich。"""
+    """Bitmagnet ??????? name/filename?LIMIT ?? enrich?"""
     arm_order = _BM_ARM_ORDER.get(sort_key, _BM_ARM_ORDER["default"])
     sql = f"""
 WITH filtered AS (
@@ -566,10 +580,10 @@ def _bitmagnet_union_list(
     fetch_limit: int,
     offset: int,
 ) -> list[dict[str, Any]]:
-    """Bitmagnet：filename ∪ title 后去重排序。
+    """Bitmagnet?filename ? title ??????
 
-    必须合并 title：不少帖番号只在帖题、文件名是日文片名（如 SONE-996 原创）。
-    旧逻辑「主表有命中就跳过 title」会漏检。
+    ???? title????????????????????? SONE-996 ????
+    ???????????? title?????
     """
     arm_order = _BM_ARM_ORDER.get(sort_key, _BM_ARM_ORDER["default"])
     outer_order = _BM_OUTER_ORDER.get(sort_key, _BM_OUTER_ORDER["default"])
@@ -611,6 +625,7 @@ filtered AS (
     return pg.query(
         sql,
         [*file_params, arm_limit, *title_params, arm_limit, fetch_limit, offset],
+        statement_timeout_ms=_SEARCH_STATEMENT_TIMEOUT_MS,
     )
 
 
@@ -636,7 +651,7 @@ def search_resources(
 
     kw = (keyword or "").strip()
     if len(kw) < 2:
-        raise ValueError("关键词至少 2 个字符")
+        raise ValueError("????? 2 ???")
 
     page, page_size, offset = _page_params(p, ps)
     mode = normalize_match_mode(match_mode)
@@ -689,7 +704,7 @@ def search_resources(
         )
 
     crack = prefer_crack and not is_uncensored_maker_code(kw)
-    # 四国白名单：应用层过滤（保持 AV/Bitmagnet 快路径）；仅 count 走 SQL
+    # ?????????????? AV/Bitmagnet ?????? count ? SQL
     resolved_region = normalize_region(region) or (
         "japan_censored" if japan_censored else None
     )
@@ -704,7 +719,7 @@ def search_resources(
         if resolved_region
         else ""
     )
-    # 兼容旧签名；region 已不进 prefer_sql
+    # ??????region ??? prefer_sql
     del exclude_uncensored
 
     kw_items = extract_keywords(kw, mode)
@@ -718,7 +733,7 @@ def search_resources(
     time_sql = TIME_FILTERS.get(filter_time, "")
     size_sql = SIZE_FILTERS.get(filter_size, "")
 
-    # count+region 需准确总数时走慢路径 SQL；列表仍走快路径 + 应用层裁板
+    # count+region ?????????? SQL???????? + ?????
     av_fast = (
         bool(code_bound)
         and mode == "exact"
@@ -758,7 +773,7 @@ def search_resources(
             )
 
         base_fetch = page_size if with_total_count else page_size + 1
-        # 有 region 时多取，抵消应用层裁板后不足一页
+        # ? region ????????????????
         if resolved_region:
             fetch_limit = min(max(base_fetch * 16, base_fetch + 80), 400)
         else:
@@ -766,7 +781,7 @@ def search_resources(
         raw_rows = _av_union_list(
             patterns, reject, fetch_limit=fetch_limit, offset=offset
         )
-        # 窗口打满但边界过滤后过少：说明续写噪声仍多，勿误报「没有更多」
+        # ???????????????????????????????
         window_full = len(raw_rows) >= fetch_limit
         rows = apply_av_code_boundary_filter(raw_rows, code_bound)
         rows = _filter_rows_by_region(
@@ -782,7 +797,7 @@ def search_resources(
             rows = rows[:page_size]
         else:
             overflow = len(rows) > page_size
-            # 窗口打满但边界/白名单后不足一页：后方可能还有真命中
+            # ???????/??????????????????
             maybe_more = window_full and len(rows) <= page_size
             has_more = overflow or maybe_more
             rows = rows[:page_size]
@@ -790,7 +805,7 @@ def search_resources(
         return _cached(
             {
                 "keywords": [x["keyword"] for x in kw_items],
-                "resources": [format_resource(r) for r in rows],
+                "resources": format_resources(rows, prefetch_torrents=False),
                 "total_count": total,
                 "has_more": has_more,
                 "page": page,
@@ -803,8 +818,8 @@ def search_resources(
         x for x in (time_sql, size_sql) if x
     )
 
-    # Bitmagnet 主路径：主表/title 分列 ILIKE → UNION → LIMIT → enrich
-    # （无 prefer、非 count/relevance、非 exact-番号；region 用应用层裁板）
+    # Bitmagnet ??????/title ?? ILIKE ? UNION ? LIMIT ? enrich
+    # ?? prefer?? count/relevance?? exact-???region ???????
     use_bitmagnet = (
         not prefer_sql.strip()
         and sort_key in _BM_ARM_ORDER
@@ -937,7 +952,7 @@ def search_resources(
         return _cached(
             {
                 "keywords": [x["keyword"] for x in kw_items],
-                "resources": [format_resource(r) for r in rows],
+                "resources": format_resources(rows, prefetch_torrents=False),
                 "total_count": total,
                 "has_more": has_more,
                 "page": page,
@@ -946,7 +961,7 @@ def search_resources(
             }
         )
 
-    # prefer / count+region / exact-番号带筛选：仍走 JOIN meta
+    # prefer / count+region / exact-???????? JOIN meta
     where = [
         "TRUE",
         PUBLIC_RESOURCE_FILTER.strip(),
@@ -955,7 +970,7 @@ def search_resources(
     params: list[Any] = list(kw_params)
     if prefer_sql:
         where.append(prefer_sql)
-    # 慢路径已 JOIN meta：region 直接进 SQL（count 准确；cn/ck 叠加裁板）
+    # ???? JOIN meta?region ??? SQL?count ???cn/ck ?????
     if region_sql:
         where.append(region_sql)
     if time_sql:
@@ -1047,7 +1062,7 @@ def search_resources(
     return _cached(
         {
             "keywords": [x["keyword"] for x in kw_items],
-            "resources": [format_resource(r) for r in rows],
+            "resources": format_resources(rows, prefetch_torrents=False),
             "total_count": total,
             "has_more": has_more,
             "page": page,

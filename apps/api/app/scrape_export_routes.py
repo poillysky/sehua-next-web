@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from email.utils import formatdate
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlparse
+import threading
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
@@ -17,6 +19,15 @@ from .outbound_http import httpx_client
 router = APIRouter(tags=["scrape-export"])
 
 _EXPORT_MEDIA_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+
+
+def _file_cache_headers(path: Path) -> dict[str, str]:
+    st = path.stat()
+    return {
+        "Cache-Control": "public, max-age=0, must-revalidate",
+        "ETag": f'"{int(st.st_mtime_ns)}-{int(st.st_size)}"',
+        "Last-Modified": formatdate(st.st_mtime, usegmt=True),
+    }
 
 
 def _wrap(data: Any, message: str = "ok", status: int = 200) -> dict[str, Any]:
@@ -276,7 +287,7 @@ def export_library_file(
         raise HTTPException(status_code=400, detail="越界路径") from e
     if not target.is_file():
         raise HTTPException(status_code=404, detail="文件不存在")
-    return FileResponse(target)
+    return FileResponse(target, headers=_file_cache_headers(target))
 
 
 @router.get("/scrape/export/img")
@@ -327,9 +338,9 @@ def get_library_materialize_status(
 
 @router.post("/scrape/library/materialize")
 def start_library_materialize(
-    background: BackgroundTasks,
     region: str = Query("", description="分区 id，空=全部"),
     sync: int = Query(0, description="1=同步执行"),
+    force: int = Query(0, description="1=强制抢占僵死任务"),
     _user: dict[str, Any] = Depends(require_user),
 ) -> dict[str, Any]:
     region_key = (region or "").strip() or None
@@ -344,16 +355,39 @@ def start_library_materialize(
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e)) from e
 
-    if not library_materialize.claim_materialize(region=region_key):
-        raise HTTPException(status_code=409, detail="本地片库同步正在进行中")
+    if not library_materialize.claim_materialize(
+        region=region_key, force=force == 1
+    ):
+        st = library_materialize.materialize_status()
+        detail = "本地片库同步正在进行中"
+        cur = str(st.get("currentCode") or "").strip()
+        done = st.get("done")
+        total = st.get("total")
+        msg = str(st.get("message") or "").strip()
+        if total:
+            detail = f"{detail}（{done or 0}/{total}"
+            if cur:
+                detail = f"{detail} · {cur}"
+            detail = f"{detail}）"
+        elif msg:
+            detail = f"{detail}（{msg}）"
+        raise HTTPException(status_code=409, detail=detail)
 
     def _job() -> None:
         try:
             library_materialize.materialize_library(region=region_key)
+        except RuntimeError as e:
+            # 另一任务已持锁：勿清 running，避免把正在跑的任务标成失败
+            if "正在进行中" in str(e):
+                return
+            library_materialize.fail_materialize(str(e) or "failed")
         except Exception as e:
             library_materialize.fail_materialize(str(e) or "failed")
 
-    background.add_task(_job)
+    # 独立线程：避免长时间占用 anyio 线程池导致 status 等接口饿死
+    threading.Thread(
+        target=_job, name="library-materialize", daemon=True
+    ).start()
     return _wrap(library_materialize.materialize_status(), "已开始同步本地片库")
 
 

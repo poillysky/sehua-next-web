@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import mimetypes
 import threading
+from email.utils import formatdate
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Body, HTTPException, Query
@@ -16,6 +18,15 @@ router = APIRouter(tags=["maker-fs"])
 
 def _wrap(data: Any, message: str = "ok", status: int = 200) -> dict[str, Any]:
     return {"data": data, "message": message, "status": status}
+
+
+def _file_cache_headers(path: Path) -> dict[str, str]:
+    st = path.stat()
+    return {
+        "Cache-Control": "public, max-age=0, must-revalidate",
+        "ETag": f'"{int(st.st_mtime_ns)}-{int(st.st_size)}"',
+        "Last-Modified": formatdate(st.st_mtime, usegmt=True),
+    }
 
 
 @router.get("/maker-fs/manifest")
@@ -253,7 +264,11 @@ def get_local_file(file_path: str) -> FileResponse:
     if not target.is_file():
         raise HTTPException(status_code=404, detail="文件不存在")
     media, _ = mimetypes.guess_type(str(target))
-    return FileResponse(target, media_type=media or "application/octet-stream")
+    return FileResponse(
+        target,
+        media_type=media or "application/octet-stream",
+        headers=_file_cache_headers(target),
+    )
 
 
 def _run_build(
@@ -263,6 +278,7 @@ def _run_build(
     workers: int,
     skip_fresh_hours: float,
     region: str | None,
+    only_prefix: str | None = None,
 ) -> None:
     try:
         maker_fs.build_maker_fs(
@@ -272,6 +288,7 @@ def _run_build(
             workers=workers,
             skip_fresh_hours=skip_fresh_hours,
             region=region,
+            only_prefix=only_prefix,
             from_claim=True,
         )
     except Exception as e:
@@ -304,20 +321,35 @@ def start_build(
         "",
         description="仅扫描指定分区 id，如 japan_censored；空=全部",
     ),
+    prefix: str = Query(
+        "",
+        description="仅扫描单个前缀（须同时传 region）；强制重扫该前缀",
+    ),
 ) -> dict[str, Any]:
     lim = limit if limit > 0 else None
     cats_only = catalogsOnly == 1
     skip_h = 0.0 if force == 1 else float(skipFreshHours)
     region_key = (region or "").strip() or None
+    prefix_key = (prefix or "").strip() or None
+    if prefix_key and not region_key:
+        raise HTTPException(
+            status_code=400, detail="单前缀扫描必须指定 region"
+        )
+    if prefix_key:
+        # 单前缀一律强制重扫
+        skip_h = 0.0
+        lim = None
+        cats_only = False
     if sync == 1:
         try:
             result = maker_fs.build_maker_fs(
                 limit_prefixes=lim,
                 max_covers_per_prefix=maxCovers,
                 catalogs_only=cats_only,
-                workers=workers,
+                workers=1 if prefix_key else workers,
                 skip_fresh_hours=skip_h,
                 region=region_key,
+                only_prefix=prefix_key,
             )
             return _wrap(result, "构建完成")
         except ValueError as e:
@@ -329,6 +361,13 @@ def start_build(
     if not maker_fs.claim_build(region=region_key):
         raise HTTPException(status_code=409, detail="构建任务正在进行中")
     background.add_task(
-        _run_build, lim, maxCovers, cats_only, workers, skip_h, region_key
+        _run_build,
+        lim,
+        maxCovers,
+        cats_only,
+        1 if prefix_key else workers,
+        skip_h,
+        region_key,
+        prefix_key,
     )
     return _wrap(maker_fs.build_status(), "已开始后台构建")

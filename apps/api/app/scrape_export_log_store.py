@@ -17,7 +17,7 @@ _FLUSH_EVERY = 0.4
 _last_flush_mono = 0.0
 
 # 强制重刮清空时标记；读侧无需关心
-_VALID_BUCKETS = frozenset({"done", "skipped", "failed"})
+_VALID_BUCKETS = frozenset({"done", "skipped", "failed", "empty"})
 
 
 def _now_iso() -> str:
@@ -242,6 +242,63 @@ def upsert_result_code(task_id: str, bucket: str, code: str) -> None:
         log.exception("upsert result code failed %s %s %s", tid, b, c)
 
 
+def bulk_upsert_result_codes(
+    task_id: str,
+    *,
+    skipped: list[str] | None = None,
+    failed: list[str] | None = None,
+    done: list[str] | None = None,
+    empty: list[str] | None = None,
+) -> None:
+    """预跳过等批量落库：单事务，避免逐条开关库卡死 building。"""
+    tid = str(task_id or "").strip()
+    if not tid:
+        return
+    now = _now_iso()
+    rows: list[tuple[str, str, str, str]] = []
+    codes_all: list[str] = []
+    for bucket, codes in (
+        ("done", done or []),
+        ("skipped", skipped or []),
+        ("failed", failed or []),
+        ("empty", empty or []),
+    ):
+        for c in codes:
+            s = str(c or "").strip()
+            if not s:
+                continue
+            rows.append((tid, bucket, s, now))
+            codes_all.append(s)
+    if not rows:
+        return
+    try:
+        with db.connect() as conn:
+            # 清掉这些番号的旧桶，再插入新终态
+            # SQLite 变量上限保守分块
+            chunk = 400
+            for i in range(0, len(codes_all), chunk):
+                part = codes_all[i : i + chunk]
+                placeholders = ",".join("?" * len(part))
+                conn.execute(
+                    f"""
+                    DELETE FROM scrape_export_codes
+                    WHERE task_id = ? AND code IN ({placeholders})
+                    """,
+                    (tid, *part),
+                )
+            conn.executemany(
+                """
+                INSERT OR IGNORE INTO scrape_export_codes
+                  (task_id, bucket, code, updated_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                rows,
+            )
+            conn.commit()
+    except Exception:
+        log.exception("bulk upsert result codes failed %s n=%s", tid, len(rows))
+
+
 def move_result_code(task_id: str, code: str, *, to_bucket: str) -> None:
     """skipped → failed 等升级。"""
     upsert_result_code(task_id, to_bucket, code)
@@ -280,7 +337,7 @@ def list_result_codes(
 def count_result_codes(task_id: str, bucket: str | None = None) -> dict[str, int]:
     tid = str(task_id or "").strip()
     if not tid:
-        return {"done": 0, "skipped": 0, "failed": 0}
+        return {"done": 0, "skipped": 0, "failed": 0, "empty": 0}
     try:
         with db.connect() as conn:
             if bucket and bucket in _VALID_BUCKETS:
@@ -298,7 +355,7 @@ def count_result_codes(task_id: str, bucket: str | None = None) -> dict[str, int
                 """,
                 (tid,),
             ).fetchall()
-        out = {"done": 0, "skipped": 0, "failed": 0}
+        out = {"done": 0, "skipped": 0, "failed": 0, "empty": 0}
         for r in rows:
             b = str(r["bucket"] or "")
             if b in out:
@@ -306,7 +363,7 @@ def count_result_codes(task_id: str, bucket: str | None = None) -> dict[str, int
         return out
     except Exception:
         log.exception("count result codes failed %s", tid)
-        return {"done": 0, "skipped": 0, "failed": 0}
+        return {"done": 0, "skipped": 0, "failed": 0, "empty": 0}
 
 
 def clear_task_result_codes(task_id: str) -> None:
@@ -330,6 +387,7 @@ def replace_task_result_codes(
     done: list[str] | None = None,
     skipped: list[str] | None = None,
     failed: list[str] | None = None,
+    empty: list[str] | None = None,
 ) -> None:
     """用完整列表覆盖（任务卡重置 / 大合并后落库）。"""
     tid = str(task_id or "").strip()
@@ -341,6 +399,7 @@ def replace_task_result_codes(
         ("done", done or []),
         ("skipped", skipped or []),
         ("failed", failed or []),
+        ("empty", empty or []),
     ):
         for c in codes:
             s = str(c or "").strip()

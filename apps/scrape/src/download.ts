@@ -275,10 +275,12 @@ async function fetchPageUnlocked(
 
   // viaFlare:true 仅表示「这站可能要过盾/渲染」，不再等于「永远跳过直连」。
   // 已有 cf_clearance → 一律先 Cookie 直连；只有无 clearance 时才首包直走 FS / 尊重直连冷却。
+  // 重要：directSkip 只能在「还能走 Flare」时生效。iqqtv 等 viaFlare:false 的源若也跳过直连，
+  // 会 0 次请求就返回 null（~百毫秒假「未找到详情页」），而连通性探测仍正常。
   const hasClearance = Boolean(cached?.cookieHeader);
   const skipDirectFirst =
     (flareOn && opts?.viaFlare === true && !hasClearance) ||
-    (shouldSkipDirect(host) && !hasClearance);
+    (flareOn && shouldSkipDirect(host) && !hasClearance);
 
   if (!skipDirectFirst) {
     const directTimeout = hasClearance
@@ -298,6 +300,8 @@ async function fetchPageUnlocked(
     // SPA 源要求 wait 时，直连结果太短/空壳则视为未渲染，回退 FS
     const minBytes = waitInSeconds && waitInSeconds > 0 ? 2000 : 500;
     if (direct && direct.html.length >= minBytes) {
+      // 直连恢复：清掉该 host 的短时 skip，避免后续误伤
+      directSkipUntil.delete(host);
       console.log(
         `[scrape] cookie-direct host=${host} ${direct.html.length}b proxy=${getActiveProxy() ? "on" : "off"} clearance=${hasClearance ? "yes" : "no"}`,
       );

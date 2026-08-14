@@ -1,10 +1,10 @@
 'use client';
 
-export type SearchSource = 'sehua' | 'lemon';
+export type SearchSource = 'sehua' | 'bitmagnet';
 
 const OPTIONS: { id: SearchSource; label: string }[] = [
   { id: 'sehua', label: '色花堂' },
-  { id: 'lemon', label: '柠檬' },
+  { id: 'bitmagnet', label: 'Bitmagnet' },
 ];
 
 /** 嵌在搜索框左侧的来源切换 */

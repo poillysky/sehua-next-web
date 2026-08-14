@@ -31,6 +31,8 @@ type Hit = {
   forumActors?: string[] | null;
   /** library 内刮削海报相对路径，优先于远程封面 */
   posterLocal?: string | null;
+  /** poster mtime-size，破坏 PWA/浏览器图片缓存 */
+  posterRev?: string | null;
 };
 
 type PrefixCache = {
@@ -43,7 +45,7 @@ type PrefixCache = {
 
 /** 会话内缓存：library / maker-fs 已确认番号 */
 const PREFIX_CACHE = new Map<string, PrefixCache>();
-const CACHE_VER = 'library-codes-v4';
+const CACHE_VER = 'library-codes-v6';
 
 function cacheKey(prefix: string, region?: string, q?: string, studio?: string) {
   const p = String(prefix || '')
@@ -77,7 +79,7 @@ const FLAKY_COVER_HOST =
 function coversForHit(it: Hit): string[] {
   const raw: string[] = [];
   const local = String(it.posterLocal || '').trim();
-  if (local) raw.push(scrapeExportFileUrl(local));
+  if (local) raw.push(scrapeExportFileUrl(local, it.posterRev));
   const remote =
     it.coverUrls?.length > 0
       ? [...it.coverUrls]
@@ -93,6 +95,56 @@ function coversForHit(it: Hit): string[] {
   const ordered = good.length ? [...good, ...flaky] : flaky;
   // 外链走 cover-proxy（服务端用项目代理），本地 file URL 原样
   return ordered.map((u) => proxiedCoverUrl(u)).filter(Boolean);
+}
+
+function mapCodeItems(dataItems: unknown[]): Hit[] {
+  return (dataItems || [])
+    .map((raw) => {
+      const it = raw as {
+        code: string;
+        coverUrl?: string | null;
+        coverUrls?: string[] | null;
+        forumTitle?: string | null;
+        forumActors?: string[] | null;
+        posterLocal?: string | null;
+        posterRev?: string | null;
+      };
+      const urls =
+        Array.isArray(it.coverUrls) && it.coverUrls.length
+          ? [...it.coverUrls]
+          : it.coverUrl
+            ? [it.coverUrl]
+            : [];
+      const posterLocal = String(it.posterLocal || '').trim() || null;
+      const posterRev = String(it.posterRev || '').trim() || null;
+      return {
+        code: it.code,
+        coverUrl: it.coverUrl ?? null,
+        coverUrls: urls,
+        forumTitle: it.forumTitle ?? null,
+        forumActors: it.forumActors ?? null,
+        posterLocal,
+        posterRev,
+      };
+    })
+    .filter((it) => {
+      // 空壳：无封面且无标题/女优 → 不展示
+      if (hitHasCover(it)) return true;
+      if (String(it.forumTitle || '').trim()) return true;
+      if ((it.forumActors || []).some((a) => String(a || '').trim())) return true;
+      return false;
+    });
+}
+
+/** 有本地 poster 或封面 URL 才挂载封面组件，避免空壳目录无意义加载 */
+function hitHasCover(it: {
+  posterLocal?: string | null;
+  coverUrl?: string | null;
+  coverUrls?: string[] | null;
+}): boolean {
+  if (String(it.posterLocal || '').trim()) return true;
+  if (String(it.coverUrl || '').trim()) return true;
+  return (it.coverUrls || []).some((u) => Boolean(String(u || '').trim()));
 }
 
 /** 番号计数 */
@@ -150,6 +202,7 @@ function PrefixTileCover({
   coverUrl,
   coverUrls,
   posterLocal,
+  posterRev,
   cropMode,
   fallbackPosition,
   loading,
@@ -158,15 +211,22 @@ function PrefixTileCover({
   coverUrl: string | null;
   coverUrls: string[];
   posterLocal?: string | null;
+  posterRev?: string | null;
   cropMode?: import('@/lib/api').PosterCropMode;
   fallbackPosition: string;
   loading: 'lazy' | 'eager';
 }) {
-  const candidates = coversForHit({ code, coverUrl, coverUrls, posterLocal });
+  const candidates = coversForHit({
+    code,
+    coverUrl,
+    coverUrls,
+    posterLocal,
+    posterRev,
+  });
   const [idx, setIdx] = useState(0);
   const [gone, setGone] = useState(false);
   const src = candidates[idx];
-  const coverSig = `${posterLocal || ''}|${coverUrl || ''}|${coverUrls.join('|')}`;
+  const coverSig = `${posterLocal || ''}|${posterRev || ''}|${coverUrl || ''}|${coverUrls.join('|')}`;
   const objectPosition = useCoverObjectPosition(
     cropMode,
     gone ? null : src,
@@ -180,7 +240,8 @@ function PrefixTileCover({
   }, [code, coverSig]);
 
   if (!candidates.length || gone || !src) {
-    return <span className="prefix-tile__empty" aria-hidden />;
+    // 无封面 URL / 本地 poster：不渲染占位图
+    return null;
   }
 
   return (
@@ -294,9 +355,9 @@ export function PrefixCodeGrid({
       return;
     }
 
-    const hit = c.pages[safePage];
-    if (hit) {
-      setItems(hit);
+    const cachedPage = c.pages[safePage];
+    if (cachedPage) {
+      setItems(cachedPage);
       setTotal(c.total);
       setLoading(false);
       return;
@@ -334,31 +395,54 @@ export function PrefixCodeGrid({
           setItems([]);
           return;
         }
-        const next: Hit[] = (data.items || []).map((it) => {
-          const urls =
-            Array.isArray((it as { coverUrls?: string[] }).coverUrls) &&
-            (it as { coverUrls?: string[] }).coverUrls!.length
-              ? ([...(it as { coverUrls: string[] }).coverUrls] as string[])
-              : it.coverUrl
-                ? [it.coverUrl]
-                : [];
-          const posterLocal = String(
-            (it as { posterLocal?: string | null }).posterLocal || '',
-          ).trim() || null;
-          return {
-            code: it.code,
-            coverUrl: it.coverUrl ?? null,
-            coverUrls: urls,
-            forumTitle: it.forumTitle ?? null,
-            forumActors: it.forumActors ?? null,
-            posterLocal,
-          };
-        });
+        const next = mapCodeItems(data.items || []);
         c.total = data.total;
         c.loaded = true;
         c.pages[safePage] = next;
         setTotal(data.total);
         setItems(next);
+
+        // 后台预取下一页，点「下一页」秒开
+        const totalPages = Math.max(
+          1,
+          Math.ceil((data.total || 0) / PREFIX_CODE_PAGE_SIZE),
+        );
+        const nextPage = safePage + 1;
+        if (
+          nextPage <= totalPages &&
+          nextPage <= BROWSE_PAGE_MAX &&
+          !c.pages[nextPage]
+        ) {
+          const prefetchAc = ac;
+          void (async () => {
+            try {
+              const more =
+                studioKey && region
+                  ? await fetchLibraryCodes({
+                      region,
+                      studio: studioKey,
+                      prefix,
+                      q: needle || undefined,
+                      offset: (nextPage - 1) * PREFIX_CODE_PAGE_SIZE,
+                      limit: PREFIX_CODE_PAGE_SIZE,
+                      signal: prefetchAc.signal,
+                    })
+                  : await fetchMakerFsPrefixCodes({
+                      prefix,
+                      region,
+                      q: needle || undefined,
+                      offset: (nextPage - 1) * PREFIX_CODE_PAGE_SIZE,
+                      limit: PREFIX_CODE_PAGE_SIZE,
+                      signal: prefetchAc.signal,
+                    });
+              if (prefetchAc.signal.aborted || !more || c.pages[nextPage]) return;
+              c.pages[nextPage] = mapCodeItems(more.items || []);
+              c.total = more.total;
+            } catch {
+              /* 预取失败忽略 */
+            }
+          })();
+        }
       } catch {
         if (!ac.signal.aborted) {
           setItems([]);
@@ -437,32 +521,48 @@ export function PrefixCodeGrid({
           <div className="prefix-grid" data-cols={gridCols}>
             {items.map((it, index) => {
               const { actors, title } = makerFsIndexLines(it, region);
+              const hasCover = hitHasCover(it);
               const tile = (
                 <>
                   <span
-                    className="prefix-tile__media"
+                    className={
+                      hasCover
+                        ? 'prefix-tile__media'
+                        : 'prefix-tile__media prefix-tile__media--nocover'
+                    }
                     style={{ aspectRatio: tileAspect }}
                   >
-                    <PrefixTileCover
-                      code={it.code}
-                      coverUrl={it.coverUrl}
-                      coverUrls={it.coverUrls}
-                      posterLocal={it.posterLocal}
-                      cropMode={cropMode}
-                      fallbackPosition={objectPosition}
-                      loading={index < 8 ? 'eager' : 'lazy'}
-                    />
-                    <span className="prefix-tile__overlay">
-                      {actors ? (
-                        <span
-                          className="prefix-tile__actors allow-select"
-                          title={actors}
-                        >
-                          {actors}
+                    {hasCover ? (
+                      <>
+                        <PrefixTileCover
+                          code={it.code}
+                          coverUrl={it.coverUrl}
+                          coverUrls={it.coverUrls}
+                          posterLocal={it.posterLocal}
+                          posterRev={it.posterRev}
+                          cropMode={cropMode}
+                          fallbackPosition={objectPosition}
+                          loading={index < 8 ? 'eager' : 'lazy'}
+                        />
+                        <span className="prefix-tile__overlay">
+                          {actors ? (
+                            <span
+                              className="prefix-tile__actors allow-select"
+                              title={actors}
+                            >
+                              {actors}
+                            </span>
+                          ) : null}
+                          <span className="prefix-tile__code allow-select">
+                            {it.code}
+                          </span>
                         </span>
-                      ) : null}
-                      <span className="prefix-tile__code allow-select">{it.code}</span>
-                    </span>
+                      </>
+                    ) : (
+                      <span className="prefix-tile__code prefix-tile__code--solo allow-select">
+                        {it.code}
+                      </span>
+                    )}
                   </span>
                   {title ? (
                     <span className="prefix-tile__meta">

@@ -20,6 +20,9 @@ from .search_prefer import SEARCH_NAME_EXPR
 # PostgreSQL: ESCAPE '\' — backslash quotes % / _
 _ILIKE_ESC = "ESCAPE '\\'"
 
+# 纯字母厂牌/前缀（SONS、SSIS…）：避免 `%SONS%` 全表扫
+_MAKER_PREFIX_RE = re.compile(r"^[A-Za-z]{2,8}$")
+
 MatchField = Literal["both", "filename", "title"]
 
 
@@ -111,6 +114,41 @@ def _like_contains(keyword: str) -> str:
     return f"%{escape_ilike(keyword)}%"
 
 
+def _is_maker_prefix_token(keyword: str) -> bool:
+    return bool(_MAKER_PREFIX_RE.fullmatch(keyword.strip()))
+
+
+def _maker_prefix_like_patterns(keyword: str) -> list[str]:
+    """厂牌前缀：优先 `SONS%` / `…SONS-…`，不用裸 `%SONS%`（全库极慢）。"""
+    esc = escape_ilike(keyword.strip())
+    return [
+        f"{esc}%",
+        f"%{esc}-%",
+        f"%{esc} %",
+        f"%[{esc}%",
+        f"%({esc}%",
+        f"%.{esc}%",
+    ]
+
+
+def _token_or_clause(
+    keyword: str,
+    field: MatchField,
+) -> tuple[str, list[str]]:
+    """单 token → (sql片段, params)。厂牌前缀用边界模式，其余 contains。"""
+    clause = _token_match_clause(field)
+    if _is_maker_prefix_token(keyword):
+        patterns = _maker_prefix_like_patterns(keyword)
+        parts: list[str] = []
+        params: list[str] = []
+        for pat in patterns:
+            parts.append(clause)
+            params.extend(_params_for_like(pat, field))
+        return "(" + " OR ".join(parts) + ")", params
+    like = _like_contains(keyword)
+    return clause, _params_for_like(like, field)
+
+
 def build_exact_keyword_clause(
     keywords: list[dict[str, Any]],
     *,
@@ -134,9 +172,9 @@ def build_exact_keyword_clause(
             parts.append("(" + " OR ".join(or_parts) + ")")
             code_bound.append(kw)
         else:
-            parts.append(clause)
-            like = _like_contains(kw)
-            params.extend(_params_for_like(like, field))
+            frag, frag_params = _token_or_clause(kw, field)
+            parts.append(frag)
+            params.extend(frag_params)
     return " AND ".join(parts), params, code_bound
 
 
@@ -155,15 +193,13 @@ def build_keyword_filter(
     if match_mode == "exact":
         return build_exact_keyword_clause(keywords, field=field)
 
-    clause = _token_match_clause(field)
-
     if match_mode == "fuzzy":
         case_parts: list[str] = []
         params: list[Any] = []
         for item in keywords:
-            case_parts.append(f"(CASE WHEN {clause} THEN 1 ELSE 0 END)")
-            like = _like_contains(str(item["keyword"]))
-            params.extend(_params_for_like(like, field))
+            frag, frag_params = _token_or_clause(str(item["keyword"]), field)
+            case_parts.append(f"(CASE WHEN {frag} THEN 1 ELSE 0 END)")
+            params.extend(frag_params)
         min_matches = max(1, math.ceil(len(keywords) * 0.5))
         expr = " + ".join(case_parts)
         token_match = f"(({expr}) >= {min_matches})"
@@ -198,12 +234,12 @@ def build_keyword_filter(
     optional: list[str] = []
     params: list[Any] = []
     for item in keywords:
-        like = _like_contains(str(item["keyword"]))
-        params.extend(_params_for_like(like, field))
+        frag, frag_params = _token_or_clause(str(item["keyword"]), field)
+        params.extend(frag_params)
         if item["required"]:
-            required.append(clause)
+            required.append(frag)
         else:
-            optional.append(clause)
+            optional.append(frag)
     parts = list(required)
     if optional:
         optional.append("TRUE")
@@ -221,11 +257,9 @@ def build_relevance_order_by(
     params: list[Any] = []
     for i, item in enumerate(keywords):
         weight = 10 if i == 0 else (3 if item["required"] else 1)
-        parts.append(
-            f"(CASE WHEN {_token_match_clause('both')} THEN {weight} ELSE 0 END)"
-        )
-        like = _like_contains(str(item["keyword"]))
-        params.extend([like, like])
+        frag, frag_params = _token_or_clause(str(item["keyword"]), "both")
+        parts.append(f"(CASE WHEN {frag} THEN {weight} ELSE 0 END)")
+        params.extend(frag_params)
 
     parts.append(
         f"(CASE WHEN lower({SEARCH_NAME_EXPR}) = lower(%s) THEN 100 ELSE 0 END)"

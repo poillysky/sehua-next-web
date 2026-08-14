@@ -124,6 +124,53 @@ def _norm_str_list(v: Any) -> list[str]:
     return [str(x).strip() for x in v if str(x).strip()]
 
 
+def _canonicalize_seed_identity(
+    *,
+    code: str,
+    prefix: Any,
+    region: str,
+) -> tuple[str, str]:
+    """与索引一致：只做大小写/分隔符整理，不改 FC2 ↔ FC2-PPV 等形态。"""
+    del region
+    c = str(code or "").strip().upper().replace("_", "-")
+    p = maker_fs._std_prefix(str(prefix or ""))  # noqa: SLF001
+    if not c:
+        return "", p
+    # 缺前缀时按番号推断，不覆盖索引已给的前缀
+    if not p:
+        if re.search(r"FC2-?PPV", c, re.I):
+            p = "FC2PPV"
+        elif re.match(r"^FC2-\d", c, re.I):
+            p = "FC2"
+    return c, p
+
+
+def _seed_richness(seed: dict[str, Any]) -> tuple[int, int, int, int]:
+    return (
+        1 if str(seed.get("coverUrl") or "").strip() else 0,
+        len(_norm_str_list(seed.get("coverUrls"))),
+        1 if str(seed.get("title") or "").strip() else 0,
+        len(_norm_str_list(seed.get("actors"))),
+    )
+
+
+def _merge_seed_preserve(
+    existing: dict[str, Any], seed: dict[str, Any]
+) -> dict[str, Any]:
+    """空字段不覆盖已有内容（同目录重复写入时勿用空壳冲掉封面/标题）。"""
+    out = dict(seed)
+    for k in ("title", "titleZh", "coverUrl", "poster"):
+        if not str(out.get(k) or "").strip() and str(existing.get(k) or "").strip():
+            out[k] = existing.get(k)
+    if not _norm_str_list(out.get("coverUrls")) and _norm_str_list(
+        existing.get("coverUrls")
+    ):
+        out["coverUrls"] = list(existing.get("coverUrls") or [])
+    if not _norm_str_list(out.get("actors")) and _norm_str_list(existing.get("actors")):
+        out["actors"] = list(existing.get("actors") or [])
+    return out
+
+
 def _seed_unchanged(existing: dict[str, Any], seed: dict[str, Any]) -> bool:
     """种子内容未变则不必重写 meta.json（忽略 seededAt/updatedAt）。"""
     for k in (
@@ -194,15 +241,19 @@ def _write_entry(
 
     二次同步热路径：已存在且未变则只读 meta 比对，不 mkdir、不重写封面.url。
     """
-    code = str(target.get("code") or "").strip().upper()
+    rid = str(target.get("region") or "")
+    code, prefix = _canonicalize_seed_identity(
+        code=str(target.get("code") or ""),
+        prefix=target.get("prefix"),
+        region=rid,
+    )
     if not code:
         return "error"
-    rid = str(target.get("region") or "")
     label = scrape_naming.KIND_LABELS.get(
         scrape_naming.resolve_kind(region=rid, code=code), ""
     ) or maker_fs.REGION_META.get(rid, {}).get("label") or rid
     maker = _normalize_fc2_maker(str(target.get("maker") or ""), rid)
-    target = {**target, "maker": maker}
+    target = {**target, "maker": maker, "prefix": prefix, "code": code}
 
     raw_actors = target.get("forumActors")
     actors: list[str] = []
@@ -225,7 +276,7 @@ def _write_entry(
 
     meta_seed: dict[str, Any] = {
         "code": code,
-        "prefix": target.get("prefix"),
+        "prefix": prefix,
         "maker": maker,
         "studio": maker,
         "region": rid,
@@ -260,47 +311,44 @@ def _write_entry(
             existing = json.loads(meta_path.read_text(encoding="utf-8"))
         except Exception:
             existing = {}
-        if isinstance(existing, dict) and _is_network_scraped(existing):
+        if not isinstance(existing, dict):
+            existing = {}
+
+        scraped = _is_network_scraped(existing)
+        if scraped and not scrape_path.is_file():
             # 旧版把刮削写进 meta.json：迁到 scrape.json 后，索引文件改回种子
-            if not scrape_path.is_file():
-                entry_dir.mkdir(parents=True, exist_ok=True)
-                try:
-                    scrape_path.write_text(
-                        json.dumps(existing, ensure_ascii=False, indent=2),
-                        encoding="utf-8",
-                    )
-                except Exception:
-                    log.warning(
-                        "migrate scrape meta failed %s", entry_dir, exc_info=True
-                    )
-            prev_seeded = str(existing.get("seededAt") or "").strip()
-            if prev_seeded:
-                meta_seed["seededAt"] = prev_seeded
-            meta_seed["updatedAt"] = _now_iso()
             entry_dir.mkdir(parents=True, exist_ok=True)
-            meta_path.write_text(
-                json.dumps(meta_seed, ensure_ascii=False, separators=(",", ":")),
-                encoding="utf-8",
-            )
-            _ensure_cover_url_file(url_path, cover_url)
-            return "updated"
-        if isinstance(existing, dict) and _seed_unchanged(existing, meta_seed):
-            if cover_url and not url_path.is_file():
-                entry_dir.mkdir(parents=True, exist_ok=True)
-                _ensure_cover_url_file(url_path, cover_url)
-                return "updated"
-            return "skipped"
-        # 纯种子有变化：更新，保留首次 seededAt（绝不改 scrape.json）
+            try:
+                scrape_path.write_text(
+                    json.dumps(existing, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+            except Exception:
+                log.warning(
+                    "migrate scrape meta failed %s", entry_dir, exc_info=True
+                )
+
+        # 空壳索引不覆盖已有标题/封面（FC2 / FC2-PPV 同目录）
+        meta_seed = _merge_seed_preserve(existing, meta_seed)
         prev_seeded = str(existing.get("seededAt") or "").strip()
         if prev_seeded:
             meta_seed["seededAt"] = prev_seeded
+
+        if not scraped and _seed_unchanged(existing, meta_seed):
+            cover = str(meta_seed.get("coverUrl") or "")
+            if cover and not url_path.is_file():
+                entry_dir.mkdir(parents=True, exist_ok=True)
+                _ensure_cover_url_file(url_path, cover)
+                return "updated"
+            return "skipped"
+
         meta_seed["updatedAt"] = _now_iso()
         entry_dir.mkdir(parents=True, exist_ok=True)
         meta_path.write_text(
             json.dumps(meta_seed, ensure_ascii=False, separators=(",", ":")),
             encoding="utf-8",
         )
-        _ensure_cover_url_file(url_path, cover_url)
+        _ensure_cover_url_file(url_path, str(meta_seed.get("coverUrl") or ""))
         return "updated"
 
     # 新条目
@@ -332,7 +380,10 @@ def _norm_entry_code(raw: str) -> str:
         return s
 
 
-def _read_entry_code(entry_dir: Path) -> str:
+def _read_entry_code(entry_dir: Path, *, prefer_name: bool = False) -> str:
+    name = entry_dir.name.strip()
+    if prefer_name and _CODE_DIR_RE.fullmatch(name):
+        return _norm_entry_code(name)
     for fname in (INDEX_META_FILE, SCRAPE_META_FILE):
         p = entry_dir / fname
         if not p.is_file():
@@ -345,7 +396,6 @@ def _read_entry_code(entry_dir: Path) -> str:
             c = _norm_entry_code(str(data.get("code") or ""))
             if c:
                 return c
-    name = entry_dir.name.strip()
     if _CODE_DIR_RE.fullmatch(name):
         return _norm_entry_code(name)
     return ""
@@ -354,20 +404,21 @@ def _read_entry_code(entry_dir: Path) -> str:
 def _is_entry_dir(path: Path) -> bool:
     if not path.is_dir():
         return False
+    if _CODE_DIR_RE.fullmatch(path.name.strip()):
+        return True
     if (path / INDEX_META_FILE).is_file() or (path / SCRAPE_META_FILE).is_file():
         return True
-    return bool(_CODE_DIR_RE.fullmatch(path.name.strip()))
+    return False
 
 
-def _iter_library_entry_dirs(library: Path) -> list[Path]:
+def _iter_library_entry_dirs(library: Path):
     """遍历片库番号目录（区域/厂牌[/前缀]/番号），不做全库 rglob。"""
-    out: list[Path] = []
     if not library.is_dir():
-        return out
+        return
     try:
         regions = [p for p in library.iterdir() if p.is_dir()]
     except OSError:
-        return out
+        return
     for region in regions:
         if region.name in _SKIP_TOP_NAMES or region.name.startswith("."):
             continue
@@ -384,15 +435,14 @@ def _iter_library_entry_dirs(library: Path) -> list[Path]:
                 continue
             for child in children:
                 if _is_entry_dir(child):
-                    out.append(child)
+                    yield child
                     continue
                 try:
                     for code_dir in child.iterdir():
                         if code_dir.is_dir() and _is_entry_dir(code_dir):
-                            out.append(code_dir)
+                            yield code_dir
                 except OSError:
                     pass
-    return out
 
 
 def _rel_posix(library: Path, path: Path) -> str:
@@ -456,15 +506,25 @@ def add_fc2_keep_path(library: Path, rel_or_abs: str | Path) -> None:
             log.warning("write fc2 keep failed", exc_info=True)
 
 
-def is_fc2_keep_path(library: Path, entry: Path) -> bool:
+def _path_key(path: Path | str) -> str:
+    """稳定路径键：避免 Path.resolve() 对海量目录逐个 stat。"""
+    return os.path.normcase(os.path.abspath(str(path)))
+
+
+def is_fc2_keep_path(
+    library: Path,
+    entry: Path,
+    *,
+    keep: set[str] | None = None,
+) -> bool:
     rel = _rel_posix(library, entry)
     if not rel:
         return False
-    keep = load_fc2_keep(library)
-    if rel in keep:
+    keep_set = keep if keep is not None else load_fc2_keep(library)
+    if rel in keep_set:
         return True
     # 白名单命中任意前缀（作者夹整棵）
-    for k in keep:
+    for k in keep_set:
         if rel == k or rel.startswith(k.rstrip("/") + "/"):
             return True
     return False
@@ -474,16 +534,23 @@ def _expected_paths_and_codes(
     library: Path,
     naming: dict[str, Any],
     targets: list[dict[str, Any]],
-) -> tuple[set[str], set[Path]]:
-    """返回 (expected_codes, expected_dirs)。含 FC2，一律按索引规范路径。"""
+    *,
+    on_progress: Any | None = None,
+) -> tuple[set[str], set[str]]:
+    """返回 (expected_codes, expected_dir_keys)。含 FC2，一律按索引规范路径。"""
     codes: set[str] = set()
-    expected_dirs: set[Path] = set()
-    for t in targets:
-        code = _norm_entry_code(str(t.get("code") or ""))
+    expected_dirs: set[str] = set()
+    total = len(targets)
+    for i, t in enumerate(targets, 1):
+        rid = str(t.get("region") or "")
+        code, prefix = _canonicalize_seed_identity(
+            code=str(t.get("code") or ""),
+            prefix=t.get("prefix"),
+            region=rid,
+        )
         if not code:
             continue
         codes.add(code)
-        rid = str(t.get("region") or "")
         kind_id = scrape_naming.resolve_kind(region=rid, code=code)
         label = scrape_naming.KIND_LABELS.get(kind_id, "") or maker_fs.REGION_META.get(
             rid, {}
@@ -491,7 +558,7 @@ def _expected_paths_and_codes(
         maker = _normalize_fc2_maker(str(t.get("maker") or ""), rid)
         meta = {
             "code": code,
-            "prefix": t.get("prefix"),
+            "prefix": prefix,
             "maker": maker,
             "studio": maker,
             "region": rid,
@@ -502,13 +569,15 @@ def _expected_paths_and_codes(
                 naming,
                 code=code,
                 meta=meta,
-                target={**t, "maker": maker},
+                target={**t, "maker": maker, "prefix": prefix, "code": code},
                 category=str(label),
                 kind=kind_id,
             )
-            expected_dirs.add(d.resolve())
+            expected_dirs.add(_path_key(d))
         except Exception:
             pass
+        if on_progress and (i == 1 or i % 2048 == 0 or i >= total):
+            on_progress(i, total)
     return codes, expected_dirs
 
 
@@ -548,11 +617,22 @@ def prune_library_to_index(
     library: Path,
     naming: dict[str, Any],
     targets: list[dict[str, Any]],
+    *,
+    on_progress: Any | None = None,
 ) -> dict[str, int]:
     """与索引路径完全对齐；FC2 刮削白名单目录保留不删。"""
-    codes, expected_dirs = _expected_paths_and_codes(library, naming, targets)
+
+    def _build_prog(done: int, total: int) -> None:
+        if on_progress:
+            on_progress("build", done, total, 0, 0)
+
+    codes, expected_dirs = _expected_paths_and_codes(
+        library, naming, targets, on_progress=_build_prog
+    )
+    keep = load_fc2_keep(library)
     removed = 0
     kept = 0
+    scanned = 0
 
     def _rm(entry: Path) -> None:
         nonlocal removed
@@ -565,27 +645,138 @@ def prune_library_to_index(
             log.warning("prune remove %s failed: %s", entry, e)
 
     for entry in _iter_library_entry_dirs(library):
-        try:
-            resolved = entry.resolve()
-        except Exception:
-            continue
-        code = _read_entry_code(entry)
-        if not code:
-            continue
-        if resolved in expected_dirs:
+        scanned += 1
+        key = _path_key(entry)
+        if key in expected_dirs:
             kept += 1
-            continue
-        # 索引仍有此番号，且目录在刮削白名单（作者夹）→ 保留
-        if code in codes and is_fc2_keep_path(library, entry):
-            kept += 1
-            continue
-        _rm(entry)
+        else:
+            code = _read_entry_code(entry, prefer_name=True)
+            if not code:
+                if on_progress and scanned % 512 == 0:
+                    on_progress("scan", scanned, len(targets), kept, removed)
+                continue
+            # 索引仍有此番号，且目录在刮削白名单（作者夹）→ 保留
+            if code in codes and is_fc2_keep_path(library, entry, keep=keep):
+                kept += 1
+            else:
+                _rm(entry)
+        if on_progress and (scanned == 1 or scanned % 512 == 0):
+            on_progress("scan", scanned, len(targets), kept, removed)
 
-    return {"removed": removed, "kept": kept}
+    if on_progress:
+        on_progress("scan", scanned, len(targets), kept, removed)
+    return {"removed": removed, "kept": kept, "scanned": scanned}
 
 
 def _collect_targets(region: str | None = None) -> list[dict[str, Any]]:
-    return scrape_export.collect_targets(region=region or None)
+    """收集待物化目标。
+
+    collect_targets 已按 区|前缀|番号 去重，且落盘与索引一一对应；
+    rekey=False 跳过全库重算键，避免点击后干等十余秒才见进度。
+    include_fill=True：digit_pad 前缀按 fillFrom..fillTo 建空洞目录
+    （如 SONE-014 不在 covers 也会建空文件夹，与片商列表 999 一致）。
+    """
+    return scrape_export.collect_targets(
+        region=region or None,
+        rekey=False,
+        include_fill=True,
+    )
+
+
+def _dedupe_targets_by_entry_path(targets: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """同一落盘目录只保留信息最全的一条（保留供测试/特殊调用；热路径默认不用）。"""
+    naming = scrape_naming.fixed_naming()
+    library = _library_root()
+    best: dict[str, tuple[tuple[int, int, int, int], dict[str, Any]]] = {}
+    order: list[str] = []
+    for t in targets:
+        rid = str(t.get("region") or "")
+        code, prefix = _canonicalize_seed_identity(
+            code=str(t.get("code") or ""),
+            prefix=t.get("prefix"),
+            region=rid,
+        )
+        if not code:
+            continue
+        maker = _normalize_fc2_maker(str(t.get("maker") or ""), rid)
+        label = scrape_naming.KIND_LABELS.get(
+            scrape_naming.resolve_kind(region=rid, code=code), ""
+        ) or maker_fs.REGION_META.get(rid, {}).get("label") or rid
+        meta = {
+            "code": code,
+            "prefix": prefix,
+            "maker": maker,
+            "studio": maker,
+            "region": rid,
+            "title": t.get("forumTitle"),
+            "coverUrl": t.get("coverUrl"),
+            "actors": t.get("forumActors") if isinstance(t.get("forumActors"), list) else [],
+        }
+        try:
+            d = scrape_naming.resolve_entry_dir(
+                library,
+                naming,
+                code=code,
+                meta=meta,
+                target={**t, "maker": maker, "prefix": prefix, "code": code},
+                category=str(label),
+            )
+            key = _path_key(d)
+        except Exception:
+            key = f"{rid}|{prefix}|{code}|{maker}"
+        merged = {
+            **t,
+            "code": code,
+            "prefix": prefix,
+            "maker": maker,
+        }
+        score = _seed_richness(
+            {
+                "coverUrl": merged.get("coverUrl"),
+                "coverUrls": merged.get("coverUrls") or [],
+                "title": merged.get("forumTitle"),
+                "actors": merged.get("forumActors") or [],
+            }
+        )
+        prev = best.get(key)
+        if prev is None:
+            best[key] = (score, merged)
+            order.append(key)
+            continue
+        prev_score, prev_t = prev
+        if score > prev_score:
+            keep = _merge_target_richer(prev_t, merged)
+            best[key] = (
+                _seed_richness(
+                    {
+                        "coverUrl": keep.get("coverUrl"),
+                        "coverUrls": keep.get("coverUrls") or [],
+                        "title": keep.get("forumTitle"),
+                        "actors": keep.get("forumActors") or [],
+                    }
+                ),
+                keep,
+            )
+        else:
+            keep = _merge_target_richer(merged, prev_t)
+            best[key] = (prev_score, keep)
+    return [best[k][1] for k in order if k in best]
+
+
+def _merge_target_richer(base: dict[str, Any], rich: dict[str, Any]) -> dict[str, Any]:
+    """rich 优先非空字段，保留 base 其它键。"""
+    out = dict(base)
+    out.update({k: v for k, v in rich.items() if v not in (None, "", [], {})})
+    for k in ("coverUrl", "forumTitle"):
+        if not str(out.get(k) or "").strip() and str(base.get(k) or "").strip():
+            out[k] = base.get(k)
+    if not _norm_str_list(out.get("coverUrls")) and _norm_str_list(base.get("coverUrls")):
+        out["coverUrls"] = list(base.get("coverUrls") or [])
+    if not (
+        isinstance(out.get("forumActors"), list) and out.get("forumActors")
+    ) and isinstance(base.get("forumActors"), list):
+        out["forumActors"] = list(base.get("forumActors") or [])
+    return out
 
 
 def materialize_library(
@@ -598,6 +789,22 @@ def materialize_library(
         raise RuntimeError("本地片库同步正在进行中")
     try:
         region_key = (region or "").strip() or ""
+        # 立刻刷新状态，避免收集索引时 UI 长时间停在 queued / 0
+        _set_state(
+            running=True,
+            finishedAt="",
+            message="收集索引…",
+            region=region_key,
+            total=0,
+            done=0,
+            written=0,
+            skipped=0,
+            updated=0,
+            removed=0,
+            errors=0,
+            currentCode="",
+            workers=0,
+        )
         targets = _collect_targets(region_key or None)
         if not targets:
             raise ValueError("没有可同步的番号，请先增量/全量扫库生成本地索引")
@@ -627,7 +834,6 @@ def materialize_library(
 
         _set_state(
             running=True,
-            startedAt=_now_iso(),
             finishedAt="",
             message="同步中",
             region=region_key,
@@ -708,7 +914,26 @@ def materialize_library(
         )
         removed = 0
         try:
-            pruned = prune_library_to_index(library, naming, targets)
+
+            def _prune_prog(
+                phase: str, a: int, b: int, kept_n: int, removed_n: int
+            ) -> None:
+                if phase == "build":
+                    _set_state(
+                        message=f"清理准备 {a}/{b}",
+                        removed=removed_n,
+                        currentCode="",
+                    )
+                else:
+                    _set_state(
+                        message=f"清理扫描 {a} · 保留 {kept_n} · 删除 {removed_n}",
+                        removed=removed_n,
+                        currentCode="",
+                    )
+
+            pruned = prune_library_to_index(
+                library, naming, targets, on_progress=_prune_prog
+            )
             removed = int(pruned.get("removed") or 0)
         except Exception as e:
             log.warning("prune library failed: %s", e)
@@ -756,22 +981,68 @@ def fail_materialize(message: str = "failed") -> None:
     _set_state(running=False, finishedAt=_now_iso(), message=message or "failed")
 
 
-def claim_materialize(*, region: str | None = None) -> bool:
+def _parse_state_time(raw: str) -> datetime | None:
+    s = str(raw or "").strip()
+    if not s:
+        return None
+    try:
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def claim_materialize(*, region: str | None = None, force: bool = False) -> bool:
+    """申请开始物化。
+
+    真在跑（持有工作锁）→ 拒绝（force 也不能打断）。
+    running 标志僵死（工作锁空闲且超时）或 force+锁空闲 → 回收后领取。
+    """
+    lock_busy = not _mat_lock.acquire(blocking=False)
+    if not lock_busy:
+        _mat_lock.release()
+
     with _meta_lock:
-        if _mat_state.get("running"):
+        running = bool(_mat_state.get("running"))
+
+        # 工作锁占用 = 真在跑，不可抢
+        if lock_busy:
             return False
+
+        if running and not force:
+            msg = str(_mat_state.get("message") or "")
+            ts = _parse_state_time(
+                str(_mat_state.get("updatedAt") or _mat_state.get("startedAt") or "")
+            )
+            age = (
+                (datetime.now(timezone.utc) - ts).total_seconds()
+                if ts
+                else 10**9
+            )
+            # 收集阶段宽限 90s（线程已领取但尚未开写）
+            if msg in {"queued", "收集索引…"} and age < 90:
+                return False
+            # 其它状态锁却空闲：超过 2 分钟视为僵死
+            if msg not in {"queued", "收集索引…"} and age < 120:
+                return False
+
         _mat_state.update(
             {
                 "running": True,
                 "startedAt": _now_iso(),
                 "finishedAt": "",
-                "message": "queued",
+                "message": "收集索引…",
                 "region": (region or "").strip(),
                 "total": 0,
                 "done": 0,
                 "written": 0,
                 "skipped": 0,
                 "updated": 0,
+                "removed": 0,
                 "errors": 0,
                 "currentCode": "",
                 "workers": 0,
@@ -783,7 +1054,7 @@ def claim_materialize(*, region: str | None = None) -> bool:
 
 def abort_claim(message: str = "failed") -> None:
     with _meta_lock:
-        if _mat_state.get("message") == "queued":
+        if _mat_state.get("message") in {"queued", "收集索引…"}:
             _mat_state.update(
                 {
                     "running": False,
@@ -1388,13 +1659,20 @@ def _read_meta_summary(entry_dir: Path) -> dict[str, Any] | None:
             poster_name = cand
             break
     poster_local = ""
+    poster_rev = ""
     if poster_name:
+        poster_path = entry_dir / poster_name
         try:
             lib = _library_root().resolve()
             rel = entry_dir.resolve().relative_to(lib).as_posix()
             poster_local = f"{rel}/{poster_name}"
         except Exception:
             poster_local = ""
+        try:
+            st = poster_path.stat()
+            poster_rev = f"{int(st.st_mtime_ns)}-{int(st.st_size)}"
+        except OSError:
+            poster_rev = ""
 
     scraped = bool(scrape_path.is_file()) or bool(scrape_data)
 
@@ -1407,6 +1685,7 @@ def _read_meta_summary(entry_dir: Path) -> dict[str, Any] | None:
         "genres": tags,
         "posterFile": poster_name,
         "posterLocal": poster_local or None,
+        "posterRev": poster_rev or None,
         "directory": entry_dir.name,
         "scraped": scraped,
     }
@@ -1449,6 +1728,126 @@ def _fc2_codes_outside_uncategorized(fc2_root: Path, prefix: str) -> set[str]:
     return out
 
 
+def _code_sort_key(it: dict[str, Any]) -> tuple:
+    c = str(it.get("code") or "")
+    m = re.search(r"(\d+)(?:\D*)$", c)
+    n = int(m.group(1)) if m else 0
+    return (-n, c)
+
+
+def _dir_name_sort_key(name: str) -> tuple:
+    c = _norm_entry_code(name) or str(name).strip().upper()
+    m = re.search(r"(\d+)(?:\D*)$", c)
+    n = int(m.group(1)) if m else 0
+    return (-n, c)
+
+
+def _empty_code_summary(name: str) -> dict[str, Any]:
+    return {
+        "code": str(name).strip().upper(),
+        "coverUrl": None,
+        "coverUrls": [],
+        "forumTitle": None,
+        "forumActors": None,
+        "genres": None,
+        "posterLocal": None,
+        "posterRev": None,
+        "scraped": False,
+    }
+
+
+def _summary_for_entry(entry_dir: Path, name: str) -> dict[str, Any]:
+    summary = _read_meta_summary(entry_dir)
+    if not summary:
+        return _empty_code_summary(name)
+    return summary
+
+
+def _entry_looks_listable(entry_dir: Path) -> bool:
+    """有封面文件 / 封面.url / 元数据里的封面或标题女优 → 可展示；否则空壳跳过。"""
+    code = entry_dir.name
+    for cand in (
+        "poster.jpg",
+        "poster.jpeg",
+        "poster.png",
+        "poster.webp",
+        f"{code}-poster.jpg",
+        COVER_URL_NAME,
+    ):
+        try:
+            if (entry_dir / cand).is_file():
+                return True
+        except OSError:
+            pass
+    for fname in (SCRAPE_META_FILE, INDEX_META_FILE):
+        data = _read_json_dict(entry_dir / fname)
+        if not data:
+            continue
+        if str(data.get("coverUrl") or data.get("poster") or "").strip():
+            return True
+        urls = data.get("coverUrls")
+        if isinstance(urls, list) and any(str(u or "").strip() for u in urls):
+            return True
+        if str(data.get("titleZh") or data.get("title") or "").strip():
+            return True
+        actors = data.get("actors") or data.get("actress") or []
+        if isinstance(actors, list) and any(str(a or "").strip() for a in actors):
+            return True
+    return False
+
+
+def _summary_is_listable(summary: dict[str, Any] | None) -> bool:
+    if not isinstance(summary, dict):
+        return False
+    if str(summary.get("posterLocal") or "").strip():
+        return True
+    if str(summary.get("coverUrl") or "").strip():
+        return True
+    urls = summary.get("coverUrls")
+    if isinstance(urls, list) and any(str(u or "").strip() for u in urls):
+        return True
+    if str(summary.get("forumTitle") or "").strip():
+        return True
+    actors = summary.get("forumActors")
+    if isinstance(actors, list) and any(str(a or "").strip() for a in actors):
+        return True
+    return False
+
+
+# 前缀可展示目录名短缓存（已剔除空壳）
+_browse_names_cache: dict[str, tuple[float, int, list[str]]] = {}
+_browse_names_lock = threading.Lock()
+
+
+def _list_prefix_entry_names(root: Path) -> list[str]:
+    """列出前缀下可展示的子目录（跳过无封面/无标题的空壳）。"""
+    key = str(root.resolve())
+    try:
+        st = root.stat()
+        sig = float(st.st_mtime)
+        nlink = int(getattr(st, "st_nlink", 0) or 0)
+    except OSError:
+        raw = _safe_list_dirs(root)
+        return [n for n in raw if _entry_looks_listable(root / n)]
+    with _browse_names_lock:
+        hit = _browse_names_cache.get(key)
+        if hit and hit[0] == sig and hit[1] == nlink:
+            return list(hit[2])
+    raw = _safe_list_dirs(root)
+    if raw:
+        with ThreadPoolExecutor(max_workers=min(8, len(raw))) as pool:
+            flags = list(pool.map(lambda n: (n, _entry_looks_listable(root / n)), raw))
+        names = [n for n, ok in flags if ok]
+    else:
+        names = []
+    with _browse_names_lock:
+        _browse_names_cache[key] = (sig, nlink, list(names))
+        if len(_browse_names_cache) > 64:
+            for k in list(_browse_names_cache.keys())[:16]:
+                _browse_names_cache.pop(k, None)
+    return names
+
+
 def browse_codes(
     *,
     region: str,
@@ -1479,42 +1878,108 @@ def browse_codes(
             "source": "library",
         }
     needle = str(q or "").strip().upper()
-    items: list[dict[str, Any]] = []
     # 未分类：同番号若已有作者目录则跳过（片商优先读非未分类）
     skip_codes: set[str] = set()
     if rid == "fc2" and st == "未分类":
         skip_codes = _fc2_codes_outside_uncategorized(root.parent.parent, pref)
-    for name in _safe_list_dirs(root):
-        summary = _read_meta_summary(root / name)
-        if not summary:
-            # 空壳目录也列出番号名
-            summary = {
-                "code": str(name).strip().upper(),
-                "coverUrl": None,
-                "coverUrls": [],
-                "forumTitle": None,
-                "forumActors": None,
-                "genres": None,
-                "posterLocal": None,
-                "scraped": False,
-            }
-        code_u = _norm_entry_code(str(summary.get("code") or name))
-        if code_u and code_u in skip_codes:
-            continue
-        if needle:
+
+    names = _list_prefix_entry_names(root)
+    if skip_codes:
+        names = [
+            n
+            for n in names
+            if (_norm_entry_code(n) or n.strip().upper()) not in skip_codes
+        ]
+
+    off = max(0, int(offset or 0))
+    lim = max(1, min(500, int(limit or 100)))
+
+    if not needle:
+        # 快路径：只按目录名排序分页，再读当前页摘要（勿对整前缀扫 meta/scrape）
+        names_sorted = sorted(names, key=_dir_name_sort_key)
+        total = len(names_sorted)
+        page_names = names_sorted[off : off + lim]
+        items: list[dict[str, Any]] = []
+        if page_names:
+            with ThreadPoolExecutor(max_workers=min(8, len(page_names))) as pool:
+                raw_items = list(
+                    pool.map(
+                        lambda n: _summary_for_entry(root / n, n),
+                        page_names,
+                    )
+                )
+            items = [s for s in raw_items if _summary_is_listable(s)]
+        return {
+            "prefix": pref,
+            "region": rid,
+            "studio": st,
+            "total": total,
+            "offset": off,
+            "limit": lim,
+            "items": items,
+            "updatedAt": _now_iso(),
+            "source": "library",
+        }
+
+    # 有搜索词：番号名先过滤；未命中的再读摘要做标题/女优匹配
+    matched_names: list[str] = []
+    maybe_title: list[str] = []
+    for name in names:
+        code_u = _norm_entry_code(name) or name.strip().upper()
+        if needle in code_u:
+            matched_names.append(name)
+        else:
+            maybe_title.append(name)
+
+    extra: list[tuple[str, dict[str, Any]]] = []
+    if maybe_title:
+        # 限制额外扫描量，避免搜索拖死大前缀
+        scan = maybe_title[:2000]
+
+        def _match_one(n: str) -> tuple[str, dict[str, Any]] | None:
+            summary = _summary_for_entry(root / n, n)
+            if not _summary_is_listable(summary):
+                return None
             blob = (
                 f"{summary.get('code')} {summary.get('forumTitle') or ''} "
                 f"{' '.join(summary.get('forumActors') or [])} "
                 f"{' '.join(summary.get('genres') or [])}"
             )
-            if needle not in blob.upper():
-                continue
-        items.append(summary)
+            if needle in blob.upper():
+                return (n, summary)
+            return None
 
-    items.sort(key=_code_sort_key)
-    total = len(items)
-    off = max(0, int(offset or 0))
-    lim = max(1, min(500, int(limit or 100)))
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            for hit in pool.map(_match_one, scan):
+                if hit:
+                    extra.append(hit)
+
+    # 去重保序后按番号排序分页
+    seen: set[str] = set()
+    ordered_names: list[str] = []
+    for n in [*matched_names, *[n for n, _ in extra]]:
+        if n in seen:
+            continue
+        seen.add(n)
+        ordered_names.append(n)
+    ordered_names.sort(key=_dir_name_sort_key)
+    total = len(ordered_names)
+    page_names = ordered_names[off : off + lim]
+    by_name = {n: s for n, s in extra}
+    items = []
+    need_read = [n for n in page_names if n not in by_name]
+    if need_read:
+        with ThreadPoolExecutor(max_workers=min(8, len(need_read))) as pool:
+            for n, s in zip(
+                need_read,
+                pool.map(lambda x: _summary_for_entry(root / x, x), need_read),
+            ):
+                by_name[n] = s
+    for n in page_names:
+        s = by_name.get(n) or _empty_code_summary(n)
+        if _summary_is_listable(s):
+            items.append(s)
+
     return {
         "prefix": pref,
         "region": rid,
@@ -1522,17 +1987,10 @@ def browse_codes(
         "total": total,
         "offset": off,
         "limit": lim,
-        "items": items[off : off + lim],
+        "items": items,
         "updatedAt": _now_iso(),
         "source": "library",
     }
-
-
-def _code_sort_key(it: dict[str, Any]) -> tuple:
-    c = str(it.get("code") or "")
-    m = re.search(r"(\d+)(?:\D*)$", c)
-    n = int(m.group(1)) if m else 0
-    return (-n, c)
 
 
 # —— 分区标签 / 系列分类落库（仅 scrape.json；增量复用）——
@@ -2102,7 +2560,8 @@ def browse_facet_codes(
             "studio": studio,
             "prefix": pref,
         }
-        items.append(summary)
+        if _summary_is_listable(summary):
+            items.append(summary)
 
     return {
         "region": rid,

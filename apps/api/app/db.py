@@ -115,4 +115,14 @@ def init_db() -> None:
             "CREATE INDEX IF NOT EXISTS idx_scrape_codes_task_bucket "
             "ON scrape_export_codes(task_id, bucket)"
         )
+        # 磁力无 dn 时按 infohash 解析出的文件树（避免每次外网拉 .torrent）
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS torrent_file_cache (
+              info_hash TEXT PRIMARY KEY,
+              files_json TEXT NOT NULL,
+              updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
         conn.commit()

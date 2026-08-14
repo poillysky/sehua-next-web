@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from datetime import datetime
 from typing import Any
@@ -13,9 +14,12 @@ from .pack_bleed import (
     is_public_download_link,
     links_for_resource_hash,
     parse_ed2k_link,
+    parse_magnet_link,
     pick_previews_for_resource,
     format_size_gb,
 )
+
+log = logging.getLogger(__name__)
 
 PUBLIC_RESOURCE_FILTER = """
   AND (
@@ -154,7 +158,119 @@ def parse_ed2k(link: str) -> dict[str, Any] | None:
     return {"filename": name, "size": int(m.group(2)), "hash": m.group(3).upper()}
 
 
-def format_resource(row: dict[str, Any]) -> dict[str, Any]:
+_EXT_HINT_RE = re.compile(
+    r"(?:^|[.\s\[\(（_/|=-])(mp4|mkv|avi|wmv|rmvb|m2ts|ts|mov|flv|mpeg|mpg|m4v|webm|rm|zip|rar|7z|iso)(?:$|[.\s\]\)）_/|=-])",
+    re.I,
+)
+
+
+def _guess_ext(*blobs: str) -> str:
+    for blob in blobs:
+        if not blob:
+            continue
+        # 路径真后缀
+        base = str(blob).replace("\\", "/").rsplit("/", 1)[-1]
+        m = re.search(r"\.([a-z0-9]{2,5})\s*$", base, re.I)
+        if m and " " not in m.group(1) and len(m.group(1)) <= 5:
+            return m.group(1).lower()
+        h = _EXT_HINT_RE.search(str(blob))
+        if h:
+            return h.group(1).lower()
+    return ""
+
+
+def _files_from_magnet_via_bitmagnet(info_hash: str) -> list[dict[str, Any]]:
+    """色花磁力只有 btih 时，用 Bitmagnet 库补全真实文件列表。"""
+    h = (info_hash or "").strip()
+    if len(h) != 40:
+        return []
+    try:
+        from . import bitmagnet_client, bitmagnet_pg
+
+        if not bitmagnet_pg.is_configured():
+            return []
+        item = bitmagnet_client.get(h.lower())
+        out = []
+        for f in item.get("files") or []:
+            if not isinstance(f, dict):
+                continue
+            path = str(f.get("path") or "").strip()
+            if not path:
+                continue
+            out.append(
+                {
+                    "index": int(f.get("index") or len(out) + 1),
+                    "path": path,
+                    "size": int(f.get("size") or 0),
+                    "extension": str(f.get("extension") or "").lower().lstrip("."),
+                }
+            )
+        return out
+    except Exception as e:
+        log.debug("bitmagnet enrich skip %s: %s", h[:8], e)
+        return []
+
+
+def _enrich_magnet_files(info_hash: str) -> list[dict[str, Any]]:
+    """Bitmagnet → 公开 .torrent 缓存，补全无 dn 磁力的真实文件树。"""
+    files = _files_from_magnet_via_bitmagnet(info_hash)
+    if files:
+        return files
+    try:
+        from . import torrent_meta
+
+        return torrent_meta.files_from_infohash(info_hash)
+    except Exception as e:
+        log.debug("torrent meta enrich skip %s: %s", (info_hash or "")[:8], e)
+        return []
+
+
+def _magnet_hashes_from_row(row: dict[str, Any]) -> list[str]:
+    hash_ = str(row.get("hash") or "").upper()
+    raw_link = (row.get("ed2k_link") or "").strip()
+    links = links_for_resource_hash(hash_, row.get("ed2k_links"), raw_link)
+    out: list[str] = []
+    for link in links:
+        if parse_ed2k(link):
+            continue
+        m = parse_magnet_link(link)
+        if m and m.get("hash"):
+            out.append(str(m["hash"]))
+    return out
+
+
+def format_resources(
+    rows: list[dict[str, Any]],
+    *,
+    prefetch_torrents: bool = True,
+) -> list[dict[str, Any]]:
+    """列表批量 format；可选并行预热无 dn 磁力的 torrent 元数据。
+
+    搜索列表路径请传 prefetch_torrents=False，避免慢网下卡住首屏。
+    """
+    if not rows:
+        return []
+    if prefetch_torrents:
+        hashes: list[str] = []
+        for row in rows:
+            hashes.extend(_magnet_hashes_from_row(row))
+        if hashes:
+            try:
+                from . import torrent_meta
+
+                torrent_meta.prefetch_infohashes(hashes)
+            except Exception as e:
+                log.debug("torrent prefetch skip: %s", e)
+    return [
+        format_resource(r, enrich_magnets=prefetch_torrents) for r in rows
+    ]
+
+
+def format_resource(
+    row: dict[str, Any],
+    *,
+    enrich_magnets: bool = True,
+) -> dict[str, Any]:
     raw_title = (row.get("title") or "").strip() or None
     raw_desc = (row.get("description") or "").strip() or None
     raw_link = (row.get("ed2k_link") or "").strip()
@@ -184,16 +300,85 @@ def format_resource(row: dict[str, Any]) -> dict[str, Any]:
         or (raw_link if is_stub else "")
     )
 
-    files = []
+    files: list[dict[str, Any]] = []
+    magnet_hashes: list[str] = []
     for i, link in enumerate(ed2k_links):
         parsed = parse_ed2k(link)
-        path = parsed["filename"] if parsed else filename
-        size = int(parsed["size"] if parsed else (row.get("size") or 0) or 0)
-        ext = row.get("extension") or (path.rsplit(".", 1)[-1] if "." in path else "")
-        files.append({"index": i + 1, "path": path, "size": size, "extension": ext})
+        magnet = None if parsed else parse_magnet_link(link)
+        if magnet and magnet.get("hash"):
+            magnet_hashes.append(str(magnet["hash"]))
+
+        if parsed:
+            path = parsed["filename"]
+            size = int(parsed["size"] or 0)
+        elif magnet:
+            # 仅用磁力 dn=；没有 dn 时不要把帖子标题当成种子文件
+            path = str(magnet.get("filename") or "").strip()
+            try:
+                size = int(magnet.get("size") or row.get("size") or 0)
+            except Exception:
+                size = int(row.get("size") or 0)
+            if not path:
+                # 占位等 enrich；无 path 的条目稍后丢掉
+                files.append(
+                    {
+                        "index": i + 1,
+                        "path": "",
+                        "size": size,
+                        "extension": "",
+                        "_magnet_pending": True,
+                    }
+                )
+                continue
+        else:
+            path = filename or raw_title or ""
+            try:
+                size = int(float(row.get("size") or 0))
+            except Exception:
+                size = 0
+
+        ext = str(row.get("extension") or "").strip().lstrip(".").lower()
+        if ext and (" " in ext or len(ext) > 8):
+            ext = ""
+        if not ext:
+            ext = _guess_ext(path, filename, raw_title or "", raw_desc or "")
+        files.append(
+            {
+                "index": i + 1,
+                "path": path,
+                "size": size,
+                "extension": ext,
+            }
+        )
+
+    # 磁力无 dn / 无后缀：Bitmagnet → 公开 torrent 缓存补全（详情再开；列表默认关）
+    need_enrich = (not files) or any(
+        f.get("_magnet_pending")
+        or (not f.get("extension"))
+        or (f.get("path") in ((raw_title or ""), (filename or "")))
+        for f in files
+    )
+    if enrich_magnets and need_enrich and magnet_hashes:
+        for mh in magnet_hashes:
+            enriched = _enrich_magnet_files(mh)
+            if enriched:
+                files = enriched
+                break
+
+    files = [
+        {k: v for k, v in f.items() if not str(k).startswith("_")}
+        for f in files
+        if str(f.get("path") or "").strip()
+    ]
 
     try:
-        display_size = int(float(row.get("size") or (files[0]["size"] if files else 0)))
+        display_size = int(
+            float(
+                row.get("size")
+                or max((int(f.get("size") or 0) for f in files), default=0)
+                or 0
+            )
+        )
     except Exception:
         display_size = 0
 
@@ -247,8 +432,8 @@ def format_resource(row: dict[str, Any]) -> dict[str, Any]:
         "size": display_size,
         "ed2k_link": primary,
         "link_kind": link_kind_of(primary),
-        "single_file": len(ed2k_links) <= 1,
-        "files_count": len(ed2k_links),
+        "single_file": (len(files) <= 1) if files else (len(ed2k_links) <= 1),
+        "files_count": len(files) if files else len(ed2k_links),
         "files": files,
         "created_at": to_epoch_seconds(row.get("created_at")),
         "updated_at": to_epoch_seconds(row.get("updated_at")),

@@ -337,19 +337,25 @@ function phaseBadge(detail: ScrapeExportDetail | null | undefined, running: bool
   const phaseLabel =
     phase === "scrape"
       ? "刮削中"
-      : phase === "skipped"
-        ? "已跳过"
-        : phase === "done" || phase === "write"
-          ? "已写入"
-          : running
-            ? "进行中"
-            : "完成";
+      : phase === "empty"
+        ? "空号"
+        : phase === "skipped"
+          ? "空号"
+          : phase === "failed"
+            ? "失败"
+            : phase === "done" || phase === "write"
+              ? "已写入"
+              : running
+                ? "进行中"
+                : "完成";
   const phaseTone =
-    phase === "skipped"
+    phase === "empty" || phase === "skipped"
       ? "idle"
-      : running || phase === "scrape"
-        ? "run"
-        : "ok";
+      : phase === "failed"
+        ? "err"
+        : running || phase === "scrape"
+          ? "run"
+          : "ok";
   return { phaseLabel, phaseTone };
 }
 
@@ -650,6 +656,7 @@ export function ScrapeProgressSummary({
           100,
           Math.round(
             (((progress.done || 0) +
+              (progress.empty || 0) +
               (progress.skipped || 0) +
               (progress.failed || 0)) /
               progress.total) *
@@ -658,7 +665,10 @@ export function ScrapeProgressSummary({
         )
       : 0;
   const processed =
-    (progress?.done || 0) + (progress?.skipped || 0) + (progress?.failed || 0);
+    (progress?.done || 0) +
+    (progress?.empty || 0) +
+    (progress?.skipped || 0) +
+    (progress?.failed || 0);
 
   return (
     <div className="scrape-pane-card scrape-prog-card">
@@ -708,8 +718,8 @@ export function ScrapeProgressSummary({
         {(
           [
             ["成功", progress?.done ?? 0, "ok"],
-            ["跳过", progress?.skipped ?? 0, "mute"],
-            ["失败", progress?.failed ?? 0, "err"],
+            ["空号", progress?.empty ?? 0, "mute"],
+            ["数据不全", progress?.failed ?? 0, "err"],
             ["合计", progress?.total ?? 0, "total"],
           ] as const
         ).map(([label, n, tone]) => (

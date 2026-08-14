@@ -11,6 +11,11 @@
       "dsn": "",
       "note": "独立资源库；在 app.local.json 或设置页填写局域网 DSN"
     },
+    "bitmagnet_db": {
+      "enabled": false,
+      "dsn": "",
+      "note": "Bitmagnet 独立 Postgres；与色花资源库分开配置"
+    },
     "forum.sehuatang": {
       "regionByKey": {
         "95:716": "other",

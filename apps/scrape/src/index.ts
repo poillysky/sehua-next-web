@@ -499,25 +499,65 @@ app.post("/api/scrape", async (req, res) => {
     res.status(400).json({ ok: false, message: "code required" });
     return;
   }
+  const deadlineMs = Math.max(
+    10000,
+    Math.min(
+      120000,
+      Number(
+        (body as { deadlineMs?: number }).deadlineMs
+          || process.env.SCRAPE_ITEM_DEADLINE_MS
+          || 35000,
+      ) || 35000,
+    ),
+  );
   try {
     const run = queueForChannel(body.channel);
-    const meta = await run(() =>
-      scrapeOne(dirs, code, {
-        preferCoverUrl: body.preferCoverUrl,
-        preferTitle: body.preferTitle,
-        preferActors: body.preferActors,
-        preferLocal: body.preferLocal,
-        force: Boolean(body.force),
-        kind: body.kind,
-        region: body.region,
-        metaSources: body.metaSources,
-        coverSources: body.coverSources,
-        fieldPriority: body.fieldPriority,
-        coverDownloadStrategy: body.coverDownloadStrategy,
-        posterCrop: body.posterCrop,
-        channel: body.channel,
-      }),
-    );
+    const meta = await run(async () => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const result = await Promise.race([
+          scrapeOne(dirs, code, {
+            preferCoverUrl: body.preferCoverUrl,
+            preferTitle: body.preferTitle,
+            preferActors: body.preferActors,
+            preferLocal: body.preferLocal,
+            force: Boolean(body.force),
+            kind: body.kind,
+            region: body.region,
+            metaSources: body.metaSources,
+            coverSources: body.coverSources,
+            fieldPriority: body.fieldPriority,
+            coverDownloadStrategy: body.coverDownloadStrategy,
+            posterCrop: body.posterCrop,
+            channel: body.channel,
+          }),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(
+              () => reject(new Error("scrape_deadline")),
+              deadlineMs,
+            );
+          }),
+        ]);
+        return result;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (/scrape_deadline/i.test(msg)) {
+          return {
+            code,
+            title: "",
+            source: "none",
+            ok: false,
+            message: "scrape_deadline",
+            sourcesTried: [],
+            sourceRuns: [],
+            scrapedAt: new Date().toISOString(),
+          };
+        }
+        throw e;
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    });
     res.json({ ok: meta.ok, data: meta, message: meta.message });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

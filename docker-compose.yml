@@ -1,17 +1,21 @@
-# NAS 部署 — 独立服务（资源库 Postgres 另机/另容器）
+# NAS 部署 — 单镜像（web+api+scrape），两套独立 Postgres（均不进本 compose）
 #
 # 目录:
 #   /vol1/1000/Docker/sehua-next-web/
 #     docker-compose.yml
-#     data/           # SQLite / library / maker-fs
-#     scrape-data/    # 刮削封面与 meta
-#     config/         # app.json（默认含独立资源库 DSN）
+#     data/
+#     scrape-data/
+#     config/
+#       app.json              # 仓库公开默认（可从本仓库拷）
+#       app.local.json        # 本机敏感项：两套 DSN / 代理 / 密钥（勿提交）
 #
-# 资源库：与本服务无关，用局域网可达地址（勿用 127.0.0.1 / 勿用容器名 postgres）。
-# 默认见 config/app.json → settings.resource_db
-#   例: postgresql://postgres:postgres@192.168.2.38:5435/ed2k
+# 两套库（局域网直连，勿用 127.0.0.1 / 勿用容器名）:
+#   色花资源库   resource_db     例 192.168.2.38:5435/ed2k
+#   Bitmagnet    bitmagnet_db    例 192.168.2.38:5438/bitmagnet
+# 也可启动后在 设置 → 资源数据库 / Bitmagnet 库 填写。
 #
 # 启动:
+#   mkdir -p /vol1/1000/Docker/sehua-next-web/{data,scrape-data,config}
 #   cd /vol1/1000/Docker/sehua-next-web
 #   docker compose pull
 #   docker compose up -d
@@ -21,7 +25,7 @@ name: sehua-next-web
 
 services:
   app:
-    image: poillysky/sehua-next-web:1.0.1
+    image: poillysky/sehua-next-web:latest
     container_name: sehua-next-web
     restart: always
     ports:
@@ -39,6 +43,5 @@ services:
     dns:
       - 223.5.5.5
       - 8.8.8.8
-    # 独立网桥即可；经宿主机/局域网访问外部 Postgres（如 192.168.2.38:5435）
     extra_hosts:
       - "host.docker.internal:host-gateway"

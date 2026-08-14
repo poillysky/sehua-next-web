@@ -239,6 +239,7 @@ def _empty_code_lists() -> dict[str, list[str]]:
         "doneCodes": [],
         "skippedCodes": [],
         "failedCodes": [],
+        "emptyCodes": [],
         "activeCodes": [],
         "activeFastCodes": [],
         "activeSlowCodes": [],
@@ -259,13 +260,13 @@ def _append_result_code(bucket: str, code: str) -> None:
 
 
 def _code_already_counted(code: str) -> bool:
-    """调用方须已持有 _meta_lock。同一番号只计入成功/跳过/失败一次。"""
+    """调用方须已持有 _meta_lock。同一番号只计入成功/空号/失败/跳过一次。"""
     c = str(code or "").strip()
     if not c:
         return True
     if c in _result_seen:
         return True
-    for bucket in ("doneCodes", "skippedCodes", "failedCodes"):
+    for bucket in ("doneCodes", "emptyCodes", "failedCodes", "skippedCodes"):
         if c in list(_state.get(bucket) or []):
             _result_seen.add(c)
             return True
@@ -275,42 +276,74 @@ def _code_already_counted(code: str) -> bool:
 def _reconcile_result_counts_locked() -> None:
     """用去重列表回写计数；若仍超过合计则钳制成功数。调用方须持锁。"""
     done_n = len(list(_state.get("doneCodes") or []))
+    empty_n = len(list(_state.get("emptyCodes") or []))
     skip_n = len(list(_state.get("skippedCodes") or []))
     fail_n = len(list(_state.get("failedCodes") or []))
     # 计数不得小于列表长度（防止历史虚高被列表裁剪后仍显示更大）
     done = max(done_n, 0)
+    empty = max(empty_n, 0)
     skipped = max(skip_n, 0)
     failed = max(fail_n, 0)
     # 若内存计数被旧逻辑抬高，以唯一列表为准
     if int(_state.get("done") or 0) != done:
         _state["done"] = done
+    if int(_state.get("empty") or 0) != empty:
+        _state["empty"] = empty
     if int(_state.get("skipped") or 0) != skipped:
         _state["skipped"] = skipped
     if int(_state.get("failed") or 0) != failed:
         _state["failed"] = failed
     total = int(_state.get("total") or 0)
-    processed = done + skipped + failed
+    processed = done + empty + skipped + failed
     if total > 0 and processed > total:
-        room = max(0, total - skipped - failed)
+        room = max(0, total - empty - skipped - failed)
         _state["done"] = min(done, room)
+
+
+def _remove_from_result_buckets(code: str, *buckets: str) -> None:
+    """调用方须已持有 _meta_lock。从若干结果桶移除番号并同步计数键。"""
+    c = str(code or "").strip()
+    if not c:
+        return
+    count_key = {
+        "doneCodes": "done",
+        "emptyCodes": "empty",
+        "skippedCodes": "skipped",
+        "failedCodes": "failed",
+    }
+    for bucket in buckets:
+        lst = list(_state.get(bucket) or [])
+        if c not in lst:
+            continue
+        _state[bucket] = [x for x in lst if x != c]
+        ck = count_key.get(bucket)
+        if ck:
+            _state[ck] = len(list(_state.get(bucket) or []))
 
 
 def _record_terminal_result(result: str, code: str) -> None:
     """调用方须已持有 _meta_lock。去重后累加计数，避免暂停重入导致成功>合计。
 
-    特例：先前误记为跳过的 not_found，本轮可升级为失败（从 skipped → failed）。
+    特例：先前误记为失败的 not_found 可迁到空号；
+    已刮成功的可从跳过/空号/失败升级为成功。
     """
     global _result_seen
     c = str(code or "").strip()
     if not c:
         return
     r = str(result or "done").strip().lower()
+    if r in {"skip", "skipped"}:
+        # 兼容旧路径：已存在完整条目记成功，不再进「跳过」
+        r = "done"
+    if r in {"not_found", "notfound"}:
+        r = "empty"
     tid = str(_state.get("taskId") or "").strip()
     if r == "failed":
-        skip_lst = list(_state.get("skippedCodes") or [])
-        if c in skip_lst:
-            _state["skippedCodes"] = [x for x in skip_lst if x != c]
-            _state["skipped"] = len(list(_state.get("skippedCodes") or []))
+        in_soft = c in list(_state.get("skippedCodes") or []) or c in list(
+            _state.get("emptyCodes") or []
+        )
+        if in_soft:
+            _remove_from_result_buckets(c, "skippedCodes", "emptyCodes")
             fail_lst = list(_state.get("failedCodes") or [])
             if c not in fail_lst:
                 _append_result_code("failedCodes", c)
@@ -320,13 +353,44 @@ def _record_terminal_result(result: str, code: str) -> None:
             if tid:
                 scrape_export_log_store.move_result_code(tid, c, to_bucket="failed")
             return
+    if r == "empty":
+        # 旧任务把全源无详情记成失败 → 迁到空号
+        if c in list(_state.get("failedCodes") or []) or c in list(
+            _state.get("skippedCodes") or []
+        ):
+            _remove_from_result_buckets(c, "failedCodes", "skippedCodes")
+            if c not in list(_state.get("emptyCodes") or []):
+                _append_result_code("emptyCodes", c)
+            _state["empty"] = len(list(_state.get("emptyCodes") or []))
+            _result_seen.add(c)
+            _reconcile_result_counts_locked()
+            if tid:
+                scrape_export_log_store.move_result_code(tid, c, to_bucket="empty")
+            return
+    if r == "done":
+        in_soft = (
+            c in list(_state.get("skippedCodes") or [])
+            or c in list(_state.get("emptyCodes") or [])
+            or c in list(_state.get("failedCodes") or [])
+        )
+        if in_soft and c not in list(_state.get("doneCodes") or []):
+            _remove_from_result_buckets(
+                c, "skippedCodes", "emptyCodes", "failedCodes"
+            )
+            _append_result_code("doneCodes", c)
+            _state["done"] = len(list(_state.get("doneCodes") or []))
+            _result_seen.add(c)
+            _reconcile_result_counts_locked()
+            if tid:
+                scrape_export_log_store.move_result_code(tid, c, to_bucket="done")
+            return
     if _code_already_counted(c):
         return
     _result_seen.add(c)
-    if r == "skipped":
-        _append_result_code("skippedCodes", c)
-        _state["skipped"] = len(list(_state.get("skippedCodes") or []))
-        bucket = "skipped"
+    if r == "empty":
+        _append_result_code("emptyCodes", c)
+        _state["empty"] = len(list(_state.get("emptyCodes") or []))
+        bucket = "empty"
     elif r == "failed":
         _append_result_code("failedCodes", c)
         _state["failed"] = len(list(_state.get("failedCodes") or []))
@@ -387,10 +451,12 @@ _state: dict[str, Any] = {
     "done": 0,
     "failed": 0,
     "skipped": 0,
+    "empty": 0,
     "active": 0,
     "doneCodes": [],
     "skippedCodes": [],
     "failedCodes": [],
+    "emptyCodes": [],
     "activeCodes": [],
     "activeFastCodes": [],
     "activeSlowCodes": [],
@@ -422,6 +488,8 @@ _control: dict[str, bool] = {
     # 暂停时立即打断进行中的 HTTP，worker 回队等待继续
     "pause_abort": False,
 }
+# 重置任务后：丢弃 worker 收尾 / persist_state 对任务卡的 max 合并写回
+_discard_finish_persist_task_id = ""
 
 # 进行中的刮削 HTTP 客户端，暂停/取消时 close 以立刻打断
 _http_clients: set[Any] = set()
@@ -674,18 +742,22 @@ def _reconcile_stuck_export_state(*, persist: bool = False) -> None:
 
 
 def _export_boot_stuck() -> bool:
-    """building/queued 阶段长时间无 total/active，或 worker 已消失。"""
+    """building/queued 长时间未进入 scraping，或 worker 已消失。"""
     with _meta_lock:
         if not _state.get("running"):
             return False
         msg = str(_state.get("message") or "")
-        total = int(_state.get("total") or 0)
-        active = int(_state.get("active") or 0)
-        if total > 0 or active > 0:
-            return False
-        if msg not in ("building", "queued", "paused"):
+        if msg not in ("building", "queued"):
             return False
         if not _export_worker_alive():
+            return True
+        active = int(_state.get("active") or 0)
+        # 已有 total 仍可能卡在预跳过；active=0 且久无进度视为卡住
+        if (
+            active <= 0
+            and _last_progress_mono > 0
+            and (time.monotonic() - _last_progress_mono) > 45.0
+        ):
             return True
         started = str(_state.get("startedAt") or "").strip()
         if not started:
@@ -695,7 +767,8 @@ def _export_boot_stuck() -> bool:
             age = (datetime.now(timezone.utc) - dt).total_seconds()
         except Exception:
             return False
-        return age > 20.0
+        # building 超过 90s 仍无人在刮
+        return age > 90.0 and active <= 0
 
 
 def _force_unstick_export(*, wait_dead: float = 5.0) -> bool:
@@ -858,10 +931,12 @@ def _snapshot_state() -> dict[str, Any]:
             "done": int(_state.get("done") or 0),
             "failed": int(_state.get("failed") or 0),
             "skipped": int(_state.get("skipped") or 0),
+            "empty": int(_state.get("empty") or 0),
             "active": int(_state.get("active") or 0),
             "doneCodes": list(_state.get("doneCodes") or []),
             "skippedCodes": list(_state.get("skippedCodes") or []),
             "failedCodes": list(_state.get("failedCodes") or []),
+            "emptyCodes": list(_state.get("emptyCodes") or []),
             "activeCodes": list(_state.get("activeCodes") or []),
             "activeFastCodes": list(_state.get("activeFastCodes") or []),
             "activeSlowCodes": list(_state.get("activeSlowCodes") or []),
@@ -892,7 +967,7 @@ def _snapshot_state() -> dict[str, Any]:
 def _checkpoint_finished_codes() -> set[str]:
     with _meta_lock:
         out: set[str] = set()
-        for bucket in ("doneCodes", "skippedCodes", "failedCodes"):
+        for bucket in ("doneCodes", "emptyCodes", "skippedCodes", "failedCodes"):
             for c in list(_state.get(bucket) or []):
                 s = str(c or "").strip()
                 if s:
@@ -914,7 +989,7 @@ def _write_resume_checkpoint(
         if not targets:
             return
         finished = set()
-        for bucket in ("doneCodes", "skippedCodes", "failedCodes"):
+        for bucket in ("doneCodes", "emptyCodes", "skippedCodes", "failedCodes"):
             for c in list(_state.get(bucket) or []):
                 s = str(c or "").strip()
                 if s:
@@ -937,9 +1012,11 @@ def _write_resume_checkpoint(
             "message": "paused" if reason == "paused" else str(_state.get("message") or ""),
             "total": int(_state.get("total") or len(targets)),
             "done": int(_state.get("done") or 0),
+            "empty": int(_state.get("empty") or 0),
             "skipped": int(_state.get("skipped") or 0),
             "failed": int(_state.get("failed") or 0),
             "doneCodes": list(_state.get("doneCodes") or []),
+            "emptyCodes": list(_state.get("emptyCodes") or []),
             "skippedCodes": list(_state.get("skippedCodes") or []),
             "failedCodes": list(_state.get("failedCodes") or []),
             "allTargets": targets,
@@ -984,7 +1061,7 @@ def _clear_resume_checkpoint() -> None:
 
 def clear_task_resume(task_id: str) -> dict[str, Any]:
     """重置任务卡时清该任务断点 + 日志/结果，并清内存计数避免写回。"""
-    global _result_seen
+    global _result_seen, _discard_finish_persist_task_id
     tid = str(task_id or "").strip()
     if not tid:
         raise RuntimeError("缺少 taskId")
@@ -996,6 +1073,8 @@ def clear_task_resume(task_id: str) -> dict[str, Any]:
     # 重置：结果桶 + 过程日志一并清掉
     scraped = scrape_export_log_store.purge_task_logs(tid)
     with _meta_lock:
+        # 丢弃本轮 worker 收尾的旧计数 max 写回（暂停后重置竞态）
+        _discard_finish_persist_task_id = tid
         same = str(_state.get("taskId") or "").strip() == tid
         running = bool(_state.get("running"))
         if same:
@@ -1003,10 +1082,12 @@ def clear_task_resume(task_id: str) -> dict[str, Any]:
             _result_seen = set()
             _state["done"] = 0
             _state["skipped"] = 0
+            _state["empty"] = 0
             _state["failed"] = 0
             _state["total"] = 0
             _state["doneCodes"] = []
             _state["skippedCodes"] = []
+            _state["emptyCodes"] = []
             _state["failedCodes"] = []
             _state["active"] = 0
             _state["activeCodes"] = []
@@ -1030,6 +1111,10 @@ def clear_task_resume(task_id: str) -> dict[str, Any]:
                     "interrupted",
                 }:
                     _state["message"] = ""
+    # 任务卡计数立刻置零（勿走 max 合并）
+    _replace_task_result_counts(tid)
+    # 只落 status 快照；带 discard 标记时勿再 max 抬高任务卡
+    _persist_state(force=True)
     if cleared:
         _push_event(
             phase="job",
@@ -1047,8 +1132,6 @@ def clear_task_resume(task_id: str) -> dict[str, Any]:
             level="info",
             archive=False,
         )
-    # 只落 status 快照；不要用旧计数抬高任务卡（has_progress 已为 0）
-    _persist_state(force=True)
     return export_status()
 
 
@@ -1106,10 +1189,14 @@ def _apply_resume_checkpoint_to_state(data: dict[str, Any]) -> None:
                 "message": "paused" if paused else "interrupted",
                 "total": int(data.get("total") or 0),
                 "done": int(data.get("done") or 0),
+                "empty": int(data.get("empty") or 0),
                 "skipped": int(data.get("skipped") or 0),
                 "failed": int(data.get("failed") or 0),
                 "active": 0,
                 "doneCodes": list(data.get("doneCodes") or [])[-_MAX_RESULT_CODES:],
+                "emptyCodes": list(data.get("emptyCodes") or [])[
+                    -_MAX_RESULT_CODES:
+                ],
                 "skippedCodes": list(data.get("skippedCodes") or [])[
                     -_MAX_RESULT_CODES:
                 ],
@@ -1151,10 +1238,12 @@ def _apply_resume_checkpoint_to_state(data: dict[str, Any]) -> None:
             str(data.get("taskId") or ""),
             message="已暂停" if paused else "已中断",
             done=int(data.get("done") or 0),
+            empty=int(data.get("empty") or 0),
             skipped=int(data.get("skipped") or 0),
             failed=int(data.get("failed") or 0),
             total=int(data.get("total") or 0),
             done_codes=list(data.get("doneCodes") or []),
+            empty_codes=list(data.get("emptyCodes") or []),
             skipped_codes=list(data.get("skippedCodes") or []),
             failed_codes=list(data.get("failedCodes") or []),
         )
@@ -1174,6 +1263,7 @@ def peek_resume_for_task(task_id: str) -> dict[str, Any] | None:
         "taskId": str(data.get("taskId") or ""),
         "paused": bool(data.get("paused")),
         "done": int(data.get("done") or 0),
+        "empty": int(data.get("empty") or 0),
         "skipped": int(data.get("skipped") or 0),
         "failed": int(data.get("failed") or 0),
         "total": int(data.get("total") or 0),
@@ -1319,6 +1409,91 @@ def sync_running_task_from_settings() -> bool:
     return True
 
 
+# 任务勾选字段里：白名单不强制有值（站上常无）；其余勾选字段缺值 → 失败
+_OPTIONAL_EXPORT_FIELDS = frozenset({"series", "outline", "studio", "publisher"})
+_REQUIRED_VALUE_FIELDS = frozenset({"titleZh", "actors", "tags", "cover"})
+
+
+def _field_labels_zh() -> dict[str, str]:
+    return {
+        "cover": "封面",
+        "titleZh": "中文标题",
+        "outline": "简介",
+        "studio": "制片",
+        "publisher": "发行",
+        "actors": "女优",
+        "tags": "标签",
+        "series": "系列",
+    }
+
+
+def _meta_missing_required_fields(
+    raw: dict[str, Any],
+    *,
+    entry_dir: Path | None,
+    poster_name: str,
+    need_cover: bool,
+    export_fields: list[str] | None,
+) -> list[str]:
+    """对照任务勾选字段：返回缺值的强制字段（系列等白名单不计入）。"""
+    want = set(_normalize_fields(export_fields))
+    if not want:
+        return []
+    missing: list[str] = []
+    for f in _normalize_fields(export_fields):
+        if f in _OPTIONAL_EXPORT_FIELDS:
+            continue
+        if f == "cover":
+            if not need_cover:
+                continue
+            ok_cover = False
+            if entry_dir is not None and entry_dir.is_dir():
+                ok_cover = (entry_dir / poster_name).is_file() or (
+                    entry_dir / "poster.jpg"
+                ).is_file()
+            if not ok_cover and not str(
+                raw.get("poster") or raw.get("coverUrl") or ""
+            ).strip():
+                missing.append(f)
+            continue
+        if f == "titleZh":
+            zh = str(raw.get("titleZh") or raw.get("title_zh") or "").strip()
+            code = str(raw.get("code") or "").strip()
+            fs = (
+                raw.get("fieldSources")
+                if isinstance(raw.get("fieldSources"), dict)
+                else {}
+            )
+            zh_src = str(fs.get("titleZh") or "").strip().lower()
+            if zh_src and zh_src not in {
+                "",
+                "index",
+                "forum",
+                "maker-fs",
+                "seed",
+                "local",
+            }:
+                if not zh:
+                    missing.append(f)
+            elif not is_quality_chinese_title(zh, code):
+                missing.append(f)
+        elif f == "actors":
+            actors = raw.get("actors") if isinstance(raw.get("actors"), list) else []
+            if not actors:
+                actress = (
+                    raw.get("actress") if isinstance(raw.get("actress"), list) else []
+                )
+                if not actress:
+                    missing.append(f)
+        elif f == "tags":
+            tags = raw.get("genres") if isinstance(raw.get("genres"), list) else []
+            if not tags:
+                tags = raw.get("tags") if isinstance(raw.get("tags"), list) else []
+            if not tags:
+                missing.append(f)
+    return missing
+
+
 def _entry_complete(
     entry_dir: Path | None,
     *,
@@ -1326,12 +1501,12 @@ def _entry_complete(
     need_cover: bool,
     export_fields: list[str] | None = None,
 ) -> bool:
-    """增量跳过条件：封面齐全，且上次已按当前勾选字段刮过（缺字段不跳过）。
+    """增量跳过条件：对照任务勾选字段是否齐。
 
-    系列 / 制片 / 简介等字段站点可能本身无值：只要上次 exportFields 已包含该字段，
-    空值也算完成，避免无限重刮；新增勾选字段则视为未完成。
-    中文标题 / 女优 / 标签仍要求有值（站上通常能拿到；缺则继续增量补刮）。
-    已确认 not_found（全网无详情）也视为完成，避免错误番号每次开始又进队。
+    - 只检查任务编辑里勾选的字段
+    - 系列 / 简介 / 制片等白名单：不强制有值
+    - 中文标题 / 女优 / 标签 / 封面：勾选了则必须有值
+    - not_found 空号标记：算完成
     """
     if entry_dir is None or not entry_dir.is_dir():
         return False
@@ -1388,67 +1563,177 @@ def _entry_complete(
 
     want = set(_normalize_fields(export_fields))
     prev_norm = _prev_export_fields(raw)
-    # 已确认全网无详情：增量跳过（不要求封面/字段有值）
-    msg = str(raw.get("message") or "").strip()
-    msg_l = msg.lower()
-    if raw.get("ok") is False and (
-        msg_l in {"not_found", "notfound"}
-        or _is_no_detail_error(msg)
-        or "全部源未找到详情页" in msg
-    ):
-        if not want or want <= prev_norm:
+    if _is_confirmed_empty_meta(raw):
+        # 空号终态；新增强制字段才重刮，白名单变更不触发
+        required_want = want - _OPTIONAL_EXPORT_FIELDS
+        if not required_want or required_want <= prev_norm:
             return True
+        return False
 
-    if need_cover:
-        if not (
-            (entry_dir / poster_name).is_file() or (entry_dir / "poster.jpg").is_file()
-        ):
-            return False
-    if not want:
-        return True
+    # 新增勾选的强制字段 → 未完成；白名单不挡完成
     for f in want:
-        if f == "cover":
+        if f in _OPTIONAL_EXPORT_FIELDS:
             continue
-        # 新增勾选 → 未完成
-        if f not in prev_norm:
+        if f not in prev_norm and f != "cover":
             return False
-        # 中文标题 / 女优 / 标签：空则未完成（这些站上通常能拿到）
-        # outline 与 series/studio 一样：已进过 exportFields 则允许空（不少片无简介）
-        if f == "titleZh":
-            zh = str(raw.get("titleZh") or raw.get("title_zh") or "").strip()
-            code = str(raw.get("code") or "").strip()
-            fs = raw.get("fieldSources") if isinstance(raw.get("fieldSources"), dict) else {}
-            zh_src = str(fs.get("titleZh") or "").strip().lower()
-            # 网络源：有值即完成；仅本地索引题走质量门
-            if zh_src and zh_src not in {
-                "",
-                "index",
-                "forum",
-                "maker-fs",
-                "seed",
-                "local",
-            }:
-                if not zh:
-                    return False
-            elif not is_quality_chinese_title(zh, code):
-                return False
-        elif f == "outline":
-            # 已刮过该字段：空简介也算完成，否则会每次进队；Node 无 force 还会命中 cache
+
+    return not _meta_missing_required_fields(
+        raw,
+        entry_dir=entry_dir,
+        poster_name=poster_name,
+        need_cover=need_cover,
+        export_fields=export_fields,
+    )
+
+def _resolve_target_entry_dir(target: dict[str, Any], library: Path) -> Path | None:
+    """按命名规则定位目标目录；不存在则回退扫描。"""
+    code = _std_code(str(target.get("code") or ""))
+    if not code:
+        return None
+    rid = str(target.get("region") or "")
+    label = _region_label(rid)
+    naming_cfg = scrape_naming.fixed_naming()
+    kind_id = scrape_naming.resolve_kind(
+        region=rid,
+        code=code,
+    )
+    try:
+        cand = scrape_naming.resolve_entry_dir(
+            library,
+            naming_cfg,
+            code=code,
+            meta={
+                "code": code,
+                "prefix": target.get("prefix"),
+                "maker": target.get("maker"),
+                "region": rid,
+                "regionLabel": label,
+            },
+            target=target,
+            category=label,
+            kind=kind_id,
+        )
+        if cand.is_dir():
+            return cand
+    except Exception:
+        pass
+    return _find_library_entry_dir(code)
+
+
+def _bulk_skip_complete_targets(
+    targets: list[dict[str, Any]],
+    *,
+    library: Path,
+    export_fields: list[str],
+) -> list[dict[str, Any]]:
+    """增量：按本地真实状态立刻入桶，只把「未完成」送进工作池。
+
+    - 已刮成功 → done（成功）
+    - 已落盘 not_found（全源确认无详情）→ empty（空号）
+    - 未完成（含 maker-fs 补全空种子 / 无封面空洞）→ pending 进网刮；
+      空号只能由 worker 全源无详情后写入，禁止预分类直接跳过进网
+    """
+    global _result_seen
+    need_cover = "cover" in set(_normalize_fields(export_fields))
+    poster_name = "poster.jpg"
+    pending: list[dict[str, Any]] = []
+    done_codes: list[str] = []
+    empty_codes: list[str] = []
+    for t in targets:
+        if not isinstance(t, dict):
             continue
-        elif f == "actors":
-            actors = raw.get("actors") if isinstance(raw.get("actors"), list) else []
-            if not actors:
-                actress = raw.get("actress") if isinstance(raw.get("actress"), list) else []
-                if not actress:
-                    return False
-        elif f == "tags":
-            tags = raw.get("genres") if isinstance(raw.get("genres"), list) else []
-            if not tags:
-                tags = raw.get("tags") if isinstance(raw.get("tags"), list) else []
-            if not tags:
-                return False
-        # series / studio / outline：允许空（不少片子无系列/简介）
-    return True
+        c = str(t.get("code") or "").strip()
+        if not c:
+            continue
+        entry = _resolve_target_entry_dir(t, library)
+        if not _entry_complete(
+            entry,
+            poster_name=poster_name,
+            need_cover=need_cover,
+            export_fields=export_fields,
+        ):
+            # 未完成（含无封面补全种子）：进队刮削，勿当空号
+            pending.append(t)
+            continue
+        rid = str(t.get("region") or "")
+        kind_id = scrape_naming.resolve_kind(region=rid, code=_std_code(c) or c)
+        # FC2 未分类：与单条路径一致，仍进队搬家/补刮
+        if (
+            kind_id == "fc2"
+            and entry is not None
+            and _path_has_uncategorized(entry)
+        ):
+            pending.append(t)
+            continue
+        existing = _load_scrape_meta(entry) if entry is not None else None
+        if not existing and entry is not None:
+            existing = _load_index_meta(entry)
+        if _is_confirmed_empty_meta(existing):
+            empty_codes.append(c)
+        else:
+            done_codes.append(c)
+
+    tid = ""
+    with _meta_lock:
+        tid = str(_state.get("taskId") or "").strip()
+        for c in done_codes:
+            if _code_already_counted(c):
+                # 允许从旧跳过/空号/失败升级为成功
+                if c in list(_state.get("doneCodes") or []):
+                    continue
+                if c in list(_state.get("skippedCodes") or []) or c in list(
+                    _state.get("emptyCodes") or []
+                ) or c in list(_state.get("failedCodes") or []):
+                    _remove_from_result_buckets(
+                        c, "skippedCodes", "emptyCodes", "failedCodes"
+                    )
+                    _append_result_code("doneCodes", c)
+                    _result_seen.add(c)
+                continue
+            _result_seen.add(c)
+            _append_result_code("doneCodes", c)
+        for c in empty_codes:
+            # 允许从旧「失败」桶迁到空号（全源无详情本应为空号）
+            if c in list(_state.get("failedCodes") or []) or c in list(
+                _state.get("skippedCodes") or []
+            ):
+                _remove_from_result_buckets(c, "failedCodes", "skippedCodes")
+                if c not in list(_state.get("emptyCodes") or []):
+                    _append_result_code("emptyCodes", c)
+                _result_seen.add(c)
+                continue
+            if _code_already_counted(c):
+                continue
+            _result_seen.add(c)
+            _append_result_code("emptyCodes", c)
+        _state["done"] = len(list(_state.get("doneCodes") or []))
+        _state["empty"] = len(list(_state.get("emptyCodes") or []))
+        _state["skipped"] = len(list(_state.get("skippedCodes") or []))
+        _state["failed"] = len(list(_state.get("failedCodes") or []))
+        _reconcile_result_counts_locked()
+
+    if tid and (done_codes or empty_codes):
+        try:
+            scrape_export_log_store.bulk_upsert_result_codes(
+                tid,
+                done=done_codes,
+                empty=empty_codes,
+            )
+        except Exception:
+            log.exception("bulk classify persist codes failed")
+
+    if done_codes or empty_codes or pending:
+        _push_event(
+            phase="job",
+            text=(
+                f"增量预分类 · 成功 {len(done_codes)}"
+                + (f" · 空号 {len(empty_codes)}" if empty_codes else "")
+                + f" · 待刮 {len(pending)}"
+            ),
+            level="info",
+        )
+        _touch_progress()
+    return pending
 
 
 def _write_not_found_marker(
@@ -1459,8 +1744,12 @@ def _write_not_found_marker(
     meta: dict[str, Any] | None = None,
     runs: list[Any] | None = None,
 ) -> None:
-    """网络全源无详情时写 scrape.json：增量不再重试，但仍计为失败。"""
+    """无数据空号落盘 scrape.json（快源识别不到）。"""
     if entry_dir is None or not entry_dir.is_dir():
+        return
+    run_list = list(runs or (meta or {}).get("sourceRuns") or [])
+    # 有 runs 时须全是无详情；空 runs 允许（快源直接 not_found / 旧标记）
+    if run_list and not _all_network_sources_no_detail(run_list):
         return
     want = _normalize_fields(export_fields)
     prev = _load_scrape_meta(entry_dir) or {}
@@ -1472,7 +1761,7 @@ def _write_not_found_marker(
         "message": "not_found",
         "exportFields": want,
         "scrapedAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "sourceRuns": list(runs or (meta or {}).get("sourceRuns") or []),
+        "sourceRuns": run_list,
     }
     if not str(payload.get("poster") or "").strip():
         payload.pop("poster", None)
@@ -1622,10 +1911,12 @@ def _prime_state_for_job(job: dict[str, Any], *, keep_lock_message: str = "queue
             "done": 0,
             "failed": 0,
             "skipped": 0,
+            "empty": 0,
             "active": 0,
             "doneCodes": [],
             "skippedCodes": [],
             "failedCodes": [],
+            "emptyCodes": [],
             "activeCodes": [],
             "activeFastCodes": [],
             "activeSlowCodes": [],
@@ -1890,30 +2181,77 @@ def _uniq_result_codes(codes: list[str] | None) -> list[str]:
 
 def _merge_lifetime_code_buckets(
     exist_done: list[str],
+    exist_empty: list[str],
     exist_skip: list[str],
     exist_fail: list[str],
     new_done: list[str],
+    new_empty: list[str],
     new_skip: list[str],
     new_fail: list[str],
-) -> tuple[list[str], list[str], list[str]]:
-    """任务卡终身统计：按番号去重合并；成功 > 失败 > 跳过。
+) -> tuple[list[str], list[str], list[str], list[str]]:
+    """任务卡终身统计：按番号去重合并；成功 > 空号 > 失败 > 跳过。
 
-    无详情失败（not_found）绝不可被「增量跳过」盖掉。
+    全源无详情记空号，可从历史失败桶迁出；真正失败（超时等）仍保留。
     """
     done = _uniq_result_codes([*exist_done, *new_done])
     done_set = set(done)
+    empty = _uniq_result_codes(
+        [c for c in [*exist_empty, *new_empty] if c not in done_set]
+    )
+    empty_set = set(empty)
     failed = _uniq_result_codes(
-        [c for c in [*exist_fail, *new_fail] if c not in done_set]
+        [
+            c
+            for c in [*exist_fail, *new_fail]
+            if c not in done_set and c not in empty_set
+        ]
     )
     fail_set = set(failed)
     skipped = _uniq_result_codes(
         [
             c
             for c in [*exist_skip, *new_skip]
-            if c not in done_set and c not in fail_set
+            if c not in done_set and c not in fail_set and c not in empty_set
         ]
     )
-    return done, skipped, failed
+    return done, empty, skipped, failed
+
+
+def _replace_task_result_counts(task_id: str) -> None:
+    """重置任务：任务卡计数强制清零（不做 max 合并）。"""
+    tid = str(task_id or "").strip()
+    if not tid:
+        return
+    try:
+        raw = settings_store.get_setting(settings_store.SCRAPE_KEY) or {}
+        tasks = scrape_profiles.normalize_scrape_tasks(
+            raw.get("scrapeTasks") or raw.get("scrape_tasks")
+        )
+        changed = False
+        now = _now_iso()
+        for t in tasks:
+            if str(t.get("id") or "") != tid:
+                continue
+            t["done"] = 0
+            t["empty"] = 0
+            t["skipped"] = 0
+            t["failed"] = 0
+            t["total"] = 0
+            t["doneCodes"] = []
+            t["emptyCodes"] = []
+            t["skippedCodes"] = []
+            t["failedCodes"] = []
+            t["lastStatus"] = ""
+            t["updatedAt"] = now
+            changed = True
+            break
+        if not changed:
+            return
+        next_raw = dict(raw)
+        next_raw["scrapeTasks"] = tasks
+        settings_store.put_setting(settings_store.SCRAPE_KEY, next_raw)
+    except Exception:
+        log.exception("replace scrape task counts failed task=%s", tid)
 
 
 def _persist_task_result(
@@ -1921,10 +2259,12 @@ def _persist_task_result(
     *,
     message: str,
     done: int,
-    skipped: int,
+    empty: int = 0,
+    skipped: int = 0,
     failed: int,
     total: int,
     done_codes: list[str] | None = None,
+    empty_codes: list[str] | None = None,
     skipped_codes: list[str] | None = None,
     failed_codes: list[str] | None = None,
 ) -> None:
@@ -1941,12 +2281,17 @@ def _persist_task_result(
         now = _now_iso()
         status = str(message or "").strip()
         incoming_done = _uniq_result_codes(done_codes)
+        incoming_empty = _uniq_result_codes(empty_codes)
         incoming_skip = _uniq_result_codes(skipped_codes)
         incoming_fail = _uniq_result_codes(failed_codes)
-        # 计数以传入的 done/skipped/failed 为准；列表可能被截断，不能只信 len()
+        # 计数以传入的 done/empty/skipped/failed 为准；列表可能被截断，不能只信 len()
         incoming_done_n = max(
             len(incoming_done) if done_codes is not None else 0,
             max(0, int(done)),
+        )
+        incoming_empty_n = max(
+            len(incoming_empty) if empty_codes is not None else 0,
+            max(0, int(empty)),
         )
         incoming_skip_n = max(
             len(incoming_skip) if skipped_codes is not None else 0,
@@ -1969,6 +2314,11 @@ def _persist_task_result(
                 incoming_done_n,
                 int(db_counts.get("done") or 0),
             )
+            empty_n = max(
+                int(t.get("empty") or 0),
+                incoming_empty_n,
+                int(db_counts.get("empty") or 0),
+            )
             skipped_n = max(
                 int(t.get("skipped") or 0),
                 incoming_skip_n,
@@ -1979,7 +2329,7 @@ def _persist_task_result(
                 incoming_fail_n,
                 int(db_counts.get("failed") or 0),
             )
-            processed = done_n + skipped_n + failed_n
+            processed = done_n + empty_n + skipped_n + failed_n
             total_n = max(
                 int(t.get("total") or 0),
                 incoming_total,
@@ -1987,10 +2337,11 @@ def _persist_task_result(
             )
             if status == "ok":
                 status = (
-                    f"完成 · 成功 {done_n} · 跳过 {skipped_n} · 失败 {failed_n}"
+                    f"完成 · 成功 {done_n} · 空号 {empty_n} · 数据不全 {failed_n}"
                 )
             t["lastStatus"] = status[:120]
             t["done"] = int(done_n)
+            t["empty"] = int(empty_n)
             t["skipped"] = int(skipped_n)
             t["failed"] = int(failed_n)
             t["total"] = int(total_n)
@@ -1999,6 +2350,11 @@ def _persist_task_result(
             t["doneCodes"] = incoming_done[-preview_cap:] if incoming_done else list(
                 t.get("doneCodes") or []
             )[:preview_cap]
+            t["emptyCodes"] = (
+                incoming_empty[-preview_cap:]
+                if incoming_empty
+                else list(t.get("emptyCodes") or [])[:preview_cap]
+            )
             t["skippedCodes"] = (
                 incoming_skip[-preview_cap:]
                 if incoming_skip
@@ -2038,10 +2394,12 @@ def _take_next_job_after_finish() -> dict[str, Any] | None:
             "taskId": str(_state.get("taskId") or ""),
             "message": end_message,
             "done": int(_state.get("done") or 0),
+            "empty": int(_state.get("empty") or 0),
             "skipped": int(_state.get("skipped") or 0),
             "failed": int(_state.get("failed") or 0),
             "total": int(_state.get("total") or 0),
             "doneCodes": list(_state.get("doneCodes") or []),
+            "emptyCodes": list(_state.get("emptyCodes") or []),
             "skippedCodes": list(_state.get("skippedCodes") or []),
             "failedCodes": list(_state.get("failedCodes") or []),
         }
@@ -2144,17 +2502,30 @@ def _take_next_job_after_finish() -> dict[str, Any] | None:
                 _release_export_file_lock()
 
     if finished_snap and finished_snap.get("taskId"):
-        _persist_task_result(
-            str(finished_snap["taskId"]),
-            message=str(finished_snap.get("message") or ""),
-            done=int(finished_snap.get("done") or 0),
-            skipped=int(finished_snap.get("skipped") or 0),
-            failed=int(finished_snap.get("failed") or 0),
-            total=int(finished_snap.get("total") or 0),
-            done_codes=list(finished_snap.get("doneCodes") or []),
-            skipped_codes=list(finished_snap.get("skippedCodes") or []),
-            failed_codes=list(finished_snap.get("failedCodes") or []),
-        )
+        snap_tid = str(finished_snap.get("taskId") or "").strip()
+        discard = False
+        global _discard_finish_persist_task_id
+        with _meta_lock:
+            if (
+                snap_tid
+                and str(_discard_finish_persist_task_id or "").strip() == snap_tid
+            ):
+                discard = True
+                _discard_finish_persist_task_id = ""
+        if not discard:
+            _persist_task_result(
+                snap_tid,
+                message=str(finished_snap.get("message") or ""),
+                done=int(finished_snap.get("done") or 0),
+                empty=int(finished_snap.get("empty") or 0),
+                skipped=int(finished_snap.get("skipped") or 0),
+                failed=int(finished_snap.get("failed") or 0),
+                total=int(finished_snap.get("total") or 0),
+                done_codes=list(finished_snap.get("doneCodes") or []),
+                empty_codes=list(finished_snap.get("emptyCodes") or []),
+                skipped_codes=list(finished_snap.get("skippedCodes") or []),
+                failed_codes=list(finished_snap.get("failedCodes") or []),
+            )
     return next_job
 
 
@@ -2193,15 +2564,21 @@ def _persist_state(*, force: bool = False) -> None:
             running = bool(_state.get("running"))
             paused = bool(_state.get("paused")) or str(_state.get("message") or "") == "paused"
             done = int(_state.get("done") or 0)
+            empty = int(_state.get("empty") or 0)
             skipped = int(_state.get("skipped") or 0)
             failed = int(_state.get("failed") or 0)
             total = int(_state.get("total") or 0)
             done_codes = list(_state.get("doneCodes") or [])
+            empty_codes = list(_state.get("emptyCodes") or [])
             skipped_codes = list(_state.get("skippedCodes") or [])
             failed_codes = list(_state.get("failedCodes") or [])
             msg = str(_state.get("message") or "")
-            has_progress = total > 0 or done > 0 or skipped > 0 or failed > 0
-        if tid and (running or paused or has_progress):
+            has_progress = total > 0 or done > 0 or empty > 0 or skipped > 0 or failed > 0
+            discard_tid = str(_discard_finish_persist_task_id or "").strip()
+        # 刚重置的任务：禁止用 max 把旧卡数字抬回来
+        if tid and discard_tid == tid:
+            pass
+        elif tid and (running or paused or has_progress):
             if paused or msg == "paused":
                 label = "已暂停"
             elif running:
@@ -2216,10 +2593,12 @@ def _persist_state(*, force: bool = False) -> None:
                 tid,
                 message=label,
                 done=done,
+                empty=empty,
                 skipped=skipped,
                 failed=failed,
                 total=total,
                 done_codes=done_codes,
+                empty_codes=empty_codes,
                 skipped_codes=skipped_codes,
                 failed_codes=failed_codes,
             )
@@ -2278,7 +2657,7 @@ def _hydrate_state() -> None:
                 "paused": False,
                 "watchHold": watch_hold,
                 "resumable": bool(data.get("resumable"))
-                or int(data.get("done") or 0) + int(data.get("skipped") or 0)
+                or int(data.get("done") or 0) + int(data.get("empty") or 0) + int(data.get("skipped") or 0)
                 < int(data.get("total") or 0),
                 "pauseSaved": pause_hint,
                 "startedAt": str(data.get("startedAt") or ""),
@@ -2288,8 +2667,12 @@ def _hydrate_state() -> None:
                 "done": int(data.get("done") or 0),
                 "failed": int(data.get("failed") or 0),
                 "skipped": int(data.get("skipped") or 0),
+                "empty": int(data.get("empty") or 0),
                 "active": 0,
                 "doneCodes": list(data.get("doneCodes") or [])[-_MAX_RESULT_CODES:],
+                "emptyCodes": list(data.get("emptyCodes") or [])[
+                    -_MAX_RESULT_CODES:
+                ],
                 "skippedCodes": list(data.get("skippedCodes") or [])[
                     -_MAX_RESULT_CODES:
                 ],
@@ -2336,6 +2719,7 @@ def _hydrate_state() -> None:
     if tid and (
         int(data.get("total") or 0) > 0
         or int(data.get("done") or 0) > 0
+        or int(data.get("empty") or 0) > 0
         or int(data.get("skipped") or 0) > 0
         or int(data.get("failed") or 0) > 0
     ):
@@ -2352,10 +2736,12 @@ def _hydrate_state() -> None:
                     )
                 ),
                 done=int(data.get("done") or 0),
+                empty=int(data.get("empty") or 0),
                 skipped=int(data.get("skipped") or 0),
                 failed=int(data.get("failed") or 0),
                 total=int(data.get("total") or 0),
                 done_codes=list(data.get("doneCodes") or []),
+                empty_codes=list(data.get("emptyCodes") or []),
                 skipped_codes=list(data.get("skippedCodes") or []),
                 failed_codes=list(data.get("failedCodes") or []),
             )
@@ -2534,7 +2920,7 @@ def _reset_title_events() -> None:
     _persist_state()
 
 
-_DETAIL_TERMINAL_PHASES = frozenset({"done", "skipped", "failed"})
+_DETAIL_TERMINAL_PHASES = frozenset({"done", "skipped", "failed", "empty"})
 
 
 def _detail_display_ready(detail: dict[str, Any] | None) -> bool:
@@ -3690,6 +4076,7 @@ def export_status(
             return full[-cap:], n, True
 
         done_codes, done_n, done_trunc = _codes("doneCodes")
+        empty_codes, empty_n, empty_trunc = _codes("emptyCodes")
         skip_codes, skip_n, skip_trunc = _codes("skippedCodes")
         fail_codes, fail_n, fail_trunc = _codes("failedCodes")
         out = {
@@ -3702,11 +4089,13 @@ def export_status(
             "done": int(_state.get("done") or 0) or done_n,
             "failed": int(_state.get("failed") or 0) or fail_n,
             "skipped": int(_state.get("skipped") or 0) or skip_n,
+            "empty": int(_state.get("empty") or 0) or empty_n,
             "active": int(_state.get("active") or 0),
             "doneCodes": done_codes,
+            "emptyCodes": empty_codes,
             "skippedCodes": skip_codes,
             "failedCodes": fail_codes,
-            "codesTruncated": bool(done_trunc or skip_trunc or fail_trunc),
+            "codesTruncated": bool(done_trunc or empty_trunc or skip_trunc or fail_trunc),
             "activeCodes": list(_state.get("activeCodes") or []),
             "activeFastCodes": list(_state.get("activeFastCodes") or []),
             "activeSlowCodes": list(_state.get("activeSlowCodes") or []),
@@ -3749,11 +4138,13 @@ def list_export_codes(
     limit: int = 50000,
     offset: int = 0,
 ) -> dict[str, Any]:
-    """按任务 + 桶取完整番号列表（点开成功/跳过/失败用）。"""
+    """按任务 + 桶取完整番号列表（点开成功/空号/失败用）。"""
     tid = str(task_id or "").strip()
     b = str(bucket or "").strip().lower()
     if b in {"done", "success", "ok"}:
         b = "done"
+    elif b in {"empty", "empty_code", "emptycode"}:
+        b = "empty"
     elif b in {"skip", "skipped"}:
         b = "skipped"
     elif b in {"fail", "failed", "error"}:
@@ -3765,6 +4156,7 @@ def list_export_codes(
             tid = str(_state.get("taskId") or "").strip()
             mem_key = {
                 "done": "doneCodes",
+                "empty": "emptyCodes",
                 "skipped": "skippedCodes",
                 "failed": "failedCodes",
             }[b]
@@ -3791,6 +4183,7 @@ def list_export_codes(
     with _meta_lock:
         mem_key = {
             "done": "doneCodes",
+            "empty": "emptyCodes",
             "skipped": "skippedCodes",
             "failed": "failedCodes",
         }[b]
@@ -3826,10 +4219,12 @@ def claim_export() -> bool:
                 "done": 0,
                 "failed": 0,
                 "skipped": 0,
+                "empty": 0,
                 "active": 0,
                 "doneCodes": [],
                 "skippedCodes": [],
                 "failedCodes": [],
+                "emptyCodes": [],
                 "activeCodes": [],
                 "activeFastCodes": [],
                 "activeSlowCodes": [],
@@ -3921,10 +4316,12 @@ def _reset_idle_state() -> None:
             "done": 0,
             "failed": 0,
             "skipped": 0,
+            "empty": 0,
             "active": 0,
             "doneCodes": [],
             "skippedCodes": [],
             "failedCodes": [],
+            "emptyCodes": [],
             "activeCodes": [],
             "activeFastCodes": [],
             "activeSlowCodes": [],
@@ -3968,10 +4365,12 @@ def pause_export() -> dict[str, Any]:
         n_active = _clear_active_progress_locked()
         tid = str(_state.get("taskId") or "")
         done = int(_state.get("done") or 0)
+        empty = int(_state.get("empty") or 0)
         skipped = int(_state.get("skipped") or 0)
         failed = int(_state.get("failed") or 0)
         total = int(_state.get("total") or 0)
         done_codes = list(_state.get("doneCodes") or [])
+        empty_codes = list(_state.get("emptyCodes") or [])
         skipped_codes = list(_state.get("skippedCodes") or [])
         failed_codes = list(_state.get("failedCodes") or [])
     http_n, flare_n = _abort_all_inflight()
@@ -3986,10 +4385,12 @@ def pause_export() -> dict[str, Any]:
             tid,
             message="已暂停",
             done=done,
+            empty=empty,
             skipped=skipped,
             failed=failed,
             total=total,
             done_codes=done_codes,
+            empty_codes=empty_codes,
             skipped_codes=skipped_codes,
             failed_codes=failed_codes,
         )
@@ -4281,8 +4682,14 @@ def collect_targets(
     maker: str | None = None,
     prefix: str | None = None,
     code: str | None = None,
+    rekey: bool = True,
+    include_fill: bool = False,
 ) -> list[dict[str, Any]]:
-    """从 maker-fs 收集待刮削番号。"""
+    """从 maker-fs 收集待刮削/物化番号。
+
+    rekey=False：直接用索引 covers 键（物化热路径，避免全库重算键拖慢十几秒）。
+    include_fill=True：digit_pad 前缀按 fillFrom..fillTo 补空洞（刮削要 999 不要只 831）。
+    """
     want_code = _std_code(code) if code else ""
     want_prefix = maker_fs._std_prefix(prefix) if prefix else ""  # noqa: SLF001
     want_maker = (maker or "").strip()
@@ -4325,15 +4732,18 @@ def collect_targets(
             pad = max(1, min(8, int(idx.get("pad") or 3)))
             from_n = max(1, int(idx.get("from") or 1))
             to_n = max(0, int(idx.get("to") or 0))
-            # 按 pad + from..to 规范；超区间（如 to=234 却有 -720）不进刮削
-            covers = maker_fs._rekey_covers_to_pad(  # noqa: SLF001
-                covers, prefix=p, pad=pad, from_n=from_n, to_n=to_n
-            )
+            if rekey:
+                # 按 pad + from..to 规范；超区间（如 to=234 却有 -720）不进刮削
+                covers = maker_fs._rekey_covers_to_pad(  # noqa: SLF001
+                    covers, prefix=p, pad=pad, from_n=from_n, to_n=to_n
+                )
+            seen_codes: set[str] = set()
             for ckey, hit in covers.items():
-                c = _std_code(str(ckey))
+                # 用索引 covers 键原样（仅大小写），不再二次 _std_code 改写
+                c = str(ckey or "").strip().upper().replace("_", "-")
                 if not c:
                     continue
-                if want_code and c != want_code:
+                if want_code and c != want_code and _std_code(c) != want_code:
                     continue
                 cover_url = None
                 urls: list[str] = []
@@ -4360,16 +4770,349 @@ def collect_targets(
                         ),
                     }
                 )
-    # 去重保序
+                seen_codes.add(c)
+            # 刮削：按发现区间补空洞（SONE fillTo=999 而 covers 只有 831）
+            if include_fill and not want_code and maker_fs.should_fill_digit_range(rid, p):
+                fill_from = int(idx.get("fillFrom") or 0)
+                fill_to = int(idx.get("fillTo") or 0)
+                if fill_to < fill_from or fill_to <= 0:
+                    d_from, d_to = maker_fs._discovered_digit_bounds(covers, p)  # noqa: SLF001
+                    fill_from, fill_to = d_from, d_to
+                if fill_to >= fill_from > 0:
+                    for c in maker_fs._iter_filled_digit_codes(  # noqa: SLF001
+                        p, fill_from, fill_to, pad
+                    ):
+                        cu = str(c or "").strip().upper()
+                        if not cu or cu in seen_codes:
+                            continue
+                        out.append(
+                            {
+                                "code": cu,
+                                "prefix": p,
+                                "maker": board,
+                                "region": rid,
+                                "coverUrl": None,
+                                "coverUrls": [],
+                                "forumTitle": None,
+                                "forumActors": None,
+                                "fromFill": True,
+                            }
+                        )
+                        seen_codes.add(cu)
+    # 去重保序：同区同前缀同番号才算一条（FC2 / FC2-PPV 分开）
     seen: set[str] = set()
     uniq: list[dict[str, Any]] = []
     for it in out:
-        k = f"{it['region']}|{it['code']}"
+        k = f"{it['region']}|{it['prefix']}|{it['code']}"
         if k in seen:
             continue
         seen.add(k)
         uniq.append(it)
     return uniq
+
+
+def _region_label_to_id() -> dict[str, str]:
+    out: dict[str, str] = {}
+    for rid, meta in maker_fs.REGION_META.items():
+        lab = str((meta or {}).get("label") or "").strip()
+        if lab:
+            out[lab] = rid
+    try:
+        for kid, lab in (scrape_naming.KIND_LABELS or {}).items():
+            s = str(lab or "").strip()
+            if s and s not in out and kid in maker_fs.REGION_META:
+                out[s] = str(kid)
+    except Exception:
+        pass
+    return out
+
+
+def _target_from_library_entry_dir(
+    entry: Path,
+    library: Path,
+    *,
+    label_map: dict[str, str] | None = None,
+) -> dict[str, Any] | None:
+    """从片库番号目录反推刮削目标（空目录 / 仅有种子也可刮）。"""
+    try:
+        rel = entry.relative_to(library)
+        parts = list(rel.parts)
+    except Exception:
+        try:
+            rel = entry.resolve().relative_to(library.resolve())
+            parts = list(rel.parts)
+        except Exception:
+            return None
+    if len(parts) < 2:
+        return None
+    labels = label_map if label_map is not None else _region_label_to_id()
+    region_label = str(parts[0] or "").strip()
+    rid = labels.get(region_label) or ""
+    if not rid:
+        if region_label in maker_fs.REGION_META:
+            rid = region_label
+        else:
+            return None
+    code = ""
+    prefix = ""
+    maker = str(parts[1] or "").strip() or "未分组"
+    meta_path = entry / INDEX_META_FILE
+    raw: dict[str, Any] | None = None
+    if meta_path.is_file():
+        try:
+            loaded = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            loaded = None
+        if isinstance(loaded, dict):
+            raw = loaded
+            code = str(raw.get("code") or "").strip().upper().replace("_", "-")
+            prefix = maker_fs._std_prefix(str(raw.get("prefix") or ""))  # noqa: SLF001
+            mk = str(raw.get("maker") or raw.get("studio") or "").strip()
+            if mk:
+                maker = mk
+            rr = str(raw.get("region") or "").strip()
+            if rr in maker_fs.REGION_META:
+                rid = rr
+    if not code:
+        code = str(entry.name or "").strip().upper().replace("_", "-")
+    if not code:
+        return None
+    if not prefix:
+        if "-" in code:
+            prefix = maker_fs._std_prefix(code.split("-", 1)[0])  # noqa: SLF001
+        elif len(parts) >= 3:
+            prefix = maker_fs._std_prefix(str(parts[-2]))  # noqa: SLF001
+    cover_url = None
+    cover_urls: list[str] = []
+    forum_title = None
+    if raw is not None:
+        cover_url = raw.get("coverUrl") or raw.get("poster")
+        cover_urls = [
+            str(u).strip()
+            for u in (raw.get("coverUrls") or [])
+            if str(u).strip()
+        ]
+        forum_title = (
+            str(raw.get("title") or raw.get("titleZh") or "").strip() or None
+        )
+    url_file = entry / "封面.url"
+    if not cover_url and url_file.is_file():
+        try:
+            text = url_file.read_text(encoding="utf-8", errors="ignore")
+            m = re.search(r"^\s*URL\s*=\s*(\S+)", text, re.I | re.M)
+            if m:
+                cover_url = m.group(1).strip()
+        except Exception:
+            pass
+    if cover_url and cover_url not in cover_urls:
+        cover_urls = [str(cover_url), *cover_urls]
+    return {
+        "code": code,
+        "prefix": prefix or "",
+        "maker": maker,
+        "region": rid,
+        "coverUrl": cover_url,
+        "coverUrls": cover_urls[:4],
+        "forumTitle": forum_title,
+        "forumActors": None,
+        "fromLibraryDir": True,
+    }
+
+
+def _scoped_library_prefix_dirs(
+    library: Path,
+    *,
+    region_ids: list[str] | None,
+    maker: str,
+    prefix: str,
+) -> list[Path]:
+    """任务范围内的 {区域}/{厂牌}/{前缀}/ 目录，避免全库扫。"""
+    want_prefix = maker_fs._std_prefix(prefix) if prefix else ""  # noqa: SLF001
+    want_maker = (maker or "").strip()
+    if not want_prefix and not want_maker:
+        return []
+    labels: list[str] = []
+    if region_ids:
+        for rid in region_ids:
+            lab = _region_label(rid)
+            if lab and lab not in labels:
+                labels.append(lab)
+    else:
+        try:
+            for child in library.iterdir():
+                if child.is_dir() and not child.name.startswith("."):
+                    labels.append(child.name)
+        except OSError:
+            return []
+    roots: list[Path] = []
+    for lab in labels:
+        region_dir = library / lab
+        if not region_dir.is_dir():
+            continue
+        try:
+            makers = [p for p in region_dir.iterdir() if p.is_dir()]
+        except OSError:
+            continue
+        for maker_dir in makers:
+            if want_maker and maker_dir.name != want_maker:
+                continue
+            if want_prefix:
+                cand = maker_dir / want_prefix
+                if cand.is_dir():
+                    roots.append(cand)
+                    continue
+                # 大小写不一致
+                try:
+                    for child in maker_dir.iterdir():
+                        if (
+                            child.is_dir()
+                            and child.name.upper() == want_prefix.upper()
+                        ):
+                            roots.append(child)
+                            break
+                except OSError:
+                    pass
+            else:
+                roots.append(maker_dir)
+    return roots
+
+
+def collect_library_empty_folder_targets(
+    *,
+    region: str | None = None,
+    regions: list[str] | None = None,
+    maker: str | None = None,
+    prefix: str | None = None,
+    code: str | None = None,
+) -> list[dict[str, Any]]:
+    """扫描任务范围内片库：无 scrape.json 的番号目录纳入刮削。
+
+    必须带前缀或番号；禁止全库扫描（十万级目录会卡死「开始」数十秒）。
+    空洞补全由 collect_targets(include_fill=True) 负责。
+    """
+    from . import library_materialize as lm
+
+    want_code = str(code or "").strip().upper().replace("_", "-")
+    want_prefix = maker_fs._std_prefix(prefix) if prefix else ""  # noqa: SLF001
+    want_maker = (maker or "").strip()
+    if not want_prefix and not want_code and not want_maker:
+        return []
+
+    region_ids: list[str] = []
+    if regions:
+        for r in regions:
+            rid = maker_fs.resolve_fs_region(str(r or "")) or str(r or "").strip()
+            if rid and rid not in region_ids:
+                region_ids.append(rid)
+    elif region:
+        rid = maker_fs.resolve_fs_region(region) or region
+        if rid:
+            region_ids = [rid]
+
+    library = _resolve_library_root()
+    if not library.is_dir():
+        return []
+
+    label_map = _region_label_to_id()
+    out: list[dict[str, Any]] = []
+
+    def _maybe_add(entry: Path) -> None:
+        scrape_path = entry / SCRAPE_META_FILE
+        if scrape_path.is_file():
+            return
+        t = _target_from_library_entry_dir(entry, library, label_map=label_map)
+        if not t:
+            return
+        rid = str(t.get("region") or "")
+        if region_ids and rid not in region_ids:
+            return
+        c = str(t.get("code") or "")
+        if want_code and c != want_code and _std_code(c) != want_code:
+            return
+        p = maker_fs._std_prefix(str(t.get("prefix") or ""))  # noqa: SLF001
+        if want_prefix and p != want_prefix:
+            return
+        board = str(t.get("maker") or "").strip()
+        if want_maker and board != want_maker:
+            return
+        out.append(t)
+
+    if want_code and not want_prefix:
+        # 单番号：走定位，不做目录遍历
+        found = _find_library_entry_dir(want_code)
+        if found is not None:
+            _maybe_add(found)
+        return out
+
+    roots = _scoped_library_prefix_dirs(
+        library,
+        region_ids=region_ids or None,
+        maker=want_maker,
+        prefix=want_prefix,
+    )
+    for root in roots:
+        try:
+            children = [p for p in root.iterdir() if p.is_dir()]
+        except OSError:
+            continue
+        for child in children:
+            # root 已是前缀目录 → 子项为番号；或 root 是厂牌 → 子项可能是前缀/番号
+            if lm._is_entry_dir(child):  # noqa: SLF001
+                _maybe_add(child)
+                continue
+            if want_prefix:
+                continue
+            try:
+                for code_dir in child.iterdir():
+                    if code_dir.is_dir() and lm._is_entry_dir(code_dir):  # noqa: SLF001
+                        _maybe_add(code_dir)
+            except OSError:
+                pass
+    return out
+
+
+def merge_scrape_targets(
+    index_targets: list[dict[str, Any]],
+    disk_targets: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """索引目标优先；片库空目录补漏。同 区|前缀|番号 合并，磁盘侧补空字段。"""
+    best: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+    for src in (index_targets, disk_targets):
+        for t in src:
+            if not isinstance(t, dict):
+                continue
+            rid = str(t.get("region") or "").strip()
+            p = maker_fs._std_prefix(str(t.get("prefix") or ""))  # noqa: SLF001
+            c = str(t.get("code") or "").strip().upper().replace("_", "-")
+            if not c:
+                continue
+            key = f"{rid}|{p}|{c}"
+            prev = best.get(key)
+            if prev is None:
+                best[key] = {**t, "prefix": p, "code": c}
+                order.append(key)
+                continue
+            # 补空：封面/标题等
+            merged = dict(prev)
+            for k in ("coverUrl", "forumTitle", "maker"):
+                if not str(merged.get(k) or "").strip() and str(t.get(k) or "").strip():
+                    merged[k] = t.get(k)
+            prev_urls = [
+                str(u).strip() for u in (merged.get("coverUrls") or []) if str(u).strip()
+            ]
+            for u in t.get("coverUrls") or []:
+                s = str(u).strip()
+                if s and s not in prev_urls:
+                    prev_urls.append(s)
+            if prev_urls:
+                merged["coverUrls"] = prev_urls[:4]
+            if t.get("fromLibraryDir"):
+                merged["fromLibraryDir"] = True
+            if t.get("fromFill"):
+                merged["fromFill"] = True
+            best[key] = merged
+    return [best[k] for k in order if k in best]
 
 
 _NO_DETAIL_ERR_MARKERS = (
@@ -4460,18 +5203,65 @@ def _has_usable_scrape_payload(meta: dict[str, Any], code: str) -> bool:
     return False
 
 
-def _all_network_sources_no_detail(runs: Any) -> bool:
-    """所有网络源均反馈未找到详情页（番号错误/不存在）。"""
+def _all_network_sources_no_detail(
+    runs: Any,
+    *,
+    expected_sources: list[str] | None = None,
+) -> bool:
+    """所有网络源均反馈未找到详情页（番号不存在）。
+
+    超时 / 5xx / 连接失败不算「无数据」。
+    若传入 expected_sources，须这些源都实际跑过且均无详情，才算全源确认。
+    """
     net_runs = _iter_network_source_runs(runs)
     if not net_runs:
         return False
-    if any(bool(r.get("ok")) for r in net_runs):
+    meta_runs = [
+        r
+        for r in net_runs
+        if str(r.get("mode") or "").strip().lower() in {"", "meta"}
+    ]
+    use = meta_runs if meta_runs else net_runs
+    if not use:
         return False
-    return all(
+    if any(bool(r.get("ok")) for r in use):
+        return False
+    if not all(
         _is_no_detail_error(str(r.get("error") or ""))
         or _is_no_detail_error(str(r.get("message") or ""))
-        for r in net_runs
-    )
+        for r in use
+    ):
+        return False
+    if expected_sources:
+        tried = {
+            str(r.get("id") or "").strip().lower()
+            for r in use
+            if str(r.get("id") or "").strip()
+        }
+        want = {
+            str(s).strip().lower() for s in expected_sources if str(s).strip()
+        }
+        if want and not want <= tried:
+            return False
+    return True
+
+
+def _is_confirmed_empty_meta(meta: dict[str, Any] | None) -> bool:
+    """落盘是否为「无数据」空号（可增量跳过）。
+
+    快源判定 not_found 后落盘；无 sourceRuns 的旧空号标记也认（无可用字段即可）。
+    """
+    if not _meta_is_not_found(meta):
+        return False
+    assert isinstance(meta, dict)
+    code = str(meta.get("code") or "")
+    if _has_usable_scrape_payload(meta, code):
+        return False
+    runs = meta.get("sourceRuns")
+    net = _iter_network_source_runs(runs)
+    if not net:
+        return True
+    return _all_network_sources_no_detail(runs)
 
 
 def _classify_network_scrape(
@@ -4479,32 +5269,36 @@ def _classify_network_scrape(
     *,
     code: str,
     need_net: bool,
+    expected_sources: list[str] | None = None,
 ) -> str:
-    """网络刮削结果：ok | not_found | hard_fail | empty。
+    """网络刮削结果：ok | not_found | hard_fail。
 
-    not_found：全源无详情页 / message=not_found / 无任何可用元数据与封面。
+    not_found（空号）：快源识别不到 / 无任何可用字段。
+    hard_fail（失败）：超时等可重试，或有部分字段但不齐。
     """
     if not need_net:
         return "ok"
     msg = str(meta.get("message") or "").strip()
+    msg_l = msg.lower()
     if msg in {"paused", "cancelled", "needs_flare"}:
         return msg
+    runs = meta.get("sourceRuns")
+    has_partial = _has_usable_scrape_payload(meta, code)
+    # 快源已判定无详情 → 空号（允许 sourceRuns 稍后补全）
+    if (not has_partial) and (
+        msg_l in {"not_found", "notfound"}
+        or _all_network_sources_no_detail(runs, expected_sources=expected_sources)
+    ):
+        return "not_found"
     if (not meta.get("ok")) and (
-        msg in {"bad response"}
+        msg in {"bad response", "scrape_timeout", "scrape_deadline", "no_meta"}
         or msg.startswith(("刮削服务", "无法连接刮削服务"))
     ):
         return "hard_fail"
-    runs = meta.get("sourceRuns")
-    if _all_network_sources_no_detail(runs):
-        return "not_found"
-    if msg == "not_found":
-        return "not_found"
-    if bool(meta.get("ok")) or _has_usable_scrape_payload(meta, code):
+    if bool(meta.get("ok")) or has_partial:
         return "ok"
-    # 有源尝试但全失败且无可用字段
-    if _iter_network_source_runs(runs):
-        return "not_found"
-    return "empty"
+    # 无字段且未给出 not_found：失败可重试
+    return "hard_fail"
 
 
 def _call_scrape(
@@ -4524,6 +5318,7 @@ def _call_scrape(
     cover_download_strategy: str | None = None,
     poster_crop: dict[str, Any] | None = None,
     channel: str | None = None,
+    deadline_ms: int | None = None,
 ) -> dict[str, Any]:
     url = f"{origin.rstrip('/')}/api/scrape"
     payload: dict[str, Any] = {"code": code, "force": force}
@@ -4554,10 +5349,21 @@ def _call_scrape(
         payload["coverDownloadStrategy"] = cover_download_strategy
     if isinstance(poster_crop, dict) and poster_crop:
         payload["posterCrop"] = poster_crop
+    if deadline_ms is not None:
+        try:
+            payload["deadlineMs"] = max(10000, min(120000, int(deadline_ms)))
+        except Exception:
+            pass
     last_err = "bad response"
-    # 过盾串行后单番号可能很久；给足读超时，避免误判失败
-    http_timeout = httpx.Timeout(10.0, read=180.0)
-    for attempt in range(3):
+    # 空号/全源失败时个别站会拖很久；过长读超时 + 重试会让快源槽位全堵死
+    read_s = 40.0
+    if deadline_ms is not None:
+        try:
+            read_s = max(12.0, min(90.0, float(deadline_ms) / 1000.0 + 5.0))
+        except Exception:
+            read_s = 40.0
+    http_timeout = httpx.Timeout(10.0, read=read_s)
+    for attempt in range(2):
         abort = _work_abort_kind()
         if abort == "cancel":
             return {"code": code, "ok": False, "message": "cancelled"}
@@ -4597,6 +5403,10 @@ def _call_scrape(
                 return data
             last_err = str(body.get("message") or "bad response")
             break
+        except httpx.TimeoutException:
+            # 超时不重试：否则 5 槽 × 3 次 × 180s 会卡死整晚
+            last_err = "scrape_timeout"
+            return {"code": code, "ok": False, "message": "scrape_timeout"}
         except httpx.RequestError as e:
             abort = _work_abort_kind()
             if abort == "paused":
@@ -4725,8 +5535,31 @@ def _write_entry(
 
     existing = _find_library_entry_dir(code)
     if existing is None or not existing.is_dir():
-        log.warning("scrape write skip %s: 本地库无对应文件夹，请先同步片库", code)
-        return "failed"
+        # 补全号 / 未物化：按命名规则建空目录，允许继续刮削落盘
+        try:
+            existing = scrape_naming.resolve_entry_dir(
+                library,
+                naming_cfg,
+                code=code,
+                meta={
+                    "code": code,
+                    "prefix": target.get("prefix"),
+                    "maker": target.get("maker"),
+                    "region": rid,
+                    "regionLabel": label,
+                },
+                target=target,
+                category=label,
+                kind=kind_id,
+            )
+            existing.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            log.warning(
+                "scrape write skip %s: 本地库无对应文件夹且无法创建",
+                code,
+                exc_info=True,
+            )
+            return "failed"
     _remember_entry_dir(code, existing)
 
     # 索引 meta.json 只读；激活的本地可复用字段事后按中文规则合并
@@ -5088,10 +5921,12 @@ def run_export(
                 "done": 0,
                 "failed": 0,
                 "skipped": 0,
+                "empty": 0,
                 "active": 0,
                 "doneCodes": [],
                 "skippedCodes": [],
                 "failedCodes": [],
+                "emptyCodes": [],
                 "activeCodes": [],
                 "activeFastCodes": [],
                 "activeSlowCodes": [],
@@ -5152,13 +5987,44 @@ def run_export(
                 _end_flags["clearOnStop"] = bool(_control.get("clearOnStop"))
             return export_status()
 
+        _push_event(phase="job", text="收集目标…", level="info")
         targets = collect_targets(
             region=region,
             regions=regions,
             maker=maker,
             prefix=prefix,
             code=code,
+            include_fill=True,
         )
+        fill_n = sum(1 for t in targets if t.get("fromFill"))
+        if fill_n:
+            _push_event(
+                phase="job",
+                text=f"索引目标 {len(targets)} · 含补全号 {fill_n}",
+                level="info",
+            )
+        try:
+            disk_extra = collect_library_empty_folder_targets(
+                region=region,
+                regions=regions,
+                maker=maker,
+                prefix=prefix,
+                code=code,
+            )
+            before_n = len(targets)
+            targets = merge_scrape_targets(targets, disk_extra)
+            added = len(targets) - before_n
+            if disk_extra:
+                _push_event(
+                    phase="job",
+                    text=(
+                        f"片库空目录补入 {len(disk_extra)} 条"
+                        + (f" · 净增 {added}" if added else " · 均已在索引目标中")
+                    ),
+                    level="info",
+                )
+        except Exception:
+            log.exception("collect library empty folder targets failed")
         # 同任务断点续跑：
         # - 暂停续跑：只用 remainingTargets
         # - 其它残留断点：全量 targets 减去已完成（避免重置后只刮残留几条）
@@ -5167,11 +6033,17 @@ def run_export(
         cur_tid = str(task_id or tid or "").strip()
         if resume and resume_tid and resume_tid == cur_tid:
             finished = set()
-            for bucket in ("doneCodes", "skippedCodes", "failedCodes"):
+            # 失败不进 finished：增量/续跑都会重新入队再刮
+            for bucket in ("doneCodes", "emptyCodes", "skippedCodes"):
                 for c in list((resume or {}).get(bucket) or []):
                     s = str(c or "").strip()
                     if s:
                         finished.add(s)
+            failed_resume = {
+                str(c or "").strip()
+                for c in list((resume or {}).get("failedCodes") or [])
+                if str(c or "").strip()
+            }
             pause_resume = bool(
                 (resume or {}).get("paused")
                 or str((resume or {}).get("reason") or "") == "paused"
@@ -5182,9 +6054,28 @@ def run_export(
                 for t in list((resume or {}).get("remainingTargets") or [])
                 if isinstance(t, dict) and str(t.get("code") or "").strip()
             ]
+            all_saved = [
+                t
+                for t in list((resume or {}).get("allTargets") or [])
+                if isinstance(t, dict)
+            ]
+            retry_failed = [
+                t
+                for t in (all_saved or targets)
+                if str(t.get("code") or "").strip() in failed_resume
+            ]
             if pause_resume and remaining_saved:
-                targets = remaining_saved
-            elif finished:
+                # 未跑完的 + 本轮已失败的重试
+                seen_q: set[str] = set()
+                merged: list[dict[str, Any]] = []
+                for t in [*retry_failed, *remaining_saved]:
+                    c = str(t.get("code") or "").strip()
+                    if not c or c in seen_q:
+                        continue
+                    seen_q.add(c)
+                    merged.append(t)
+                targets = merged
+            elif finished or failed_resume:
                 targets = [
                     t
                     for t in targets
@@ -5192,36 +6083,36 @@ def run_export(
                 ]
             with _meta_lock:
                 _state["done"] = int((resume or {}).get("done") or 0)
+                _state["empty"] = int((resume or {}).get("empty") or 0)
                 _state["skipped"] = int((resume or {}).get("skipped") or 0)
-                _state["failed"] = int((resume or {}).get("failed") or 0)
+                # 失败项将重刮，本轮计数从 0 再累计
+                _state["failed"] = 0
                 _state["doneCodes"] = list((resume or {}).get("doneCodes") or [])[
                     -_MAX_RESULT_CODES:
                 ]
+                _state["emptyCodes"] = list(
+                    (resume or {}).get("emptyCodes") or []
+                )[-_MAX_RESULT_CODES:]
                 _state["skippedCodes"] = list(
                     (resume or {}).get("skippedCodes") or []
                 )[-_MAX_RESULT_CODES:]
-                _state["failedCodes"] = list(
-                    (resume or {}).get("failedCodes") or []
-                )[-_MAX_RESULT_CODES:]
+                _state["failedCodes"] = []
                 total_saved = int((resume or {}).get("total") or 0)
                 _state["total"] = total_saved or (
                     len(targets)
                     + int(_state["done"])
+                    + int(_state["empty"])
                     + int(_state["skipped"])
                     + int(_state["failed"])
                 )
-                all_saved = [
-                    t
-                    for t in list((resume or {}).get("allTargets") or [])
-                    if isinstance(t, dict)
-                ]
                 _state["allTargets"] = all_saved or list(targets)
                 _result_seen = set(finished)
             _push_event(
                 phase="job",
                 text=(
                     f"{'暂停续跑' if pause_resume else '断点续跑'} · 已完成 {int((resume or {}).get('done') or 0)}"
-                    f" · 剩余 {len(targets)}"
+                    + (f" · 失败重试 {len(retry_failed)}" if retry_failed else "")
+                    + f" · 剩余 {len(targets)}"
                 ),
                 level="info",
             )
@@ -5229,6 +6120,31 @@ def run_export(
             with _meta_lock:
                 _state["total"] = len(targets)
                 _state["allTargets"] = list(targets)
+
+        # 增量：按本地真实状态预分类（成功/空号/失败），只把未完成送进工作池
+        if not bool(force_ref[0]) and targets:
+            try:
+                lib_root = _resolve_library_root()
+                before_pending = len(targets)
+                _push_event(
+                    phase="job",
+                    text=f"增量预分类扫描 {before_pending} …",
+                    level="info",
+                )
+                targets = _bulk_skip_complete_targets(
+                    targets,
+                    library=lib_root,
+                    export_fields=export_fields,
+                )
+                if len(targets) < before_pending:
+                    with _meta_lock:
+                        # total 保持 allTargets 全量；processed = done+empty+fail
+                        all_n = len(list(_state.get("allTargets") or []))
+                        if all_n > 0:
+                            _state["total"] = all_n
+            except Exception:
+                log.exception("bulk classify complete targets failed")
+
         if _control.get("cancel"):
             _push_event(phase="job", text="任务已取消", level="warn")
             with _meta_lock:
@@ -5236,6 +6152,26 @@ def run_export(
                 _end_flags["clearOnStop"] = bool(_control.get("clearOnStop"))
             return export_status()
         if not targets:
+            with _meta_lock:
+                done_n = int(_state.get("done") or 0)
+                empty_n = int(_state.get("empty") or 0)
+                skip_n = int(_state.get("skipped") or 0)
+                fail_n = int(_state.get("failed") or 0)
+            if done_n + empty_n + skip_n + fail_n > 0:
+                _push_event(
+                    phase="job",
+                    text=(
+                        f"增量无需新刮 · 成功 {done_n} · 空号 {empty_n}"
+                        + (f" · 跳过 {skip_n}" if skip_n else "")
+                        + f" · 数据不全 {fail_n}"
+                    ),
+                    level="ok",
+                )
+                with _meta_lock:
+                    _end_flags["message"] = "ok"
+                    _end_flags["clearOnStop"] = bool(_control.get("clearOnStop"))
+                _clear_resume_checkpoint()
+                return export_status()
             _push_event(
                 phase="job",
                 text="无待刮削番号（请先构建 maker-fs 索引）",
@@ -5494,9 +6430,9 @@ def run_export(
                                 exc_info=True,
                             )
                     existing = filled
-                    # not_found 标记只为避免重试，本质仍是失败，不能进「跳过」桶
-                    is_nf = _meta_is_not_found(existing)
-                    result = "failed" if is_nf else "skipped"
+                    # not_found = 空号；已刮成功立刻记成功
+                    is_nf = _is_confirmed_empty_meta(existing)
+                    result = "empty" if is_nf else "done"
                     poster_local = ""
                     for cand in (poster_name, "poster.jpg"):
                         if (entry_dir / cand).is_file():
@@ -5509,7 +6445,7 @@ def run_export(
                             region=rid,
                             region_label=label,
                             path=entry_rel,
-                            phase="failed" if is_nf else "skipped",
+                            phase="empty" if is_nf else "done",
                             meta=existing,
                             source_runs=(
                                 existing.get("sourceRuns")
@@ -5536,16 +6472,16 @@ def run_export(
                         _push_event(
                             phase="scrape",
                             code=c,
-                            text="已确认无详情（not_found）· 计入失败，增量不再重试",
-                            level="error",
+                            text="已确认无详情（not_found）· 计入空号",
+                            level="warn",
                             archive=False,
                         )
                     else:
                         _push_event(
                             phase="write",
                             code=c,
-                            text="已存在 meta/封面，增量跳过",
-                            level="warn",
+                            text="已存在 meta/封面，记为成功",
+                            level="ok",
                             archive=False,
                         )
                 else:
@@ -5625,12 +6561,22 @@ def run_export(
                     meta_src_use, cover_src_use = (
                         scrape_profiles.derive_sources_from_fields(fp_use)
                     )
+                    # 无封面补全号：不砍超时，让快源跑完以便立即判空号
+                    is_fill_empty = (
+                        bool(t.get("fromFill")) or bool(t.get("fromLibraryDir"))
+                    ) and not str(t.get("coverUrl") or "").strip()
+                    if not is_fill_empty and not str(t.get("coverUrl") or "").strip():
+                        urls = t.get("coverUrls") or []
+                        if not any(str(u).strip() for u in urls):
+                            is_fill_empty = True
+                    scrape_deadline_ms: int | None = None
                     need_net = bool(meta_src_use or cover_src_use)
                     _push_event(
                         phase="parse",
                         code=c,
                         text=(
                             "准备网络请求"
+                            + (" · 补全空洞" if is_fill_empty else "")
                             if need_net
                             else "无网络源 · 仅用本地候选"
                         ),
@@ -5677,6 +6623,7 @@ def run_export(
                             if isinstance(cfg.get("posterCrop"), dict)
                             else None,
                             channel=ch,
+                            deadline_ms=scrape_deadline_ms,
                         )
                         scrape_abort = str(meta.get("message") or "")
                         if scrape_abort == "paused":
@@ -5684,14 +6631,40 @@ def run_export(
                         if scrape_abort == "cancelled":
                             return "cancel", c
                         # 快通道：不过盾不够 → 转入慢源补过盾（不计成功/失败）
+                        # 空号：快源全员确认无详情 → 立即判空号，不进慢源
                         if scrape_abort == "needs_flare" and ch == "fast":
-                            _push_event(
-                                phase="scrape",
-                                code=c,
-                                text="快源不够 · 转入慢源补过盾",
-                                level="info",
+                            runs_nf = (
+                                meta.get("sourceRuns")
+                                if isinstance(meta, dict)
+                                else None
                             )
-                            return "defer_slow", c
+                            meta_runs = [
+                                r
+                                for r in _iter_network_source_runs(runs_nf)
+                                if str(r.get("mode") or "") == "meta"
+                            ]
+                            fast_meta_nf = bool(meta_runs) and all(
+                                (not bool(r.get("ok")))
+                                and _is_no_detail_error(
+                                    str(r.get("error") or r.get("message") or "")
+                                )
+                                for r in meta_runs
+                            )
+                            if fast_meta_nf:
+                                if isinstance(meta, dict):
+                                    meta = {
+                                        **meta,
+                                        "message": "not_found",
+                                        "ok": False,
+                                    }
+                            else:
+                                _push_event(
+                                    phase="scrape",
+                                    code=c,
+                                    text="快源不够 · 转入慢源补过盾",
+                                    level="info",
+                                )
+                                return "defer_slow", c
                     else:
                         meta = {
                             **template,
@@ -5709,10 +6682,14 @@ def run_export(
                             ],
                             "message": "index",
                         }
-                    # 网络结果分类（在合并本地之前）：全源无详情 → 失败，勿当成功
+                    # 网络结果分类（在合并本地之前）：
+                    # 空号 = 快源全员确认无详情（立即判定）；失败 = 字段不齐 / 超时未确认
                     net_raw = dict(meta or {})
                     net_outcome = _classify_network_scrape(
-                        net_raw, code=c, need_net=need_net
+                        net_raw,
+                        code=c,
+                        need_net=need_net,
+                        expected_sources=None,
                     )
                     # 网络结果为底；再按中文规则合并本地索引
                     net = dict(meta or {})
@@ -5760,10 +6737,70 @@ def run_export(
                         else {}
                     )
                     if net_outcome == "hard_fail":
+                        has_partial = _has_usable_scrape_payload(meta, c)
+                        # 无封面空洞超时且无任何字段 → 按空号（无数据），非字段不齐失败
+                        if (
+                            (not has_partial)
+                            and is_fill_empty
+                            and scrape_msg
+                            in {
+                                "scrape_timeout",
+                                "scrape_deadline",
+                                "no_meta",
+                                "not_found",
+                                "notfound",
+                            }
+                        ):
+                            _push_event(
+                                phase="scrape",
+                                code=c,
+                                text="记为空号 · 无数据（快源未识别到详情）",
+                                level="warn",
+                            )
+                            _set_current_detail(
+                                _detail_payload(
+                                    code=c,
+                                    kind=kind,
+                                    region=rid,
+                                    region_label=label,
+                                    path=entry_rel,
+                                    phase="empty",
+                                    meta=meta,
+                                    source_runs=runs,
+                                    field_sources=field_sources,
+                                )
+                            )
+                            try:
+                                _write_not_found_marker(
+                                    entry_dir,
+                                    code=c,
+                                    export_fields=export_fields,
+                                    meta={
+                                        **(meta if isinstance(meta, dict) else {}),
+                                        "ok": False,
+                                        "message": "not_found",
+                                    },
+                                    runs=runs,
+                                )
+                            except Exception:
+                                log.debug(
+                                    "write not_found marker failed %s",
+                                    c,
+                                    exc_info=True,
+                                )
+                            result = "empty"
+                            return "empty", c
+                        fail_txt = scrape_msg or "刮削失败"
+                        if scrape_msg in {"scrape_timeout", "scrape_deadline"}:
+                            fail_txt = "刮削超时（源站过慢或无响应）"
+                        elif scrape_msg in {"no_meta", "not_found", "notfound"}:
+                            fail_txt = "未确认无数据 · 记为失败（可重试）"
+                        if has_partial:
+                            fail_txt = "字段数据不齐全 · 记为失败"
                         _push_event(
                             phase="scrape",
                             code=c,
-                            text=scrape_msg or "刮削失败",
+                            text=fail_txt,
                             level="error",
                         )
                         _set_current_detail(
@@ -5774,7 +6811,9 @@ def run_export(
                                 region_label=label,
                                 path=entry_rel,
                                 phase="failed",
-                                meta={},
+                                meta=meta if has_partial else {},
+                                source_runs=runs if has_partial else None,
+                                field_sources=field_sources if has_partial else None,
                             )
                         )
                         result = "failed"
@@ -5840,22 +6879,45 @@ def run_export(
                                 ),
                                 level="warn",
                             )
-                    # 全源无详情 / 无可用元数据封面 → 记失败，不写库、不当成功
-                    if net_outcome in {"not_found", "empty"}:
-                        fail_reason = (
-                            "全部源未找到详情页（番号可能错误或不存在）"
-                            if _all_network_sources_no_detail(runs)
-                            else (
-                                scrape_msg
-                                if scrape_msg and scrape_msg != "ok"
-                                else "not_found"
-                            )
+                    # 空号 = 全部数据源都没有数据；失败 = 有部分字段但不齐全
+                    if net_outcome == "not_found":
+                        has_partial = _has_usable_scrape_payload(meta, c)
+                        # 本通道 runs 全员无详情即可；快→慢已保证慢源也会跑
+                        confirmed_empty = (
+                            not has_partial
+                            and _all_network_sources_no_detail(runs)
                         )
+                        if has_partial or not confirmed_empty:
+                            _push_event(
+                                phase="scrape",
+                                code=c,
+                                text=(
+                                    "字段数据不齐全 · 记为失败"
+                                    if has_partial
+                                    else "未确认全源无数据 · 记为失败（可重试）"
+                                ),
+                                level="error",
+                            )
+                            _set_current_detail(
+                                _detail_payload(
+                                    code=c,
+                                    kind=kind,
+                                    region=rid,
+                                    region_label=label,
+                                    path=entry_rel,
+                                    phase="failed",
+                                    meta=meta,
+                                    source_runs=runs,
+                                    field_sources=field_sources,
+                                )
+                            )
+                            result = "failed"
+                            return "failed", c
                         _push_event(
                             phase="scrape",
                             code=c,
-                            text=f"元数据获取失败 · {fail_reason}",
-                            level="error",
+                            text="记为空号 · 快源均无详情",
+                            level="warn",
                         )
                         _set_current_detail(
                             _detail_payload(
@@ -5864,13 +6926,12 @@ def run_export(
                                 region=rid,
                                 region_label=label,
                                 path=entry_rel,
-                                phase="failed",
+                                phase="empty",
                                 meta=meta,
                                 source_runs=runs,
                                 field_sources=field_sources,
                             )
                         )
-                        # 落盘 not_found 标记，下次增量直接跳过，不再反复入队
                         try:
                             _write_not_found_marker(
                                 entry_dir,
@@ -5881,10 +6942,12 @@ def run_export(
                             )
                         except Exception:
                             log.debug(
-                                "write not_found marker failed %s", c, exc_info=True
+                                "write not_found marker failed %s",
+                                c,
+                                exc_info=True,
                             )
-                        result = "failed"
-                        return "failed", c
+                        result = "empty"
+                        return "empty", c
                     _push_event(
                         phase="scrape",
                         code=c,
@@ -5951,6 +7014,51 @@ def run_export(
                         if (entry_dir / cand).is_file():
                             poster_local = f"{entry_rel}/{cand}"
                             break
+                    # 有数据但任务勾选强制字段不齐 → 失败（系列白名单不计入）
+                    if result == "done":
+                        miss = _meta_missing_required_fields(
+                            meta if isinstance(meta, dict) else {},
+                            entry_dir=entry_dir,
+                            poster_name=poster_name,
+                            need_cover=need_cover,
+                            export_fields=export_fields,
+                        )
+                        if not miss and not _entry_complete(
+                            entry_dir,
+                            poster_name=poster_name,
+                            need_cover=need_cover,
+                            export_fields=export_fields,
+                        ):
+                            # 兜底：entry_complete 未过但 miss 为空（例如未写入 exportFields）
+                            miss = ["titleZh"]
+                        if miss:
+                            labels = _field_labels_zh()
+                            miss_zh = "、".join(
+                                labels.get(x, x) for x in miss
+                            )
+                            result = "failed"
+                            _push_event(
+                                phase="write",
+                                code=c,
+                                text=f"字段数据不齐全（缺 {miss_zh}）· 记为失败",
+                                level="error",
+                            )
+                            _set_current_detail(
+                                _detail_payload(
+                                    code=c,
+                                    kind=kind,
+                                    region=rid,
+                                    region_label=label,
+                                    path=entry_rel,
+                                    phase="failed",
+                                    meta=meta,
+                                    source_runs=runs,
+                                    field_sources=field_sources,
+                                    poster_local=poster_local,
+                                    fallback_cover=str(meta.get("poster") or ""),
+                                )
+                            )
+                            return "failed", c
                     _set_current_detail(
                         _detail_payload(
                             code=c,
@@ -5974,11 +7082,13 @@ def run_export(
                             level="ok",
                         )
                     elif result == "skipped":
+                        # 兼容旧返回值；对外记成功
+                        result = "done"
                         _push_event(
                             phase="write",
                             code=c,
-                            text="已存在，跳过写入",
-                            level="warn",
+                            text="已存在，记为成功",
+                            level="ok",
                         )
                     else:
                         _push_event(

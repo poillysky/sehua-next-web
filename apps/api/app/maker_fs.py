@@ -99,6 +99,11 @@ REGION_ORDER = list(REGION_META.keys())
 # 仅这两区把女优名写入 maker-fs 索引；其它区只保留标题
 FORUM_ACTORS_INDEX_REGIONS = frozenset({"japan_censored", "japan_gravure"})
 
+# 数字流水号：按 from..to 内部补全（不要求库里每条真实存在）
+# FC2 / 欧美 / date6 等特殊格式不适用
+FILL_DIGIT_RANGE_REGIONS = frozenset({"japan_censored", "china"})
+FILL_DIGIT_RANGE_MAX = 50_000
+
 _build_lock = threading.Lock()
 _meta_lock = threading.Lock()
 _build_state: dict[str, Any] = {
@@ -515,6 +520,89 @@ def indexes_forum_actors(region: str | None) -> bool:
     return bool(rid and rid in FORUM_ACTORS_INDEX_REGIONS)
 
 
+def should_fill_digit_range(fs_region: str | None, prefix: str) -> bool:
+    """日本有码 / 国产无码 的 digit_pad 前缀：列表按首尾补全。
+
+    FC2、欧美区以及 SKIP / date6 / western / fc2 / alnum 等特殊格式一律不补。
+    """
+    rid = resolve_fs_region(fs_region) or str(fs_region or "").strip()
+    if rid not in FILL_DIGIT_RANGE_REGIONS:
+        return False
+    pref = _std_prefix(prefix)
+    if not pref:
+        return False
+    try:
+        from .prefix_ranges import SKIP_PREFIXES
+        from .search_av import prefix_format_meta
+
+        if pref in SKIP_PREFIXES or pref.replace("-", "") in SKIP_PREFIXES:
+            return False
+        meta = prefix_format_meta(pref)
+        return str(meta.get("codeFormat") or "") == "digit_pad"
+    except Exception:
+        return False
+
+
+def _filled_range_total(from_n: int, to_n: int) -> int:
+    lo = max(1, int(from_n or 1))
+    hi = max(0, int(to_n or 0))
+    if hi < lo:
+        return 0
+    return min(FILL_DIGIT_RANGE_MAX, hi - lo + 1)
+
+
+def _discovered_digit_bounds(
+    covers: dict[str, Any] | None, prefix: str
+) -> tuple[int, int]:
+    """库内已命中 covers 的流水上下界（上限用稳健簇，去掉离群高号）。
+
+    补全只填「已发现的第一号～最后号」之间的空洞，不按 ranges 余量往上编。
+    """
+    pref = _std_prefix(prefix)
+    if not pref or not isinstance(covers, dict) or not covers:
+        return 0, 0
+    nums: list[int] = []
+    for code in covers:
+        m = re.fullmatch(rf"{re.escape(pref)}-(\d+)$", str(code).upper())
+        if m:
+            try:
+                n = int(m.group(1))
+            except ValueError:
+                continue
+            if n > 0:
+                nums.append(n)
+    if not nums:
+        return 0, 0
+    lo = min(nums)
+    hi = max(nums)
+    if len(nums) >= 10:
+        try:
+            from .prefix_ranges import robust_serial_max
+
+            rob = robust_serial_max(nums)
+            if rob and 0 < rob <= hi:
+                hi = rob
+        except Exception:
+            pass
+    return max(1, lo), max(0, hi)
+
+
+def _iter_filled_digit_codes(prefix: str, from_n: int, to_n: int, pad: int):
+    """生成 PREFIX-zeroPad 全区间（含库内未出现的号码）。"""
+    pref = _std_prefix(prefix)
+    if not pref:
+        return
+    lo = max(1, int(from_n or 1))
+    hi = max(0, int(to_n or 0))
+    width = max(1, min(8, int(pad or 3)))
+    if hi < lo:
+        return
+    if hi - lo + 1 > FILL_DIGIT_RANGE_MAX:
+        hi = lo + FILL_DIGIT_RANGE_MAX - 1
+    for n in range(lo, hi + 1):
+        yield f"{pref}-{n:0{width}d}"
+
+
 def _normalize_forum_actors_field(actors_raw: Any) -> list[str] | None:
     """列表展示用：映射表标准名；无有效名返回 None。"""
     if not isinstance(actors_raw, list) or not actors_raw:
@@ -896,14 +984,25 @@ def read_manifest() -> dict[str, Any]:
 
 
 def _read_cover_count_fast(path: Path) -> int:
-    """只抽 coverCount，避免加载整份 covers。"""
+    """只抽 coverCount / fillFrom·fillTo，避免加载整份 covers。"""
     try:
         text = path.read_text(encoding="utf-8")
     except Exception:
         return 0
     m = re.search(r'"coverCount"\s*:\s*(\d+)', text)
     if m:
-        return int(m.group(1))
+        n = int(m.group(1))
+        if n > 0:
+            return n
+    # 旧索引未写准 coverCount 时，用已发现首尾估算补全条数
+    if re.search(r'"fillRange"\s*:\s*true', text):
+        mf = re.search(r'"fillFrom"\s*:\s*(\d+)', text)
+        mt = re.search(r'"fillTo"\s*:\s*(\d+)', text)
+        if mf and mt:
+            lo = int(mf.group(1))
+            hi = int(mt.group(1))
+            if hi >= lo > 0:
+                return min(FILL_DIGIT_RANGE_MAX, hi - lo + 1)
     # 旧文件无 coverCount 时数 covers 键（慢路径，尽量少走）
     m2 = re.search(r'"covers"\s*:\s*\{', text)
     if not m2:
@@ -913,7 +1012,7 @@ def _read_cover_count_fast(path: Path) -> int:
 
 
 def prefix_code_count(prefix: str, fs_region: str | None = None) -> int:
-    """已搜索确认的子条目数（如 SONE-001 → 1）。"""
+    """子条目数：优先读 index 里已写好的 coverCount（补全后即首尾区间长度）。"""
     p = _std_prefix(prefix)
     rid = resolve_fs_region(fs_region)
     if rid:
@@ -1347,13 +1446,35 @@ def list_prefix_codes(
     cover_map = _rekey_covers_to_pad(
         cover_map_raw, prefix=pref, pad=pad, from_n=from_n, to_n=to_n
     )
+    fill_range = bool(idx.get("fillRange")) or should_fill_digit_range(
+        fs_region, pref
+    )
+    # 补全上下界：只认 covers 里已发现流水，不用 ranges 余量
+    fill_from = int(idx.get("fillFrom") or 0)
+    fill_to = int(idx.get("fillTo") or 0)
+    if fill_range:
+        d_from, d_to = _discovered_digit_bounds(cover_map, pref)
+        if d_to > 0:
+            fill_from, fill_to = d_from, d_to
+        elif fill_to <= 0:
+            fill_range = False
     if set(cover_map_raw.keys()) != set(cover_map.keys()) or len(cover_map_raw) != len(
         cover_map
     ):
         # 懒写回：去掉不正规/超区间键，下次扫描前展示也干净
         try:
             idx["covers"] = cover_map
-            idx["coverCount"] = len(cover_map)
+            idx["hitCount"] = len(cover_map)
+            if fill_range and fill_to >= fill_from > 0:
+                idx["fillRange"] = True
+                idx["fillFrom"] = fill_from
+                idx["fillTo"] = fill_to
+                idx["coverCount"] = _filled_range_total(fill_from, fill_to)
+            else:
+                idx["fillRange"] = False
+                idx.pop("fillFrom", None)
+                idx.pop("fillTo", None)
+                idx["coverCount"] = len(cover_map)
             idx["from"] = from_n
             idx["to"] = to_n
             idx["pad"] = pad
@@ -1364,11 +1485,8 @@ def list_prefix_codes(
             log.debug("lazy rekey covers %s failed", pref, exc_info=True)
     want_actors = indexes_forum_actors(fs_region)
     needle = str(q or "").strip().upper()
-    items: list[dict[str, Any]] = []
-    for code, hit in cover_map.items():
-        key = str(code or "").strip().upper()
-        if not key:
-            continue
+
+    def _row_for_code(key: str, hit: Any) -> dict[str, Any] | None:
         cover_url = None
         forum_title = None
         forum_actors = None
@@ -1384,14 +1502,12 @@ def list_prefix_codes(
                 blob = f"{blob} {forum_title}"
             if forum_actors:
                 blob = f"{blob} {' '.join(forum_actors)}"
-            # 搜索同时匹配磁盘上的原始女优名（映射前）
             if want_actors and isinstance(hit, dict):
                 raw_acts = hit.get("forumActors")
                 if isinstance(raw_acts, list) and raw_acts:
                     blob = f"{blob} {' '.join(str(a) for a in raw_acts if str(a).strip())}"
             if needle not in blob.upper():
-                continue
-        # 全员 coverUrl；有码/写真带女优；其余只带标题
+                return None
         row: dict[str, Any] = {
             "code": key,
             "coverUrl": cover_url,
@@ -1399,24 +1515,62 @@ def list_prefix_codes(
         }
         if want_actors:
             row["forumActors"] = forum_actors
-        items.append(row)
-    # 热门→冷门：番号数字大的（更新）在前
-    items.sort(key=lambda it: code_sort_key(str(it["code"])), reverse=True)
-    total = len(items)
+        return row
+
+    items: list[dict[str, Any]] = []
     off = max(0, int(offset or 0))
     lim = max(1, min(500, int(limit or 100)))
-    page = items[off : off + lim]
+    if fill_range and fill_to >= fill_from > 0:
+        lo = max(1, int(fill_from))
+        hi = max(0, int(fill_to))
+        if hi - lo + 1 > FILL_DIGIT_RANGE_MAX:
+            lo = max(lo, hi - FILL_DIGIT_RANGE_MAX + 1)
+        width = max(1, min(8, int(pad or 3)))
+        if needle:
+            # 搜索：扫全区间过滤（缺号也按番号文本匹配）
+            matched: list[dict[str, Any]] = []
+            for n in range(hi, lo - 1, -1):
+                key = f"{pref}-{n:0{width}d}"
+                row = _row_for_code(key, cover_map.get(key))
+                if row:
+                    matched.append(row)
+            total = len(matched)
+            page = matched[off : off + lim]
+            items = page
+        else:
+            # 无搜索：按需切片，不必物化上万条
+            total = hi - lo + 1
+            for i in range(off, min(off + lim, total)):
+                n = hi - i
+                key = f"{pref}-{n:0{width}d}"
+                row = _row_for_code(key, cover_map.get(key))
+                if row:
+                    items.append(row)
+    else:
+        for code, hit in cover_map.items():
+            key = str(code or "").strip().upper()
+            if not key:
+                continue
+            row = _row_for_code(key, hit)
+            if row:
+                items.append(row)
+        items.sort(key=lambda it: code_sort_key(str(it["code"])), reverse=True)
+        total = len(items)
+        items = items[off : off + lim]
     return {
         "prefix": pref,
         "region": fs_region or idx.get("region") or "",
         "total": total,
         "offset": off,
         "limit": lim,
-        "items": page,
+        "items": items,
         "pad": pad,
         "codeSample": f"{pref}-{1:0{pad}d}",
         "from": from_n,
         "to": to_n,
+        "fillFrom": fill_from if fill_range else 0,
+        "fillTo": fill_to if fill_range else 0,
+        "fillRange": bool(fill_range and fill_to >= fill_from > 0),
         "updatedAt": idx.get("updatedAt") or "",
         "source": "maker-fs",
         "q": needle or "",
@@ -1451,7 +1605,19 @@ def sync_prefix_pad(prefix: str, pad: int) -> None:
             continue
         idx["pad"] = width
         idx["covers"] = new_covers
-        idx["coverCount"] = len(new_covers)
+        idx["hitCount"] = len(new_covers)
+        fill = should_fill_digit_range(rid, p)
+        d_from, d_to = _discovered_digit_bounds(new_covers, p)
+        fill = fill and d_to >= d_from > 0
+        idx["fillRange"] = fill
+        if fill:
+            idx["fillFrom"] = d_from
+            idx["fillTo"] = d_to
+            idx["coverCount"] = _filled_range_total(d_from, d_to)
+        else:
+            idx.pop("fillFrom", None)
+            idx.pop("fillTo", None)
+            idx["coverCount"] = len(new_covers)
         idx["updatedAt"] = _now_iso()
         write_json(path, idx, compact=True)
 
@@ -1582,6 +1748,12 @@ def _export_prefix_index(
             from_n=from_reuse,
             to_n=to_reuse,
         )
+        fill = should_fill_digit_range(fs_region, prefix)
+        d_from, d_to = _discovered_digit_bounds(covers_norm, prefix)
+        fill = fill and d_to >= d_from > 0
+        range_total = (
+            _filled_range_total(d_from, d_to) if fill else len(covers_norm)
+        )
         dirty = False
         if (
             set(covers0.keys()) != set(covers_norm.keys())
@@ -1589,13 +1761,32 @@ def _export_prefix_index(
             or int(reused.get("to") or 0) != to_reuse
             or int(reused.get("from") or 0) != from_reuse
             or int(reused.get("pad") or 0) != pad_reuse
+            or bool(reused.get("fillRange")) != fill
+            or int(reused.get("coverCount") or 0) != range_total
+            or int(reused.get("fillFrom") or 0) != (d_from if fill else 0)
+            or int(reused.get("fillTo") or 0) != (d_to if fill else 0)
         ):
             reused["covers"] = covers_norm
-            reused["coverCount"] = len(covers_norm)
+            reused["hitCount"] = len(covers_norm)
+            reused["fillRange"] = fill
+            if fill:
+                reused["fillFrom"] = d_from
+                reused["fillTo"] = d_to
+            else:
+                reused.pop("fillFrom", None)
+                reused.pop("fillTo", None)
+            reused["coverCount"] = range_total
             reused["from"] = from_reuse
             reused["to"] = to_reuse
             reused["pad"] = pad_reuse
             dirty = True
+        else:
+            reused["fillRange"] = fill
+            reused["hitCount"] = len(covers_norm)
+            reused["coverCount"] = range_total
+            if fill:
+                reused["fillFrom"] = d_from
+                reused["fillTo"] = d_to
         if not indexes_forum_actors(fs_region):
             covers = reused.get("covers")
             if isinstance(covers, dict):
@@ -1744,6 +1935,12 @@ def _export_prefix_index(
         except Exception:
             log.debug("robust trim covers %s failed", prefix, exc_info=True)
 
+    fill_range = should_fill_digit_range(fs_region, prefix)
+    d_from, d_to = _discovered_digit_bounds(covers, prefix)
+    fill_range = fill_range and d_to >= d_from > 0
+    range_total = (
+        _filled_range_total(d_from, d_to) if fill_range else len(covers)
+    )
     data = {
         "version": 1,
         "prefix": prefix,
@@ -1753,11 +1950,17 @@ def _export_prefix_index(
         "from": from_n,
         "to": to_n,
         "pad": pad,
+        "fillRange": fill_range,
         "updatedAt": _now_iso(),
         "source": "db",
-        "coverCount": len(covers),
+        # coverCount：补全区=已发现首尾间长度；否则=真实命中
+        "coverCount": range_total,
+        "hitCount": len(covers),
         "covers": covers,
     }
+    if fill_range:
+        data["fillFrom"] = d_from
+        data["fillTo"] = d_to
     # 前缀索引体积大：紧凑 JSON 显著加快写盘
     write_json(prefix_index_path(prefix, fs_region or None), data, compact=True)
     return data
@@ -1876,6 +2079,7 @@ def build_maker_fs(
     workers: int = DEFAULT_EXPORT_WORKERS,
     skip_fresh_hours: float = DEFAULT_SKIP_FRESH_HOURS,
     region: str | None = None,
+    only_prefix: str | None = None,
     from_claim: bool = False,
 ) -> dict[str, Any]:
     """生成七区细表 +（可选）从库导出各前缀封面索引。
@@ -1883,11 +2087,15 @@ def build_maker_fs(
     - workers: 并行扫库线程数（默认 8，与连接池上限对齐）
     - skip_fresh_hours: 跳过 N 小时内已导出的前缀（0=强制全量）
     - region: 仅扫描指定分区（如 japan_censored）；空=全部
+    - only_prefix: 仅扫描单个前缀（强制重扫该前缀）
     - from_claim: 后台任务已 claim_build，跳过 running 互斥检查
     """
     region_id = resolve_fs_region(region) if region else None
     if region and not region_id:
         raise ValueError(f"未知分区: {region}")
+    only_pref = _std_prefix(only_prefix) if only_prefix else ""
+    if only_pref and not region_id:
+        raise ValueError("单前缀扫描必须指定分区 region")
     if not from_claim:
         with _meta_lock:
             if _build_state.get("running"):
@@ -1910,7 +2118,7 @@ def build_maker_fs(
                 "skipped": 0,
                 "workers": 0,
                 "region": region_id or "",
-                "currentPrefix": "",
+                "currentPrefix": only_pref or "",
                 "updatedAt": _now_iso(),
                 "regionProgress": {},
             }
@@ -2002,7 +2210,39 @@ def build_maker_fs(
         work = prefixes
         if region_id:
             work = [e for e in work if e.get("region") == region_id]
-        if limit_prefixes is not None and limit_prefixes > 0:
+        if only_pref:
+            # 单前缀：强制重扫（忽略新鲜度跳过）
+            skip_fresh_hours = 0.0
+            work = [
+                e
+                for e in work
+                if _std_prefix(str(e.get("prefix") or "")) == only_pref
+            ]
+            if not work and region_id:
+                # 自定义前缀可能只在区目录里
+                cat = read_region_index(region_id) or {}
+                for it in cat.get("prefixes") or []:
+                    if not isinstance(it, dict):
+                        continue
+                    if _std_prefix(str(it.get("prefix") or "")) != only_pref:
+                        continue
+                    work = [
+                        {
+                            "prefix": only_pref,
+                            "name": it.get("name") or only_pref,
+                            "type_name": it.get("type_name") or only_pref,
+                            "board_name": it.get("board_name") or "",
+                            "path": list(it.get("path") or []),
+                            "region": region_id,
+                            "custom": bool(it.get("custom")),
+                        }
+                    ]
+                    break
+            if not work:
+                raise ValueError(
+                    f"分区 {region_id} 中未找到前缀 {only_pref}"
+                )
+        if limit_prefixes is not None and limit_prefixes > 0 and not only_pref:
             work = work[:limit_prefixes]
 
         worker_n = max(1, min(int(workers or 1), 6))

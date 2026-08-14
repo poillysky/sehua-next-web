@@ -6,7 +6,7 @@ const apiProxy =
 const nextConfig: NextConfig = {
   output: 'standalone',
   devIndicators: false,
-  // 柠檬 Playwright 过盾可能超过默认代理超时（对齐色花）
+  // 刮削 / 长请求可能超过默认代理超时
   experimental: {
     proxyTimeout: 180_000,
   },

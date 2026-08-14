@@ -43,6 +43,7 @@ from .config_loader import config_paths
 from .db import db_path, init_db
 
 from .pg import close_pool
+from .bitmagnet_pg import close_pool as close_bitmagnet_pool
 
 from .resource_routes import router as resource_router
 from .conn_settings_routes import router as conn_settings_router
@@ -54,7 +55,6 @@ from .scrape_export_routes import router as scrape_export_router
 from .cover_focus_routes import router as cover_focus_router
 
 from . import (
-    lemon_client,
     prefix_ranges,
     scrape_export,
     scrape_source_probe,
@@ -79,6 +79,21 @@ class ResourceDbConfig(BaseModel):
         default="",
 
         description="Postgres DSN, e.g. postgresql://user:pass@host:5432/ed2k",
+
+    )
+
+    note: str = ""
+
+
+class BitmagnetDbConfig(BaseModel):
+
+    enabled: bool = False
+
+    dsn: str = Field(
+
+        default="",
+
+        description="Bitmagnet Postgres DSN, e.g. postgresql://user:pass@host:5432/bitmagnet",
 
     )
 
@@ -151,12 +166,8 @@ async def lifespan(_app: FastAPI):
         logging.getLogger('sns.api').exception('stop maker_fs_auto failed')
 
     prefix_ranges.stop_daily_scheduler()
-    try:
-        lemon_client.shutdown_browser()
-    except Exception:
-        logging.getLogger('sns.api').exception('shutdown_browser failed')
-
     close_pool()
+    close_bitmagnet_pool()
 
 
 
@@ -359,5 +370,79 @@ def test_resource_db(
             status=200,
 
         )
+
+
+def _test_postgres_dsn(dsn: str, *, refused_hint: str) -> Envelope:
+    if not dsn.strip():
+        raise HTTPException(status_code=400, detail="请填写连接信息")
+    try:
+        with psycopg.connect(dsn.strip(), connect_timeout=5) as conn:
+            conn.execute("SELECT 1")
+        return Envelope(data={"ok": True}, message="可以连接")
+    except Exception as e:
+        raw = str(e) or "连接失败"
+        low = raw.lower()
+        if "password authentication failed" in low:
+            msg = "密码认证失败：密码不对，或该库实际需要密码"
+        elif "no password supplied" in low:
+            msg = (
+                "服务器要求密码：本机 psql 可能免密，"
+                "但从本机 API 连 192.168.x 等远程地址通常必须填密码"
+            )
+        elif "could not translate host" in low or "name or service not known" in low:
+            msg = "主机无法解析：请检查主机地址"
+        elif "connection refused" in low:
+            msg = refused_hint
+        elif "timeout" in low:
+            msg = "连接超时：请确认主机/防火墙/端口可达"
+        else:
+            msg = raw
+        return Envelope(data={"ok": False}, message=msg, status=200)
+
+
+@app.get("/settings/bitmagnet-db", response_model=Envelope)
+def get_bitmagnet_db(
+    _user: dict[str, Any] | None = Depends(get_optional_user),
+) -> Envelope:
+    raw = settings_store.get_setting(settings_store.BITMAGNET_DB_KEY)
+    cfg = BitmagnetDbConfig.model_validate(raw or {})
+    public = cfg.model_dump()
+    configured = bool(cfg.enabled and cfg.dsn.strip())
+    return Envelope(
+        data={**public, "configured": configured},
+        message="configured" if configured else "not_configured",
+    )
+
+
+@app.put("/settings/bitmagnet-db", response_model=Envelope)
+def put_bitmagnet_db(
+    body: BitmagnetDbConfig,
+    _user: dict[str, Any] = Depends(require_admin),
+) -> Envelope:
+    saved = settings_store.put_setting(
+        settings_store.BITMAGNET_DB_KEY,
+        body.model_dump(),
+    )
+    close_bitmagnet_pool()
+    configured = bool(body.enabled and body.dsn.strip())
+    return Envelope(
+        data={
+            **saved["value"],
+            "configured": configured,
+            "updated_at": saved["updated_at"],
+        },
+        message="saved",
+    )
+
+
+@app.post("/settings/bitmagnet-db/test", response_model=Envelope)
+def test_bitmagnet_db(
+    body: BitmagnetDbConfig,
+    _user: dict[str, Any] = Depends(require_admin),
+) -> Envelope:
+    return _test_postgres_dsn(
+        body.dsn,
+        refused_hint="连接被拒绝：请确认 Bitmagnet Postgres 已启动且端口正确（默认 5432）",
+    )
 
 

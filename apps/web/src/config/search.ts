@@ -30,6 +30,8 @@ export const DEFAULT_FILTER_TIME: FilterTime = "all";
 export const DEFAULT_FILTER_SIZE: FilterSize = "all";
 export const DEFAULT_MATCH_MODE: MatchMode = "smart";
 export const SEARCH_PAGE_SIZE = 10;
+/** Bitmagnet / 色花 搜索卡片最多展示的核心文件行数 */
+export const SEARCH_DISPLAY_FILES_MAX = 3;
 export const SEARCH_KEYWORD_LENGTH_MIN = 2;
 /** 番号搜索底池一次拉取上限（无中文/破解，客户端再 filter） */
 export const CODE_SEARCH_POOL_SIZE = 80;

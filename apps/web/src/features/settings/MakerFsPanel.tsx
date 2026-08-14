@@ -11,6 +11,7 @@ import {
   fetchMakerFsRegions,
   fetchMakerFsStatus,
   materializeLibrary,
+  fetchLibraryMaterializeStatus,
   putMakerFsPrefixRange,
   putMakerFsAutoDaily,
   removeMakerFsRegionPrefix,
@@ -341,20 +342,26 @@ export function MakerFsPanel({
     force?: boolean;
     skipFreshHours?: number;
     region?: string;
+    prefix?: string;
     label: string;
   }) {
     setMsg('');
-    if (opts.region) setScanningId(opts.region);
-    else setScanningId('__all__');
+    const scanKey = opts.prefix
+      ? `p:${opts.region || ''}:${opts.prefix}`
+      : opts.region
+        ? opts.region
+        : '__all__';
+    setScanningId(scanKey);
     try {
       // 仅启动请求短暂占 busy；等待过程中必须可下钻浏览
       setBusy(true);
       await buildMakerFs({
         catalogsOnly: opts.catalogsOnly,
-        force: opts.force,
-        skipFreshHours: opts.skipFreshHours,
+        force: opts.force ?? Boolean(opts.prefix),
+        skipFreshHours: opts.prefix ? 0 : opts.skipFreshHours,
         region: opts.region,
-        workers: 6,
+        prefix: opts.prefix,
+        workers: opts.prefix ? 1 : 6,
       });
       try {
         const s0 = await fetchMakerFsStatus();
@@ -393,12 +400,43 @@ export function MakerFsPanel({
     setMsg('');
     try {
       setBusy(true);
-      const started = await materializeLibrary({ region: opts?.region });
+      let started: LibraryMaterializeStatus;
+      let alreadyRunning = false;
+      try {
+        started = await materializeLibrary({ region: opts?.region });
+      } catch (e) {
+        const text = e instanceof Error ? e.message : '同步失败';
+        if (!/正在进行中/.test(text)) throw e;
+        // 已有任务：跟进度；状态已空闲则强制抢占僵死 running 标志
+        const cur = await fetchLibraryMaterializeStatus();
+        if (cur.running) {
+          const msg = String(cur.message || '');
+          const updated = Date.parse(String(cur.updatedAt || cur.startedAt || ''));
+          const ageSec = Number.isFinite(updated)
+            ? (Date.now() - updated) / 1000
+            : 0;
+          // queued 超过 90s 仍未开跑 → 强制抢占
+          if (msg === 'queued' && ageSec >= 90) {
+            started = await materializeLibrary({
+              region: opts?.region,
+              force: true,
+            });
+          } else {
+            started = cur;
+            alreadyRunning = true;
+          }
+        } else {
+          started = await materializeLibrary({
+            region: opts?.region,
+            force: true,
+          });
+        }
+      }
       setLibSync(started);
-      setBusy(false);
       onStatusRef.current('同步片库中', 'mute');
-      toast(`${label}已开始`, 'info');
+      toast(alreadyRunning ? `${label}进行中，继续等待…` : `${label}已开始`, 'info');
       const st = await waitLibraryMaterialize({
+        expectStartedAt: started.startedAt,
         onTick: (s) => setLibSync(s),
       });
       const detail = `写入 ${st.written ?? 0} · 更新 ${st.updated ?? 0} · 跳过 ${st.skipped ?? 0}`;
@@ -646,6 +684,13 @@ export function MakerFsPanel({
                       const up = libSync.updated ?? 0;
                       const wr = libSync.written ?? 0;
                       const rm = libSync.removed ?? 0;
+                      const msg = String(libSync.message || '');
+                      if (/收集|准备|queued/i.test(msg)) {
+                        return msg === 'queued' ? '收集索引…' : msg;
+                      }
+                      if (/清理/.test(msg)) {
+                        return msg;
+                      }
                       const cur = libSync.currentCode
                         ? ` · ${libSync.currentCode}`
                         : '';
@@ -802,6 +847,8 @@ export function MakerFsPanel({
                 codeFormat: p.codeFormat,
                 padEditable: p.padEditable,
               });
+              const scanKey = `p:${stack.region.id}:${p.prefix}`;
+              const scanning = scanningId === scanKey;
               return (
               <li key={p.prefix}>
                 <div className="settings-nav mfs-prefix-row">
@@ -823,6 +870,26 @@ export function MakerFsPanel({
                       {p.custom ? '自定义 · ' : ''}
                       {formatMakerFsCount(p.codeCount)} 条 · 规范 {sample}
                     </span>
+                  </button>
+                  <button
+                    type="button"
+                    className={cn(
+                      'mfs-scan-chip',
+                      scanning && 'is-scanning',
+                    )}
+                    disabled={busy || Boolean(scanningId)}
+                    aria-label={`扫描 ${p.prefix}`}
+                    onClick={() => {
+                      void runBuild({
+                        region: stack.region.id,
+                        prefix: p.prefix,
+                        force: true,
+                        label: `扫描 ${p.prefix}`,
+                      });
+                    }}
+                  >
+                    <ScanSearch size={14} strokeWidth={2.25} aria-hidden />
+                    {scanning ? '扫描中' : '扫描'}
                   </button>
                   {padEditable ? (
                     <button
