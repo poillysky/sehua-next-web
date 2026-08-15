@@ -266,19 +266,18 @@ export function MakerFsPanel({
   const autoDaily = Boolean(status?.autoDaily?.enabled);
   const autoDailyMeta = status?.autoDaily;
 
-  const refreshHub = useCallback(async () => {
+  const refreshHub = useCallback(async (opts?: { light?: boolean }) => {
+    const light = Boolean(opts?.light);
     try {
-      const [m, s, ov] = await Promise.all([
+      // 构建中只拉内存 status + 轻量 manifest，勿等 regions（磁盘忙会卡死「加载中」）
+      const [m, s] = await Promise.all([
         fetchMakerFsManifest(),
         fetchMakerFsStatus(),
-        fetchMakerFsRegions().catch(() => null),
       ]);
       setManifest(m);
       setStatus((prev) => mergeMakerFsStatus(prev, s));
-      const list =
-        (ov?.regions?.length ? ov.regions : null) ||
-        (m.regions?.length ? m.regions : null) ||
-        MAKER_FS_FALLBACK_REGIONS;
+      let list =
+        (m.regions?.length ? m.regions : null) || MAKER_FS_FALLBACK_REGIONS;
       setRegions(list);
       const text = s.running
         ? `构建中 ${s.prefixes || 0}/${s.prefixTotal || 0}`
@@ -286,6 +285,17 @@ export function MakerFsPanel({
           ? '已就绪'
           : '未构建';
       onStatusRef.current(text, s.running ? 'mute' : m.ready ? 'ok' : 'warn');
+
+      if (!light && !s.running) {
+        try {
+          const ov = await fetchMakerFsRegions();
+          if (ov?.regions?.length) {
+            setRegions(ov.regions);
+          }
+        } catch {
+          /* 用 manifest / 兜底即可 */
+        }
+      }
     } catch (e) {
       setMsg(e instanceof Error ? e.message : '读取失败');
       onStatusRef.current('异常', 'warn');
@@ -296,8 +306,10 @@ export function MakerFsPanel({
     let cancelled = false;
     void (async () => {
       setLoading(true);
-      await refreshHub();
+      await refreshHub({ light: true });
       if (!cancelled) setLoading(false);
+      // 进入后再补全 regions（空闲时）；构建中保持轻量
+      if (!cancelled) void refreshHub();
     })();
     return () => {
       cancelled = true;
@@ -307,7 +319,7 @@ export function MakerFsPanel({
   // 从后台切回 / 面板一直挂着时，补一次拉齐（避免卡在中途快照）
   useEffect(() => {
     const onVis = () => {
-      if (document.visibilityState === 'visible') void refreshHub();
+      if (document.visibilityState === 'visible') void refreshHub({ light: true });
     };
     document.addEventListener('visibilitychange', onVis);
     return () => document.removeEventListener('visibilitychange', onVis);
@@ -356,14 +368,28 @@ export function MakerFsPanel({
   const openRegion = useCallback(async (region: MakerFsRegionSummary) => {
     setOpeningId(region.id);
     setMsg('');
+    const ac = new AbortController();
+    const kill = window.setTimeout(() => ac.abort(), 20000);
     try {
-      const cat = await fetchMakerFsRegion(region.id);
+      const cat = await fetchMakerFsRegion(region.id, ac.signal);
       setCatalog(cat);
       setStack({ kind: 'region', region });
+      if ((cat as { building?: boolean }).building) {
+        toast('该区仍在构建，目录会陆续出现', 'info');
+      }
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : '读取分区失败');
-      toast(e instanceof Error ? e.message : '读取分区失败', 'error');
+      const aborted =
+        (e instanceof DOMException && e.name === 'AbortError') ||
+        (e instanceof Error && /abort/i.test(e.message));
+      const text = aborted
+        ? '读取超时：构建占满磁盘，请稍后再进该区'
+        : e instanceof Error
+          ? e.message
+          : '读取分区失败';
+      setMsg(text);
+      toast(text, 'error');
     } finally {
+      window.clearTimeout(kill);
       setOpeningId(null);
     }
   }, [toast]);

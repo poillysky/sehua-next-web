@@ -20,10 +20,36 @@ from .search_prefer import SEARCH_NAME_EXPR
 # PostgreSQL: ESCAPE '\' — backslash quotes % / _
 _ILIKE_ESC = "ESCAPE '\\'"
 
+# 影视多片名 / 中英别名：强分隔 → 各词整串匹配后 OR（勿空格拼成 AND）
+_ALIAS_QUERY_SEP = re.compile(r"[,;，、；|｜/\n\r]+")
+
 # 纯字母厂牌/前缀（SONS、SSIS…）：避免 `%SONS%` 全表扫
 _MAKER_PREFIX_RE = re.compile(r"^[A-Za-z]{2,8}$")
 
 MatchField = Literal["both", "filename", "title"]
+
+
+def split_alias_query_terms(q: str, *, limit: int = 8) -> list[str]:
+    """逗号/顿号等拆成多个完整片名；不含强分隔时整段保留。"""
+    s = (q or "").strip()
+    if not s:
+        return []
+    if not _ALIAS_QUERY_SEP.search(s):
+        return [s]
+    out: list[str] = []
+    seen: set[str] = set()
+    for part in _ALIAS_QUERY_SEP.split(s):
+        t = str(part or "").strip()
+        if len(t) < 2:
+            continue
+        key = t.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(t)
+        if len(out) >= limit:
+            break
+    return out
 
 
 def split_chinese_bigrams(text: str) -> list[dict[str, Any]]:
@@ -37,6 +63,10 @@ def split_chinese_bigrams(text: str) -> list[dict[str, Any]]:
 def extract_keywords(
     keyword: str, match_mode: str = "smart"
 ) -> list[dict[str, Any]]:
+    alias_terms = split_alias_query_terms(keyword)
+    if len(alias_terms) > 1:
+        return [{"keyword": t, "required": False} for t in alias_terms]
+
     keywords: list[dict[str, Any]] = []
     for m in QUOTED_KEYWORD_REGEX.finditer(keyword):
         keywords.append({"keyword": m.group(1), "required": True})
@@ -178,6 +208,23 @@ def build_exact_keyword_clause(
     return " AND ".join(parts), params, code_bound
 
 
+def build_alias_or_clause(
+    terms: list[str],
+    *,
+    field: MatchField = "both",
+) -> tuple[str, list[Any], list[str]]:
+    """每个片名整串匹配，片名之间 OR。"""
+    if not terms:
+        return "FALSE", [], []
+    parts: list[str] = []
+    params: list[Any] = []
+    for t in terms:
+        frag, frag_params = _token_or_clause(t, field)
+        parts.append(frag)
+        params.extend(frag_params)
+    return "(" + " OR ".join(parts) + ")", params, []
+
+
 def build_keyword_filter(
     keywords: list[dict[str, Any]],
     match_mode: str,
@@ -189,6 +236,11 @@ def build_keyword_filter(
     """Return (sql, params, code_bound_keywords)."""
     if not keywords:
         return "FALSE", [], []
+
+    # 中英别名多片名：顿号/逗号分隔 → OR
+    alias_terms = split_alias_query_terms(full_keyword or "")
+    if len(alias_terms) > 1:
+        return build_alias_or_clause(alias_terms, field=field)
 
     if match_mode == "exact":
         return build_exact_keyword_clause(keywords, field=field)

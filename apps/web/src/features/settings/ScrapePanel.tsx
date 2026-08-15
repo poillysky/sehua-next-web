@@ -537,14 +537,14 @@ function applyScrapeConfig(
   setters.setCoverDownloadStrategy(
     d.coverDownloadStrategy === "size" ? "size" : "priority",
   );
-  const legacyConc = Math.max(1, Math.min(8, Number(d.exportConcurrency) || 4));
+  const legacyConc = Math.max(1, Math.min(4, Number(d.exportConcurrency) || 2));
   const fastConc = Math.max(
     1,
-    Math.min(8, Number(d.exportFastConcurrency) || legacyConc),
+    Math.min(4, Number(d.exportFastConcurrency) || Math.min(legacyConc, 2)),
   );
   const slowConc = Math.max(
     1,
-    Math.min(8, Number(d.exportSlowConcurrency) || legacyConc),
+    Math.min(4, Number(d.exportSlowConcurrency) || Math.min(legacyConc, 1)),
   );
   setters.setExportFastConcurrency(fastConc);
   setters.setExportSlowConcurrency(slowConc);
@@ -611,10 +611,10 @@ export function ScrapePanel({
   const [proxyUrl, setProxyUrl] = useState("");
   const [coverDownloadStrategy, setCoverDownloadStrategy] =
     useState<CoverDownloadStrategy>("priority");
-  const [exportFastConcurrency, setExportFastConcurrency] = useState(4);
-  const [exportSlowConcurrency, setExportSlowConcurrency] = useState(4);
-  const [fastConcurrencyText, setFastConcurrencyText] = useState("4");
-  const [slowConcurrencyText, setSlowConcurrencyText] = useState("4");
+  const [exportFastConcurrency, setExportFastConcurrency] = useState(2);
+  const [exportSlowConcurrency, setExportSlowConcurrency] = useState(1);
+  const [fastConcurrencyText, setFastConcurrencyText] = useState("2");
+  const [slowConcurrencyText, setSlowConcurrencyText] = useState("1");
   const [metadataOptimize, setMetadataOptimize] = useState<MetadataOptimizeConfig>(
     DEFAULT_METADATA_OPTIMIZE,
   );
@@ -644,7 +644,9 @@ export function ScrapePanel({
     status: string;
     tone: "ok" | "run" | "mute" | "err" | "total";
     codes: string[];
+    task: ScrapeTask;
   } | null>(null);
+  const [statRescrapeBusy, setStatRescrapeBusy] = useState(false);
   /** 从番号列表点进进度页「详细数据」 */
   const [focusDetail, setFocusDetail] = useState<{
     code: string;
@@ -1468,6 +1470,58 @@ export function ScrapePanel({
     return st;
   }
 
+  async function onRescrapeCodes(codes: string[], opts?: { closeModal?: boolean }) {
+    const ctx = statCodesOpen;
+    if (!ctx?.task || !codes.length || statRescrapeBusy) return;
+    const task = ctx.task;
+    const list = [
+      ...new Set(
+        codes
+          .map((c) => String(c || "").trim().toUpperCase().replace(/_/g, "-"))
+          .filter(Boolean),
+      ),
+    ];
+    if (!list.length) return;
+    setStatRescrapeBusy(true);
+    try {
+      const st = await startScrapeExport({
+        taskId: task.id,
+        name: task.name || undefined,
+        regions: task.regions?.length ? task.regions : undefined,
+        maker: task.maker || undefined,
+        prefix: task.prefix || undefined,
+        codes: list,
+        mode: "force",
+        force: true,
+        fields: task.fields,
+        localFields: task.localFields,
+      });
+      setProgress(st);
+      const busyExport =
+        Boolean(st.running) || Boolean(st.queue && st.queue.length);
+      setExporting(busyExport);
+      if (opts?.closeModal !== false) setStatCodesOpen(null);
+      setTab("progress");
+      const mineQueued = (st.queue || []).some(
+        (q) => String(q.taskId || "") === task.id,
+      );
+      const mineRunning = st.running && String(st.taskId || "") === task.id;
+      if (mineQueued) toast(`已排队强制重刮 ${list.length} 个`, "info");
+      else if (mineRunning)
+        toast(
+          list.length === 1
+            ? `正在强制重刮 ${list[0]}`
+            : `正在强制重刮 ${list.length} 个`,
+          "info",
+        );
+      else toast("已提交强制重刮", "info");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "强制重刮失败", "error");
+    } finally {
+      setStatRescrapeBusy(false);
+    }
+  }
+
   async function onStartTask(draft: ScrapeTaskDraft) {
     setBusy(true);
     setTaskModalOpen(false);
@@ -1617,7 +1671,7 @@ export function ScrapePanel({
                   className="scrape-pane-field__input"
                   type="text"
                   inputMode="numeric"
-                  pattern="[1-8]"
+                  pattern="[1-4]"
                   value={fastConcurrencyText}
                   disabled={busy || exporting}
                   onChange={(e) => {
@@ -1625,17 +1679,17 @@ export function ScrapePanel({
                     setFastConcurrencyText(raw);
                     if (!raw) return;
                     const n = Number(raw);
-                    if (n >= 1 && n <= 8) setExportFastConcurrency(n);
+                    if (n >= 1 && n <= 4) setExportFastConcurrency(n);
                   }}
                   onBlur={() => {
                     const n = Math.max(
                       1,
-                      Math.min(8, Number(fastConcurrencyText) || 4),
+                      Math.min(4, Number(fastConcurrencyText) || 2),
                     );
                     setExportFastConcurrency(n);
                     setFastConcurrencyText(String(n));
                   }}
-                  placeholder="4"
+                  placeholder="2"
                   autoComplete="off"
                 />
               </label>
@@ -1645,7 +1699,7 @@ export function ScrapePanel({
                   className="scrape-pane-field__input"
                   type="text"
                   inputMode="numeric"
-                  pattern="[1-8]"
+                  pattern="[1-4]"
                   value={slowConcurrencyText}
                   disabled={busy || exporting}
                   onChange={(e) => {
@@ -1653,22 +1707,22 @@ export function ScrapePanel({
                     setSlowConcurrencyText(raw);
                     if (!raw) return;
                     const n = Number(raw);
-                    if (n >= 1 && n <= 8) setExportSlowConcurrency(n);
+                    if (n >= 1 && n <= 4) setExportSlowConcurrency(n);
                   }}
                   onBlur={() => {
                     const n = Math.max(
                       1,
-                      Math.min(8, Number(slowConcurrencyText) || 4),
+                      Math.min(4, Number(slowConcurrencyText) || 1),
                     );
                     setExportSlowConcurrency(n);
                     setSlowConcurrencyText(String(n));
                   }}
-                  placeholder="4"
+                  placeholder="1"
                   autoComplete="off"
                 />
               </label>
               <p className="scrape-pane-card__hint">
-                各 1–8。快源真并行；慢源任务可并行，过盾请求排队单飞，互不堵死。
+                各 1–4（默认快 2 / 慢 1，目标整容器持续 &lt;1G）。过高易顶满；慢源过盾仍单飞排队。
               </p>
             </div>
 
@@ -2324,6 +2378,7 @@ export function ScrapePanel({
                                     tone,
                                     // 后端按完成顺序追加，界面最新在上
                                     codes: [...codes].reverse(),
+                                    task,
                                   });
                                 })();
                               }}
@@ -2571,15 +2626,39 @@ export function ScrapePanel({
         ]
           .filter(Boolean)
           .join(" ")}
-        onClose={() => setStatCodesOpen(null)}
+        onClose={() => {
+          if (statRescrapeBusy) return;
+          setStatCodesOpen(null);
+        }}
         footer={
-          <button
-            type="button"
-            className="btn scrape-stat-codes-modal__done"
-            onClick={() => setStatCodesOpen(null)}
-          >
-            完成
-          </button>
+          <div className="scrape-stat-codes-modal__foot">
+            {statCodesOpen &&
+            statCodesOpen.codes.length > 0 &&
+            (statCodesOpen.tone === "ok" ||
+              statCodesOpen.tone === "mute" ||
+              statCodesOpen.tone === "err") ? (
+              <button
+                type="button"
+                className="btn scrape-stat-codes-modal__rescrape-all"
+                disabled={statRescrapeBusy}
+                onClick={() =>
+                  void onRescrapeCodes(statCodesOpen.codes)
+                }
+              >
+                {statRescrapeBusy
+                  ? "提交中…"
+                  : `全部强制重刮 (${statCodesOpen.codes.length})`}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="btn scrape-stat-codes-modal__done"
+              disabled={statRescrapeBusy}
+              onClick={() => setStatCodesOpen(null)}
+            >
+              完成
+            </button>
+          </div>
         }
       >
         {statCodesOpen ? (
@@ -2599,11 +2678,12 @@ export function ScrapePanel({
             {statCodesOpen.codes.length > 0 ? (
               <ul className="scrape-stat-codes__list">
                 {statCodesOpen.codes.map((code) => (
-                  <li key={code}>
+                  <li key={code} className="scrape-stat-codes__row">
                     <button
                       type="button"
                       className="scrape-stat-codes__item"
                       title={`查看 ${code} 详细数据`}
+                      disabled={statRescrapeBusy}
                       onClick={() => {
                         setStatCodesOpen(null);
                         setFocusDetail({ code, nonce: Date.now() });
@@ -2616,6 +2696,19 @@ export function ScrapePanel({
                         ›
                       </span>
                     </button>
+                    {statCodesOpen.tone === "ok" ||
+                    statCodesOpen.tone === "mute" ||
+                    statCodesOpen.tone === "err" ? (
+                      <button
+                        type="button"
+                        className="scrape-stat-codes__rescrape"
+                        title={`强制重刮 ${code}`}
+                        disabled={statRescrapeBusy}
+                        onClick={() => void onRescrapeCodes([code])}
+                      >
+                        重刮
+                      </button>
+                    ) : null}
                   </li>
                 ))}
               </ul>

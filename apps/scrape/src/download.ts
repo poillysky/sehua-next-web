@@ -17,6 +17,23 @@ import { getActiveProxy } from "./proxy.js";
 import { cookieForUrl } from "./sourceCookies.js";
 import { UA } from "./util.js";
 
+/** HTML 上限（防异常大页 / 压缩炸弹撑爆 RSS） */
+const MAX_HTML_BYTES = Math.max(
+  1_000_000,
+  Math.min(
+    12_000_000,
+    Number(process.env.SCRAPE_MAX_HTML_BYTES || 3_000_000) || 3_000_000,
+  ),
+);
+/** 单张封面上限 */
+const MAX_IMAGE_BYTES = Math.max(
+  200_000,
+  Math.min(
+    20_000_000,
+    Number(process.env.SCRAPE_MAX_IMAGE_BYTES || 5_000_000) || 5_000_000,
+  ),
+);
+
 /** 同 host 限流：快源可并行；过盾站仍单飞（先建 cookie 再复用）。 */
 type HostSem = {
   max: number;
@@ -45,8 +62,37 @@ function hostMaxParallel(host: string): number {
   } catch {
     /* ignore */
   }
-  // javbus / freejavbt 等：并发 5 时真正吃满同站并行
-  return 4;
+  // 默认 1：同站少堆 HTML；可用 SCRAPE_HOST_PARALLEL 覆盖（1–4）
+  const n = Number(process.env.SCRAPE_HOST_PARALLEL || 1) || 1;
+  return Math.max(1, Math.min(4, n));
+}
+
+/** 尽量排空 / 取消 undici 响应体，避免连接与缓冲滞留 */
+async function drainBody(res: {
+  body?: { cancel?: () => Promise<unknown> | unknown } | null;
+  arrayBuffer?: () => Promise<ArrayBuffer>;
+}): Promise<void> {
+  try {
+    if (res.body && typeof res.body.cancel === "function") {
+      await res.body.cancel();
+      return;
+    }
+  } catch {
+    /* ignore */
+  }
+  try {
+    if (typeof res.arrayBuffer === "function") await res.arrayBuffer();
+  } catch {
+    /* ignore */
+  }
+}
+
+function contentLengthTooLarge(
+  headers: { get: (n: string) => string | null },
+  max: number,
+): boolean {
+  const cl = Number(headers.get("content-length") || 0);
+  return Number.isFinite(cl) && cl > max;
 }
 
 function markDirectSkip(host: string): void {
@@ -105,9 +151,10 @@ export async function downloadToFile(
 /** 下载图片到内存（用于按文件大小择优） */
 export async function downloadBytes(
   url: string,
-  opts?: { timeoutMs?: number },
+  opts?: { timeoutMs?: number; maxBytes?: number },
 ): Promise<Buffer | null> {
   const timeoutMs = opts?.timeoutMs ?? 25000;
+  const maxBytes = opts?.maxBytes ?? MAX_IMAGE_BYTES;
   if (!url || !/^https?:\/\//i.test(url)) return null;
   try {
     const res = await undiciFetch(url, {
@@ -119,9 +166,19 @@ export async function downloadBytes(
       },
       redirect: "follow",
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      await drainBody(res);
+      return null;
+    }
+    if (contentLengthTooLarge(res.headers, maxBytes)) {
+      console.log(
+        `[scrape] image skip host=${hostOf(url)} Content-Length>${maxBytes}`,
+      );
+      await drainBody(res);
+      return null;
+    }
     const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length < 200) return null;
+    if (buf.length < 200 || buf.length > maxBytes) return null;
     return buf;
   } catch {
     return null;
@@ -162,9 +219,23 @@ async function fetchDirect(
       console.log(
         `[scrape] cookie-direct fail host=${hostOf(url)} HTTP ${res.status}`,
       );
+      await drainBody(res);
+      return null;
+    }
+    if (contentLengthTooLarge(res.headers, MAX_HTML_BYTES)) {
+      console.log(
+        `[scrape] cookie-direct skip host=${hostOf(url)} Content-Length>${MAX_HTML_BYTES}`,
+      );
+      await drainBody(res);
       return null;
     }
     const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length > MAX_HTML_BYTES) {
+      console.log(
+        `[scrape] cookie-direct skip host=${hostOf(url)} body>${MAX_HTML_BYTES}`,
+      );
+      return null;
+    }
     const html = decodeHtmlBytes(buf, res.headers.get("content-type"));
     if (looksBlockedHtml(html)) {
       if (!opts.hadClearance) markDirectSkip(hostOf(url));
@@ -272,6 +343,13 @@ async function fetchViaCurl(
       return null;
     }
     if (!fs.existsSync(tmp)) return null;
+    const st = fs.statSync(tmp);
+    if (st.size > MAX_HTML_BYTES) {
+      console.log(
+        `[scrape] curl skip host=${hostOf(url)} body>${MAX_HTML_BYTES}`,
+      );
+      return null;
+    }
     const buf = fs.readFileSync(tmp);
     if (buf.length < 400) return null;
     const html = decodeHtmlBytes(buf, "text/html; charset=utf-8");
@@ -438,6 +516,7 @@ async function fetchPageUnlocked(
   }
 
   // Node/undici 易被 CF TLS 指纹拦（同代理 Python/curl 仍 200）：viaFlare:false 时用 curl 回退
+  // 显式 false：禁止再回落 Flare（否则代理直连站会被 hostNeedsFlare / else 分支拖成「过盾超时」）
   if (opts?.viaFlare === false) {
     const viaCurl = await fetchViaCurl(url, {
       timeoutMs,
@@ -449,6 +528,7 @@ async function fetchPageUnlocked(
       directSkipUntil.delete(host);
       return viaCurl;
     }
+    return null;
   }
 
   if (
@@ -475,23 +555,6 @@ async function fetchPageUnlocked(
       }
     } catch {
       /* fall through */
-    }
-  } else if (flareOn) {
-    try {
-      const hit = await fetchViaFlareSolverrFull(url, {
-        timeoutMs: flareTimeoutMs,
-        cookie: cookie || baseCookie || undefined,
-        waitInSeconds,
-        noSessionRetry: opts?.strictTimeout === true,
-      });
-      if (hit.html && !looksBlockedHtml(hit.html)) {
-        return {
-          html: hit.html,
-          finalUrl: hit.finalUrl || url,
-        };
-      }
-    } catch {
-      /* ignore */
     }
   }
   return null;
@@ -601,6 +664,7 @@ export async function probeImageUrl(
       redirect: "follow",
     });
     if (!res.ok && res.status !== 206) {
+      await drainBody(res);
       return { ok: false, finalUrl: url, sizeHint: 0 };
     }
     const finalUrl = String(res.url || url);
@@ -608,6 +672,7 @@ export async function probeImageUrl(
     const rangeTotal = Number(
       (res.headers.get("content-range") || "").split("/")[1] || 0,
     );
+    await drainBody(res);
     return { ok: true, finalUrl, sizeHint: rangeTotal || cl };
   } catch {
     return { ok: false, finalUrl: url, sizeHint: 0 };

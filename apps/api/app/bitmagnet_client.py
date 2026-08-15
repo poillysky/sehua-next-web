@@ -17,6 +17,7 @@ SEARCH_FILES_MAX = 8
 SEARCH_FILES_FETCH = 80
 DETAIL_FILES_MAX = 2000
 HASH_RE = re.compile(r"^[a-fA-F0-9]{40}$")
+_ALIAS_QUERY_SEP = re.compile(r"[,;，、；|｜/\n\r]+")
 PADDING_RE = re.compile(r"(_____padding_file_|\.pad/\d+)", re.I)
 JUNK_EXTS = frozenset(
     {
@@ -125,6 +126,28 @@ def _like_pattern(keyword: str) -> str:
         .replace("_", "\\_")
     )
     return f"%{escaped}%"
+
+
+def _split_alias_terms(q: str, *, limit: int = 8) -> list[str]:
+    s = (q or "").strip()
+    if not s:
+        return []
+    if not _ALIAS_QUERY_SEP.search(s):
+        return [s]
+    out: list[str] = []
+    seen: set[str] = set()
+    for part in _ALIAS_QUERY_SEP.split(s):
+        t = str(part or "").strip()
+        if len(t) < 2:
+            continue
+        key = t.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(t)
+        if len(out) >= limit:
+            break
+    return out or [s]
 
 
 def _as_int(v: Any, default: int = 0) -> int:
@@ -480,7 +503,9 @@ def search(
     order_sql = _SORT_SQL.get(sort_type) or _SORT_SQL["default"]
     time_sql = _TIME_SQL.get(filter_time) or ""
     size_sql = _SIZE_SQL.get(filter_size) or ""
-    pattern = _like_pattern(kw)
+    terms = _split_alias_terms(kw)
+    patterns = [_like_pattern(t) for t in terms]
+    name_where = " OR ".join(["t.name ILIKE %s ESCAPE '\\'"] * len(patterns))
     ext_list = ", ".join(f"'{e}'" for e in CORE_EXTS)
 
     try:
@@ -488,11 +513,11 @@ def search(
             f"""
             SELECT COUNT(*)::int AS total
             FROM torrents t
-            WHERE t.name ILIKE %s ESCAPE '\\'
+            WHERE ({name_where})
             {time_sql}
             {size_sql}
             """,
-            [pattern],
+            patterns,
         )
         total = int(count_rows[0]["total"]) if count_rows else 0
 
@@ -510,7 +535,7 @@ def search(
                 t.created_at,
                 t.updated_at
               FROM torrents t
-              WHERE t.name ILIKE %s ESCAPE '\\'
+              WHERE ({name_where})
               {time_sql}
               {size_sql}
               ORDER BY {order_sql}
@@ -553,7 +578,7 @@ def search(
               ) AS files
             FROM filtered
             """,
-            [pattern, PAGE_SIZE, offset],
+            [*patterns, PAGE_SIZE, offset],
         )
     except bitmagnet_pg.BitmagnetDbUnavailable as e:
         raise BitmagnetError(str(e)) from e
@@ -565,7 +590,7 @@ def search(
     cost_ms = int((time.perf_counter() - t0) * 1000)
     return {
         "keyword": kw,
-        "keywords": [kw],
+        "keywords": terms,
         "page": page,
         "source": "bitmagnet",
         "baseUrl": "",

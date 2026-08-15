@@ -12,30 +12,36 @@ export type PosterCropConfig = {
   preferCropIfBetter?: boolean;
 };
 
-/** 读 JPEG 宽高；失败返回 null */
+/** 读 JPEG 宽高；失败返回 null（只读文件头，避免整图进内存） */
 export function readJpegSize(
   filePath: string,
 ): { width: number; height: number } | null {
   try {
-    const buf = fs.readFileSync(filePath);
-    if (buf.length < 100 || buf[0] !== 0xff || buf[1] !== 0xd8) return null;
-    let i = 2;
-    while (i < buf.length - 9) {
-      if (buf[i] !== 0xff) {
-        i += 1;
-        continue;
+    const fd = fs.openSync(filePath, "r");
+    try {
+      const buf = Buffer.alloc(65536);
+      const n = fs.readSync(fd, buf, 0, buf.length, 0);
+      if (n < 100 || buf[0] !== 0xff || buf[1] !== 0xd8) return null;
+      let i = 2;
+      while (i < n - 9) {
+        if (buf[i] !== 0xff) {
+          i += 1;
+          continue;
+        }
+        const marker = buf[i + 1]!;
+        if (marker === 0xd9 || marker === 0xda) break;
+        const len = (buf[i + 2]! << 8) | buf[i + 3]!;
+        if (marker >= 0xc0 && marker <= 0xc3) {
+          const height = (buf[i + 5]! << 8) | buf[i + 6]!;
+          const width = (buf[i + 7]! << 8) | buf[i + 8]!;
+          return { width, height };
+        }
+        i += 2 + len;
       }
-      const marker = buf[i + 1]!;
-      if (marker === 0xd9 || marker === 0xda) break;
-      const len = (buf[i + 2]! << 8) | buf[i + 3]!;
-      if (marker >= 0xc0 && marker <= 0xc3) {
-        const height = (buf[i + 5]! << 8) | buf[i + 6]!;
-        const width = (buf[i + 7]! << 8) | buf[i + 8]!;
-        return { width, height };
-      }
-      i += 2 + len;
+      return null;
+    } finally {
+      fs.closeSync(fd);
     }
-    return null;
   } catch {
     return null;
   }

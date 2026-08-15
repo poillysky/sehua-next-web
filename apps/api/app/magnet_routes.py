@@ -24,7 +24,7 @@ def _wrap(data: Any, message: str = "ok", status: int = 200) -> dict[str, Any]:
 
 @router.get("/magnet/search")
 def magnet_search(
-    keyword: str = Query(..., min_length=1, max_length=120),
+    keyword: str = Query(..., min_length=1, max_length=200),
     page: int = Query(1, ge=1, le=500),
     sortType: str = Query("default", max_length=20),
     filterTime: str = Query("all", max_length=20),

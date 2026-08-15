@@ -42,6 +42,8 @@ class ExportBody(BaseModel):
     maker: str = ""
     prefix: str = ""
     code: str = ""
+    # 多番号强制重刮（与 code 合并，逗号/顿号亦可写在 code）
+    codes: list[str] | None = None
     force: bool = False
     mode: Literal["incremental", "force"] | str | None = None
     fields: list[str] | None = None
@@ -128,6 +130,7 @@ def start_export(
             maker=(body.maker or "").strip() or None,
             prefix=(body.prefix or "").strip() or None,
             code=(body.code or "").strip() or None,
+            codes=list(body.codes) if body.codes else None,
             force=bool(body.force),
             mode=(str(body.mode).strip() if body.mode else None) or None,
             fields=list(body.fields) if body.fields is not None else None,

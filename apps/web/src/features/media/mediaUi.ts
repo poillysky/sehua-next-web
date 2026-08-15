@@ -56,25 +56,37 @@ export function mediaCategoryLabel(id: MediaCategoryId): string {
   return map[id] || id;
 }
 
-/** 中英/别名去重后拼成仓库搜索词（空格分隔，控制长度） */
-export function buildMediaSearchQuery(item: Pick<MediaItem, 'title' | 'originalTitle' | 'aka'>): string {
+/** 影视跳 BT：中文 / 英文原名 / 别名全部保留，用顿号拼接；后端按词分别搜再 OR 合并。 */
+export function buildMediaSearchTerms(
+  item: Pick<MediaItem, 'title' | 'originalTitle' | 'aka'>,
+  opts?: { maxTerms?: number; maxLen?: number },
+): string[] {
+  const maxTerms = opts?.maxTerms ?? 6;
+  const maxLen = opts?.maxLen ?? 100;
   const seen = new Set<string>();
   const parts: string[] = [];
   for (const raw of [item.title, item.originalTitle, ...(item.aka || [])]) {
-    const s = String(raw || '').trim();
+    let s = String(raw || '').trim();
     if (!s) continue;
+    // 过长别名截断，避免整串超限
+    if (s.length > 60) s = s.slice(0, 60).trim();
+    if (s.length < SEARCH_KEYWORD_LENGTH_MIN) continue;
     const key = s.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
     parts.push(s);
+    if (parts.length >= maxTerms) break;
   }
-  let q = parts.join(' ');
-  // 资源搜索不宜过长
-  if (q.length > 120) {
-    q = parts.slice(0, 3).join(' ');
+  while (parts.length > 1 && parts.join('，').length > maxLen) {
+    parts.pop();
   }
-  if (q.length > 120) q = q.slice(0, 120).trim();
-  return q;
+  return parts;
+}
+
+export function buildMediaSearchQuery(
+  item: Pick<MediaItem, 'title' | 'originalTitle' | 'aka'>,
+): string {
+  return buildMediaSearchTerms(item).join('，');
 }
 
 /** 影视跳转仓库：默认进 Bitmagnet（BT 库） */

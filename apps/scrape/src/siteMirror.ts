@@ -132,6 +132,7 @@ export const SITE_MIRROR_PROFILES: Record<string, SiteMirrorProfile> = {
       defaultLooksLike(html) &&
       (/javbus|seejav|bigImage|磁力|女優|女优/i.test(html) || html.length > 4000),
     viaFlare: false,
+    registerFlare: false,
     probePath: "/",
   },
   miss_av: {
@@ -167,6 +168,7 @@ export const SITE_MIRROR_PROFILES: Record<string, SiteMirrorProfile> = {
       (/7mmtv|censored_content|searchall|search_keyword/i.test(html) ||
         html.length > 5000),
     viaFlare: false,
+    registerFlare: false,
     probePath: "/zh/",
   },
   avmoo: {
@@ -236,6 +238,7 @@ export const SITE_MIRROR_PROFILES: Record<string, SiteMirrorProfile> = {
       defaultLooksLike(html) &&
       (/avbase|作品|女優|女优/i.test(html) || html.length > 8000),
     viaFlare: false,
+    registerFlare: false,
     probePath: "/",
   },
   fc2_hub: {
@@ -282,6 +285,7 @@ export const SITE_MIRROR_PROFILES: Record<string, SiteMirrorProfile> = {
       defaultLooksLike(html) &&
       (/madou|麻豆/i.test(html) || html.length > 3000),
     viaFlare: false,
+    registerFlare: false,
     probePath: "/",
   },
   madouqu: {
@@ -319,6 +323,7 @@ export const SITE_MIRROR_PROFILES: Record<string, SiteMirrorProfile> = {
       defaultLooksLike(html) &&
       (/jav321|v\.php|search/i.test(html) || html.length > 2000),
     viaFlare: false,
+    registerFlare: false,
     probePath: "/",
   },
   dmm: {
@@ -341,6 +346,7 @@ export const SITE_MIRROR_PROFILES: Record<string, SiteMirrorProfile> = {
       return String(html || "").length > 1000;
     },
     viaFlare: false,
+    registerFlare: false,
     probePath: "/",
   },
   mgstage: {
@@ -361,6 +367,7 @@ export const SITE_MIRROR_PROFILES: Record<string, SiteMirrorProfile> = {
     sameFamily: (h) => /caribbeancom/i.test(h),
     looksLike: (html) => html.length > 1000,
     viaFlare: false,
+    registerFlare: false,
     probePath: "/",
   },
   fc2: {
@@ -370,6 +377,7 @@ export const SITE_MIRROR_PROFILES: Record<string, SiteMirrorProfile> = {
     sameFamily: (h) => /fc2\.com/i.test(h),
     looksLike: (html) => html.length > 1000,
     viaFlare: false,
+    registerFlare: false,
     probePath: "/",
   },
   libredmm: {
@@ -391,6 +399,7 @@ export const SITE_MIRROR_PROFILES: Record<string, SiteMirrorProfile> = {
       defaultLooksLike(html) &&
       (/airav|wiki|video/i.test(html) || html.length > 2000),
     viaFlare: false,
+    registerFlare: false,
     probePath: "/",
   },
 };
@@ -420,7 +429,9 @@ function loadFromDisk(): void {
       if (!ent?.baseUrl || Number(ent.expiresAt) <= now) continue;
       memory.set(id, ent);
       const prof = SITE_MIRROR_PROFILES[id];
-      if (prof?.registerFlare !== false) registerFlareHost(ent.baseUrl);
+      if (prof?.viaFlare !== false && prof?.registerFlare !== false) {
+        registerFlareHost(ent.baseUrl);
+      }
     }
   } catch {
     /* ignore */
@@ -446,7 +457,9 @@ function persistAll(): void {
 function persistOne(id: string, ent: MirrorEntry, log = true): void {
   memory.set(id, ent);
   const prof = SITE_MIRROR_PROFILES[id];
-  if (prof?.registerFlare !== false) registerFlareHost(ent.baseUrl);
+  if (prof?.viaFlare !== false && prof?.registerFlare !== false) {
+    registerFlareHost(ent.baseUrl);
+  }
   persistAll();
   if (log) console.log(`[scrape] ${id} mirror → ${ent.baseUrl}`);
 }
@@ -512,7 +525,10 @@ async function probeCandidate(
       : hostNeedsFlare(url)
         ? true
         : undefined;
-  if (prof.registerFlare !== false) registerFlareHost(preferred);
+  // 代理直连源禁止登记过盾 host，否则后续探测会被 hostNeedsFlare 误吸进 Flare
+  if (viaFlare !== false && prof.registerFlare !== false) {
+    registerFlareHost(preferred);
+  }
 
   const page = await fetchPage(url, {
     timeoutMs: viaFlare === true ? 55000 : 20000,
@@ -662,7 +678,9 @@ export async function resolveSiteMirror(
   if (!opts?.forceRefresh) {
     const hit = memory.get(sid);
     if (hit && hit.expiresAt > Date.now() && hit.baseUrl) {
-      if (prof.registerFlare !== false) registerFlareHost(hit.baseUrl);
+      if (prof.viaFlare !== false && prof.registerFlare !== false) {
+        registerFlareHost(hit.baseUrl);
+      }
       return hit.baseUrl;
     }
   }

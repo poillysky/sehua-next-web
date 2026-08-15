@@ -169,9 +169,9 @@
       "flareSolverrUrl": "",
       "proxyUrl": "",
       "coverDownloadStrategy": "priority",
-      "exportConcurrency": 5,
-      "exportFastConcurrency": 5,
-      "exportSlowConcurrency": 5,
+      "exportConcurrency": 2,
+      "exportFastConcurrency": 2,
+      "exportSlowConcurrency": 1,
       "posterCrop": {
         "byKind": {
           "japan_censored": "right",
@@ -264,45 +264,40 @@
         "cover": [
           "javbus",
           "jav321",
-          "libredmm",
-          "freejavbt"
+          "libredmm"
         ],
         "titleZh": [
           "iqqtv",
-          "sevenmmtv",
-          "javbus"
+          "airav_io",
+          "sevenmmtv"
         ],
         "outline": [
           "iqqtv",
-          "jav321",
-          "libredmm"
+          "airav_io",
+          "jav321"
         ],
         "studio": [
           "javbus",
           "jav321",
-          "libredmm",
-          "freejavbt"
+          "libredmm"
         ],
         "actors": [
           "javbus",
           "jav321",
-          "libredmm",
-          "freejavbt"
+          "libredmm"
         ],
         "tags": [
           "javbus",
           "freejavbt",
-          "libredmm",
-          "jav321"
+          "airav_io"
         ],
         "series": [
           "javbus",
           "freejavbt",
-          "jav321",
-          "libredmm"
+          "jav321"
         ]
       },
-      "fieldPrioritySchema": 5,
+      "fieldPrioritySchema": 7,
       "kindPrioritySchema": 20,
       "kindProfiles": {
         "japan_censored": {
@@ -314,55 +309,50 @@
             "jav321",
             "libredmm",
             "freejavbt",
+            "airav_io",
             "iqqtv",
             "sevenmmtv"
           ],
           "coverSources": [
             "javbus",
             "jav321",
-            "libredmm",
-            "freejavbt"
+            "libredmm"
           ],
           "fieldPriority": {
             "cover": [
               "javbus",
               "jav321",
-              "libredmm",
-              "freejavbt"
+              "libredmm"
             ],
             "titleZh": [
               "iqqtv",
-              "sevenmmtv",
-              "javbus"
+              "airav_io",
+              "sevenmmtv"
             ],
             "outline": [
               "iqqtv",
-              "jav321",
-              "libredmm"
+              "airav_io",
+              "jav321"
             ],
             "studio": [
               "javbus",
               "jav321",
-              "libredmm",
-              "freejavbt"
+              "libredmm"
             ],
             "actors": [
               "javbus",
               "jav321",
-              "libredmm",
-              "freejavbt"
+              "libredmm"
             ],
             "tags": [
               "javbus",
               "freejavbt",
-              "libredmm",
-              "jav321"
+              "airav_io"
             ],
             "series": [
               "javbus",
               "freejavbt",
-              "jav321",
-              "libredmm"
+              "jav321"
             ]
           }
         },
@@ -375,56 +365,50 @@
             "jav321",
             "libredmm",
             "freejavbt",
+            "airav_io",
             "iqqtv",
-            "sevenmmtv",
-            "airav_io"
+            "sevenmmtv"
           ],
           "coverSources": [
             "javbus",
             "jav321",
-            "libredmm",
-            "freejavbt"
+            "libredmm"
           ],
           "fieldPriority": {
             "cover": [
               "javbus",
               "jav321",
-              "libredmm",
-              "freejavbt"
+              "libredmm"
             ],
             "titleZh": [
               "iqqtv",
-              "sevenmmtv",
-              "airav_io"
+              "airav_io",
+              "sevenmmtv"
             ],
             "outline": [
               "iqqtv",
-              "jav321",
-              "libredmm"
+              "airav_io",
+              "jav321"
             ],
             "studio": [
               "javbus",
               "jav321",
-              "libredmm",
-              "freejavbt"
+              "libredmm"
             ],
             "actors": [
               "javbus",
               "jav321",
-              "libredmm",
-              "freejavbt"
+              "libredmm"
             ],
             "tags": [
               "javbus",
               "freejavbt",
-              "libredmm",
-              "jav321"
+              "airav_io"
             ],
             "series": [
               "javbus",
               "freejavbt",
-              "jav321",
-              "libredmm"
+              "jav321"
             ]
           }
         },
@@ -433,24 +417,24 @@
           "writeTree": null,
           "writeEmby": null,
           "metaSources": [
-            "javbus",
             "carib",
+            "javbus",
+            "jav321",
             "freejavbt",
-            "avsox",
-            "airav_io",
+            "iqqtv",
             "sevenmmtv",
-            "iqqtv"
+            "airav_io"
           ],
           "coverSources": [
-            "javbus",
             "carib",
-            "freejavbt"
+            "javbus",
+            "jav321"
           ],
           "fieldPriority": {
             "cover": [
-              "javbus",
               "carib",
-              "freejavbt"
+              "javbus",
+              "jav321"
             ],
             "titleZh": [
               "iqqtv",
@@ -459,26 +443,28 @@
             ],
             "outline": [
               "iqqtv",
-              "airav_io",
-              "carib"
+              "carib",
+              "jav321"
             ],
             "studio": [
               "carib",
-              "javbus"
+              "javbus",
+              "jav321"
             ],
             "actors": [
               "javbus",
-              "sevenmmtv",
-              "airav_io"
+              "carib",
+              "jav321"
             ],
             "tags": [
               "javbus",
-              "avsox"
+              "carib",
+              "freejavbt"
             ],
             "series": [
               "javbus",
-              "avsox",
-              "airav_io"
+              "carib",
+              "jav321"
             ]
           }
         },
@@ -488,52 +474,53 @@
           "writeEmby": null,
           "metaSources": [
             "javbus",
-            "freejavbt",
             "libredmm",
-            "airav_io",
-            "sevenmmtv",
+            "jav321",
+            "freejavbt",
             "iqqtv",
-            "miss_av"
+            "airav_io",
+            "sevenmmtv"
           ],
           "coverSources": [
             "javbus",
-            "freejavbt",
-            "libredmm"
+            "libredmm",
+            "jav321"
           ],
           "fieldPriority": {
             "cover": [
               "javbus",
-              "freejavbt",
-              "libredmm"
+              "libredmm",
+              "jav321"
             ],
             "titleZh": [
               "iqqtv",
-              "sevenmmtv",
-              "airav_io"
+              "airav_io",
+              "sevenmmtv"
             ],
             "outline": [
               "iqqtv",
               "airav_io",
-              "miss_av"
+              "libredmm"
             ],
             "studio": [
               "libredmm",
               "javbus",
-              "airav_io"
+              "jav321"
             ],
             "actors": [
-              "sevenmmtv",
-              "airav_io",
-              "javbus"
+              "javbus",
+              "libredmm",
+              "jav321"
             ],
             "tags": [
               "javbus",
-              "libredmm"
+              "libredmm",
+              "freejavbt"
             ],
             "series": [
               "libredmm",
               "javbus",
-              "airav_io"
+              "jav321"
             ]
           }
         },
@@ -543,32 +530,28 @@
           "writeEmby": null,
           "metaSources": [
             "fc2",
-            "freejavbt",
             "javbus",
-            "miss_av",
-            "fd2ppv",
+            "iqqtv",
             "airav_io"
           ],
           "coverSources": [
             "fc2",
-            "freejavbt",
             "javbus"
           ],
           "fieldPriority": {
             "cover": [
               "fc2",
-              "freejavbt",
               "javbus"
             ],
             "titleZh": [
-              "fc2",
-              "miss_av",
-              "fd2ppv"
+              "iqqtv",
+              "airav_io",
+              "fc2"
             ],
             "outline": [
               "fc2",
-              "miss_av",
-              "airav_io"
+              "iqqtv",
+              "javbus"
             ],
             "studio": [
               "fc2",
@@ -576,7 +559,6 @@
             ],
             "actors": [
               "fc2",
-              "miss_av",
               "javbus"
             ],
             "tags": [
@@ -595,25 +577,24 @@
           "writeEmby": null,
           "metaSources": [
             "madou",
-            "madouqu",
-            "freejavbt",
             "xiao_huang_shu",
+            "madouqu",
             "javbus"
           ],
           "coverSources": [
             "madou",
-            "madouqu",
-            "freejavbt"
+            "xiao_huang_shu",
+            "madouqu"
           ],
           "fieldPriority": {
             "cover": [
               "madou",
-              "madouqu",
-              "freejavbt"
+              "xiao_huang_shu",
+              "madouqu"
             ],
             "titleZh": [
-              "madou",
               "madouqu",
+              "madou",
               "xiao_huang_shu"
             ],
             "outline": [
@@ -622,14 +603,14 @@
               "xiao_huang_shu"
             ],
             "studio": [
-              "madou",
               "madouqu",
+              "madou",
               "xiao_huang_shu"
             ],
             "actors": [
-              "madou",
               "madouqu",
-              "xiao_huang_shu"
+              "madou",
+              "javbus"
             ],
             "tags": [
               "madou",
@@ -637,8 +618,8 @@
               "javbus"
             ],
             "series": [
-              "madou",
-              "madouqu"
+              "madouqu",
+              "madou"
             ]
           }
         },
@@ -647,53 +628,54 @@
           "writeTree": null,
           "writeEmby": null,
           "metaSources": [
-            "freejavbt",
             "javbus",
             "libredmm",
+            "jav321",
+            "freejavbt",
+            "iqqtv",
             "airav_io",
-            "sevenmmtv",
-            "miss_av",
-            "iqqtv"
+            "sevenmmtv"
           ],
           "coverSources": [
-            "freejavbt",
             "javbus",
-            "libredmm"
+            "libredmm",
+            "jav321"
           ],
           "fieldPriority": {
             "cover": [
-              "freejavbt",
               "javbus",
-              "libredmm"
+              "libredmm",
+              "jav321"
             ],
             "titleZh": [
               "iqqtv",
               "airav_io",
-              "miss_av"
+              "sevenmmtv"
             ],
             "outline": [
               "iqqtv",
               "airav_io",
-              "miss_av"
+              "libredmm"
             ],
             "studio": [
               "javbus",
-              "airav_io",
-              "libredmm"
+              "libredmm",
+              "jav321"
             ],
             "actors": [
-              "airav_io",
-              "miss_av",
-              "javbus"
+              "javbus",
+              "libredmm",
+              "jav321"
             ],
             "tags": [
               "javbus",
-              "sevenmmtv"
+              "libredmm",
+              "freejavbt"
             ],
             "series": [
               "javbus",
-              "airav_io",
-              "libredmm"
+              "libredmm",
+              "jav321"
             ]
           }
         }

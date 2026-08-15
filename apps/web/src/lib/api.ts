@@ -1287,6 +1287,8 @@ export async function startScrapeExport(body: {
   maker?: string;
   prefix?: string;
   code?: string;
+  /** 多番号强制重刮（与 code 合并） */
+  codes?: string[];
   force?: boolean;
   mode?: 'incremental' | 'force';
   fields?: ScrapeTaskField[];
@@ -2138,6 +2140,8 @@ export type MediaChartResult = {
 export type MediaSearchResult = {
   source: MediaSourceId;
   query: string;
+  /** 服务端拆分后的片名列表（多片名逐条搜再合并） */
+  terms?: string[];
   page: number;
   totalPages: number;
   items: MediaItem[];

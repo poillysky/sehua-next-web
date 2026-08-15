@@ -1154,11 +1154,21 @@ def read_regions_overview(*, enrich: bool = False) -> dict[str, Any] | None:
     return {**data, "regions": enriched, "regionCount": len(enriched)}
 
 
-def read_region_index(fs_region: str) -> dict[str, Any] | None:
+def read_region_index(
+    fs_region: str, *, enrich: bool | None = None
+) -> dict[str, Any] | None:
+    """读区目录。enrich=None 时：构建中跳过重扫（避免堵死 API / 进不去设置页）。"""
     rid = resolve_fs_region(fs_region) or fs_region
     raw = read_json(region_index_path(rid))
     if not raw:
         return None
+    do_enrich = True if enrich is None else bool(enrich)
+    if do_enrich and enrich is None:
+        with _meta_lock:
+            if _build_state.get("running"):
+                do_enrich = False
+    if not do_enrich:
+        return raw
     return enrich_region_catalog(raw)
 
 

@@ -80,43 +80,44 @@ FIELD_PRIORITY_KEYS = (
 # schema≥3：字段优先级嵌在七区 kindProfiles[*].fieldPriority
 # schema=5：日本区 titleZh/outline 前置 iqqtv（不过盾中文标题快源）
 # schema=6：freejavbt 移出封面源（截帧/推荐串号不可靠）
-FIELD_PRIORITY_SCHEMA = 6
+# schema=7：标题/简介锁中文快源；其它字段放开结构快源（速度优先，少过盾）
+FIELD_PRIORITY_SCHEMA = 7
 # 七区×字段默认：仅「从未配置过」时的出厂值；线上以设置页 kindProfiles.fieldPriority 为准，勿在业务里写死源序
-# 快源靠前，过盾源垫后；每字段最多 3 个网络源
+# 快源靠前；titleZh/outline 中文站优先；其它字段可用日文结构源
 _JP_CENSORED_FP: dict[str, list[str]] = {
     "titleZh": ["iqqtv", "airav_io", "sevenmmtv"],
-    "outline": ["iqqtv", "airav_io"],
-    "studio": ["javbus", "airav_io"],
-    "cover": ["javbus"],
-    "actors": ["javbus", "airav_io", "sevenmmtv"],
-    "tags": ["javbus", "airav_io"],
-    "series": ["javbus", "freejavbt"],
+    "outline": ["iqqtv", "airav_io", "jav321"],
+    "studio": ["javbus", "jav321", "libredmm"],
+    "cover": ["javbus", "jav321", "libredmm"],
+    "actors": ["javbus", "jav321", "libredmm"],
+    "tags": ["javbus", "freejavbt", "airav_io"],
+    "series": ["javbus", "freejavbt", "jav321"],
 }
 
 _JP_UNCENSORED_FP: dict[str, list[str]] = {
-    "titleZh": ["iqqtv", "javbus", "sevenmmtv"],
-    "outline": ["iqqtv", "carib", "javbus"],
-    "studio": ["carib", "javbus", "avsox"],
-    "cover": ["carib", "javbus", "avsox"],
-    "actors": ["javbus", "avsox", "carib"],
-    "tags": ["javbus", "avsox", "carib"],
-    "series": ["javbus", "avsox"],
+    "titleZh": ["iqqtv", "sevenmmtv", "airav_io"],
+    "outline": ["iqqtv", "carib", "jav321"],
+    "studio": ["carib", "javbus", "jav321"],
+    "cover": ["carib", "javbus", "jav321"],
+    "actors": ["javbus", "carib", "jav321"],
+    "tags": ["javbus", "carib", "freejavbt"],
+    "series": ["javbus", "carib", "jav321"],
 }
 
 _JP_AMATEUR_FP: dict[str, list[str]] = {
-    "titleZh": ["iqqtv", "javbus", "libredmm"],
-    "outline": ["iqqtv", "libredmm", "javbus"],
-    "studio": ["libredmm", "javbus", "dmm"],
-    "cover": ["javbus", "libredmm"],
-    "actors": ["javbus", "libredmm", "avsox"],
-    "tags": ["javbus", "libredmm", "dmm"],
-    "series": ["libredmm", "javbus", "dmm"],
+    "titleZh": ["iqqtv", "airav_io", "sevenmmtv"],
+    "outline": ["iqqtv", "airav_io", "libredmm"],
+    "studio": ["libredmm", "javbus", "jav321"],
+    "cover": ["javbus", "libredmm", "jav321"],
+    "actors": ["javbus", "libredmm", "jav321"],
+    "tags": ["javbus", "libredmm", "freejavbt"],
+    "series": ["libredmm", "javbus", "jav321"],
 }
 
-# 首波仅 fc2/freejavbt/javbus；过盾 fd2ppv 只挂 titleZh 第三 → 第 2 波
+# FC2：官方快；中文标题能刮到再补 iqqtv/airav
 _FC2_FP: dict[str, list[str]] = {
-    "titleZh": ["fc2", "javbus", "fd2ppv"],
-    "outline": ["fc2", "javbus"],
+    "titleZh": ["iqqtv", "airav_io", "fc2"],
+    "outline": ["fc2", "iqqtv", "javbus"],
     "studio": ["fc2", "javbus"],
     "cover": ["fc2", "javbus"],
     "actors": ["fc2", "javbus"],
@@ -124,26 +125,25 @@ _FC2_FP: dict[str, list[str]] = {
     "series": ["fc2", "javbus"],
 }
 
-# 首波：madouqu/madou/freejavbt；过盾小黄书仅 titleZh 第三 → 第 2 波
+# 国产：标题/简介中文站；封面 madou 更稳，小黄书作补充
 _CHINA_FP: dict[str, list[str]] = {
     "titleZh": ["madouqu", "madou", "xiao_huang_shu"],
-    "outline": ["madouqu", "madou", "freejavbt"],
-    "studio": ["madouqu", "madou", "freejavbt"],
-    "cover": ["madouqu", "madou"],
+    "outline": ["madouqu", "madou", "xiao_huang_shu"],
+    "studio": ["madouqu", "madou", "xiao_huang_shu"],
+    "cover": ["madou", "xiao_huang_shu", "madouqu"],
     "actors": ["madouqu", "madou", "javbus"],
-    "tags": ["madouqu", "madou", "javbus"],
+    "tags": ["madou", "madouqu", "javbus"],
     "series": ["madouqu", "madou"],
 }
 
-# 首波：freejavbt/javbus/libredmm；过盾 airav 仅 titleZh 第三 → 第 2 波
 _WESTERN_FP: dict[str, list[str]] = {
-    "titleZh": ["iqqtv", "javbus", "airav_io"],
-    "outline": ["iqqtv", "javbus", "libredmm"],
-    "studio": ["javbus", "libredmm"],
-    "cover": ["javbus", "libredmm"],
-    "actors": ["javbus", "libredmm"],
-    "tags": ["javbus", "libredmm"],
-    "series": ["javbus", "libredmm"],
+    "titleZh": ["iqqtv", "airav_io", "sevenmmtv"],
+    "outline": ["iqqtv", "airav_io", "libredmm"],
+    "studio": ["javbus", "libredmm", "jav321"],
+    "cover": ["javbus", "libredmm", "jav321"],
+    "actors": ["javbus", "libredmm", "jav321"],
+    "tags": ["javbus", "libredmm", "freejavbt"],
+    "series": ["javbus", "libredmm", "jav321"],
 }
 
 
@@ -989,6 +989,26 @@ def _strip_freejavbt_from_cover(
     return out
 
 
+def _apply_speed_zh_title_field_defaults(
+    kinds: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """schema≥7：按出厂「标题/简介中文 + 其它字段放开快源」重配各区 fieldPriority。"""
+    out: dict[str, dict[str, Any]] = {}
+    for kid, prof in kinds.items():
+        merged = dict(prof or {})
+        base = DEFAULT_FIELD_PRIORITY_BY_KIND.get(kid)
+        if not base:
+            out[kid] = merged
+            continue
+        fp_n = normalize_field_priority(base)
+        meta_d, cover_d = derive_sources_from_fields(fp_n)
+        merged["fieldPriority"] = fp_n
+        merged["metaSources"] = meta_d
+        merged["coverSources"] = cover_d
+        out[kid] = merged
+    return out
+
+
 def profiles_public(
     raw_profiles: Any,
     *,
@@ -1024,6 +1044,8 @@ def profiles_public(
     if upgrade_fields:
         kinds = _prepend_iqqtv_field_lists(kinds)
         kinds = _strip_freejavbt_from_cover(kinds)
+        if fp_schema < 7:
+            kinds = _apply_speed_zh_title_field_defaults(kinds)
     # 顶层 fieldPriority 仅兼容旧前端；schema≥3 以各区 kindProfiles.fieldPriority 为准
     ref = kinds.get("japan_censored") or {}
     fields = normalize_field_priority(ref.get("fieldPriority"))

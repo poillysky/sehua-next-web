@@ -6,6 +6,8 @@ const DEFAULT_COOKIES: Record<string, string> = {
   mgstage: "adc=1",
   /** FANZA/DMM 年龄门；详情仍可能受日本 IP 限制 */
   dmm: "age_check_done=1; ckcy=1; cklg=ja; is_overseas=0",
+  /** FC2 内容站年龄确认 */
+  fc2: "adult_check=1",
 };
 
 export function defaultCookieFor(sourceId: string): string {
@@ -27,6 +29,7 @@ export function cookieForUrl(url: string, sourceId?: string): string {
     if (host.includes("dmm.co.jp") || host.includes("fanza")) {
       return DEFAULT_COOKIES.dmm!;
     }
+    if (host.includes("fc2.com")) return DEFAULT_COOKIES.fc2!;
   } catch {
     /* ignore */
   }

@@ -85,18 +85,18 @@ class _DaemonThreadPoolExecutor(ThreadPoolExecutor):
 
 
 def _normalize_export_concurrency(raw: Any) -> int:
-    """单通道并发：默认 4，上限 8。"""
+    """单通道并发：默认 2，上限 4（整容器持续 <1G）。"""
     try:
         n = int(raw)
     except (TypeError, ValueError):
-        n = 4
+        n = 2
     if n <= 0:
-        n = 4
-    return max(1, min(8, n))
+        n = 2
+    return max(1, min(4, n))
 
 
 def _resolve_channel_concurrency(cfg: dict[str, Any]) -> tuple[int, int]:
-    """快/慢通道并发；缺省回落 exportConcurrency。"""
+    """快/慢通道并发；缺省回落安全默认（快 2 / 慢 1）。"""
     leg = _normalize_export_concurrency(
         cfg.get("exportConcurrency") or cfg.get("export_concurrency")
     )
@@ -106,31 +106,26 @@ def _resolve_channel_concurrency(cfg: dict[str, Any]) -> tuple[int, int]:
     slow_raw = cfg.get("exportSlowConcurrency")
     if slow_raw is None:
         slow_raw = cfg.get("export_slow_concurrency")
+    if fast_raw is None and slow_raw is None:
+        return min(leg, 2), min(leg, 1)
     fast = _normalize_export_concurrency(
         fast_raw if fast_raw is not None else leg
     )
     slow = _normalize_export_concurrency(
-        slow_raw if slow_raw is not None else leg
+        slow_raw if slow_raw is not None else 1
     )
     return fast, slow
 
 
-# 与 scrape.ts FLARE_HEAVY 对齐：这些源在 titleZh 链上会占过盾锁
+# 与 sources.access=proxy_flare 对齐：仅这些占过盾锁 / 慢通道
 _FLARE_BOUND_SOURCES = frozenset(
     {
-        "airav_io",
-        "airav",
-        "sevenmmtv",
         "javdb",
         "javlibrary",
         "miss_av",
-        "avbase",
         "avmoo",
         "avsox",
-        "dmm",
         "mgstage",
-        "madouqu",
-        "xiao_huang_shu",
         "fd2ppv",
         "fc2_hub",
     }
@@ -1870,6 +1865,7 @@ def _make_export_job(
     maker: str | None = None,
     prefix: str | None = None,
     code: str | None = None,
+    codes: list[str] | None = None,
     force: bool = False,
     mode: str | None = None,
     fields: list[str] | None = None,
@@ -1878,6 +1874,8 @@ def _make_export_job(
     region_list = [str(r).strip() for r in (regions or []) if str(r).strip()]
     tid = str(task_id or "").strip()
     is_force, mode_key = _coerce_force_mode(force=force, mode=mode, task_id=tid)
+    code_list = _parse_export_code_filters(code, codes)
+    code_joined = "，".join(code_list) if code_list else ""
     name = str(task_name or "").strip()
     if not name:
         bits = [
@@ -1886,7 +1884,9 @@ def _make_export_job(
                 ",".join(region_list) if region_list else (region or ""),
                 (maker or "").strip(),
                 (prefix or "").strip(),
-                (code or "").strip(),
+                code_joined
+                if len(code_list) <= 3
+                else (f"{code_list[0]}…等{len(code_list)}个" if code_list else ""),
             )
             if x
         ]
@@ -1907,7 +1907,8 @@ def _make_export_job(
         "regions": region_list or None,
         "maker": (maker or "").strip() or None,
         "prefix": (prefix or "").strip() or None,
-        "code": (code or "").strip() or None,
+        "code": code_joined or None,
+        "codes": code_list or None,
         "force": bool(is_force),
         "mode": mode_key,
         "fields": export_fields,
@@ -2006,6 +2007,7 @@ def _spawn_export_thread(job: dict[str, Any]) -> None:
                 maker=job.get("maker"),
                 prefix=job.get("prefix"),
                 code=job.get("code"),
+                codes=job.get("codes"),
                 force=is_force,
                 mode=mode_key,
                 fields=job.get("fields"),
@@ -2040,6 +2042,7 @@ def submit_export_job(
     maker: str | None = None,
     prefix: str | None = None,
     code: str | None = None,
+    codes: list[str] | None = None,
     force: bool = False,
     mode: str | None = None,
     fields: list[str] | None = None,
@@ -2062,6 +2065,7 @@ def submit_export_job(
         maker=maker,
         prefix=prefix,
         code=code,
+        codes=codes,
         force=force,
         mode=mode,
         fields=fields,
@@ -2098,8 +2102,11 @@ def submit_export_job(
                         _state.get("exportFields")
                     )
                     fields_changed = new_fields != cur_fields
+                    force_codes = bool(job.get("force")) and bool(
+                        job.get("codes") or job.get("code")
+                    )
                     if not _export_boot_stuck() and _export_worker_alive():
-                        if not fields_changed:
+                        if not fields_changed and not force_codes:
                             return export_status()
                         _state["pendingRestart"] = job
                         _control["cancel"] = True
@@ -4149,6 +4156,43 @@ def _std_code(code: str) -> str:
     return f"{prefix}-{n:0{width}d}"
 
 
+_CODE_FILTER_SEP = re.compile(r"[,;，、|｜/\n\r]+")
+
+
+def _parse_export_code_filters(
+    code: str | None = None,
+    codes: list[str] | None = None,
+    *,
+    limit: int = 5000,
+) -> list[str]:
+    """单号 / 逗号顿号多号 / codes 列表 → 去重保序的标准番号。"""
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def _add(raw: str) -> None:
+        c = _std_code(raw)
+        if not c or c in seen:
+            return
+        seen.add(c)
+        out.append(c)
+
+    if codes:
+        for raw in codes:
+            _add(str(raw or ""))
+            if len(out) >= limit:
+                return out
+    s = str(code or "").strip()
+    if s:
+        if _CODE_FILTER_SEP.search(s):
+            for part in _CODE_FILTER_SEP.split(s):
+                _add(part)
+                if len(out) >= limit:
+                    break
+        else:
+            _add(s)
+    return out
+
+
 def _safe_segment(name: str) -> str:
     s = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", str(name or "").strip())
     s = s.strip(" .") or "unknown"
@@ -4810,6 +4854,7 @@ def collect_targets(
     maker: str | None = None,
     prefix: str | None = None,
     code: str | None = None,
+    codes: list[str] | None = None,
     rekey: bool = True,
     include_fill: bool = False,
 ) -> list[dict[str, Any]]:
@@ -4817,8 +4862,10 @@ def collect_targets(
 
     rekey=False：直接用索引 covers 键（物化热路径，避免全库重算键拖慢十几秒）。
     include_fill=True：digit_pad 前缀按 fillFrom..fillTo 补空洞（刮削要 999 不要只 831）。
+    code / codes：限定番号（可多号，逗号/顿号分隔）；缺失时仍合成目标便于强制重刮。
     """
-    want_code = _std_code(code) if code else ""
+    want_list = _parse_export_code_filters(code, codes)
+    want_codes = set(want_list)
     want_prefix = maker_fs._std_prefix(prefix) if prefix else ""  # noqa: SLF001
     want_maker = (maker or "").strip()
     region_ids: list[str] = []
@@ -4871,7 +4918,7 @@ def collect_targets(
                 c = str(ckey or "").strip().upper().replace("_", "-")
                 if not c:
                     continue
-                if want_code and c != want_code and _std_code(c) != want_code:
+                if want_codes and c not in want_codes and _std_code(c) not in want_codes:
                     continue
                 cover_url = None
                 urls: list[str] = []
@@ -4899,8 +4946,9 @@ def collect_targets(
                     }
                 )
                 seen_codes.add(c)
-            # 刮削：按发现区间补空洞（SONE fillTo=999 而 covers 只有 831）
-            if include_fill and not want_code and maker_fs.should_fill_digit_range(rid, p):
+                seen_codes.add(_std_code(c))
+            # 刮削：按发现区间补空洞；指定番号时也补，便于空号/无数据强制重刮
+            if include_fill and maker_fs.should_fill_digit_range(rid, p):
                 fill_from = int(idx.get("fillFrom") or 0)
                 fill_to = int(idx.get("fillTo") or 0)
                 if fill_to < fill_from or fill_to <= 0:
@@ -4912,6 +4960,12 @@ def collect_targets(
                     ):
                         cu = str(c or "").strip().upper()
                         if not cu or cu in seen_codes:
+                            continue
+                        if (
+                            want_codes
+                            and cu not in want_codes
+                            and _std_code(cu) not in want_codes
+                        ):
                             continue
                         out.append(
                             {
@@ -4927,6 +4981,7 @@ def collect_targets(
                             }
                         )
                         seen_codes.add(cu)
+                        seen_codes.add(_std_code(cu))
     # 去重保序：同区同前缀同番号才算一条（FC2 / FC2-PPV 分开）
     seen: set[str] = set()
     uniq: list[dict[str, Any]] = []
@@ -4936,6 +4991,35 @@ def collect_targets(
             continue
         seen.add(k)
         uniq.append(it)
+
+    # 指定番号但索引/补全都没有：仍合成目标（强制重刮空号）
+    if want_list:
+        have = {_std_code(str(t.get("code") or "")) for t in uniq}
+        have |= {str(t.get("code") or "").strip().upper() for t in uniq}
+        rid0 = region_ids[0] if region_ids else ""
+        for c in want_list:
+            if c in have:
+                continue
+            pref = want_prefix
+            if not pref:
+                m = re.fullmatch(r"([A-Z0-9]+)-\d+", c)
+                pref = m.group(1) if m else ""
+            if not pref or not rid0:
+                continue
+            uniq.append(
+                {
+                    "code": c,
+                    "prefix": pref,
+                    "maker": want_maker or pref,
+                    "region": rid0,
+                    "coverUrl": None,
+                    "coverUrls": [],
+                    "forumTitle": None,
+                    "forumActors": None,
+                    "fromFilter": True,
+                }
+            )
+            have.add(c)
     return uniq
 
 
@@ -5939,6 +6023,7 @@ def run_export(
     maker: str | None = None,
     prefix: str | None = None,
     code: str | None = None,
+    codes: list[str] | None = None,
     force: bool = False,
     mode: str | None = None,
     fields: list[str] | None = None,
@@ -6022,8 +6107,20 @@ def run_export(
 
     maker_s = (maker or "").strip()
     prefix_s = (prefix or "").strip().upper()
-    code_s = _std_code(code) if code else ""
-    scope_bits = [x for x in (region_label, maker_s, prefix_s, code_s) if x]
+    code_list = _parse_export_code_filters(code, codes)
+    code_s = "，".join(code_list) if code_list else ""
+    scope_bits = [
+        x
+        for x in (
+            region_label,
+            maker_s,
+            prefix_s,
+            code_s
+            if len(code_list) <= 3
+            else (f"{len(code_list)} 个番号" if code_list else ""),
+        )
+        if x
+    ]
     with _meta_lock:
         global _result_seen
         started = _state.get("startedAt") or _now_iso()
@@ -6122,6 +6219,7 @@ def run_export(
             maker=maker,
             prefix=prefix,
             code=code,
+            codes=codes,
             include_fill=True,
         )
         fill_n = sum(1 for t in targets if t.get("fromFill"))
@@ -6153,12 +6251,14 @@ def run_export(
                 )
         except Exception:
             log.exception("collect library empty folder targets failed")
-        # 同任务断点续跑：
-        # - 暂停续跑：只用 remainingTargets
-        # - 其它残留断点：全量 targets 减去已完成（避免重置后只刮残留几条）
+        # 强制重刮指定番号：忽略断点里的已完成集合，否则空号/成功不会再进池
         resume = _load_resume_checkpoint()
         resume_tid = str((resume or {}).get("taskId") or "").strip()
         cur_tid = str(task_id or tid or "").strip()
+        force_code_rerun = bool(force_ref[0]) and bool(code_list)
+        if resume and resume_tid and resume_tid == cur_tid and force_code_rerun:
+            _clear_resume_checkpoint()
+            resume = None
         if resume and resume_tid and resume_tid == cur_tid:
             finished = set()
             # 失败不进 finished：增量/续跑都会重新入队再刮

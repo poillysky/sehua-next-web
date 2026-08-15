@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import time
@@ -448,7 +449,11 @@ async def media_search(
     source: str = Query("tmdb"),
     page: int = Query(1, ge=1, le=20),
 ) -> dict[str, Any]:
-    """影视信息搜索（TMDB / 豆瓣），用于发现页关键字检索。"""
+    """影视信息搜索（TMDB / 豆瓣）。
+
+    多片名：用逗号/顿号/分号等分隔（中文片名也可用空格），逐条搜索后合并去重。
+    英文片名含空格时请用逗号分隔多部作品，避免被拆碎。
+    """
     src = (source or "tmdb").strip().lower()
     query = (q or "").strip()
     if not query:
@@ -456,7 +461,18 @@ async def media_search(
     if src not in {"tmdb", "douban"}:
         raise HTTPException(status_code=400, detail="未知数据源")
 
-    cache_key = f"search:{src}:{query.lower()}:{page}"
+    terms = _split_media_query_terms(query)
+    if not terms:
+        raise HTTPException(status_code=400, detail="请输入关键词")
+
+    # 多词：固定汇总第 1 页，避免分页语义混乱
+    multi = len(terms) > 1
+    use_page = 1 if multi else page
+    cache_key = (
+        f"search:{src}:multi:{'|'.join(t.lower() for t in terms)}"
+        if multi
+        else f"search:{src}:{query.lower()}:{use_page}"
+    )
     cached = _cache_get(cache_key)
     if cached is not None:
         return _wrap(cached)
@@ -464,55 +480,153 @@ async def media_search(
     if src == "tmdb":
         key = _require_tmdb_key()
         async with httpx.AsyncClient(**_HTTPX_KW) as client:
-            data = await _tmdb_get(
-                client,
-                "/3/search/multi",
-                {
-                    "api_key": key,
-                    "language": "zh-CN",
-                    "query": query,
-                    "page": page,
-                    "include_adult": "false",
-                },
-            )
-        results = data.get("results") if isinstance(data.get("results"), list) else []
-        items: list[dict[str, Any]] = []
-        for raw in results:
-            if not isinstance(raw, dict):
-                continue
-            mt = str(raw.get("media_type") or "").strip().lower()
-            if mt not in {"movie", "tv"}:
-                continue
-            if not raw.get("id"):
-                continue
-            items.append(_map_tmdb_list_item(raw, mt))
+            if multi:
+                batches = await asyncio.gather(
+                    *[
+                        _tmdb_search_one(client, key=key, query=t, page=1)
+                        for t in terms
+                    ]
+                )
+                items = _merge_media_items([b[0] for b in batches])
+                total_pages = 1
+            else:
+                items, total_pages = await _tmdb_search_one(
+                    client, key=key, query=terms[0], page=use_page
+                )
         payload = {
             "source": "tmdb",
             "query": query,
-            "page": page,
-            "totalPages": int(data.get("total_pages") or 1),
+            "terms": terms,
+            "page": use_page,
+            "totalPages": total_pages,
             "items": items,
         }
         _cache_set(cache_key, payload, ttl=1800)
         return _wrap(payload)
 
-    # 豆瓣：subject_suggest（轻量联想）
+    # 豆瓣 subject_suggest
     try:
         async with httpx.AsyncClient(**_DOUBAN_HTTPX_KW) as client:
-            r = await client.get(
-                "https://movie.douban.com/j/subject_suggest",
-                params={"q": query},
-                headers={
-                    "User-Agent": _DOUBAN_UA,
-                    "Referer": "https://movie.douban.com/",
-                    "Accept": "application/json, text/plain, */*",
-                },
-            )
+            if multi:
+                batches = await asyncio.gather(
+                    *[_douban_suggest_one(client, t) for t in terms]
+                )
+                items = _merge_media_items(list(batches))
+            else:
+                items = await _douban_suggest_one(client, terms[0])
     except httpx.ConnectError as e:
         raise HTTPException(
             status_code=502,
             detail="无法连接豆瓣（网络或系统代理异常）",
         ) from e
+    payload = {
+        "source": "douban",
+        "query": query,
+        "terms": terms,
+        "page": 1,
+        "totalPages": 1,
+        "items": items,
+    }
+    _cache_set(cache_key, payload, ttl=1800 if items else 120)
+    return _wrap(payload)
+
+
+_MEDIA_QUERY_STRONG_SEP = re.compile(r"[,;，、；|｜/\n\r]+")
+_MEDIA_QUERY_SPACE_SEP = re.compile(r"\s+")
+_MEDIA_QUERY_HAS_LATIN = re.compile(r"[A-Za-z]")
+
+
+def _split_media_query_terms(q: str, *, limit: int = 10) -> list[str]:
+    """拆成多个片名：强分隔符优先；纯中文可用空格；英文含空格整段保留。"""
+    s = (q or "").strip()
+    if not s:
+        return []
+    if _MEDIA_QUERY_STRONG_SEP.search(s):
+        parts = _MEDIA_QUERY_STRONG_SEP.split(s)
+    elif _MEDIA_QUERY_HAS_LATIN.search(s):
+        parts = [s]
+    else:
+        parts = _MEDIA_QUERY_SPACE_SEP.split(s)
+    out: list[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        t = str(part or "").strip()
+        if not t:
+            continue
+        key = t.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(t)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _merge_media_items(batches: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    """按各词结果顺序交错合并，同 id 去重。"""
+    merged: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    max_len = max((len(b) for b in batches), default=0)
+    for i in range(max_len):
+        for batch in batches:
+            if i >= len(batch):
+                continue
+            item = batch[i]
+            if not isinstance(item, dict):
+                continue
+            sid = f"{item.get('source')}:{item.get('id')}"
+            if sid in seen:
+                continue
+            seen.add(sid)
+            merged.append(item)
+    return merged
+
+
+async def _tmdb_search_one(
+    client: httpx.AsyncClient,
+    *,
+    key: str,
+    query: str,
+    page: int,
+) -> tuple[list[dict[str, Any]], int]:
+    data = await _tmdb_get(
+        client,
+        "/3/search/multi",
+        {
+            "api_key": key,
+            "language": "zh-CN",
+            "query": query,
+            "page": page,
+            "include_adult": "false",
+        },
+    )
+    results = data.get("results") if isinstance(data.get("results"), list) else []
+    items: list[dict[str, Any]] = []
+    for raw in results:
+        if not isinstance(raw, dict):
+            continue
+        mt = str(raw.get("media_type") or "").strip().lower()
+        if mt not in {"movie", "tv"}:
+            continue
+        if not raw.get("id"):
+            continue
+        items.append(_map_tmdb_list_item(raw, mt))
+    return items, max(1, int(data.get("total_pages") or 1))
+
+
+async def _douban_suggest_one(
+    client: httpx.AsyncClient, query: str
+) -> list[dict[str, Any]]:
+    r = await client.get(
+        "https://movie.douban.com/j/subject_suggest",
+        params={"q": query},
+        headers={
+            "User-Agent": _DOUBAN_UA,
+            "Referer": "https://movie.douban.com/",
+            "Accept": "application/json, text/plain, */*",
+        },
+    )
     if r.status_code in {403, 418, 429}:
         raise HTTPException(status_code=502, detail="豆瓣暂时拒绝访问（风控）")
     if not r.is_success:
@@ -523,7 +637,7 @@ async def media_search(
         raise HTTPException(status_code=502, detail="豆瓣响应非 JSON") from e
     if not isinstance(rows, list):
         rows = []
-    items = []
+    items: list[dict[str, Any]] = []
     for raw in rows:
         if not isinstance(raw, dict) or not raw.get("id"):
             continue
@@ -543,15 +657,7 @@ async def media_search(
                 year=str(raw.get("year") or "").strip() or None,
             )
         )
-    payload = {
-        "source": "douban",
-        "query": query,
-        "page": 1,
-        "totalPages": 1,
-        "items": items,
-    }
-    _cache_set(cache_key, payload, ttl=1800 if items else 120)
-    return _wrap(payload)
+    return items
 
 
 # ─── 豆瓣 ─────────────────────────────────────────────

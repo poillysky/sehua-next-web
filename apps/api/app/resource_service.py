@@ -726,7 +726,7 @@ def search_resources(
     kw_sql, kw_params, code_bound = build_keyword_filter(
         kw_items,
         mode,
-        full_keyword=full_plain if mode == "fuzzy" else None,
+        full_keyword=full_plain,
         use_trgm=use_trgm,
     )
 
@@ -831,14 +831,14 @@ def search_resources(
         file_sql, file_params, _ = build_keyword_filter(
             kw_items,
             mode,
-            full_keyword=full_plain if mode == "fuzzy" else None,
+            full_keyword=full_plain,
             use_trgm=use_trgm and mode == "fuzzy",
             field="filename",
         )
         title_sql, title_params, _ = build_keyword_filter(
             kw_items,
             mode,
-            full_keyword=full_plain if mode == "fuzzy" else None,
+            full_keyword=full_plain,
             use_trgm=use_trgm and mode == "fuzzy",
             field="title",
         )
@@ -857,10 +857,10 @@ def search_resources(
                 if use_trgm and ("similarity" in msg or "word_similarity" in msg):
                     _trgm_ok = False
                     file_sql, file_params, _ = build_keyword_filter(
-                        kw_items, mode, field="filename"
+                        kw_items, mode, full_keyword=full_plain, field="filename"
                     )
                     title_sql, title_params, _ = build_keyword_filter(
-                        kw_items, mode, field="title"
+                        kw_items, mode, full_keyword=full_plain, field="title"
                     )
                     total = _bitmagnet_union_count(
                         file_sql,
@@ -905,10 +905,10 @@ def search_resources(
             if use_trgm and ("similarity" in msg or "word_similarity" in msg):
                 _trgm_ok = False
                 file_sql, file_params, _ = build_keyword_filter(
-                    kw_items, mode, field="filename"
+                    kw_items, mode, full_keyword=full_plain, field="filename"
                 )
                 title_sql, title_params, _ = build_keyword_filter(
-                    kw_items, mode, field="title"
+                    kw_items, mode, full_keyword=full_plain, field="title"
                 )
                 rows = _bitmagnet_union_list(
                     file_sql,

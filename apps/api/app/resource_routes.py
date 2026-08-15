@@ -171,7 +171,7 @@ def browse(
 
 @router.get("/search")
 def search(
-    keyword: str = Query(..., min_length=2, max_length=100),
+    keyword: str = Query(..., min_length=2, max_length=160),
     p: int = Query(1, ge=1),
     ps: int = Query(10, ge=1, le=80),
     sortType: str = Query("default"),

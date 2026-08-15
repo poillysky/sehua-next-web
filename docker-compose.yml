@@ -6,19 +6,14 @@
 #     data/
 #     scrape-data/
 #     config/
-#       app.json              # 仓库公开默认（可从本仓库拷）
-#       app.local.json        # 本机敏感项：两套 DSN / 代理 / 密钥（勿提交）
+#       app.json / app.local.json / scrape.env
 #
-# 两套库（局域网直连，勿用 127.0.0.1 / 勿用容器名）:
-#   色花资源库   resource_db     例 192.168.2.38:5435/ed2k
-#   Bitmagnet    bitmagnet_db    例 192.168.2.38:5438/bitmagnet
-# 也可启动后在 设置 → 资源数据库 / Bitmagnet 库 填写。
+# 内存目标：本容器持续 RSS < 1G（不含独立 flaresolverr）。
+# 默认：快 2 / 慢 1；同站并行 1；scrape Node 堆 512MB；硬顶 mem_limit 1g。
 #
 # 启动:
 #   mkdir -p /vol1/1000/Docker/sehua-next-web/{data,scrape-data,config}
-#   cd /vol1/1000/Docker/sehua-next-web
-#   docker compose pull
-#   docker compose up -d
+#   cd /vol1/1000/Docker/sehua-next-web && docker compose pull && docker compose up -d
 # 访问: http://NAS_IP:3020
 
 name: sehua-next-web
@@ -28,6 +23,8 @@ services:
     image: poillysky/sehua-next-web:latest
     container_name: sehua-next-web
     restart: always
+    # 持续运行硬顶；尖峰超限会被 OOM 杀整容器（故并发保持偏低）
+    mem_limit: 1g
     ports:
       - "3020:3020"
     environment:
@@ -36,18 +33,38 @@ services:
       SCRAPE_ORIGIN: http://127.0.0.1:9210
       API_INTERNAL_BASE: http://127.0.0.1:8020
       WEB_PORT: "3020"
+      # —— 内存安全（整栈持续 <1G）——
+      SCRAPE_CONCURRENCY: "2"
+      SCRAPE_FAST_CONCURRENCY: "2"
+      SCRAPE_SLOW_CONCURRENCY: "1"
+      SCRAPE_HOST_PARALLEL: "1"
+      SCRAPE_MAX_HTML_BYTES: "3000000"
+      SCRAPE_MAX_IMAGE_BYTES: "5000000"
+      NODE_OPTIONS: "--max-old-space-size=512"
+      FLARESOLVERR_MAX_SESSIONS_WARN: "1"
+      FLARESOLVERR_MAX_SESSIONS_CRITICAL: "2"
+      FLARESOLVERR_MEM_WARN: "70"
+      FLARESOLVERR_MEM_CRITICAL: "85"
+      FLARESOLVERR_DOCKER_NAME: flaresolverr
+      FLARESOLVERR_AUTO_MANAGE: "1"
+      FLARESOLVERR_RESTART_CMD: >-
+        curl -fsS --unix-socket /var/run/docker.sock
+        -X POST http://localhost/containers/flaresolverr/restart
+      FLARESOLVERR_STATS_CMD: >-
+        curl -fsS --unix-socket /var/run/docker.sock
+        "http://localhost/containers/flaresolverr/stats?stream=0"
     volumes:
       - /vol1/1000/Docker/sehua-next-web/data:/app/data
       - /vol1/1000/Docker/sehua-next-web/scrape-data:/app/apps/scrape/data
       - /vol1/1000/Docker/sehua-next-web/config:/app/config
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /vol1/1000/Docker/sehua-next-web/config/scrape.env:/app/apps/scrape/.env:ro
     dns:
       - 223.5.5.5
       - 8.8.8.8
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    # 刮削并发开大量 SQLite/HTTP/文件 FD；默认 ~1024 会打满
     ulimits:
       nofile:
         soft: 65535
         hard: 65535
-

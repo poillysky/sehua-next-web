@@ -11761,6 +11761,53 @@ textarea {
   background: #0a84ff;
 }
 
+.scrape-stat-codes-modal__foot {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  align-items: center;
+}
+
+.scrape-stat-codes-modal__foot .scrape-stat-codes-modal__done {
+  width: auto;
+  min-width: 88px;
+  flex-shrink: 0;
+  background: color-mix(in srgb, var(--bg-soft) 80%, var(--surface-solid));
+  color: var(--ink);
+}
+
+.dark .scrape-stat-codes-modal__foot .scrape-stat-codes-modal__done {
+  background: color-mix(in srgb, var(--bg-soft) 70%, #1c1c1e);
+  color: #fff;
+}
+
+.scrape-stat-codes-modal__rescrape-all {
+  flex: 1;
+  min-width: 0;
+  min-height: 40px;
+  border: none;
+  border-radius: 12px;
+  background: #007aff;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.scrape-stat-codes-modal__rescrape-all:disabled {
+  opacity: 0.45;
+}
+
+.scrape-stat-codes-modal__rescrape-all:active:not(:disabled) {
+  opacity: 0.88;
+  transform: scale(0.985);
+}
+
+.dark .scrape-stat-codes-modal__rescrape-all {
+  background: #0a84ff;
+}
+
 .scrape-stat-codes-modal-card--ok .app-modal-card__title,
 .scrape-stat-codes-modal-card--ok .modal-title {
   color: color-mix(in srgb, #34c759 55%, var(--ink));
@@ -11864,13 +11911,21 @@ textarea {
   border-top: 0.5px solid var(--border-subtle);
 }
 
+.scrape-stat-codes__row {
+  display: flex;
+  align-items: stretch;
+  min-height: 44px;
+}
+
 .scrape-stat-codes__item {
   appearance: none;
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  width: 100%;
+  width: auto;
   margin: 0;
   padding: 11px 12px;
   border: none;
@@ -11883,6 +11938,36 @@ textarea {
   outline: none;
   box-shadow: none;
   min-height: 44px;
+}
+
+.scrape-stat-codes__rescrape {
+  flex-shrink: 0;
+  align-self: center;
+  min-width: 52px;
+  min-height: 32px;
+  margin: 0 8px 0 0;
+  padding: 0 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #007aff;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  -webkit-tap-highlight-color: transparent;
+  cursor: pointer;
+}
+
+.dark .scrape-stat-codes__rescrape {
+  color: #0a84ff;
+}
+
+.scrape-stat-codes__rescrape:disabled {
+  opacity: 0.4;
+}
+
+.scrape-stat-codes__rescrape:active:not(:disabled) {
+  opacity: 0.55;
 }
 
 .scrape-stat-codes__code {
@@ -14397,6 +14482,13 @@ a.scrape-src-card__url:active {
 
 .media-search__go:active {
   opacity: 0.88;
+}
+
+.media-search__terms {
+  margin: -8px 4px 12px;
+  font-size: 12px;
+  color: #8e8e93;
+  line-height: 1.35;
 }
 
 .dark .media-hub__top {

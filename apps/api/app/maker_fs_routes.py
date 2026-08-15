@@ -106,10 +106,28 @@ def list_regions(enrich: int = Query(0, ge=0, le=1)) -> dict[str, Any]:
 
 @router.get("/maker-fs/regions/{region_id}")
 def get_region(region_id: str) -> dict[str, Any]:
-    idx = maker_fs.read_region_index(region_id)
-    if not idx:
-        raise HTTPException(status_code=404, detail="该区本地索引不存在，请先构建")
-    return _wrap(idx)
+    rid = maker_fs.resolve_fs_region(region_id) or str(region_id or "").strip()
+    idx = maker_fs.read_region_index(rid)
+    if idx:
+        return _wrap(idx)
+    # 构建中该区尚未写出：仍返回空壳，避免前端「进不去」
+    st = maker_fs.build_status()
+    if st.get("running"):
+        meta = maker_fs.REGION_META.get(rid) or {}
+        return _wrap(
+            {
+                "id": rid,
+                "label": meta.get("label") or rid,
+                "navPath": meta.get("navPath") or "",
+                "prefixes": [],
+                "prefixCount": 0,
+                "makerCount": 0,
+                "codeCount": 0,
+                "building": True,
+                "updatedAt": st.get("updatedAt") or "",
+            }
+        )
+    raise HTTPException(status_code=404, detail="该区本地索引不存在，请先构建")
 
 
 @router.post("/maker-fs/regions/{region_id}/prefixes")

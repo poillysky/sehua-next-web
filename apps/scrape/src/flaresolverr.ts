@@ -11,12 +11,19 @@ let activeFlareUrl = "";
 /** FS 本机服务：直连，不走刮削代理 */
 const directAgent = new Agent();
 
-/** 易 403/CF 的站：直连失败后再过盾（Cookie 可复用） */
+/**
+ * 易 403/CF、且 access=proxy_flare 的站：直连失败后再过盾。
+ * 勿把代理直连源（airav / avbase / 7mmtv / madouqu 等）写进来，否则探测会误走 Flare。
+ */
 const CF_HOST_RE =
-  /(?:^|\.)(javdb\.|javlibrary\.|missav|javten\.|fd2ppv\.|airav\.|avbase\.|avmoo\.|avsox\.|tellme\.pw|mgstage\.|7mmtv\.|theporndb\.|madouqu\.)/i;
+  /(?:^|\.)(javdb\.|javlibrary\.|missav|javten\.|fd2ppv\.|avmoo\.|avsox\.|tellme\.pw|mgstage\.)/i;
 
-/** 运行时登记的镜像域名（如 airav 跳转到 inggairav*.work） */
+/** 运行时登记的镜像域名（仅 proxy_flare / viaFlare:true 源） */
 const extraFlareHosts = new Set<string>();
+
+/** 代理直连 / 直连源：禁止登记，避免探测与刮削被误吸入过盾通道 */
+const NEVER_REGISTER_FLARE_RE =
+  /(?:^|\.)(airav|avbase|7mmtv|7mm\.tv|madouqu|madou\.club|theporndb|javbus|seejav|caribbeancom|jav321|freejavbt|libredmm|contents\.fc2|dmm\.co\.jp|xchina|iqq[0-9]|airav\.wiki)/i;
 
 export function registerFlareHost(hostOrUrl: string): void {
   try {
@@ -27,7 +34,8 @@ export function registerFlareHost(hostOrUrl: string): void {
     )
       .toLowerCase()
       .replace(/\.$/, "");
-    if (host) extraFlareHosts.add(host);
+    if (!host || NEVER_REGISTER_FLARE_RE.test(host)) return;
+    extraFlareHosts.add(host);
   } catch {
     /* ignore */
   }
@@ -229,6 +237,18 @@ async function flareApi(
       dispatcher: directAgent,
     });
     const text = await res.text();
+    // JSON 外壳 + HTML；默认约 6MB，可用 SCRAPE_MAX_HTML_BYTES 抬高（×2，封顶 12MB）
+    const maxFlareJson = Math.max(
+      2_000_000,
+      Math.min(
+        12_000_000,
+        (Number(process.env.SCRAPE_MAX_HTML_BYTES || 3_000_000) || 3_000_000) *
+          2,
+      ),
+    );
+    if (text.length > maxFlareJson) {
+      throw new Error(`flaresolverr response too large ${text.length}`);
+    }
     let json: {
       status?: string;
       message?: string;
@@ -245,6 +265,15 @@ async function flareApi(
       json = JSON.parse(text);
     } catch {
       throw new Error(`flaresolverr bad json HTTP ${res.status}`);
+    }
+    // 丢掉原始 JSON 字符串引用，只保留解析结果（过盾页常数 MB）
+    const maxHtml =
+      Number(process.env.SCRAPE_MAX_HTML_BYTES || 3_000_000) || 3_000_000;
+    if (
+      json.solution?.response &&
+      json.solution.response.length > maxHtml
+    ) {
+      json.solution.response = json.solution.response.slice(0, maxHtml);
     }
     if (!res.ok || json.status !== "ok") {
       throw new Error(json.message || `flaresolverr failed HTTP ${res.status}`);
@@ -365,8 +394,6 @@ export function hostNeedsFlare(url: string): boolean {
     const host = new URL(url).hostname.toLowerCase();
     if (CF_HOST_RE.test(host)) return true;
     if (extraFlareHosts.has(host)) return true;
-    // airav 系镜像：inggairav5.work / xxairavyy.xxx
-    if (/airav/i.test(host)) return true;
     return false;
   } catch {
     return false;

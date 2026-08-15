@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # Single image: web (3020) + api (8020) + scrape (9210)
-# Build: docker build -t sehua-next-web:1.0.1 .
+# Build: docker build -t sehua-next-web:1.0.8 .
 
 # ─── Web build ─────────────────────────────────────────────
 FROM node:22-bookworm-slim AS web-builder
@@ -34,7 +34,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     SNS_COOKIE_SECURE=0 \
     PORT=9210 \
     HOST=127.0.0.1 \
-    WEB_PORT=3020
+    WEB_PORT=3020 \
+    SCRAPE_CONCURRENCY=2 \
+    SCRAPE_FAST_CONCURRENCY=2 \
+    SCRAPE_SLOW_CONCURRENCY=1 \
+    SCRAPE_HOST_PARALLEL=1 \
+    SCRAPE_MAX_HTML_BYTES=3000000 \
+    SCRAPE_MAX_IMAGE_BYTES=5000000 \
+    NODE_OPTIONS=--max-old-space-size=512 \
+    FLARESOLVERR_MAX_SESSIONS_WARN=1 \
+    FLARESOLVERR_MAX_SESSIONS_CRITICAL=2
 
 # Node 22 + supervisord + sharp (libvips) libs
 RUN apt-get update && apt-get install -y --no-install-recommends \

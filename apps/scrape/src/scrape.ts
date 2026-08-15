@@ -799,14 +799,13 @@ function mergeByFieldPriority(
   };
 }
 
-/** 强制/高概率走 FlareSolverr 的源（与 providers viaFlare / CF 站对齐） */
+/** 强制/高概率走 FlareSolverr 的源（与 sources.access=proxy_flare 对齐） */
 const FLARE_HEAVY_SOURCES = new Set<string>([
   "javdb",
   "javlibrary",
   "miss_av",
   "avmoo",
   "avsox",
-  "dmm",
   "mgstage",
   "fd2ppv",
   "fc2_hub",
@@ -1299,8 +1298,10 @@ async function downloadBestCover(
       const buf = await downloadBytes(cand.url);
       if (!buf) continue;
       if (!best || buf.length > best.buf.length) {
+        // 立刻丢掉次优缓冲，避免多候选叠内存
         best = { cand, buf };
       }
+      // 显式丢掉未入选的 buf（best 已换引用）
     }
     if (!best) {
       return { ok: false, url: null, usedPortrait: false, source: null };
@@ -1308,12 +1309,14 @@ async function downloadBestCover(
     const tmp = `${coverDest}.tmp`;
     fs.writeFileSync(tmp, best.buf);
     fs.renameSync(tmp, coverDest);
-    return {
-      ok: true,
+    const out = {
+      ok: true as const,
       url: best.cand.url,
       usedPortrait: best.cand.portrait,
       source: best.cand.source,
     };
+    best = null;
+    return out;
   }
 
   // priority：按数据源优先级依次尝试，成功即停

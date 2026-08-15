@@ -5,6 +5,7 @@
  * - 过载先回收会话（降内存），仍严重且配置了重启命令则自动重启
  */
 import { exec as execCb } from "node:child_process";
+import fs from "node:fs";
 import { promisify } from "node:util";
 import {
   getFlareSolverrUrl,
@@ -77,12 +78,12 @@ function readConfig(): MonitorConfig {
   const autoRaw = String(process.env.FLARESOLVERR_AUTO_MANAGE || "1").trim();
   return {
     intervalMs: envNum("FLARESOLVERR_MONITOR_INTERVAL_MS", 30_000),
-    maxSessionsWarn: envNum("FLARESOLVERR_MAX_SESSIONS_WARN", 2),
-    maxSessionsCritical: envNum("FLARESOLVERR_MAX_SESSIONS_CRITICAL", 3),
-    cpuWarn: envNum("FLARESOLVERR_CPU_WARN", 80),
-    cpuCritical: envNum("FLARESOLVERR_CPU_CRITICAL", 92),
-    memWarn: envNum("FLARESOLVERR_MEM_WARN", 75),
-    memCritical: envNum("FLARESOLVERR_MEM_CRITICAL", 88),
+    maxSessionsWarn: envNum("FLARESOLVERR_MAX_SESSIONS_WARN", 1),
+    maxSessionsCritical: envNum("FLARESOLVERR_MAX_SESSIONS_CRITICAL", 2),
+    cpuWarn: envNum("FLARESOLVERR_CPU_WARN", 75),
+    cpuCritical: envNum("FLARESOLVERR_CPU_CRITICAL", 90),
+    memWarn: envNum("FLARESOLVERR_MEM_WARN", 70),
+    memCritical: envNum("FLARESOLVERR_MEM_CRITICAL", 85),
     // CF 过盾常 25–60s；过低会误判「过载」并毁掉可复用 session
     latencyWarnMs: envNum("FLARESOLVERR_LATENCY_WARN_MS", 60_000),
     latencyCriticalMs: envNum("FLARESOLVERR_LATENCY_CRITICAL_MS", 120_000),
@@ -243,6 +244,15 @@ function buildRestartCommand(cfg: MonitorConfig): string {
   const flare = getFlareSolverrUrl();
   if (flare && flareHostIsLocal(flare)) {
     return `docker restart ${cfg.dockerName || "flaresolverr"}`;
+  }
+  // 同 NAS：挂了 docker.sock 即可重启兄弟容器（无需同 compose 网络 / docker CLI）
+  try {
+    if (fs.existsSync("/var/run/docker.sock")) {
+      const docker = cfg.dockerName || "flaresolverr";
+      return `curl -fsS --unix-socket /var/run/docker.sock -X POST http://localhost/containers/${docker}/restart`;
+    }
+  } catch {
+    /* ignore */
   }
   return "";
 }
@@ -413,12 +423,30 @@ export async function restartFlareNow(reason = "manual"): Promise<{
   const cfg = readConfig();
   const cmd = buildRestartCommand(cfg);
   if (!cmd) {
-    return {
-      ok: false,
-      message:
-        "未配置重启命令。请设置 FLARESOLVERR_RESTART_CMD 或 FLARESOLVERR_SSH（docker restart）",
-      cmd: "",
-    };
+    // NAS / 远端 Flare：本机没有 docker/ssh 重启权限时，改为清会话（测数据源后够用）
+    try {
+      const soft = await recycleFlareSessions({ keepOwned: false });
+      rememberAction(
+        soft.ok ? "recycle" : "recycle-failed",
+        soft.ok
+          ? `${reason} · no-restart-cmd · destroyed=${soft.destroyed}`
+          : soft.message,
+      );
+      return {
+        ok: soft.ok,
+        message: soft.ok
+          ? `未配置容器重启，已回收 ${soft.destroyed} 个过盾会话`
+          : soft.message || "回收会话失败",
+        cmd: "",
+      };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return {
+        ok: false,
+        message: `未配置重启命令，且回收会话失败：${msg}`,
+        cmd: "",
+      };
+    }
   }
   const now = Date.now();
   if (reason !== "manual" && now - lastRestartAt < cfg.restartCooldownMs) {

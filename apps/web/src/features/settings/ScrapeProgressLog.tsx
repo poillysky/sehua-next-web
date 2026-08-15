@@ -847,7 +847,7 @@ export function ScrapeProgressLog({
       }
       return {
         code,
-        phase: "done",
+        phase: "scrape",
         title: "",
         titleZh: "",
         plot: "",
@@ -951,6 +951,152 @@ export function ScrapeProgressLog({
     });
   }, [liveDetail, pinnedCode]);
 
+  const pinnedUpper = pinnedCode.trim().toUpperCase();
+  const pinnedIsActive =
+    Boolean(pinnedUpper) &&
+    running &&
+    (viewingLive ||
+      String(progress?.current || "")
+        .trim()
+        .toUpperCase() === pinnedUpper ||
+      (progress?.activeCodes || []).some(
+        (c) => String(c || "").trim().toUpperCase() === pinnedUpper,
+      ) ||
+      (progress?.activeFastCodes || []).some(
+        (c) => String(c || "").trim().toUpperCase() === pinnedUpper,
+      ) ||
+      (progress?.activeSlowCodes || []).some(
+        (c) => String(c || "").trim().toUpperCase() === pinnedUpper,
+      ));
+
+  // 钉住详情页：刮削进行中轮询 /detail，否则只会首拉一次，封面/状态停在旧值
+  useEffect(() => {
+    const code = pinnedCode.trim();
+    if (!code) return;
+    if (!running && !pinnedIsActive) return;
+
+    let cancelled = false;
+    let inFlight = false;
+    let timer: number | null = null;
+
+    const mergeDetail = (incoming: ScrapeExportDetail) => {
+      setPinnedDetail((prev) => {
+        if (!prev) return incoming;
+        if (
+          prev.code &&
+          incoming.code &&
+          prev.code.toUpperCase() !== incoming.code.toUpperCase()
+        ) {
+          return incoming;
+        }
+        const pick = (a?: string | null, b?: string | null) =>
+          String(a || "").trim() ? a : b;
+        return {
+          ...prev,
+          ...incoming,
+          phase: incoming.phase || prev.phase,
+          titleZh: pick(incoming.titleZh, prev.titleZh),
+          title: pick(incoming.title, prev.title),
+          originalTitle: pick(incoming.originalTitle, prev.originalTitle),
+          plot: pick(incoming.plot, prev.plot),
+          studio: pick(incoming.studio, prev.studio),
+          series: pick(incoming.series, prev.series),
+          poster: pick(incoming.poster, prev.poster),
+          posterLocal: pick(incoming.posterLocal, prev.posterLocal),
+          actors:
+            incoming.actors && incoming.actors.length
+              ? incoming.actors
+              : prev.actors,
+          genres:
+            incoming.genres && incoming.genres.length
+              ? incoming.genres
+              : prev.genres,
+          sourceRuns:
+            incoming.sourceRuns && incoming.sourceRuns.length
+              ? incoming.sourceRuns
+              : prev.sourceRuns,
+          fieldSources: {
+            ...(prev.fieldSources || {}),
+            ...(incoming.fieldSources || {}),
+          },
+          fieldTimings: {
+            ...(prev.fieldTimings || {}),
+            ...(incoming.fieldTimings || {}),
+          },
+          events:
+            Array.isArray(incoming.events) && incoming.events.length
+              ? incoming.events
+              : prev.events,
+        };
+      });
+      if (Array.isArray(incoming.events) && incoming.events.length) {
+        setPinnedEvents(incoming.events);
+      }
+    };
+
+    const schedule = () => {
+      if (cancelled) return;
+      if (timer != null) window.clearTimeout(timer);
+      timer = window.setTimeout(() => void tick(), 1800);
+    };
+
+    const tick = async () => {
+      if (cancelled || inFlight) return;
+      inFlight = true;
+      const ac = new AbortController();
+      const kill = window.setTimeout(() => ac.abort(), 10000);
+      try {
+        const d = await fetchScrapeExportDetail(code, ac.signal);
+        if (!cancelled) {
+          mergeDetail(d);
+          setPinnedError("");
+        }
+      } catch {
+        /* 轮询失败不打断界面 */
+      } finally {
+        window.clearTimeout(kill);
+        inFlight = false;
+        if (!cancelled) schedule();
+      }
+    };
+
+    void tick();
+
+    return () => {
+      cancelled = true;
+      if (timer != null) window.clearTimeout(timer);
+    };
+  }, [pinnedCode, pinnedIsActive, running]);
+
+  // 本号刚结束：立刻再拉一次落盘结果（封面/已写入）
+  const wasPinnedActiveRef = useRef(false);
+  useEffect(() => {
+    const code = pinnedCode.trim();
+    if (!code) {
+      wasPinnedActiveRef.current = false;
+      return;
+    }
+    if (pinnedIsActive) {
+      wasPinnedActiveRef.current = true;
+      return;
+    }
+    if (!wasPinnedActiveRef.current) return;
+    wasPinnedActiveRef.current = false;
+    let cancelled = false;
+    void fetchScrapeExportDetail(code)
+      .then((d) => {
+        if (cancelled) return;
+        setPinnedDetail(d);
+        if (Array.isArray(d.events) && d.events.length) {
+          setPinnedEvents(d.events);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [pinnedCode, pinnedIsActive]);
+
   const detail = pinnedCode ? pinnedDetail : liveDetail;
 
   if (!progress && !exporting && !pinnedCode) {
@@ -992,13 +1138,13 @@ export function ScrapeProgressLog({
           ) : (
             <ScrapeDetailPane
               detail={detail}
-              running={running && viewingLive}
+              running={pinnedIsActive || (running && viewingLive && !pinnedCode)}
             />
           )
         ) : (
           <ScrapeLogPane
             events={events}
-            running={running && viewingLive}
+            running={pinnedIsActive || (running && viewingLive && !pinnedCode)}
             code={currentCode || undefined}
           />
         )}

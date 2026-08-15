@@ -7,7 +7,6 @@ import {
   abortAllFlareRequests,
   clearCachedClearance,
   getFlareSolverrUrl,
-  hostNeedsFlare,
   looksBlockedHtml,
   normalizeFlareUrl,
   probeFlareSolverr,
@@ -67,23 +66,27 @@ setSiteMirrorStorePath(path.join(metaDir, "site-mirrors.json"));
 loadPersistedNetwork();
 
 const dirs: Dirs = { coversDir, metaDir };
-/** 双通道各自并发；默认 8，可用环境变量覆盖。旧 SCRAPE_CONCURRENCY 作两者上限参考。 */
+/** 双通道各自并发；默认快 2 / 慢 1，上限 4（整容器持续 <1G）。 */
 const _legacyConc = Math.max(
   1,
-  Math.min(16, Number(process.env.SCRAPE_CONCURRENCY || 8) || 8),
+  Math.min(4, Number(process.env.SCRAPE_CONCURRENCY || 2) || 2),
 );
 const SCRAPE_FAST_CONCURRENCY = Math.max(
   1,
   Math.min(
-    16,
+    4,
     Number(process.env.SCRAPE_FAST_CONCURRENCY || _legacyConc) || _legacyConc,
   ),
 );
 const SCRAPE_SLOW_CONCURRENCY = Math.max(
   1,
   Math.min(
-    16,
-    Number(process.env.SCRAPE_SLOW_CONCURRENCY || _legacyConc) || _legacyConc,
+    4,
+    Number(
+      process.env.SCRAPE_SLOW_CONCURRENCY ||
+        Math.min(1, _legacyConc) ||
+        1,
+    ) || 1,
   ),
 );
 const runFast = createQueue(SCRAPE_FAST_CONCURRENCY);
@@ -95,6 +98,30 @@ function queueForChannel(channel: unknown) {
     .toLowerCase() === "slow"
     ? runSlow
     : runFast;
+}
+
+/** 基址已带路径时勿重复拼接 probePath（如 …/zh + /zh/） */
+function joinBaseProbePath(base: string, probePath: string): string {
+  const b = String(base || "").replace(/\/$/, "");
+  let p = String(probePath || "/").trim() || "/";
+  if (!p.startsWith("/")) p = `/${p}`;
+  if (p === "/") return `${b}/`;
+  try {
+    const u = new URL(/^https?:\/\//i.test(b) ? b : `https://${b}`);
+    const basePath = (u.pathname || "/").replace(/\/+$/, "") || "";
+    const probeNorm = p.replace(/\/+$/, "") || "";
+    if (
+      probeNorm &&
+      (basePath === probeNorm ||
+        basePath.endsWith(probeNorm) ||
+        basePath.endsWith(`/${probeNorm.replace(/^\//, "")}`))
+    ) {
+      return `${u.origin}${basePath}/`;
+    }
+    return `${u.origin}${basePath}${p}`.replace(/([^:]\/)\/+/g, "$1");
+  } catch {
+    return `${b}${p}`;
+  }
 }
 
 const app = express();
@@ -370,6 +397,13 @@ app.post("/api/sources/probe", async (req, res) => {
       basesToTry.push(seed.replace(/\/$/, ""));
     }
   }
+  // airav.io 常跳镜像：无缓存时顺带试官方入口，便于 NAS 探测跟上跳转
+  if (id === "airav_io") {
+    for (const seed of ["https://airav.io/cn", "https://www.airav.io/cn"]) {
+      const s = seed.replace(/\/$/, "");
+      if (s && !basesToTry.includes(s)) basesToTry.push(s);
+    }
+  }
 
   try {
     // theporndb：根路径无业务；有 Key 才算配置就绪，否则标 unknown
@@ -445,20 +479,24 @@ app.post("/api/sources/probe", async (req, res) => {
 
     let lastError = "超时 / 无响应";
     let okBase = "";
+    const access = String(def.access || "proxy").trim().toLowerCase();
+    const hasProxy = Boolean(getActiveProxy());
+    // access 决定是否过盾；勿再用 hostNeedsFlare 覆盖（会把代理直连站标成「过盾超时」）
+    const needsFlare =
+      access === "proxy_flare" && Boolean(getFlareSolverrUrl());
+    if (access === "proxy" && !hasProxy) {
+      lastError = "未配置代理（本源需代理直连）";
+    } else if (access === "proxy_flare" && !getFlareSolverrUrl()) {
+      lastError = "未配置 FlareSolverr（本源需代理过盾）";
+    }
+
     for (const tryBase of basesToTry) {
       const b = String(tryBase || "").replace(/\/$/, "");
       if (!b) continue;
-      const url = `${b}${probePath.startsWith("/") ? probePath : `/${probePath}`}`;
-      const needsFlare =
-        id !== "airav_io" &&
-        id !== "airav" &&
-        id !== "sevenmmtv" &&
-        id !== "avbase" &&
-        Boolean(getFlareSolverrUrl()) &&
-        hostNeedsFlare(url);
+      const url = joinBaseProbePath(b, probePath);
       const html = await fetchText(url, {
-        // 探测要快：过盾一枪上限 28s，直连 12s（发现镜像留给正式刮削）
-        timeoutMs: needsFlare ? 22000 : 10000,
+        // NAS+代理偏慢：直连略放宽；过盾单枪仍封顶，避免拖死整批测试
+        timeoutMs: needsFlare ? 28000 : 18000,
         strictTimeout: true,
         // 禁止 undefined：否则直连失败后仍会回落 Flare，把代理站拖到半分钟
         viaFlare: needsFlare,
@@ -467,7 +505,13 @@ app.post("/api/sources/probe", async (req, res) => {
         referer: `${b}/`,
       });
       if (!html) {
-        lastError = needsFlare ? "过盾超时 / 无响应" : "超时 / 无响应";
+        if (access === "proxy" && !hasProxy) {
+          lastError = "未配置代理（本源需代理直连）";
+        } else if (access === "proxy_flare" && !getFlareSolverrUrl()) {
+          lastError = "未配置 FlareSolverr（本源需代理过盾）";
+        } else {
+          lastError = needsFlare ? "过盾超时 / 无响应" : "超时 / 无响应";
+        }
         continue;
       }
       if (looksBlockedHtml(html)) {
@@ -479,7 +523,9 @@ app.post("/api/sources/probe", async (req, res) => {
           id === "fc2_hub" || id === "mgstage" || id === "javdb"
             ? "出口 IP 被站方封锁（换代理或暂时依赖其它源）"
             : challenge
-              ? "仍是挑战页（过盾未完成）"
+              ? needsFlare
+                ? "仍是挑战页（过盾未完成）"
+                : "仍是挑战页（本源为代理直连，请换代理出口）"
               : "空响应 / 封锁页";
         continue;
       }

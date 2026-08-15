@@ -249,13 +249,14 @@ _COVER_DOWNLOAD_STRATEGIES = frozenset({"priority", "size"})
 
 
 def _normalize_export_concurrency(raw: Any) -> int:
+    """单通道并发：默认 2，上限 4（整容器持续 <1G）。"""
     try:
         n = int(raw)
     except (TypeError, ValueError):
-        n = 4
+        n = 2
     if n <= 0:
-        n = 4
-    return max(1, min(8, n))
+        n = 2
+    return max(1, min(4, n))
 
 
 def _pick_concurrency_raw(raw: dict[str, Any] | None, *keys: str) -> Any:
@@ -273,7 +274,7 @@ def _resolve_channel_concurrency(
     slow: Any = None,
     legacy: Any = None,
 ) -> tuple[int, int, int]:
-    """快/慢通道并发；缺省时回落到 exportConcurrency。返回 (fast, slow, legacy)。"""
+    """快/慢通道并发；缺省时回落安全默认（快 2 / 慢 1）。返回 (fast, slow, legacy)。"""
     d = raw or {}
     leg = _normalize_export_concurrency(
         legacy
@@ -294,13 +295,17 @@ def _resolve_channel_concurrency(
             d, "exportSlowConcurrency", "export_slow_concurrency"
         )
     )
-    fast_n = _normalize_export_concurrency(
-        fast_raw if fast_raw is not None else leg
-    )
-    slow_n = _normalize_export_concurrency(
-        slow_raw if slow_raw is not None else leg
-    )
-    # legacy 字段保留为两者较大值，兼容旧客户端
+    # 仅有旧字段：按安全默认拆分，避免快慢都顶到同一高值
+    if fast_raw is None and slow_raw is None:
+        fast_n = min(leg, 2)
+        slow_n = min(leg, 1)
+    else:
+        fast_n = _normalize_export_concurrency(
+            fast_raw if fast_raw is not None else leg
+        )
+        slow_n = _normalize_export_concurrency(
+            slow_raw if slow_raw is not None else 1
+        )
     return fast_n, slow_n, max(fast_n, slow_n)
 
 
@@ -1190,7 +1195,7 @@ def _is_transient_probe_error(exc: BaseException) -> bool:
 def _probe_one_source(origin: str, sid: str, base_url: str) -> dict[str, Any]:
     """调 :9210 探测；forum 本地视为 ok。
 
-    探测路径禁止全量镜像发现；过盾单枪约 ≤28s，直连 ≤12s。
+    探测路径禁止全量镜像发现；过盾单枪约 ≤28s，代理直连 ≤18s。
     httpx 留一点余量。遇连接重置（刮削热重载）自动重试。
     """
     import time
@@ -1201,7 +1206,7 @@ def _probe_one_source(origin: str, sid: str, base_url: str) -> dict[str, Any]:
     last_err: Exception | None = None
     for attempt in range(3):
         try:
-            with httpx.Client(timeout=45.0, trust_env=False) as client:
+            with httpx.Client(timeout=50.0, trust_env=False) as client:
                 r = client.post(
                     f"{origin.rstrip('/')}/api/sources/probe", json=payload
                 )
@@ -1350,20 +1355,31 @@ def run_scrape_sources_test(
     saved = settings_store.put_setting(settings_store.SCRAPE_KEY, raw)
     data = _scrape_public(saved["value"])
     data["updated_at"] = saved["updated_at"]
-    # 探测会在 Flare 里留下脏浏览器会话；测完重启腾干净环境。
-    # 刮削侧 cf_clearance 落在磁盘，重启 Flare 不会丢掉过盾 Cookie。
-    flare_msg = _restart_flare_after_source_probe(origin)
-    return data, f"测试完成 · 正常 {ok_n} · 异常 {err_n} · {flare_msg}"
+    # 仅测过「代理过盾」源时才清理 Flare；纯直连/代理直连（如 airav_io）不碰过盾
+    used_flare = False
+    for sid in probe_ids:
+        access = str((sources.get(sid) or {}).get("access") or "").strip().lower()
+        if access == "proxy_flare":
+            used_flare = True
+            break
+    if used_flare:
+        flare_msg = _restart_flare_after_source_probe(origin)
+        return data, f"测试完成 · 正常 {ok_n} · 异常 {err_n} · {flare_msg}"
+    return data, f"测试完成 · 正常 {ok_n} · 异常 {err_n}"
 
 
 def _restart_flare_after_source_probe(origin: str) -> str:
-    """数据源测完后重启 Flare；刮削进行中则跳过，避免打断过盾。"""
+    """数据源测完后清理 Flare 脏会话。
+
+    优先重启容器；NAS 未配 FLARESOLVERR_RESTART_CMD/SSH 时刮削侧会降级为回收会话。
+    刮削进行中则跳过，避免打断过盾。
+    """
     try:
         from . import scrape_export
 
         st = scrape_export.export_status(event_limit=0)
         if st.get("running"):
-            return "跳过重启 Flare（刮削进行中）"
+            return "跳过清理 Flare（刮削进行中）"
     except Exception:
         pass
     try:
@@ -1373,9 +1389,25 @@ def _restart_flare_after_source_probe(origin: str) -> str:
             method="POST",
             timeout=90.0,
         )
-        return str(msg or "").strip() or "已重启 Flare"
+        text = str(msg or "").strip()
+        if text:
+            return text
+        return "已清理 Flare"
     except Exception as e:
-        return f"重启 Flare 失败：{e}"
+        # 再试回收会话，避免整次重测被收尾失败盖住
+        try:
+            _d2, msg2 = _scrape_flare_proxy(
+                origin,
+                "/api/config/flaresolverr/recycle",
+                method="POST",
+                timeout=60.0,
+            )
+            soft = str(msg2 or "").strip()
+            if soft:
+                return f"重启不可用，已回收会话：{soft}"
+        except Exception:
+            pass
+        return f"清理 Flare 失败：{e}"
 
 
 @router.post("/scrape/flaresolverr/test", response_model=Envelope)
