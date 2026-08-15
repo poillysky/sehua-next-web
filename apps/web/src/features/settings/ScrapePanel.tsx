@@ -2450,6 +2450,7 @@ export function ScrapePanel({
                                     status: `${ch.label}进行中`,
                                     tone: "run",
                                     codes: [...ch.codes].reverse(),
+                                    task,
                                   });
                                 }}
                               >

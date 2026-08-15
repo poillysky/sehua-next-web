@@ -989,8 +989,13 @@ export function ScrapeProgressLog({
         ) {
           return incoming;
         }
-        const pick = (a?: string | null, b?: string | null) =>
-          String(a || "").trim() ? a : b;
+        const pick = (
+          a?: string | null,
+          b?: string | null,
+        ): string | undefined => {
+          const v = String(a || "").trim() ? a : b;
+          return v == null || !String(v).trim() ? undefined : String(v);
+        };
         return {
           ...prev,
           ...incoming,
