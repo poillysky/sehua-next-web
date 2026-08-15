@@ -1834,33 +1834,38 @@ export function ScrapePanel({
 
         {tab === "task" ? (
           <div className="scrape-pane">
-            <div className="scrape-src-head">
-              <div className="scrape-src-head__left">
-                <p className="scrape-src-head__title">刮削任务</p>
+            <div className="scrape-task-head">
+              <div className="scrape-task-head__titles">
+                <h2 className="scrape-task-head__title">刮削任务</h2>
+                {scrapeTasks.length ? (
+                  <p className="scrape-task-head__meta">
+                    {scrapeTasks.length} 个
+                  </p>
+                ) : null}
               </div>
-              <div className="scrape-src-head__ops">
+              <div className="scrape-task-head__ops" role="group" aria-label="任务操作">
                 {scrapeTasks.length ? (
                   <button
                     type="button"
-                    className="btn btn-ghost scrape-src-head__test"
+                    className="scrape-task-head__btn scrape-task-head__btn--ghost"
                     disabled={busy || controlBusy}
                     onClick={() => void onStartAllTasks()}
                   >
-                    <Play size={13} strokeWidth={2} />
+                    <Play size={12} strokeWidth={2.5} aria-hidden />
                     全部开始
                   </button>
                 ) : null}
                 <button
                   type="button"
-                  className="btn settings-actions__primary scrape-src-head__new"
+                  className="scrape-task-head__btn scrape-task-head__btn--primary"
                   disabled={busy}
                   onClick={() => {
                     setEditingTask(null);
                     setTaskModalOpen(true);
                   }}
                 >
-                  <Plus size={14} strokeWidth={2} />
-                  新建任务
+                  <Plus size={13} strokeWidth={2.5} aria-hidden />
+                  新建
                 </button>
               </div>
             </div>
@@ -2442,7 +2447,7 @@ export function ScrapePanel({
               <div className="scrape-pane-card scrape-task-empty">
                 <p className="scrape-task-empty__title">还没有刮削任务</p>
                 <p className="mute scrape-task-empty__sub">
-                  点右上角「新建任务」添加；可保留多张卡，启动后按队列依次刮削。
+                  点右上角「新建」添加；可保留多张卡，启动后按队列依次刮削。
                 </p>
               </div>
             )}
