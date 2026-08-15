@@ -53,6 +53,7 @@ from .zone_folder_routes import router as zone_folder_router
 from .maker_fs_routes import router as maker_fs_router
 from .scrape_export_routes import router as scrape_export_router
 from .cover_focus_routes import router as cover_focus_router
+from .media_routes import router as media_router
 
 from . import (
     prefix_ranges,
@@ -208,6 +209,7 @@ app.include_router(zone_folder_router)
 app.include_router(maker_fs_router)
 app.include_router(scrape_export_router)
 app.include_router(cover_focus_router)
+app.include_router(media_router)
 
 
 

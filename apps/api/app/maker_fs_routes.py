@@ -299,7 +299,12 @@ def _run_build(
 def start_build(
     background: BackgroundTasks,
     limit: int = Query(0, ge=0, le=5000, description="0=全部前缀"),
-    maxCovers: int = Query(5000, ge=50, le=20000),
+    maxCovers: int = Query(
+        20000,
+        ge=50,
+        le=50000,
+        description="单前缀最多写入番号数；须 ≥ 扫库行上限以免截断",
+    ),
     sync: int = Query(0, description="1=同步执行（调试）"),
     catalogsOnly: int = Query(
         0, description="1=仅写七区番号细表，不导出封面"
@@ -371,3 +376,10 @@ def start_build(
         prefix_key,
     )
     return _wrap(maker_fs.build_status(), "已开始后台构建")
+
+
+@router.post("/maker-fs/build/cancel")
+def cancel_build() -> dict[str, Any]:
+    if not maker_fs.request_cancel_build():
+        raise HTTPException(status_code=409, detail="当前没有进行中的构建")
+    return _wrap(maker_fs.build_status(), "已请求取消")

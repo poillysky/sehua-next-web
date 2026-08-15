@@ -287,9 +287,11 @@ export function HomeScreen() {
         const key = sessionStorage.getItem('nextweb:home-search');
         if (!key) return;
         const region = sessionStorage.getItem('nextweb:home-prefix-region');
+        const srcRaw = sessionStorage.getItem('nextweb:home-search-source');
         sessionStorage.removeItem('nextweb:home-search');
         sessionStorage.removeItem('nextweb:home-mode');
         sessionStorage.removeItem('nextweb:home-prefix-region');
+        sessionStorage.removeItem('nextweb:home-search-source');
         const next = key.trim();
         if (next.length < SEARCH_KEYWORD_LENGTH_MIN) return;
         setDraft(next);
@@ -300,6 +302,9 @@ export function HomeScreen() {
         setFilterTime('all');
         setFilterSize('all');
         setSearchRegion(region?.trim() || null);
+        if (srcRaw === 'bitmagnet' || srcRaw === 'sehua') {
+          setSearchSource(srcRaw);
+        }
         setSehualPage(1);
         setMagnetPage(1);
         resetLists();

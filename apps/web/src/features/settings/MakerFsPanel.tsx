@@ -280,7 +280,11 @@ export function MakerFsPanel({
         (m.regions?.length ? m.regions : null) ||
         MAKER_FS_FALLBACK_REGIONS;
       setRegions(list);
-      const text = s.running ? '构建中' : m.ready ? '已就绪' : '未构建';
+      const text = s.running
+        ? `构建中 ${s.prefixes || 0}/${s.prefixTotal || 0}`
+        : m.ready
+          ? '已就绪'
+          : '未构建';
       onStatusRef.current(text, s.running ? 'mute' : m.ready ? 'ok' : 'warn');
     } catch (e) {
       setMsg(e instanceof Error ? e.message : '读取失败');
@@ -300,21 +304,56 @@ export function MakerFsPanel({
     };
   }, [refreshHub]);
 
-  // 构建中：只轮询 status（单调合并）；勿与 waitMakerFsBuild 抢写造成回退
+  // 从后台切回 / 面板一直挂着时，补一次拉齐（避免卡在中途快照）
   useEffect(() => {
-    if (!running) return;
+    const onVis = () => {
+      if (document.visibilityState === 'visible') void refreshHub();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, [refreshHub]);
+
+  // 构建中：密轮询 status + 目录数字；外部任务结束也要拉齐最终态
+  const wasRunningRef = useRef(false);
+  useEffect(() => {
+    if (!running) {
+      if (wasRunningRef.current) {
+        wasRunningRef.current = false;
+        void refreshHub();
+      }
+      return;
+    }
+    wasRunningRef.current = true;
+    let ticks = 0;
     const t = window.setInterval(() => {
       void (async () => {
         try {
           const s = await fetchMakerFsStatus();
           setStatus((prev) => mergeMakerFsStatus(prev, s));
+          onStatusRef.current(
+            `构建中 ${s.prefixes || 0}/${s.prefixTotal || 0}`,
+            'mute',
+          );
+          ticks += 1;
+          // ~1.6s 拉一次真实区统计（enrich 自磁盘），保证条目数跟上
+          if (ticks % 2 === 0) {
+            const [m, ov] = await Promise.all([
+              fetchMakerFsManifest(),
+              fetchMakerFsRegions().catch(() => null),
+            ]);
+            setManifest(m);
+            const list =
+              (ov?.regions?.length ? ov.regions : null) ||
+              (m.regions?.length ? m.regions : null);
+            if (list?.length) setRegions(list);
+          }
         } catch {
           /* ignore */
         }
       })();
     }, 800);
     return () => window.clearInterval(t);
-  }, [running]);
+  }, [running, refreshHub]);
 
   const openRegion = useCallback(async (region: MakerFsRegionSummary) => {
     setOpeningId(region.id);
@@ -481,7 +520,9 @@ export function MakerFsPanel({
               <span className="settings-nav__title">索引状态</span>
               <span className="settings-nav__desc">
                 {running
-                  ? status?.message || status?.phase || '构建中…'
+                  ? `${status?.prefixes || 0}/${status?.prefixTotal || 0} 前缀 · ${formatMakerFsCount(status?.covers)} 条${
+                      status?.currentPrefix ? ` · ${status.currentPrefix}` : ''
+                    }`
                   : manifest?.ready
                     ? `前缀 ${formatMakerFsCount(manifest.prefixCount)} · 封面 ${formatMakerFsCount(manifest.coverCount)}`
                     : '七大路径尚未构建'}
@@ -595,7 +636,12 @@ export function MakerFsPanel({
                       <span className="settings-nav__desc">
                         {makerFsGroupNoun(r.id)} {formatMakerFsCount(r.makerCount)} · 前缀{' '}
                         {formatMakerFsCount(r.prefixCount)} · 条目{' '}
-                        {formatMakerFsCount(r.codeCount)}
+                        {formatMakerFsCount(
+                          Math.max(
+                            Number(r.codeCount || 0),
+                            showBar ? Number(rp?.covers || 0) : 0,
+                          ),
+                        )}
                       </span>
                     </span>
                   </button>

@@ -1631,7 +1631,16 @@ export async function waitMakerFsBuild(opts?: {
     opts?.onTick?.(st);
     if (!st.running) {
       const msg = String(st.message || 'ok');
-      if (msg && msg !== 'ok' && msg !== 'building' && msg !== 'queued') {
+      // 整单失败才抛；「完成但有失败/触顶」仍返回给 UI 展示
+      if (
+        msg &&
+        msg !== 'ok' &&
+        msg !== 'building' &&
+        msg !== 'queued' &&
+        msg !== 'cancelling' &&
+        !msg.startsWith('完成') &&
+        !msg.startsWith('已取消')
+      ) {
         throw new Error(msg);
       }
       return st;
@@ -2086,4 +2095,125 @@ export async function fetchLibraryFacetCodes(opts: {
   });
   if (!res.ok) throw new Error(await parseError(res));
   return ((await res.json()) as Envelope<LibraryFacetCodesResult>).data;
+}
+
+/* —— Media (TMDB / 豆瓣) —— */
+
+export type MediaSourceId = 'tmdb' | 'douban';
+export type MediaCategoryId = 'movie' | 'tv' | 'anime' | 'variety';
+
+export type MediaItem = {
+  source: MediaSourceId;
+  id: string;
+  mediaType: 'movie' | 'tv';
+  title: string;
+  originalTitle?: string | null;
+  aka: string[];
+  posterUrl?: string | null;
+  year?: string | null;
+  rating?: number | null;
+  overview?: string | null;
+  cast?: string[];
+  genres?: string[];
+  runtime?: number | null;
+  countries?: string[];
+};
+
+export type MediaChartResult = {
+  source: MediaSourceId;
+  category: MediaCategoryId;
+  chart: string;
+  page: number;
+  totalPages: number;
+  items: MediaItem[];
+};
+
+export type MediaSearchResult = {
+  source: MediaSourceId;
+  query: string;
+  page: number;
+  totalPages: number;
+  items: MediaItem[];
+};
+
+export type MediaRelatedResult = {
+  similar: MediaItem[];
+  recommendations: MediaItem[];
+};
+
+export type MediaMeta = {
+  tmdbConfigured: boolean;
+  categories: Array<{ id: MediaCategoryId; label: string }>;
+  sources: Array<{
+    id: MediaSourceId;
+    label: string;
+    charts: Array<{ id: string; label: string }>;
+  }>;
+};
+
+export async function fetchMediaMeta(signal?: AbortSignal): Promise<MediaMeta> {
+  const res = await apiFetch('/media/meta', { signal });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<MediaMeta>).data;
+}
+
+export async function fetchMediaCharts(opts: {
+  source: MediaSourceId;
+  category: MediaCategoryId;
+  chart: string;
+  page?: number;
+  signal?: AbortSignal;
+}): Promise<MediaChartResult> {
+  const q = new URLSearchParams();
+  q.set('category', opts.category);
+  q.set('chart', opts.chart);
+  if (opts.page != null) q.set('page', String(opts.page));
+  const path =
+    opts.source === 'douban'
+      ? `/media/douban/charts?${q}`
+      : `/media/tmdb/charts?${q}`;
+  const res = await apiFetch(path, { signal: opts.signal });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<MediaChartResult>).data;
+}
+
+export async function fetchMediaSearch(opts: {
+  source: MediaSourceId;
+  q: string;
+  page?: number;
+  signal?: AbortSignal;
+}): Promise<MediaSearchResult> {
+  const params = new URLSearchParams();
+  params.set('source', opts.source);
+  params.set('q', opts.q);
+  if (opts.page != null) params.set('page', String(opts.page));
+  const res = await apiFetch(`/media/search?${params}`, { signal: opts.signal });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<MediaSearchResult>).data;
+}
+
+export async function fetchMediaDetail(opts: {
+  source: MediaSourceId;
+  id: string;
+  mediaType?: 'movie' | 'tv';
+  signal?: AbortSignal;
+}): Promise<MediaItem> {
+  const path =
+    opts.source === 'douban'
+      ? `/media/douban/subject/${encodeURIComponent(opts.id)}`
+      : `/media/tmdb/${encodeURIComponent(opts.mediaType || 'movie')}/${encodeURIComponent(opts.id)}`;
+  const res = await apiFetch(path, { signal: opts.signal });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<MediaItem>).data;
+}
+
+export async function fetchMediaRelated(opts: {
+  mediaType: 'movie' | 'tv';
+  id: string;
+  signal?: AbortSignal;
+}): Promise<MediaRelatedResult> {
+  const path = `/media/tmdb/${encodeURIComponent(opts.mediaType)}/${encodeURIComponent(opts.id)}/related`;
+  const res = await apiFetch(path, { signal: opts.signal });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<MediaRelatedResult>).data;
 }

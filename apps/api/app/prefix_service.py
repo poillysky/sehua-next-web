@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 import time
 from typing import Any
 
@@ -19,10 +20,53 @@ from .search_constants import escape_ilike
 
 log = logging.getLogger(__name__)
 
-# 扫库上限：过大/多源/补扫会让全量索引极慢；中文优先靠 ORDER BY + 帖桶，不靠盲目加行
+# 扫库上限：与库内命中对齐的硬顶；构建不得再降（降了会扫漏）
 PREFIX_SCAN_ROW_CAP = 20000
+# 构建与前台同一上限；速度靠并行 workers，不靠砍行数
+PREFIX_SCAN_ROW_CAP_BUILD = PREFIX_SCAN_ROW_CAP
+# 前台点进单前缀：20s；一键/全量并行时抬到 BUILD 超时
 PREFIX_SCAN_TIMEOUT = "20s"
+PREFIX_SCAN_TIMEOUT_BUILD = "90s"
 PREFIX_CACHE_TTL_S = 300
+
+_scan_timeout_lock = threading.Lock()
+_scan_timeout_override: str | None = None
+_scan_row_cap_override: int | None = None
+
+
+def set_prefix_scan_timeout(timeout: str | None) -> str | None:
+    """临时覆盖 statement_timeout（如全量构建）；返回旧值便于还原。"""
+    global _scan_timeout_override
+    with _scan_timeout_lock:
+        prev = _scan_timeout_override
+        _scan_timeout_override = (timeout or "").strip() or None
+        return prev
+
+
+def set_prefix_scan_row_cap(cap: int | None) -> int | None:
+    """临时覆盖扫库行上限；返回旧值。"""
+    global _scan_row_cap_override
+    with _scan_timeout_lock:
+        prev = _scan_row_cap_override
+        if cap is None or int(cap) <= 0:
+            _scan_row_cap_override = None
+        else:
+            _scan_row_cap_override = max(500, min(int(PREFIX_SCAN_ROW_CAP), int(cap)))
+        return prev
+
+
+def _active_scan_timeout() -> str:
+    with _scan_timeout_lock:
+        return _scan_timeout_override or PREFIX_SCAN_TIMEOUT
+
+
+def _active_scan_row_cap(*, for_prefix: str | None = None) -> int:
+    with _scan_timeout_lock:
+        base = int(_scan_row_cap_override or PREFIX_SCAN_ROW_CAP)
+    # FC2 体量大且多 pattern 分桶；构建降 cap 会从 ~4800 砍到三千出头
+    if for_prefix and _is_fc2_prefix(for_prefix):
+        return PREFIX_SCAN_ROW_CAP
+    return base
 # 每番号保留的帖文上限；满时按中文分替换，避免只留最新日文帖
 PREFIX_POSTS_PER_CODE = 24
 # 同 hash 多源会放大结果行数；1 足够（ORDER BY 已中文优先）
@@ -32,9 +76,11 @@ PREFIX_ZH_BOOST_ROW_CAP = 3000
 PREFIX_ZH_BOOST_ENABLED = False
 
 
-def _prefix_result_row_cap() -> int:
+def _prefix_result_row_cap(for_prefix: str | None = None) -> int:
     """最终行数上限；SOURCES=1 时与 ROW_CAP 相同。"""
-    return PREFIX_SCAN_ROW_CAP * max(1, PREFIX_SOURCES_PER_HASH)
+    return _active_scan_row_cap(for_prefix=for_prefix) * max(
+        1, PREFIX_SOURCES_PER_HASH
+    )
 
 _cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
@@ -690,11 +736,12 @@ def _apply_zh_title_boost(
 
 def _query_prefix_scan(sql: str, params: list[Any]) -> list[dict[str, Any]]:
     pool = pg.get_pool()
+    timeout = _active_scan_timeout()
     with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute("BEGIN")
             try:
-                cur.execute(f"SET LOCAL statement_timeout = '{PREFIX_SCAN_TIMEOUT}'")
+                cur.execute(f"SET LOCAL statement_timeout = '{timeout}'")
                 cur.execute(sql, params)
                 rows = list(cur.fetchall()) if cur.description else []
                 cur.execute("COMMIT")
@@ -764,7 +811,12 @@ def _scan_likes_via_hash_cte(
 
     # region 仅传给 _rows_to_prefix_index 做封面过滤
     _ = normalize_region(region)
-    per = max(800, PREFIX_SCAN_ROW_CAP // max(1, len(likes) * 2))
+    cap = _active_scan_row_cap(for_prefix=needle)
+    if _is_fc2_prefix(needle):
+        # 多 pattern 时勿再 /2，否则每路过窄丢番号
+        per = max(5000, cap // max(1, len(likes)))
+    else:
+        per = max(800, cap // max(1, len(likes) * 2))
 
     union_parts: list[str] = []
     params: list[Any] = []
@@ -813,7 +865,7 @@ WHERE TRUE
 {exclude_sql}
 LIMIT %s
 """
-    params.append(_prefix_result_row_cap())
+    params.append(_prefix_result_row_cap(needle))
     t_sql = time.perf_counter()
     rows = _query_prefix_scan(sql, params)
     sql_ms = (time.perf_counter() - t_sql) * 1000
@@ -847,10 +899,14 @@ def _scan_prefix_code_index(
     )
 
     if use_anchored:
-        # 含前置装饰的标题（如【高清】[4K] SNOS-001）也要扫到，
-        # 才能与「点进番号」默认列表第一条封面一致；仅 SNOS-% 会漏掉。
+        # 先扫 PREFIX-%（选择性更高），再补 %PREFIX-% / title，避免整段只有 leading-wildcard。
         # 板区分区在 Python 侧过滤封面；SQL 不限板，便于讨论区中文译名。
-        contains = f"%{escape_ilike(needle)}-%"
+        esc = escape_ilike(needle)
+        starts = f"{esc}-%"
+        contains = f"%{esc}-%"
+        cap = _active_scan_row_cap(for_prefix=needle)
+        # 装饰前缀标题补扫：半量即可，多数命中已在 starts 桶
+        tail = max(400, cap // 2)
         sql = f"""
 WITH hashes AS (
   (
@@ -859,6 +915,16 @@ WITH hashes AS (
     WHERE TRUE
     {PUBLIC_RESOURCE_FILTER}
       AND r.filename ILIKE %s ESCAPE '\\'
+    LIMIT %s
+  )
+  UNION
+  (
+    SELECT r.hash
+    FROM ed2k_resources r
+    WHERE TRUE
+    {PUBLIC_RESOURCE_FILTER}
+      AND r.filename ILIKE %s ESCAPE '\\'
+      AND r.filename NOT ILIKE %s ESCAPE '\\'
     LIMIT %s
   )
   UNION
@@ -882,11 +948,14 @@ LIMIT %s
         rows = _query_prefix_scan(
             sql,
             [
+                starts,
+                cap,
                 contains,
-                PREFIX_SCAN_ROW_CAP,
+                starts,
+                tail,
                 contains,
-                PREFIX_SCAN_ROW_CAP,
-                _prefix_result_row_cap(),
+                tail,
+                _prefix_result_row_cap(needle),
             ],
         )
         sql_ms = (time.perf_counter() - t_sql) * 1000

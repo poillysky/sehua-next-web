@@ -12,8 +12,8 @@ import {
 } from 'react';
 import { unlockPinnedPage, pinDocumentScroll } from '@/lib/iosKeyboard';
 
-/** 主 Tab：搜索 / 片商 / 板块 / 设置 */
-export const TAB_ROUTES = ['/', '/makers', '/boards', '/settings'] as const;
+/** 主 Tab：仓库 / 影视 / 片商 / 板块 / 设置 */
+export const TAB_ROUTES = ['/', '/media', '/makers', '/boards', '/settings'] as const;
 export type TabRoute = (typeof TAB_ROUTES)[number];
 
 // 保持 pathname=/，只用 hash，避免命中 app/*/page 的 redirect
@@ -26,6 +26,7 @@ function readTabFromLocation(): TabRoute | null {
   const path = window.location.pathname;
   const hash = window.location.hash.replace(/^#/, '');
   const HASH_TO_TAB: Record<string, TabRoute> = {
+    media: '/media',
     makers: '/makers',
     boards: '/boards',
     settings: '/settings',

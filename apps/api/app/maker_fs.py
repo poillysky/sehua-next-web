@@ -40,9 +40,15 @@ from .db import ROOT
 
 log = logging.getLogger(__name__)
 
-# 导出并发：受 Postgres pool max_size=8 约束，留余量给前台查询
+# 导出并发：连接池约 14，默认 6；失败有重试
 DEFAULT_EXPORT_WORKERS = 6
 DEFAULT_SKIP_FRESH_HOURS = 24
+# 单前缀扫库失败重试（超时/池占满时常见；勿把失败写成空索引）
+_EXPORT_ATTEMPTS = 3
+_EXPORT_RETRY_BASE_S = 0.8
+_MAX_EXPORT_WORKERS = 8
+
+_build_cancel = threading.Event()
 
 MAKER_FS_ROOT = ROOT / "data" / "maker-fs"
 NAV_PATH = ROOT / "apps" / "web" / "src" / "config" / "boards.nav.json"
@@ -1241,6 +1247,17 @@ def abort_claim(message: str = "failed") -> None:
         )
 
 
+def request_cancel_build() -> bool:
+    """请求取消正在进行的构建（当前 SQL 跑完后停）；返回是否已发出取消。"""
+    with _meta_lock:
+        if not _build_state.get("running"):
+            return False
+        _build_cancel.set()
+        _build_state["message"] = "cancelling"
+        _build_state["updatedAt"] = _now_iso()
+        return True
+
+
 def _region_from_path(path: list[str], hub_fid: str = "") -> str:
     hub = str(hub_fid or "")
     if hub.startswith("mk-censored"):
@@ -1681,6 +1698,9 @@ def _try_reuse_fresh_index(
     count = int(idx.get("coverCount") or len(covers) or 0)
     if count <= 0:
         return None
+    # 上次触顶未扫全：不可当新鲜复用
+    if bool(idx.get("truncated")):
+        return None
     updated = _parse_iso_utc(str(idx.get("updatedAt") or ""))
     if not updated:
         return None
@@ -1694,7 +1714,7 @@ def _try_reuse_fresh_index(
 def _export_prefix_index(
     entry: dict[str, Any],
     *,
-    max_covers: int = 5000,
+    max_covers: int = 20000,
     skip_fresh_hours: float = 0,
 ) -> dict[str, Any]:
     from . import prefix_ranges, prefix_service
@@ -1703,6 +1723,11 @@ def _export_prefix_index(
     fs_region = resolve_fs_region(str(entry.get("region") or "")) or ""
     db_region = db_region_for(fs_region)
     path = list(entry.get("path") or [])
+    # 与扫库 ROW_CAP 对齐，避免命中被 max_covers 截断造成「比库少」
+    row_cap = int(
+        prefix_service._active_scan_row_cap(for_prefix=prefix)  # noqa: SLF001
+    )
+    max_covers = max(int(max_covers or 0), row_cap)
 
     reused = _try_reuse_fresh_index(
         prefix, fs_region, skip_fresh_hours=skip_fresh_hours
@@ -1810,75 +1835,99 @@ def _export_prefix_index(
     covers: dict[str, Any] = {}
     matched_rows = 0
     t0 = time.perf_counter()
-    try:
-        indexed = prefix_service._load_cached(  # noqa: SLF001 — 构建任务复用缓存
-            prefix,
-            bust=skip_fresh_hours <= 0,
-            region=db_region,
-        )
-        matched_rows = int(indexed.get("matchedRows") or 0)
-        for it in indexed.get("items") or []:
-            if len(covers) >= max_covers:
-                break
-            raw_code = str(it.get("code") or "")
-            # 规范键：PREFIX-zeroPad(n, pad)；剥 -C；超 from..to 丢弃
-            code = _index_code_key(
-                raw_code,
-                pad=pad,
-                prefix=prefix,
-                from_n=from_n,
-                to_n=to_n,
+    last_err: Exception | None = None
+    for attempt in range(1, _EXPORT_ATTEMPTS + 1):
+        covers = {}
+        matched_rows = 0
+        try:
+            indexed = prefix_service._load_cached(  # noqa: SLF001 — 构建任务复用缓存
+                prefix,
+                bust=skip_fresh_hours <= 0 or attempt > 1,
+                region=db_region,
             )
-            if not code:
+            matched_rows = int(indexed.get("matchedRows") or 0)
+            for it in indexed.get("items") or []:
+                if len(covers) >= max_covers:
+                    break
+                raw_code = str(it.get("code") or "")
+                # 规范键：PREFIX-zeroPad(n, pad)；剥 -C；超 from..to 丢弃
+                code = _index_code_key(
+                    raw_code,
+                    pad=pad,
+                    prefix=prefix,
+                    from_n=from_n,
+                    to_n=to_n,
+                )
+                if not code:
+                    continue
+                urls = [u for u in (it.get("coverUrls") or []) if u][:6]
+                cover_url = urls[0] if urls else it.get("coverUrl")
+                # 全员写入封面字段（可空）；有码/写真写女优，其余写标题
+                hit: dict[str, Any] = {
+                    "coverUrl": cover_url or None,
+                    "coverUrls": urls[:2],
+                    "file": None,
+                }
+                title = str(it.get("forumTitle") or "").strip()
+                if title:
+                    # 旧缓存可能残留 `) (20230104)…`；写入前再洗一轮
+                    from .scrape_forum_title import clean_forum_zh_title
+
+                    title = clean_forum_zh_title(title, code) or title
+                actors = it.get("forumActors")
+                want_actors = indexes_forum_actors(fs_region)
+                if want_actors:
+                    if isinstance(actors, list) and actors:
+                        cleaned = _normalize_forum_actors_field(actors)
+                        if cleaned:
+                            hit["forumActors"] = cleaned
+                    # 影片标题仍保留供刮削种子；女优名不当标题
+                    if title:
+                        from .forum_seed import (
+                            _looks_like_bare_actor_title,
+                            _title_is_actor_echo,
+                        )
+                        from .scrape_forum_title import is_indexable_forum_title
+
+                        actor_list = hit.get("forumActors") or []
+                        if _title_is_actor_echo(
+                            title, actor_list
+                        ) or _looks_like_bare_actor_title(title):
+                            pass
+                        elif is_indexable_forum_title(
+                            title, code, assume_not_fake=True
+                        ):
+                            hit["forumTitle"] = title
+                else:
+                    if title:
+                        from .scrape_forum_title import is_indexable_forum_title
+
+                        if is_indexable_forum_title(
+                            title, code, assume_not_fake=True
+                        ):
+                            hit["forumTitle"] = title
+                if code in covers and isinstance(covers[code], dict):
+                    covers[code] = _merge_cover_hit(covers[code], hit)
+                else:
+                    covers[code] = hit
+            last_err = None
+            break
+        except Exception as e:
+            last_err = e
+            log.warning(
+                "maker-fs export covers %s failed (%s/%s): %s",
+                prefix,
+                attempt,
+                _EXPORT_ATTEMPTS,
+                e,
+            )
+            if attempt < _EXPORT_ATTEMPTS:
+                time.sleep(_EXPORT_RETRY_BASE_S * attempt)
                 continue
-            urls = [u for u in (it.get("coverUrls") or []) if u][:6]
-            cover_url = urls[0] if urls else it.get("coverUrl")
-            # 全员写入封面字段（可空）；有码/写真写女优，其余写标题
-            hit: dict[str, Any] = {
-                "coverUrl": cover_url or None,
-                "coverUrls": urls[:2],
-                "file": None,
-            }
-            title = str(it.get("forumTitle") or "").strip()
-            if title:
-                # 旧缓存可能残留 `) (20230104)…`；写入前再洗一轮
-                from .scrape_forum_title import clean_forum_zh_title
-
-                title = clean_forum_zh_title(title, code) or title
-            actors = it.get("forumActors")
-            want_actors = indexes_forum_actors(fs_region)
-            if want_actors:
-                if isinstance(actors, list) and actors:
-                    cleaned = _normalize_forum_actors_field(actors)
-                    if cleaned:
-                        hit["forumActors"] = cleaned
-                # 影片标题仍保留供刮削种子；女优名不当标题
-                if title:
-                    from .forum_seed import (
-                        _looks_like_bare_actor_title,
-                        _title_is_actor_echo,
-                    )
-                    from .scrape_forum_title import is_indexable_forum_title
-
-                    actor_list = hit.get("forumActors") or []
-                    if _title_is_actor_echo(title, actor_list) or _looks_like_bare_actor_title(
-                        title
-                    ):
-                        pass
-                    elif is_indexable_forum_title(title, code, assume_not_fake=True):
-                        hit["forumTitle"] = title
-            else:
-                if title:
-                    from .scrape_forum_title import is_indexable_forum_title
-
-                    if is_indexable_forum_title(title, code, assume_not_fake=True):
-                        hit["forumTitle"] = title
-            if code in covers and isinstance(covers[code], dict):
-                covers[code] = _merge_cover_hit(covers[code], hit)
-            else:
-                covers[code] = hit
-    except Exception as e:
-        log.warning("maker-fs export covers %s failed: %s", prefix, e)
+            # 失败不写空 index.json，否则一键扫库会把超时前缀永久记成 0 条
+            raise
+    if last_err is not None:
+        raise last_err
 
     wall_ms = (time.perf_counter() - t0) * 1000
     log.debug(
@@ -1941,6 +1990,20 @@ def _export_prefix_index(
     range_total = (
         _filled_range_total(d_from, d_to) if fill_range else len(covers)
     )
+    # 触顶 = 可能还有库内番号没进索引（行上限或 covers 上限）
+    truncated = bool(
+        matched_rows >= row_cap or len(covers) >= max_covers
+    )
+    if truncated:
+        log.warning(
+            "maker-fs export %s possibly truncated: matchedRows=%s "
+            "rowCap=%s covers=%s maxCovers=%s",
+            prefix,
+            matched_rows,
+            row_cap,
+            len(covers),
+            max_covers,
+        )
     data = {
         "version": 1,
         "prefix": prefix,
@@ -1956,6 +2019,8 @@ def _export_prefix_index(
         # coverCount：补全区=已发现首尾间长度；否则=真实命中
         "coverCount": range_total,
         "hitCount": len(covers),
+        "matchedRows": matched_rows,
+        "truncated": truncated,
         "covers": covers,
     }
     if fill_range:
@@ -2074,7 +2139,7 @@ def _write_region_catalogs(prefixes: list[dict[str, Any]]) -> dict[str, Any]:
 def build_maker_fs(
     *,
     limit_prefixes: int | None = None,
-    max_covers_per_prefix: int = 5000,
+    max_covers_per_prefix: int = 20000,
     catalogs_only: bool = False,
     workers: int = DEFAULT_EXPORT_WORKERS,
     skip_fresh_hours: float = DEFAULT_SKIP_FRESH_HOURS,
@@ -2084,7 +2149,7 @@ def build_maker_fs(
 ) -> dict[str, Any]:
     """生成七区细表 +（可选）从库导出各前缀封面索引。
 
-    - workers: 并行扫库线程数（默认 8，与连接池上限对齐）
+    - workers: 并行扫库线程数（默认 6）
     - skip_fresh_hours: 跳过 N 小时内已导出的前缀（0=强制全量）
     - region: 仅扫描指定分区（如 japan_censored）；空=全部
     - only_prefix: 仅扫描单个前缀（强制重扫该前缀）
@@ -2104,6 +2169,7 @@ def build_maker_fs(
         if from_claim:
             abort_claim("构建任务正在进行中")
         raise RuntimeError("构建任务正在进行中")
+    _build_cancel.clear()
     with _meta_lock:
         started = _build_state.get("startedAt") or _now_iso()
         _build_state.update(
@@ -2245,12 +2311,15 @@ def build_maker_fs(
         if limit_prefixes is not None and limit_prefixes > 0 and not only_pref:
             work = work[:limit_prefixes]
 
-        worker_n = max(1, min(int(workers or 1), 6))
+        worker_n = max(1, min(int(workers or 1), _MAX_EXPORT_WORKERS))
         _build_state["workers"] = worker_n
         total_covers = 0
         built = 0
         skipped = 0
         fail_n = 0
+        cancel_n = 0
+        trunc_n = 0
+        trunc_samples: list[str] = []
         fail_samples: list[str] = []
         progress_lock = threading.Lock()
 
@@ -2332,8 +2401,11 @@ def build_maker_fs(
                     _build_state["updatedAt"] = now
 
         def _one(entry: dict[str, Any]) -> dict[str, Any]:
+            nonlocal trunc_n
             rid = resolve_fs_region(str(entry.get("region") or "")) or ""
             prefix = _std_prefix(str(entry.get("prefix") or ""))
+            if _build_cancel.is_set():
+                raise RuntimeError("cancelled")
             _touch_progress(rid=rid, prefix=prefix, phase="start")
             try:
                 idx = _export_prefix_index(
@@ -2341,6 +2413,11 @@ def build_maker_fs(
                     max_covers=max_covers_per_prefix,
                     skip_fresh_hours=skip_fresh_hours,
                 )
+                if bool(idx.get("truncated")) and not bool(idx.get("skipped")):
+                    with progress_lock:
+                        trunc_n += 1
+                        if len(trunc_samples) < 5:
+                            trunc_samples.append(prefix)
                 _touch_progress(
                     rid=rid,
                     prefix=prefix,
@@ -2354,29 +2431,27 @@ def build_maker_fs(
                 _touch_progress(rid=rid, prefix=prefix, phase="done")
                 raise
 
-        if worker_n == 1 or len(work) <= 1:
-            for entry in work:
-                try:
-                    _one(entry)
-                except Exception as e:
-                    fail_n += 1
-                    if len(fail_samples) < 5:
-                        fail_samples.append(
-                            f"{entry.get('prefix')}: {e}"
-                        )
-                    log.warning(
-                        "maker-fs build prefix %s: %s",
-                        entry.get("prefix"),
-                        e,
-                    )
-        else:
-            with ThreadPoolExecutor(max_workers=worker_n) as pool:
-                futs = {pool.submit(_one, entry): entry for entry in work}
-                for fut in as_completed(futs):
-                    entry = futs[fut]
+        # 构建与前台同一 ROW_CAP；只抬 timeout，不降行数（降行数=扫漏）
+        from . import prefix_service as _prefix_svc
+
+        _prev_scan_to = _prefix_svc.set_prefix_scan_timeout(
+            _prefix_svc.PREFIX_SCAN_TIMEOUT_BUILD
+        )
+        _prev_row_cap = _prefix_svc.set_prefix_scan_row_cap(
+            _prefix_svc.PREFIX_SCAN_ROW_CAP_BUILD
+        )
+        try:
+            if worker_n == 1 or len(work) <= 1:
+                for entry in work:
+                    if _build_cancel.is_set():
+                        cancel_n += 1
+                        break
                     try:
-                        fut.result()
+                        _one(entry)
                     except Exception as e:
+                        if str(e) == "cancelled" or _build_cancel.is_set():
+                            cancel_n += 1
+                            break
                         fail_n += 1
                         if len(fail_samples) < 5:
                             fail_samples.append(
@@ -2387,6 +2462,33 @@ def build_maker_fs(
                             entry.get("prefix"),
                             e,
                         )
+            else:
+                with ThreadPoolExecutor(max_workers=worker_n) as pool:
+                    futs = {pool.submit(_one, entry): entry for entry in work}
+                    for fut in as_completed(futs):
+                        entry = futs[fut]
+                        try:
+                            fut.result()
+                        except Exception as e:
+                            if str(e) == "cancelled" or _build_cancel.is_set():
+                                cancel_n += 1
+                                continue
+                            fail_n += 1
+                            if len(fail_samples) < 5:
+                                fail_samples.append(
+                                    f"{entry.get('prefix')}: {e}"
+                                )
+                            log.warning(
+                                "maker-fs build prefix %s: %s",
+                                entry.get("prefix"),
+                                e,
+                            )
+                        if _build_cancel.is_set():
+                            for pending in futs:
+                                pending.cancel()
+        finally:
+            _prefix_svc.set_prefix_scan_timeout(_prev_scan_to)
+            _prefix_svc.set_prefix_scan_row_cap(_prev_row_cap)
 
         # 封面导出后再汇总各区已确认子条目数
         overview = _write_region_catalogs(prefixes)
@@ -2399,6 +2501,7 @@ def build_maker_fs(
             "coverCount": total_covers,
             "skippedCount": skipped,
             "failedCount": fail_n,
+            "truncatedCount": trunc_n,
             "workers": worker_n,
             "skipFreshHours": skip_fresh_hours,
             "region": region_id or "",
@@ -2413,9 +2516,22 @@ def build_maker_fs(
         }
         write_json(manifest_path(), manifest)
         done_msg = "ok"
-        if fail_n > 0:
+        if cancel_n > 0 or _build_cancel.is_set():
+            done_msg = f"已取消（完成 {built}/{len(work)}）"
+        elif fail_n > 0:
             tip = "；".join(fail_samples[:3])
-            done_msg = f"完成，{fail_n} 个前缀失败" + (f"：{tip}" if tip else "")
+            done_msg = (
+                f"完成，{fail_n} 个前缀失败"
+                + (f"：{tip}" if tip else "")
+                + "。可再点「增量扫库」补扫失败项"
+            )
+        elif trunc_n > 0:
+            tip = "、".join(trunc_samples[:3])
+            done_msg = (
+                f"完成，{trunc_n} 个前缀可能触顶未扫全"
+                + (f"（{tip}…）" if tip else "")
+                + "，请再扫一次或提高上限"
+            )
         elif built > 0 and total_covers <= 0:
             done_msg = (
                 "完成但条目为 0：资源库已通，请检查 设置→论坛管理 的地区标签"
@@ -2431,6 +2547,7 @@ def build_maker_fs(
                 "covers": total_covers,
                 "skipped": skipped,
                 "failed": fail_n,
+                "truncated": trunc_n,
                 "currentPrefix": "",
                 "updatedAt": _now_iso(),
             }

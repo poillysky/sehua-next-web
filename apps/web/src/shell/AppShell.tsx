@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useRef, useEffect, type MouseEvent } from 'react';
 import {
   Search,
+  Clapperboard,
   Film,
   LayoutGrid,
   Settings,
@@ -17,6 +18,7 @@ import { useTabNavigation, type TabRoute } from './TabContext';
 
 const NAV_ITEMS: { tab: TabRoute; label: string; icon: typeof Search }[] = [
   { tab: '/', label: '仓库', icon: Search },
+  { tab: '/media', label: '影视', icon: Clapperboard },
   { tab: '/makers', label: '片商', icon: Film },
   { tab: '/boards', label: '板块', icon: LayoutGrid },
   { tab: '/settings', label: '设置', icon: Settings },

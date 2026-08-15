@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { AppShell, TabProvider, TabPane } from '@/shell';
 import { HomeScreen } from '@/features/home/HomeScreen';
+import { MediaScreen } from '@/features/media/MediaScreen';
 import { MakersScreen } from '@/features/makers/MakersScreen';
 import { BoardsScreen } from '@/features/boards/BoardsScreen';
 import { SettingsScreen } from '@/features/settings/SettingsScreen';
@@ -22,6 +23,9 @@ export default function HomePage() {
           <AppShell>
             <TabPane>
               <HomeScreen />
+            </TabPane>
+            <TabPane>
+              <MediaScreen />
             </TabPane>
             <TabPane>
               <MakersScreen />

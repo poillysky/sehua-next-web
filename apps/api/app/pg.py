@@ -82,7 +82,10 @@ def get_pool() -> ConnectionPool:
 
             min_size=1,
 
-            max_size=10,
+            max_size=14,
+
+            # NAS 并行扫库时避免无限等连接；超时后由上层重试
+            timeout=60,
 
             kwargs={"row_factory": dict_row},
 

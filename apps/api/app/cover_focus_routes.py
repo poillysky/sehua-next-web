@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import logging
+import re
 import time
 from typing import Any
 from urllib.parse import urlparse
@@ -63,6 +64,15 @@ def _safe_image_url(raw: str) -> str:
     host = p.hostname or ""
     if host in ("localhost", "127.0.0.1", "0.0.0.0") or host.startswith("192.168."):
         raise HTTPException(status_code=400, detail="禁止内网地址")
+    # 豆瓣 img9 等常返回防盗链挑战页；img3 较稳
+    if host.endswith("doubanio.com"):
+        u = re.sub(
+            r"https?://img\d+\.doubanio\.com",
+            "https://img3.doubanio.com",
+            u,
+            count=1,
+            flags=re.I,
+        )
     return u
 
 
@@ -80,12 +90,38 @@ def _image_headers(url: str, *, referer: str | None) -> dict[str, str]:
     return headers
 
 
+def _looks_like_image(data: bytes, ctype: str) -> bool:
+    ct = (ctype or "").lower()
+    if "image/" in ct and "svg" not in ct:
+        return True
+    if not data or len(data) < 4:
+        return False
+    # JPEG / PNG / GIF / WEBP
+    if data[:3] == b"\xff\xd8\xff":
+        return True
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return True
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return True
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return True
+    return False
+
+
 def _fetch_bytes(url: str) -> tuple[bytes, str]:
     parsed = urlparse(url)
-    host = parsed.hostname or ""
+    host = (parsed.hostname or "").lower()
     # 论坛图床常校验 Referer；无 Referer / 错 Referer 会 403
     scheme = parsed.scheme or "https"
     referers: list[str | None] = []
+    # 豆瓣图床：桌面 Referer / 空 Referer 常返回 JS 挑战 HTML；移动站 Referer 可用
+    if host.endswith("doubanio.com") or host.endswith("douban.com"):
+        referers.extend(
+            [
+                "https://m.douban.com/",
+                "https://movie.douban.com/",
+            ]
+        )
     if host:
         referers.append(f"{scheme}://{host}/")
     referers.extend(
@@ -95,33 +131,48 @@ def _fetch_bytes(url: str) -> tuple[bytes, str]:
             None,
         ]
     )
+    # 去重保序
+    seen: set[str | None] = set()
+    uniq_refs: list[str | None] = []
+    for ref in referers:
+        if ref in seen:
+            continue
+        seen.add(ref)
+        uniq_refs.append(ref)
+
     last_status = 0
     last_err: Exception | None = None
     # 走设置里的 proxyUrl，否则浏览器直连 CDN 会 ERR_CONNECTION_CLOSED
     with httpx_client(timeout=20.0) as client:
-        for ref in referers:
+        for ref in uniq_refs:
             try:
-                r = client.get(url, headers=_image_headers(url, referer=ref))
+                headers = _image_headers(url, referer=ref)
+                if host.endswith("doubanio.com"):
+                    headers["User-Agent"] = (
+                        "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) "
+                        "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 "
+                        "Mobile/15E148 Safari/604.1"
+                    )
+                r = client.get(url, headers=headers)
             except Exception as e:
                 last_err = e
                 log.warning("cover fetch transport error ref=%s: %s", ref, e)
                 continue
             last_status = r.status_code
-            if r.status_code == 403:
+            if r.status_code in {403, 418}:
                 continue
             if r.status_code >= 400:
                 raise HTTPException(
                     status_code=502, detail=f"拉图失败 {r.status_code}"
                 )
             ctype = (r.headers.get("content-type") or "image/jpeg").split(";")[0].strip()
-            if "image" not in ctype and not url.lower().endswith(
-                (".jpg", ".jpeg", ".png", ".webp", ".gif")
-            ):
-                raise HTTPException(status_code=415, detail="非图片内容")
             data = r.content
             if not data or len(data) > 12 * 1024 * 1024:
                 raise HTTPException(status_code=413, detail="图片过大或空")
-            return data, ctype or "image/jpeg"
+            if not _looks_like_image(data, ctype):
+                # 豆瓣挑战页等：换 Referer 再试
+                continue
+            return data, ctype if "image/" in ctype.lower() else "image/jpeg"
     if last_err is not None and last_status == 0:
         raise HTTPException(status_code=502, detail=f"拉图失败: {last_err}") from last_err
     raise HTTPException(status_code=502, detail=f"拉图失败 {last_status or 403}")
