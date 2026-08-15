@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -40,13 +41,17 @@ from .db import ROOT
 
 log = logging.getLogger(__name__)
 
-# 导出并发：连接池约 14，默认 6；失败有重试
-DEFAULT_EXPORT_WORKERS = 6
+# 导出并发：连接池约 14；默认 3（与刮削并行时避免打满 nofile）
+# NAS 上与刮削并行时易打满 nofile；默认 3，可用 MAKER_FS_WORKERS 覆盖
+DEFAULT_EXPORT_WORKERS = max(
+    1,
+    min(int(os.environ.get("MAKER_FS_WORKERS") or "3"), 8),
+)
 DEFAULT_SKIP_FRESH_HOURS = 24
 # 单前缀扫库失败重试（超时/池占满时常见；勿把失败写成空索引）
 _EXPORT_ATTEMPTS = 3
 _EXPORT_RETRY_BASE_S = 0.8
-_MAX_EXPORT_WORKERS = 8
+_MAX_EXPORT_WORKERS = 6
 
 _build_cancel = threading.Event()
 
@@ -2149,7 +2154,7 @@ def build_maker_fs(
 ) -> dict[str, Any]:
     """生成七区细表 +（可选）从库导出各前缀封面索引。
 
-    - workers: 并行扫库线程数（默认 6）
+    - workers: 并行扫库线程数（默认 3，MAKER_FS_WORKERS 可覆盖）
     - skip_fresh_hours: 跳过 N 小时内已导出的前缀（0=强制全量）
     - region: 仅扫描指定分区（如 japan_censored）；空=全部
     - only_prefix: 仅扫描单个前缀（强制重扫该前缀）

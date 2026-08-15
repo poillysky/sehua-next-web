@@ -312,7 +312,7 @@ def start_build(
     workers: int = Query(
         maker_fs.DEFAULT_EXPORT_WORKERS,
         ge=1,
-        le=8,
+        le=6,
         description="并行扫库线程数",
     ),
     skipFreshHours: float = Query(

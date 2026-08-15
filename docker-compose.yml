@@ -45,3 +45,9 @@ services:
       - 8.8.8.8
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # 刮削并发开大量 SQLite/HTTP/文件 FD；默认 ~1024 会打满
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+
