@@ -31,30 +31,31 @@ KIND_LABELS: dict[str, str] = {
 
 # 与 apps/scrape / mdc-ng 源 id 对齐（色花堂不在刮削源目录，仅 maker-fs 种子兜底）
 SOURCE_CATALOG: list[dict[str, str]] = [
-    {"id": "airav_io", "name": "Airav_io", "group": "av", "defaultUrl": "https://airav.io/cn"},
-    {"id": "avbase", "name": "Avbase", "group": "av", "defaultUrl": "https://www.avbase.net"},
-    {"id": "avmoo", "name": "Avmoo", "group": "av", "defaultUrl": "https://avmoo.shop"},
-    {"id": "avsox", "name": "Avsox", "group": "uncensored", "defaultUrl": "https://avsox.click"},
-    {"id": "carib", "name": "Carib", "group": "uncensored", "defaultUrl": "https://www.caribbeancom.com"},
-    {"id": "dmm", "name": "Dmm", "group": "av", "defaultUrl": "https://www.dmm.co.jp"},
-    {"id": "fc2", "name": "Fc2", "group": "fc2", "defaultUrl": "https://adult.contents.fc2.com"},
-    {"id": "fc2_hub", "name": "Fc2_hub", "group": "fc2", "defaultUrl": "https://javten.com"},
-    {"id": "fd2ppv", "name": "Fd2ppv", "group": "fc2", "defaultUrl": "https://fd2ppv.cc"},
-    {"id": "freejavbt", "name": "Freejavbt", "group": "av", "defaultUrl": "https://freejavbt.com"},
-    {"id": "jav321", "name": "Jav321", "group": "av", "defaultUrl": "https://www.jav321.com"},
-    {"id": "javbus", "name": "Javbus", "group": "av", "defaultUrl": "https://www.javbus.com"},
-    {"id": "javdb", "name": "Javdb", "group": "av", "defaultUrl": "https://javdb.com"},
-    {"id": "javlibrary", "name": "Javlibrary", "group": "av", "defaultUrl": "https://www.javlibrary.com/cn"},
-    {"id": "madou", "name": "Madou", "group": "chinese", "defaultUrl": "https://madou.club"},
-    {"id": "madouqu", "name": "Madouqu", "group": "chinese", "defaultUrl": "https://madouqu.com"},
-    {"id": "xiao_huang_shu", "name": "Xiao_huang_shu", "group": "chinese", "defaultUrl": "https://xchina.co"},
-    {"id": "mgstage", "name": "Mgstage", "group": "av", "defaultUrl": "https://www.mgstage.com"},
-    {"id": "libredmm", "name": "LibreDMM", "group": "av", "defaultUrl": "https://www.libredmm.com"},
-    {"id": "miss_av", "name": "Miss_av", "group": "av", "defaultUrl": "https://missav123.com"},
-    {"id": "sevenmmtv", "name": "7mmtv", "group": "av", "defaultUrl": "https://7mmtv.sx/zh"},
-    {"id": "iqqtv", "name": "Iqqtv", "group": "av", "defaultUrl": "https://iqq5.xyz/cn"},
-    {"id": "theporndb", "name": "ThePornDB", "group": "western", "defaultUrl": "https://api.theporndb.net"},
-    {"id": "airav", "name": "Airav", "group": "av", "defaultUrl": "https://www.airav.wiki"},
+    # access: direct=直连 | proxy=代理直连 | proxy_flare=代理过盾
+    {"id": "airav_io", "name": "Airav_io", "group": "av", "defaultUrl": "https://airav.io/cn", "access": "proxy"},
+    {"id": "avbase", "name": "Avbase", "group": "av", "defaultUrl": "https://www.avbase.net", "access": "proxy"},
+    {"id": "avmoo", "name": "Avmoo", "group": "av", "defaultUrl": "https://avmoo.shop", "access": "proxy_flare"},
+    {"id": "avsox", "name": "Avsox", "group": "uncensored", "defaultUrl": "https://avsox.click", "access": "proxy_flare"},
+    {"id": "carib", "name": "Carib", "group": "uncensored", "defaultUrl": "https://www.caribbeancom.com", "access": "proxy"},
+    {"id": "dmm", "name": "Dmm", "group": "av", "defaultUrl": "https://www.dmm.co.jp", "access": "proxy"},
+    {"id": "fc2", "name": "Fc2", "group": "fc2", "defaultUrl": "https://adult.contents.fc2.com", "access": "proxy"},
+    {"id": "fc2_hub", "name": "Fc2_hub", "group": "fc2", "defaultUrl": "https://javten.com", "access": "proxy_flare"},
+    {"id": "fd2ppv", "name": "Fd2ppv", "group": "fc2", "defaultUrl": "https://fd2ppv.cc", "access": "proxy_flare"},
+    {"id": "freejavbt", "name": "Freejavbt", "group": "av", "defaultUrl": "https://freejavbt.com", "access": "proxy"},
+    {"id": "jav321", "name": "Jav321", "group": "av", "defaultUrl": "https://www.jav321.com", "access": "proxy"},
+    {"id": "javbus", "name": "Javbus", "group": "av", "defaultUrl": "https://www.javbus.com", "access": "proxy"},
+    {"id": "javdb", "name": "Javdb", "group": "av", "defaultUrl": "https://javdb.com", "access": "proxy_flare"},
+    {"id": "javlibrary", "name": "Javlibrary", "group": "av", "defaultUrl": "https://www.javlibrary.com/cn", "access": "proxy_flare"},
+    {"id": "madou", "name": "Madou", "group": "chinese", "defaultUrl": "https://madou.club", "access": "proxy"},
+    {"id": "madouqu", "name": "Madouqu", "group": "chinese", "defaultUrl": "https://madouqu.com", "access": "proxy"},
+    {"id": "xiao_huang_shu", "name": "Xiao_huang_shu", "group": "chinese", "defaultUrl": "https://xchina.co", "access": "proxy"},
+    {"id": "mgstage", "name": "Mgstage", "group": "av", "defaultUrl": "https://www.mgstage.com", "access": "proxy_flare"},
+    {"id": "libredmm", "name": "LibreDMM", "group": "av", "defaultUrl": "https://www.libredmm.com", "access": "proxy"},
+    {"id": "miss_av", "name": "Miss_av", "group": "av", "defaultUrl": "https://missav123.com", "access": "proxy_flare"},
+    {"id": "sevenmmtv", "name": "7mmtv", "group": "av", "defaultUrl": "https://7mmtv.sx/zh", "access": "proxy"},
+    {"id": "iqqtv", "name": "Iqqtv", "group": "av", "defaultUrl": "https://iqq5.xyz/cn", "access": "direct"},
+    {"id": "theporndb", "name": "ThePornDB", "group": "western", "defaultUrl": "https://api.theporndb.net", "access": "proxy"},
+    {"id": "airav", "name": "Airav", "group": "av", "defaultUrl": "https://www.airav.wiki", "access": "proxy"},
 ]
 
 # 色花堂不在刮削源目录；仅作 maker-fs 种子 / fieldSources 标记
@@ -78,14 +79,15 @@ FIELD_PRIORITY_KEYS = (
 )
 # schema≥3：字段优先级嵌在七区 kindProfiles[*].fieldPriority
 # schema=5：日本区 titleZh/outline 前置 iqqtv（不过盾中文标题快源）
-FIELD_PRIORITY_SCHEMA = 5
+# schema=6：freejavbt 移出封面源（截帧/推荐串号不可靠）
+FIELD_PRIORITY_SCHEMA = 6
 # 七区×字段默认：仅「从未配置过」时的出厂值；线上以设置页 kindProfiles.fieldPriority 为准，勿在业务里写死源序
 # 快源靠前，过盾源垫后；每字段最多 3 个网络源
 _JP_CENSORED_FP: dict[str, list[str]] = {
     "titleZh": ["iqqtv", "airav_io", "sevenmmtv"],
     "outline": ["iqqtv", "airav_io"],
     "studio": ["javbus", "airav_io"],
-    "cover": ["javbus", "freejavbt"],
+    "cover": ["javbus"],
     "actors": ["javbus", "airav_io", "sevenmmtv"],
     "tags": ["javbus", "airav_io"],
     "series": ["javbus", "freejavbt"],
@@ -105,7 +107,7 @@ _JP_AMATEUR_FP: dict[str, list[str]] = {
     "titleZh": ["iqqtv", "javbus", "libredmm"],
     "outline": ["iqqtv", "libredmm", "javbus"],
     "studio": ["libredmm", "javbus", "dmm"],
-    "cover": ["javbus", "libredmm", "freejavbt"],
+    "cover": ["javbus", "libredmm"],
     "actors": ["javbus", "libredmm", "avsox"],
     "tags": ["javbus", "libredmm", "dmm"],
     "series": ["libredmm", "javbus", "dmm"],
@@ -116,7 +118,7 @@ _FC2_FP: dict[str, list[str]] = {
     "titleZh": ["fc2", "javbus", "fd2ppv"],
     "outline": ["fc2", "javbus"],
     "studio": ["fc2", "javbus"],
-    "cover": ["fc2", "freejavbt", "javbus"],
+    "cover": ["fc2", "javbus"],
     "actors": ["fc2", "javbus"],
     "tags": ["fc2", "javbus"],
     "series": ["fc2", "javbus"],
@@ -127,7 +129,7 @@ _CHINA_FP: dict[str, list[str]] = {
     "titleZh": ["madouqu", "madou", "xiao_huang_shu"],
     "outline": ["madouqu", "madou", "freejavbt"],
     "studio": ["madouqu", "madou", "freejavbt"],
-    "cover": ["madouqu", "madou", "freejavbt"],
+    "cover": ["madouqu", "madou"],
     "actors": ["madouqu", "madou", "javbus"],
     "tags": ["madouqu", "madou", "javbus"],
     "series": ["madouqu", "madou"],
@@ -138,7 +140,7 @@ _WESTERN_FP: dict[str, list[str]] = {
     "titleZh": ["iqqtv", "javbus", "airav_io"],
     "outline": ["iqqtv", "javbus", "libredmm"],
     "studio": ["javbus", "libredmm"],
-    "cover": ["freejavbt", "javbus", "libredmm"],
+    "cover": ["javbus", "libredmm"],
     "actors": ["javbus", "libredmm"],
     "tags": ["javbus", "libredmm"],
     "series": ["javbus", "libredmm"],
@@ -570,10 +572,14 @@ def default_cookie_for(sid: str) -> str:
 
 def default_source_config(sid: str) -> dict[str, Any]:
     defn = _CATALOG_BY_ID.get(sid) or {"defaultUrl": "", "name": sid, "group": "other"}
+    access = str(defn.get("access") or "proxy").strip().lower()
+    if access not in ("direct", "proxy", "proxy_flare"):
+        access = "proxy"
     return {
         "id": sid,
         "name": defn.get("name") or sid,
         "group": defn.get("group") or "other",
+        "access": access,
         "enabled": sid not in _DEFAULT_DISABLED_SOURCES,
         "baseUrl": str(defn.get("defaultUrl") or ""),
         "cookie": default_cookie_for(sid),
@@ -666,6 +672,7 @@ def apply_source_probe(
     status: str,
     last_error: str | None = None,
     cooldown_sec: int | None = None,
+    resolved_base_url: str | None = None,
 ) -> dict[str, dict[str, Any]]:
     out = normalize_sources_map(sources)
     if sid not in out:
@@ -676,6 +683,12 @@ def apply_source_probe(
     out[sid]["status"] = status if status in ("ok", "error", "unknown") else "unknown"
     out[sid]["lastCheckedAt"] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     out[sid]["lastError"] = last_error
+    # 探测跟到可用镜像时回写 baseUrl（iqqtv / airav_io / javbus 等）
+    resolved = str(resolved_base_url or "").strip().rstrip("/")
+    if status == "ok" and resolved and resolved.startswith("http"):
+        prev = str(out[sid].get("baseUrl") or "").strip().rstrip("/")
+        if resolved != prev:
+            out[sid]["baseUrl"] = resolved
     if status == "error":
         sec = 10 if cooldown_sec is None else max(0, min(120, int(cooldown_sec)))
         if sec > 0:
@@ -820,6 +833,10 @@ def normalize_scrape_tasks(raw: Any) -> list[dict[str, Any]]:
         watch_raw = item.get("watchEnabled")
         if watch_raw is None:
             watch_raw = item.get("watch_enabled")
+        # 仅当用户手动「开始」并完整跑完一轮后，监控才允许自动入队
+        armed_raw = item.get("watchArmed")
+        if armed_raw is None:
+            armed_raw = item.get("watch_armed")
         done_v = _int("done")
         empty_v = _int("empty")
         skipped_v = _int("skipped")
@@ -866,6 +883,8 @@ def normalize_scrape_tasks(raw: Any) -> list[dict[str, Any]]:
                 "fields": fields,
                 "localFields": local_fields,
                 "watchEnabled": bool(watch_raw),
+                # 仅用户手动「开始」并正常跑完一轮后为 True；暂停/取消后清掉
+                "watchArmed": bool(armed_raw),
                 "lastStatus": last_status,
                 "updatedAt": str(
                     item.get("updatedAt") or item.get("updated_at") or ""
@@ -932,6 +951,44 @@ def _prepend_iqqtv_field_lists(
     return out
 
 
+def _strip_freejavbt_from_cover(
+    kinds: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """schema≥6：freejavbt 不得作封面源。"""
+    out: dict[str, dict[str, Any]] = {}
+    for kid, prof in kinds.items():
+        merged = dict(prof or {})
+        fp_raw = merged.get("fieldPriority")
+        if not isinstance(fp_raw, dict):
+            out[kid] = merged
+            continue
+        fp = {k: list(v) if isinstance(v, list) else [] for k, v in fp_raw.items()}
+        cover = [str(x or "").strip().lower() for x in (fp.get("cover") or [])]
+        cover = [x for x in cover if x and x != "freejavbt"]
+        old = [str(x or "").strip().lower() for x in (fp.get("cover") or []) if str(x or "").strip()]
+        if cover == old:
+            # 仍可能 coverSources 里残留
+            cs = [
+                str(x or "").strip().lower()
+                for x in (merged.get("coverSources") or [])
+                if str(x or "").strip()
+            ]
+            if "freejavbt" not in cs:
+                out[kid] = merged
+                continue
+            merged["coverSources"] = [x for x in cs if x != "freejavbt"]
+            out[kid] = merged
+            continue
+        fp["cover"] = cover[:3]
+        fp_n = normalize_field_priority(fp)
+        meta_d, cover_d = derive_sources_from_fields(fp_n)
+        merged["fieldPriority"] = fp_n
+        merged["metaSources"] = meta_d
+        merged["coverSources"] = [x for x in cover_d if x != "freejavbt"]
+        out[kid] = merged
+    return out
+
+
 def profiles_public(
     raw_profiles: Any,
     *,
@@ -966,6 +1023,7 @@ def profiles_public(
     )
     if upgrade_fields:
         kinds = _prepend_iqqtv_field_lists(kinds)
+        kinds = _strip_freejavbt_from_cover(kinds)
     # 顶层 fieldPriority 仅兼容旧前端；schema≥3 以各区 kindProfiles.fieldPriority 为准
     ref = kinds.get("japan_censored") or {}
     fields = normalize_field_priority(ref.get("fieldPriority"))

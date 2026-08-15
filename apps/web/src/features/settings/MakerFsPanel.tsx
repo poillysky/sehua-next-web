@@ -313,8 +313,15 @@ export function MakerFsPanel({
     return () => document.removeEventListener('visibilitychange', onVis);
   }, [refreshHub]);
 
-  // 构建中：密轮询 status + 目录数字；外部任务结束也要拉齐最终态
+  // 构建中：只轻量轮询 status（内存态）；勿狂刷 regions enrich（会堵死 API）
   const wasRunningRef = useRef(false);
+  const waitAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => {
+    return () => {
+      waitAbortRef.current?.abort();
+      waitAbortRef.current = null;
+    };
+  }, []);
   useEffect(() => {
     if (!running) {
       if (wasRunningRef.current) {
@@ -324,8 +331,10 @@ export function MakerFsPanel({
       return;
     }
     wasRunningRef.current = true;
-    let ticks = 0;
+    let inFlight = false;
     const t = window.setInterval(() => {
+      if (inFlight) return;
+      inFlight = true;
       void (async () => {
         try {
           const s = await fetchMakerFsStatus();
@@ -334,24 +343,13 @@ export function MakerFsPanel({
             `构建中 ${s.prefixes || 0}/${s.prefixTotal || 0}`,
             'mute',
           );
-          ticks += 1;
-          // ~1.6s 拉一次真实区统计（enrich 自磁盘），保证条目数跟上
-          if (ticks % 2 === 0) {
-            const [m, ov] = await Promise.all([
-              fetchMakerFsManifest(),
-              fetchMakerFsRegions().catch(() => null),
-            ]);
-            setManifest(m);
-            const list =
-              (ov?.regions?.length ? ov.regions : null) ||
-              (m.regions?.length ? m.regions : null);
-            if (list?.length) setRegions(list);
-          }
         } catch {
           /* ignore */
+        } finally {
+          inFlight = false;
         }
       })();
-    }, 800);
+    }, 5000);
     return () => window.clearInterval(t);
   }, [running, refreshHub]);
 
@@ -400,7 +398,7 @@ export function MakerFsPanel({
         skipFreshHours: opts.prefix ? 0 : opts.skipFreshHours,
         region: opts.region,
         prefix: opts.prefix,
-        workers: opts.prefix ? 1 : 6,
+        workers: opts.prefix ? 1 : undefined,
       });
       try {
         const s0 = await fetchMakerFsStatus();
@@ -412,7 +410,12 @@ export function MakerFsPanel({
       onStatusRef.current('构建中', 'mute');
       toast(`${opts.label}已开始`, 'info');
 
+      waitAbortRef.current?.abort();
+      const ac = new AbortController();
+      waitAbortRef.current = ac;
       const st = await waitMakerFsBuild({
+        signal: ac.signal,
+        intervalMs: 5000,
         onTick: (s) => setStatus((prev) => mergeMakerFsStatus(prev, s)),
       });
       await refreshHub();

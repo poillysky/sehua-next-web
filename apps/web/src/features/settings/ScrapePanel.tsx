@@ -1214,6 +1214,7 @@ export function ScrapePanel({
         fields,
         localFields: normalizeLocalFields(draft.localFields, fields),
         watchEnabled: Boolean(draft.watchEnabled),
+        watchArmed: Boolean(draft.watchEnabled) ? Boolean(prev?.watchArmed) : false,
         lastStatus: prev?.lastStatus || "",
         done: prev?.done,
         empty: prev?.empty,
@@ -1258,12 +1259,19 @@ export function ScrapePanel({
           ? {
               ...t,
               watchEnabled: nextOn,
+              // 关掉监控时解除武装；开启后仍需手动跑完一轮
+              watchArmed: nextOn ? Boolean(t.watchArmed) : false,
               updatedAt: new Date().toISOString(),
             }
           : t,
       );
       await persistTasks(nextTasks);
-      toast(nextOn ? "监控已开启" : "监控已关闭", "info");
+      toast(
+        nextOn
+          ? "监控已开启（需手动开始并跑完一轮后才会自动增量）"
+          : "监控已关闭",
+        "info",
+      );
     } catch (e) {
       toast(e instanceof Error ? e.message : "更新失败", "error");
     } finally {
@@ -1321,6 +1329,7 @@ export function ScrapePanel({
           ? {
               ...t,
               lastStatus: "",
+              watchArmed: false,
               done: 0,
               empty: 0,
               skipped: 0,
@@ -1393,6 +1402,7 @@ export function ScrapePanel({
       fields,
       localFields,
       watchEnabled: Boolean(draft.watchEnabled),
+      watchArmed: Boolean(draft.watchEnabled) ? Boolean(prev?.watchArmed) : false,
       lastStatus: "running",
       done: Number(prev?.done || 0),
       empty: Number(prev?.empty || 0),
@@ -2031,13 +2041,19 @@ export function ScrapePanel({
                               disabled={controlBusy || busy}
                               title={
                                 task.watchEnabled
-                                  ? "点击关闭监控"
+                                  ? task.watchArmed
+                                    ? "监控已就绪：本轮跑完后会定期增量"
+                                    : "监控已开：请先点开始并跑完一轮"
                                   : "点击开启监控"
                               }
                               aria-pressed={Boolean(task.watchEnabled)}
                               onClick={() => void onToggleWatch(task)}
                             >
-                              监控
+                              {task.watchEnabled
+                                ? task.watchArmed
+                                  ? "监控中"
+                                  : "监控"
+                                : "监控"}
                             </button>
                             <span
                               className={`scrape-log-badge scrape-log-badge--${badgeTone}`}

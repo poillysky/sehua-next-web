@@ -9,6 +9,7 @@ import { collectDmmCidsFromHits } from "./dmmCid.js";
 import { downloadBytes, downloadToFile } from "./download.js";
 import { scrapeDmm } from "./providers/more.js";
 import { SOURCE_RUNNERS } from "./providers/runners.js";
+import { assertScrapeNotCancelled } from "./scrapeCancel.js";
 import {
   filterFieldPriorityByCaps,
   sanitizeHitBySourceCaps,
@@ -800,19 +801,13 @@ function mergeByFieldPriority(
 
 /** 强制/高概率走 FlareSolverr 的源（与 providers viaFlare / CF 站对齐） */
 const FLARE_HEAVY_SOURCES = new Set<string>([
-  "airav_io",
-  "airav",
-  "sevenmmtv",
   "javdb",
   "javlibrary",
   "miss_av",
-  "avbase",
   "avmoo",
   "avsox",
   "dmm",
   "mgstage",
-  "madouqu",
-  "xiao_huang_shu",
   "fd2ppv",
   "fc2_hub",
 ]);
@@ -981,7 +976,9 @@ async function collectHits(
 
   const runOne = async (id: SourceId) => {
     const t0 = Date.now();
-    if (id === "forum") {
+    try {
+      assertScrapeNotCancelled();
+      if (id === "forum") {
       if (preferCoverUrl || forumTitle || forumActors.length) {
         // 色花堂为主源：preferTitle 直接作为中文标题（多帖优选已在 API 侧完成）
         const zh = usableTitleZh(forumTitle) ? forumTitle : "";
@@ -1032,8 +1029,8 @@ async function collectHits(
         } as SourceRun,
       };
     }
-    try {
       const hit = await runNetwork(id);
+      assertScrapeNotCancelled();
       const ms = Date.now() - t0;
       if (!hit) {
         return {
@@ -1107,6 +1104,11 @@ async function collectHits(
         } as SourceRun,
       };
     } catch (e) {
+      const err = e instanceof Error ? e.message : "请求失败";
+      // deadline 取消：向上抛，立刻结束 scrapeOne，释放队列/锁
+      if (/scrape-deadline|scrape aborted|flare aborted/i.test(err)) {
+        throw e instanceof Error ? e : new Error(err);
+      }
       return {
         hit: null,
         run: {
@@ -1114,7 +1116,7 @@ async function collectHits(
           ok: false,
           ms: Date.now() - t0,
           mode,
-          error: e instanceof Error ? e.message : "请求失败",
+          error: err,
           detail: "wave",
         } as SourceRun,
       };

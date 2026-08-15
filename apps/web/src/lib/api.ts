@@ -651,17 +651,22 @@ export async function putPosterCrop(
   return normalizePosterCropClient(data);
 }
 
+export type ScrapeSourceAccess = 'direct' | 'proxy' | 'proxy_flare';
+
 export type ScrapeSourceDef = {
   id: string;
   name: string;
   group: string;
   defaultUrl?: string;
+  access?: ScrapeSourceAccess | string;
 };
 
 export type ScrapeSourceCard = {
   id: string;
   name: string;
   group: string;
+  /** 直连 / 代理直连 / 代理过盾 */
+  access?: ScrapeSourceAccess | string;
   enabled: boolean;
   baseUrl: string;
   cookie?: string;
@@ -731,8 +736,10 @@ export type ScrapeTask = {
   fields: ScrapeTaskField[];
   /** 从索引物化复用的字段（仅勾选的才读取；不含封面） */
   localFields?: ScrapeTaskField[];
-  /** maker-fs 监控：定期增量补刮 */
+  /** maker-fs 监控：开启后须手动开始并跑完一轮才自动增量 */
   watchEnabled?: boolean;
+  /** 后端：手动跑完后武装，暂停/取消解除 */
+  watchArmed?: boolean;
   lastStatus?: string;
   updatedAt?: string;
   /** 最近一次导出统计（与进度卡一致） */

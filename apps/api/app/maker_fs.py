@@ -1114,7 +1114,12 @@ def enrich_region_catalog(catalog: dict[str, Any]) -> dict[str, Any]:
     return catalog
 
 
-def read_regions_overview() -> dict[str, Any] | None:
+def read_regions_overview(*, enrich: bool = False) -> dict[str, Any] | None:
+    """七区总览。
+
+    enrich=False（默认）：只用 regions.json 里已写好的计数，适合轮询/设置 Hub。
+    enrich=True：扫每区前缀 index 重算 codeCount（很重，仅手动刷新时用）。
+    """
     data = read_json(regions_overview_path())
     if not data:
         return None
@@ -1124,10 +1129,15 @@ def read_regions_overview() -> dict[str, Any] | None:
         if not isinstance(r, dict):
             continue
         rid = str(r.get("id") or "")
-        cat = read_region_index(rid)
-        code_n = int((cat or {}).get("codeCount") or 0) if cat else 0
-        prefix_n = int((cat or {}).get("prefixCount") or r.get("prefixCount") or 0)
-        maker_n = int((cat or {}).get("makerCount") or r.get("makerCount") or 0)
+        if enrich:
+            cat = read_region_index(rid)
+            code_n = int((cat or {}).get("codeCount") or 0) if cat else 0
+            prefix_n = int((cat or {}).get("prefixCount") or r.get("prefixCount") or 0)
+            maker_n = int((cat or {}).get("makerCount") or r.get("makerCount") or 0)
+        else:
+            code_n = int(r.get("codeCount") or 0)
+            prefix_n = int(r.get("prefixCount") or 0)
+            maker_n = int(r.get("makerCount") or 0)
         enriched.append(
             {
                 **r,
@@ -1221,7 +1231,17 @@ def forum_seed_for_code_local(
 
 
 def build_status() -> dict[str, Any]:
-    return {**_build_state, "manifest": read_manifest()}
+    """仅返回内存进度；勿在此读盘（轮询极频繁，读盘会堵死 API）。"""
+    with _meta_lock:
+        snap = dict(_build_state)
+        rp = snap.get("regionProgress")
+        if isinstance(rp, dict):
+            snap["regionProgress"] = {
+                str(k): (dict(v) if isinstance(v, dict) else v) for k, v in rp.items()
+            }
+        else:
+            snap["regionProgress"] = {}
+    return snap
 
 
 def claim_build(*, region: str | None = None) -> bool:

@@ -76,8 +76,8 @@ def get_tree() -> dict[str, Any]:
 
 
 @router.get("/maker-fs/regions")
-def list_regions() -> dict[str, Any]:
-    overview = maker_fs.read_regions_overview()
+def list_regions(enrich: int = Query(0, ge=0, le=1)) -> dict[str, Any]:
+    overview = maker_fs.read_regions_overview(enrich=bool(enrich))
     if not overview:
         regions = [
             {

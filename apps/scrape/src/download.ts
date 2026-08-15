@@ -1,5 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
+import { spawn } from "node:child_process";
+import os from "node:os";
 import { fetch as undiciFetch } from "undici";
 import {
   fetchViaFlareSolverrFull,
@@ -180,6 +182,123 @@ async function fetchDirect(
   }
 }
 
+/**
+ * curl 回退：部分站（airav 等）用 TLS 指纹拦 Node/undici，同代理下 Python/curl 仍 200。
+ * 仅在 viaFlare:false 路径使用，避免拖慢可过盾站。
+ */
+async function fetchViaCurl(
+  url: string,
+  opts: {
+    timeoutMs: number;
+    referer?: string;
+    cookie?: string;
+    userAgent?: string;
+  },
+): Promise<{ html: string; finalUrl: string } | null> {
+  const curlBin = process.platform === "win32" ? "curl.exe" : "curl";
+  const tmp = path.join(
+    os.tmpdir(),
+    `scrape-curl-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.body`,
+  );
+  const args: string[] = [
+    "-sS",
+    "-L",
+    "--compressed",
+    "--max-time",
+    String(Math.max(3, Math.ceil(opts.timeoutMs / 1000))),
+    "-A",
+    opts.userAgent || UA,
+    "-H",
+    "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "-H",
+    "Accept-Language: zh-CN,zh;q=0.9,en;q=0.8",
+    "-o",
+    tmp,
+    "-w",
+    "%{http_code}\n%{url_effective}",
+  ];
+  const proxy = getActiveProxy();
+  if (proxy) {
+    args.push("-x", proxy);
+  }
+  if (opts.referer) {
+    args.push("-e", opts.referer);
+  }
+  if (opts.cookie) {
+    args.push("-H", `Cookie: ${opts.cookie}`);
+  }
+  args.push(url);
+
+  try {
+    const { code, stdout } = await new Promise<{
+      code: number;
+      stdout: string;
+    }>((resolve) => {
+      const child = spawn(curlBin, args, {
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let out = "";
+      let err = "";
+      child.stdout.on("data", (c: Buffer) => {
+        out += c.toString("utf8");
+      });
+      child.stderr.on("data", (c: Buffer) => {
+        err += c.toString("utf8");
+      });
+      child.on("close", (c) => {
+        if (err && !out) {
+          console.log(
+            `[scrape] curl stderr host=${hostOf(url)} ${err.slice(0, 160)}`,
+          );
+        }
+        resolve({ code: c ?? 1, stdout: out });
+      });
+      child.on("error", (e) => {
+        console.log(
+          `[scrape] curl spawn fail host=${hostOf(url)} ${e.message}`,
+        );
+        resolve({ code: 1, stdout: "" });
+      });
+    });
+
+    const lines = stdout.trim().split(/\r?\n/);
+    const httpCode = Number(lines[0] || 0);
+    const finalUrl = String(lines[1] || url).trim() || url;
+    if (code !== 0 || httpCode < 200 || httpCode >= 400) {
+      console.log(
+        `[scrape] curl fail host=${hostOf(url)} exit=${code} HTTP ${httpCode || "-"}`,
+      );
+      return null;
+    }
+    if (!fs.existsSync(tmp)) return null;
+    const buf = fs.readFileSync(tmp);
+    if (buf.length < 400) return null;
+    const html = decodeHtmlBytes(buf, "text/html; charset=utf-8");
+    if (looksBlockedHtml(html)) {
+      console.log(
+        `[scrape] curl blocked host=${hostOf(url)} ${html.length}b`,
+      );
+      return null;
+    }
+    console.log(
+      `[scrape] curl-ok host=${hostOf(url)} ${html.length}b proxy=${proxy ? "on" : "off"}`,
+    );
+    return { html, finalUrl };
+  } catch (e) {
+    console.log(
+      `[scrape] curl err host=${hostOf(url)} ${e instanceof Error ? e.message : "err"}`,
+    );
+    return null;
+  } finally {
+    try {
+      if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 /** 按 Content-Type / meta charset 解码（カリビアンコム等为 EUC-JP） */
 function decodeHtmlBytes(
   buf: Buffer,
@@ -318,6 +437,20 @@ async function fetchPageUnlocked(
     }
   }
 
+  // Node/undici 易被 CF TLS 指纹拦（同代理 Python/curl 仍 200）：viaFlare:false 时用 curl 回退
+  if (opts?.viaFlare === false) {
+    const viaCurl = await fetchViaCurl(url, {
+      timeoutMs,
+      referer: opts?.referer,
+      cookie,
+      userAgent,
+    });
+    if (viaCurl) {
+      directSkipUntil.delete(host);
+      return viaCurl;
+    }
+  }
+
   if (
     flareOn &&
     (opts?.viaFlare === true ||
@@ -332,6 +465,7 @@ async function fetchPageUnlocked(
         timeoutMs: flareTimeoutMs,
         cookie: cookie || baseCookie || undefined,
         waitInSeconds,
+        noSessionRetry: opts?.strictTimeout === true,
       });
       if (hit.html && !looksBlockedHtml(hit.html)) {
         return {
@@ -348,6 +482,7 @@ async function fetchPageUnlocked(
         timeoutMs: flareTimeoutMs,
         cookie: cookie || baseCookie || undefined,
         waitInSeconds,
+        noSessionRetry: opts?.strictTimeout === true,
       });
       if (hit.html && !looksBlockedHtml(hit.html)) {
         return {

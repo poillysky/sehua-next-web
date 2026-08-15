@@ -27,6 +27,18 @@ import {
   setNetworkStorePath,
 } from "./networkStore.js";
 import { setAiravMirrorStorePath } from "./airavMirror.js";
+import { setIqqtvMirrorStorePath } from "./iqqtvMirror.js";
+import {
+  createScrapeCancelFlag,
+  scrapeCancelAls,
+  tripScrapeCancel,
+} from "./scrapeCancel.js";
+import {
+  getSiteMirrorProfile,
+  rememberSiteMirror,
+  resolveSiteMirror,
+  setSiteMirrorStorePath,
+} from "./siteMirror.js";
 import { createQueue, getMeta, scrapeOne, type Dirs } from "./scrape.js";
 import { defaultCookieFor } from "./sourceCookies.js";
 import { DEFAULT_KIND_SOURCES, SOURCE_CATALOG } from "./sources.js";
@@ -50,6 +62,8 @@ fs.mkdirSync(metaDir, { recursive: true });
 setClearanceStorePath(path.join(metaDir, "cf-clearance.json"));
 setNetworkStorePath(path.join(metaDir, "network.json"));
 setAiravMirrorStorePath(path.join(metaDir, "airav-mirror.json"));
+setIqqtvMirrorStorePath(path.join(metaDir, "iqqtv-mirror.json"));
+setSiteMirrorStorePath(path.join(metaDir, "site-mirrors.json"));
 loadPersistedNetwork();
 
 const dirs: Dirs = { coversDir, metaDir };
@@ -312,9 +326,24 @@ app.post("/api/sources/probe", async (req, res) => {
     });
     return;
   }
-  const base = String(body.baseUrl || def.defaultUrl || "")
+  const preferred = String(body.baseUrl || def.defaultUrl || "")
     .trim()
     .replace(/\/$/, "");
+  let base = preferred;
+  let resolvedNote = "";
+  // 探测只读缓存/配置，禁止 forceRefresh（全量扫种子 + Flare 会卡几十秒～几分钟）
+  try {
+    const resolved = await resolveSiteMirror(id, {
+      preferred,
+      skipDiscover: true,
+    });
+    if (resolved) {
+      base = resolved.replace(/\/$/, "");
+      if (base !== preferred) resolvedNote = base;
+    }
+  } catch {
+    base = preferred;
+  }
   if (!base) {
     res.json({
       ok: true,
@@ -327,8 +356,21 @@ app.post("/api/sources/probe", async (req, res) => {
     });
     return;
   }
-  const probePath = def.probePath || "/";
-  const url = `${base}${probePath.startsWith("/") ? probePath : `/${probePath}`}`;
+
+  const probePath =
+    getSiteMirrorProfile(id)?.probePath || def.probePath || "/";
+  // 先打缓存/配置地址；仅 javbus 首枪失败时再试 1 个备用种子（不做全量发现）
+  const basesToTry: string[] = [base];
+  if (id === "javbus") {
+    const seed =
+      (getSiteMirrorProfile("javbus")?.seeds || []).find(
+        (s) => s.replace(/\/$/, "") !== base,
+      ) || "https://www.seejav.me";
+    if (seed && seed.replace(/\/$/, "") !== base) {
+      basesToTry.push(seed.replace(/\/$/, ""));
+    }
+  }
+
   try {
     // theporndb：根路径无业务；有 Key 才算配置就绪，否则标 unknown
     if (id === "theporndb") {
@@ -400,55 +442,81 @@ app.post("/api/sources/probe", async (req, res) => {
         return;
       }
     }
-    // CF 站：javlibrary 等 fresh 过盾常 25–40s；28s 易误报「探测超时」
-    // 强制 viaFlare，避免先烧 12s 代理直连再过盾
-    const needsFlare =
-      Boolean(getFlareSolverrUrl()) && hostNeedsFlare(url);
-    const html = await fetchText(url, {
-      timeoutMs: needsFlare ? 65000 : 10000,
-      strictTimeout: true,
-      viaFlare: needsFlare ? true : undefined,
-      sourceId: id,
-      cookie: defaultCookieFor(id),
-      referer: `${base}/`,
-    });
-    if (!html) {
+
+    let lastError = "超时 / 无响应";
+    let okBase = "";
+    for (const tryBase of basesToTry) {
+      const b = String(tryBase || "").replace(/\/$/, "");
+      if (!b) continue;
+      const url = `${b}${probePath.startsWith("/") ? probePath : `/${probePath}`}`;
+      const needsFlare =
+        id !== "airav_io" &&
+        id !== "airav" &&
+        id !== "sevenmmtv" &&
+        id !== "avbase" &&
+        Boolean(getFlareSolverrUrl()) &&
+        hostNeedsFlare(url);
+      const html = await fetchText(url, {
+        // 探测要快：过盾一枪上限 28s，直连 12s（发现镜像留给正式刮削）
+        timeoutMs: needsFlare ? 22000 : 10000,
+        strictTimeout: true,
+        // 禁止 undefined：否则直连失败后仍会回落 Flare，把代理站拖到半分钟
+        viaFlare: needsFlare,
+        sourceId: id,
+        cookie: defaultCookieFor(id),
+        referer: `${b}/`,
+      });
+      if (!html) {
+        lastError = needsFlare ? "过盾超时 / 无响应" : "超时 / 无响应";
+        continue;
+      }
+      if (looksBlockedHtml(html)) {
+        const challenge =
+          /Just a moment|cf-browser-verification|Attention Required|Cloudflare/i.test(
+            html.slice(0, 4000),
+          );
+        lastError =
+          id === "fc2_hub" || id === "mgstage" || id === "javdb"
+            ? "出口 IP 被站方封锁（换代理或暂时依赖其它源）"
+            : challenge
+              ? "仍是挑战页（过盾未完成）"
+              : "空响应 / 封锁页";
+        continue;
+      }
+      okBase = b;
+      break;
+    }
+
+    if (!okBase) {
       res.json({
         ok: true,
         data: {
           id,
           status: "error",
-          lastError: needsFlare ? "过盾超时 / 无响应" : "超时 / 无响应",
+          lastError,
           cooldownSec: 15,
         },
       });
       return;
     }
-    if (looksBlockedHtml(html)) {
-      const challenge =
-        /Just a moment|cf-browser-verification|Attention Required|Cloudflare/i.test(
-          html.slice(0, 4000),
-        );
-      const hint =
-        id === "fc2_hub" || id === "mgstage" || id === "javdb"
-          ? "出口 IP 被站方封锁（换代理或暂时依赖其它源）"
-          : challenge
-            ? "仍是挑战页（过盾未完成）"
-            : "空响应 / 封锁页";
-      res.json({
-        ok: true,
-        data: {
-          id,
-          status: "error",
-          lastError: hint,
-          cooldownSec: 15,
-        },
-      });
-      return;
+
+    try {
+      rememberSiteMirror(id, okBase);
+    } catch {
+      /* ignore */
     }
+
     res.json({
       ok: true,
-      data: { id, status: "ok", lastError: null, cooldownSec: 0 },
+      data: {
+        id,
+        status: "ok",
+        lastError: null,
+        cooldownSec: 0,
+        // 探测实际可用地址（镜像跳转后），供设置回写
+        resolvedBaseUrl: okBase,
+        resolvedFrom: resolvedNote || preferred || null,
+      },
     });
   } catch (e) {
     const raw = e instanceof Error ? e.message : String(e);
@@ -512,52 +580,69 @@ app.post("/api/scrape", async (req, res) => {
   );
   try {
     const run = queueForChannel(body.channel);
-    const meta = await run(async () => {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      try {
-        const result = await Promise.race([
-          scrapeOne(dirs, code, {
-            preferCoverUrl: body.preferCoverUrl,
-            preferTitle: body.preferTitle,
-            preferActors: body.preferActors,
-            preferLocal: body.preferLocal,
-            force: Boolean(body.force),
-            kind: body.kind,
-            region: body.region,
-            metaSources: body.metaSources,
-            coverSources: body.coverSources,
-            fieldPriority: body.fieldPriority,
-            coverDownloadStrategy: body.coverDownloadStrategy,
-            posterCrop: body.posterCrop,
-            channel: body.channel,
-          }),
-          new Promise<never>((_, reject) => {
-            timer = setTimeout(
-              () => reject(new Error("scrape_deadline")),
-              deadlineMs,
+    const cancel = createScrapeCancelFlag();
+    // 取消令牌必须在 queue 任务内挂上：acquire() 之后再进 ALS，避免丢失上下文
+    const meta = await run(() =>
+      scrapeCancelAls.run(cancel, async () => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const scrapePromise = scrapeOne(dirs, code, {
+          preferCoverUrl: body.preferCoverUrl,
+          preferTitle: body.preferTitle,
+          preferActors: body.preferActors,
+          preferLocal: body.preferLocal,
+          force: Boolean(body.force),
+          kind: body.kind,
+          region: body.region,
+          metaSources: body.metaSources,
+          coverSources: body.coverSources,
+          fieldPriority: body.fieldPriority,
+          coverDownloadStrategy: body.coverDownloadStrategy,
+          posterCrop: body.posterCrop,
+          channel: body.channel,
+        });
+        try {
+          const result = await Promise.race([
+            scrapePromise,
+            new Promise<never>((_, reject) => {
+              timer = setTimeout(() => {
+                reject(new Error("scrape_deadline"));
+              }, deadlineMs);
+            }),
+          ]);
+          return result;
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          if (/scrape_deadline/i.test(msg)) {
+            // 先 trip + abort，再等孤儿 scrapeOne 退出（ALS 仍有效），避免丢上下文后又占 Flare 锁
+            tripScrapeCancel(cancel, "scrape-deadline");
+            const n = abortAllFlareRequests("scrape-deadline");
+            console.log(
+              `[scrape] deadline ${deadlineMs}ms code=${code} aborted_flare=${n}`,
             );
-          }),
-        ]);
-        return result;
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        if (/scrape_deadline/i.test(msg)) {
-          return {
-            code,
-            title: "",
-            source: "none",
-            ok: false,
-            message: "scrape_deadline",
-            sourcesTried: [],
-            sourceRuns: [],
-            scrapedAt: new Date().toISOString(),
-          };
+            await Promise.race([
+              scrapePromise.then(
+                () => undefined,
+                () => undefined,
+              ),
+              new Promise<void>((r) => setTimeout(r, 2000)),
+            ]);
+            return {
+              code,
+              title: "",
+              source: "none",
+              ok: false,
+              message: "scrape_deadline",
+              sourcesTried: [],
+              sourceRuns: [],
+              scrapedAt: new Date().toISOString(),
+            };
+          }
+          throw e;
+        } finally {
+          if (timer) clearTimeout(timer);
         }
-        throw e;
-      } finally {
-        if (timer) clearTimeout(timer);
-      }
-    });
+      }),
+    );
     res.json({ ok: meta.ok, data: meta, message: meta.message });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

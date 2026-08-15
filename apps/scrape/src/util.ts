@@ -17,6 +17,7 @@ export function loadEnv(): void {
 
 export function stdCode(raw: string): string {
   // 统一大小写/分隔符；数字补满至少 3 位（OFES-001 / SONE-001）
+  // 宽度取 digits.length：保留已有前导零（MD-0362 勿收成 MD-362）
   const s = String(raw || "")
     .trim()
     .toUpperCase()
@@ -26,7 +27,11 @@ export function stdCode(raw: string): string {
   const prefix = m[1]!;
   const digits = m[2]!;
   const n = String(parseInt(digits, 10));
-  const width = Math.max(3, n.length, /^\d+$/.test(prefix) ? digits.length : 0);
+  const width = Math.max(
+    3,
+    digits.length,
+    /^\d+$/.test(prefix) ? digits.length : 0,
+  );
   return `${prefix}-${n.padStart(width, "0")}`;
 }
 

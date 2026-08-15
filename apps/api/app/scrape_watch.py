@@ -1,4 +1,7 @@
-"""刮削任务监控：定期对 watchEnabled 任务做增量导出（整批入队依次跑）。"""
+"""刮削任务监控：定期对 watchEnabled 且已武装的任务做增量导出。
+
+武装条件：用户对该现有任务点「开始」并正常跑完一轮后；暂停/取消后解除。
+"""
 
 from __future__ import annotations
 
@@ -24,7 +27,9 @@ def _watched_tasks() -> list[dict[str, Any]]:
     return [
         t
         for t in tasks
-        if t.get("watchEnabled") and (t.get("regions") or [])
+        if t.get("watchEnabled")
+        and t.get("watchArmed")
+        and (t.get("regions") or [])
     ]
 
 
@@ -33,8 +38,14 @@ def _tick_once() -> None:
     if not tasks:
         return
     st = scrape_export.export_status(event_limit=0)
-    if st.get("watchHold"):
-        log.debug("scrape watch skip: watchHold (user paused)")
+    # 暂停 / 断点续跑抑制：禁止监控自动再开
+    if (
+        st.get("watchHold")
+        or st.get("pauseSaved")
+        or st.get("paused")
+        or str(st.get("message") or "") == "paused"
+    ):
+        log.debug("scrape watch skip: user pause / watchHold")
         return
     # 已有导出在跑或排队：本轮不重复塞，等下次
     if st.get("running") or (st.get("queue") or []):

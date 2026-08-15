@@ -1,5 +1,10 @@
 import * as cheerio from "cheerio";
 import { fetchText } from "../download.js";
+import {
+  getSiteMirrorProfile,
+  rememberSiteMirror,
+  resolveSiteMirror,
+} from "../siteMirror.js";
 import type { ScrapeMeta } from "../types.js";
 import { isJunkCoverUrl, isJunkTitle, stdCode } from "../util.js";
 
@@ -219,8 +224,12 @@ export async function scrapeJavbus(
   const c = stdCode(code);
   if (!c) return null;
   const slug = c.toLowerCase();
+  const preferred = BASES[0]!;
+  const resolved = await resolveSiteMirror("javbus", { preferred });
+  const seeds = getSiteMirrorProfile("javbus")?.seeds || BASES;
+  const ordered = [...new Set([resolved, ...seeds].filter(Boolean))];
 
-  for (const base of BASES) {
+  for (const base of ordered) {
     // www 默认繁中 UI：类别繁体；标题/女优仍日文。镜像 seejav 同结构。
     const url = `${base}/${slug}`;
     const html = await fetchText(url, {
@@ -248,7 +257,10 @@ export async function scrapeJavbus(
       continue;
     }
     const parsed = parseDetail(html, base, c);
-    if (parsed?.title || parsed?.poster) return parsed;
+    if (parsed?.title || parsed?.poster) {
+      rememberSiteMirror("javbus", base, preferred);
+      return parsed;
+    }
   }
   return null;
 }

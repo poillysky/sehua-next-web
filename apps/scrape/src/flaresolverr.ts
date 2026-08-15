@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { Agent, fetch as undiciFetch } from "undici";
 import { getActiveProxy } from "./proxy.js";
+import { isScrapeCancelled } from "./scrapeCancel.js";
 
 let activeFlareUrl = "";
 
@@ -12,7 +13,7 @@ const directAgent = new Agent();
 
 /** 易 403/CF 的站：直连失败后再过盾（Cookie 可复用） */
 const CF_HOST_RE =
-  /(?:^|\.)(javdb\.|javlibrary\.|missav|javten\.|fd2ppv\.|xchina\.|airav\.|avbase\.|avmoo\.|avsox\.|tellme\.pw|mgstage\.|7mmtv\.|theporndb\.|madouqu\.)/i;
+  /(?:^|\.)(javdb\.|javlibrary\.|missav|javten\.|fd2ppv\.|airav\.|avbase\.|avmoo\.|avsox\.|tellme\.pw|mgstage\.|7mmtv\.|theporndb\.|madouqu\.)/i;
 
 /** 运行时登记的镜像域名（如 airav 跳转到 inggairav*.work） */
 const extraFlareHosts = new Set<string>();
@@ -72,6 +73,10 @@ function withFlareLock<T>(fn: () => Promise<T>): Promise<T> {
   flareQueueDepth += 1;
   const run = flareLock.then(
     async () => {
+      // 外层 scrape 已 deadline：排队中的过盾直接放弃，勿再占锁
+      if (isScrapeCancelled()) {
+        throw new Error("scrape aborted");
+      }
       if (flareAbortEpoch !== enterEpoch) {
         throw new Error("flare aborted");
       }
@@ -79,6 +84,9 @@ function withFlareLock<T>(fn: () => Promise<T>): Promise<T> {
         flareQueueDepth > 3 ? FLARE_BUSY_GAP_MS : FLARE_MIN_GAP_MS;
       const gap = lastFlareFinishedAt + gapMs - Date.now();
       if (gap > 0) await sleep(gap);
+      if (isScrapeCancelled()) {
+        throw new Error("scrape aborted");
+      }
       if (flareAbortEpoch !== enterEpoch) {
         throw new Error("flare aborted");
       }
@@ -89,6 +97,9 @@ function withFlareLock<T>(fn: () => Promise<T>): Promise<T> {
       }
     },
     async () => {
+      if (isScrapeCancelled()) {
+        throw new Error("scrape aborted");
+      }
       if (flareAbortEpoch !== enterEpoch) {
         throw new Error("flare aborted");
       }
@@ -96,6 +107,9 @@ function withFlareLock<T>(fn: () => Promise<T>): Promise<T> {
         flareQueueDepth > 3 ? FLARE_BUSY_GAP_MS : FLARE_MIN_GAP_MS;
       const gap = lastFlareFinishedAt + gapMs - Date.now();
       if (gap > 0) await sleep(gap);
+      if (isScrapeCancelled()) {
+        throw new Error("scrape aborted");
+      }
       if (flareAbortEpoch !== enterEpoch) {
         throw new Error("flare aborted");
       }
@@ -623,6 +637,8 @@ export async function fetchViaFlareSolverrFull(
     useProxy?: boolean;
     /** SPA 站内跳转后等渲染（FlareSolverr waitInSeconds） */
     waitInSeconds?: number;
+    /** 探测：session 失效也不重建重试，避免超时翻倍 */
+    noSessionRetry?: boolean;
   },
 ): Promise<FlareFetchResult> {
   return withFlareLock(() => fetchViaFlareSolverrUnlocked(targetUrl, opts));
@@ -635,6 +651,7 @@ async function fetchViaFlareSolverrUnlocked(
     cookie?: string;
     useProxy?: boolean;
     waitInSeconds?: number;
+    noSessionRetry?: boolean;
   },
 ): Promise<FlareFetchResult> {
   const flare = getFlareSolverrUrl();
@@ -651,6 +668,10 @@ async function fetchViaFlareSolverrUnlocked(
     opts?.waitInSeconds != null && opts.waitInSeconds > 0
       ? Math.min(30, Math.floor(opts.waitInSeconds))
       : 0;
+  // 探测：客户端超时贴近 FS maxTimeout；刮削仍留缓冲
+  const httpTimeoutPad = opts?.noSessionRetry
+    ? Math.min(4000, Math.max(1500, Math.floor(maxTimeout * 0.15)))
+    : Math.min(15000, Math.max(3000, maxTimeout));
 
   const runOnce = async (sessionId: string | null, reused: boolean) => {
     const body: Record<string, unknown> = {
@@ -666,11 +687,7 @@ async function fetchViaFlareSolverrUnlocked(
     if (cookies) body.cookies = cookies;
     const t0 = Date.now();
     try {
-      const json = await flareApi(
-        flare,
-        body,
-        maxTimeout + Math.min(15000, Math.max(3000, maxTimeout)),
-      );
+      const json = await flareApi(flare, body, maxTimeout + httpTimeoutPad);
       const html = json.solution?.response;
       if (!html) throw new Error("flaresolverr empty response");
       const st = json.solution?.status;
@@ -700,6 +717,24 @@ async function fetchViaFlareSolverrUnlocked(
       throw e;
     }
   };
+
+  // 探测：复用已有 shared session，绝不 sessions.create（可卡 20s）
+  if (opts?.noSessionRetry) {
+    const hit = sharedSession;
+    if (
+      hit &&
+      hit.proxyUrl === proxy &&
+      Date.now() - hit.lastUsedAt < SESSION_IDLE_MS
+    ) {
+      hit.lastUsedAt = Date.now();
+      try {
+        return await runOnce(hit.id, true);
+      } catch {
+        /* fall through to session-less */
+      }
+    }
+    return await runOnce(null, false);
+  }
 
   // 1) 有会话：直接复用（不再重新过盾）
   try {

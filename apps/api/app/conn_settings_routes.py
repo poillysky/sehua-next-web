@@ -1190,8 +1190,8 @@ def _is_transient_probe_error(exc: BaseException) -> bool:
 def _probe_one_source(origin: str, sid: str, base_url: str) -> dict[str, Any]:
     """调 :9210 探测；forum 本地视为 ok。
 
-    CF 站过盾约 40–65s（javlibrary 等）；:9210 探针已放宽到 65s。
-    过盾排队时单源可能更久，httpx 留足余量。遇连接重置（刮削热重载）自动重试。
+    探测路径禁止全量镜像发现；过盾单枪约 ≤28s，直连 ≤12s。
+    httpx 留一点余量。遇连接重置（刮削热重载）自动重试。
     """
     import time
 
@@ -1201,7 +1201,7 @@ def _probe_one_source(origin: str, sid: str, base_url: str) -> dict[str, Any]:
     last_err: Exception | None = None
     for attempt in range(3):
         try:
-            with httpx.Client(timeout=180.0, trust_env=False) as client:
+            with httpx.Client(timeout=45.0, trust_env=False) as client:
                 r = client.post(
                     f"{origin.rstrip('/')}/api/sources/probe", json=payload
                 )
@@ -1222,12 +1222,18 @@ def _probe_one_source(origin: str, sid: str, base_url: str) -> dict[str, Any]:
                     err = data.get("lastError") or data.get("last_error")
                     if err:
                         err = _friendly_probe_error(str(err))
-                    return {
+                    resolved = data.get("resolvedBaseUrl") or data.get(
+                        "resolved_base_url"
+                    )
+                    hit: dict[str, Any] = {
                         "id": sid,
                         "status": str(data.get("status") or "unknown"),
                         "lastError": err,
                         "cooldownSec": cd,
                     }
+                    if resolved:
+                        hit["resolvedBaseUrl"] = str(resolved).strip()
+                    return hit
                 return {
                     "id": sid,
                     "status": "error",
@@ -1329,6 +1335,7 @@ def run_scrape_sources_test(
             status=st,
             last_error=hit.get("lastError"),
             cooldown_sec=cd,
+            resolved_base_url=hit.get("resolvedBaseUrl"),
         )
         if st == "ok":
             ok_n += 1

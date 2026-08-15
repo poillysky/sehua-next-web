@@ -12,13 +12,20 @@ import {
   fetchText,
   probeImageUrl,
 } from "../download.js";
-import { looksBlockedHtml, getCachedClearance, registerFlareHost } from "../flaresolverr.js";
+import { looksBlockedHtml, registerFlareHost } from "../flaresolverr.js";
 import {
   invalidateAiravMirror,
   normalizeAiravCnBase,
   rememberAiravMirror,
   resolveAiravCnBase,
 } from "../airavMirror.js";
+import {
+  invalidateIqqtvMirror,
+  normalizeIqqtvRoot,
+  rememberIqqtvMirror,
+  resolveIqqtvRoot,
+} from "../iqqtvMirror.js";
+import { withSiteMirrorBase } from "../siteMirror.js";
 import type { PartialFromSource } from "../sources.js";
 import { isJunkCoverUrl, isJunkTitle, isLikelyChinese, stdCode, UA } from "../util.js";
 
@@ -603,11 +610,16 @@ export async function scrapeDmm(
 
 export async function scrapeJavlibrary(
   codeRaw: string,
+  opts?: { baseUrl?: string },
 ): Promise<PartialFromSource | null> {
   const code = stdCode(codeRaw);
   if (!code) return null;
+  return withSiteMirrorBase(
+    "javlibrary",
+    opts?.baseUrl || "https://www.javlibrary.com/cn",
+    async (baseRaw) => {
   // /cn = 简体 UI（类别中文）；标题/女优仍日文。强依赖 Flare
-  const cn = "https://www.javlibrary.com/cn";
+  const cn = baseRaw.replace(/\/$/, "") || "https://www.javlibrary.com/cn";
   const searchUrl = `${cn}/vl_searchbyid.php?keyword=${encodeURIComponent(code)}`;
   const searchPage = await fetchPage(searchUrl, {
     referer: `${cn}/`,
@@ -772,6 +784,8 @@ export async function scrapeJavlibrary(
       undefined,
     source: "javlibrary",
   };
+    },
+  );
 }
 
 /** Avbase = Next.js；SSR 嵌在 __NEXT_DATA__，勿再瞎匹配 HTML 卡片链接 */
@@ -1014,13 +1028,19 @@ export async function scrapeAvbase(
 ): Promise<PartialFromSource | null> {
   const code = stdCode(codeRaw);
   if (!code) return null;
-  const base = normalizeAvbaseBase(opts?.baseUrl);
+  return withSiteMirrorBase(
+    "avbase",
+    opts?.baseUrl || "https://www.avbase.net",
+    async (baseRaw) => {
+  const base = normalizeAvbaseBase(baseRaw);
   const searchUrl = `${base}/works?q=${encodeURIComponent(code)}`;
 
   const searchPage = await fetchPage(searchUrl, {
     referer: `${base}/`,
     sourceId: "avbase",
-    timeoutMs: 45000,
+    timeoutMs: 20000,
+    viaFlare: false,
+    strictTimeout: true,
   });
   if (!searchPage?.html) return null;
   const searchProps = nextPageProps(searchPage.html);
@@ -1039,7 +1059,9 @@ export async function scrapeAvbase(
       const detailPage = await fetchPage(detailUrlColon, {
         referer: searchUrl,
         sourceId: "avbase",
-        timeoutMs: 45000,
+        timeoutMs: 20000,
+        viaFlare: false,
+        strictTimeout: true,
       });
       const detailProps = detailPage?.html
         ? nextPageProps(detailPage.html)
@@ -1052,7 +1074,9 @@ export async function scrapeAvbase(
         const again = await fetchPage(detailUrlEnc, {
           referer: searchUrl,
           sourceId: "avbase",
-          timeoutMs: 45000,
+          timeoutMs: 20000,
+          viaFlare: false,
+          strictTimeout: true,
         });
         const againProps = again?.html ? nextPageProps(again.html) : null;
         if (againProps?.work) work = againProps.work as AvbaseWork;
@@ -1062,13 +1086,22 @@ export async function scrapeAvbase(
 
   if (!work) return null;
   return parseAvbaseWork(work, code);
+    },
+  );
 }
 
-export async function scrapeJav321(codeRaw: string): Promise<PartialFromSource | null> {
+export async function scrapeJav321(
+  codeRaw: string,
+  opts?: { baseUrl?: string },
+): Promise<PartialFromSource | null> {
   const code = stdCode(codeRaw);
   if (!code) return null;
+  return withSiteMirrorBase(
+    "jav321",
+    opts?.baseUrl || "https://www.jav321.com",
+    async (baseRaw) => {
   // www=简体 UI 标签，但标题/简介/女优/ジャンル 实际多为日文；无 og:*，靠 panel 解析
-  const base = "https://www.jav321.com";
+  const base = baseRaw.replace(/\/$/, "") || "https://www.jav321.com";
   const html = await fetchPostForm(
     `${base}/search`,
     `sn=${encodeURIComponent(code)}`,
@@ -1278,6 +1311,8 @@ export async function scrapeJav321(codeRaw: string): Promise<PartialFromSource |
       extractDmmCidFromUrl(cover || portrait || "") || cidHint || undefined,
     source: "jav321",
   };
+    },
+  );
 }
 
 /**
@@ -1290,10 +1325,13 @@ export async function scrapeMissav(
 ): Promise<PartialFromSource | null> {
   const code = stdCode(codeRaw);
   if (!code) return null;
-  const base = (opts?.baseUrl || "https://missav123.com").replace(/\/$/, "");
-  registerFlareHost(base);
   const slug = code.toLowerCase();
-
+  return withSiteMirrorBase(
+    "miss_av",
+    opts?.baseUrl || "https://missav123.com",
+    async (baseRaw) => {
+  const base = baseRaw.replace(/\/$/, "");
+  registerFlareHost(base);
   const paths = [
     `/cn/${slug}`,
     `/${code}`,
@@ -1453,6 +1491,8 @@ export async function scrapeMissav(
     };
   }
   return null;
+    },
+  );
 }
 
 function $titleHint(html: string): string {
@@ -1473,18 +1513,19 @@ export async function scrape7mmtv(
 ): Promise<PartialFromSource | null> {
   const code = stdCode(codeRaw);
   if (!code) return null;
-  const root = (opts?.baseUrl || "https://7mmtv.sx").replace(/\/$/, "").replace(/\/zh$/i, "");
-  registerFlareHost(root);
+  return withSiteMirrorBase(
+    "sevenmmtv",
+    opts?.baseUrl || "https://7mmtv.sx",
+    async (baseRaw) => {
+  const root = baseRaw.replace(/\/$/, "").replace(/\/zh$/i, "");
 
-  // 先过盾拿 cf_clearance，供后续 POST
-  await fetchPage(`${root}/zh/`, {
-    referer: `${root}/`,
-    sourceId: "sevenmmtv",
-    viaFlare: true,
-    waitInSeconds: 1,
-    timeoutMs: 60000,
-  });
-  const clearance = getCachedClearance(`${root}/zh/`);
+  // 实测：代理 + curl 回退即可；强制过盾只会拉长排队
+  const pageOpts = {
+    sourceId: "sevenmmtv" as const,
+    viaFlare: false as const,
+    timeoutMs: 20000,
+    strictTimeout: true,
+  };
 
   const pickDetailHref = (html: string): string => {
     const hrefs = [
@@ -1514,11 +1555,8 @@ export async function scrape7mmtv(
     `${root}/zh/searchform_search/all/${encodeURIComponent(code)}/1.html`,
   ]) {
     const page = await fetchPage(searchUrl, {
+      ...pageOpts,
       referer: `${root}/zh/`,
-      sourceId: "sevenmmtv",
-      viaFlare: true,
-      waitInSeconds: 2,
-      timeoutMs: 60000,
     });
     const html = page?.html || "";
     if (!html || looksBlockedHtml(html)) continue;
@@ -1526,7 +1564,7 @@ export async function scrape7mmtv(
     if (detailPath) break;
   }
 
-  // 2) POST 表单搜索（GET 空结果时）
+  // 2) POST 表单搜索（GET 空结果时；仍走 undici，失败则放弃）
   if (!detailPath) {
     const body = new URLSearchParams({
       search_keyword: code,
@@ -1539,8 +1577,7 @@ export async function scrape7mmtv(
       {
         referer: `${root}/zh/`,
         sourceId: "sevenmmtv",
-        cookie: clearance?.cookieHeader,
-        timeoutMs: 30000,
+        timeoutMs: 20000,
       },
     );
     if (searchHtml && !looksBlockedHtml(searchHtml)) {
@@ -1552,11 +1589,8 @@ export async function scrape7mmtv(
   const detailUrl = absUrl(detailPath, root);
   if (!detailUrl) return null;
   const detailPage = await fetchPage(detailUrl, {
+    ...pageOpts,
     referer: `${root}/zh/`,
-    sourceId: "sevenmmtv",
-    viaFlare: true,
-    waitInSeconds: 2,
-    timeoutMs: 70000,
   });
   const html = detailPage?.html || "";
   const landed = detailPage?.finalUrl || detailUrl;
@@ -1650,15 +1684,13 @@ export async function scrape7mmtv(
     fanart: fanart.length ? fanart : undefined,
     source: "sevenmmtv",
   };
+    },
+  );
 }
 
-/** iQQTV：中文标题快源；镜像常换，默认 iqq5.xyz（对齐 MDCx）。 */
+/** iQQTV：中文标题快源；镜像常换（iqq5 → iqqk4 等），自动跟跳转。 */
 function normalizeIqqtvBase(raw?: string): string {
-  let b = String(raw || "https://iqq5.xyz")
-    .trim()
-    .replace(/\/$/, "");
-  b = b.replace(/\/(cn|jp)$/i, "").replace(/\/$/, "");
-  return b || "https://iqq5.xyz";
+  return normalizeIqqtvRoot(raw || "") || "https://iqq5.xyz";
 }
 
 function iqqtvJunkTitle(title: string): boolean {
@@ -1667,13 +1699,10 @@ function iqqtvJunkTitle(title: string): boolean {
   );
 }
 
-export async function scrapeIqqtv(
-  codeRaw: string,
-  opts?: { baseUrl?: string },
+async function scrapeIqqtvOnce(
+  code: string,
+  root: string,
 ): Promise<PartialFromSource | null> {
-  const code = stdCode(codeRaw);
-  if (!code) return null;
-  const root = normalizeIqqtvBase(opts?.baseUrl);
   const cnBase = `${root}/cn`;
 
   const searchUrl = `${cnBase}/search.php?kw=${encodeURIComponent(code)}`;
@@ -1686,6 +1715,13 @@ export async function scrapeIqqtv(
   const searchHtml = searchPage?.html || "";
   if (!searchHtml || searchHtml.length < 400) return null;
   if (looksBlockedHtml(searchHtml) && searchHtml.length < 8000) return null;
+
+  const landedRoot =
+    normalizeIqqtvRoot(searchPage?.finalUrl || "") || root;
+  if (landedRoot && landedRoot !== root) {
+    rememberIqqtvMirror(landedRoot, root);
+  }
+  const effectiveCn = `${landedRoot}/cn`;
 
   const $s = cheerio.load(searchHtml);
   let detailPath = "";
@@ -1717,7 +1753,7 @@ export async function scrapeIqqtv(
   }
   if (!detailPath) return null;
 
-  let detailUrl = absUrl(detailPath, `${cnBase}/`);
+  let detailUrl = absUrl(detailPath, `${effectiveCn}/`);
   if (!detailUrl) return null;
   // 统一走 /cn/ 详情拿中文题
   detailUrl = detailUrl
@@ -1740,6 +1776,11 @@ export async function scrapeIqqtv(
   if (!html || html.length < 800) return null;
   if (looksBlockedHtml(html) && html.length < 8000) return null;
   if (!pageMentionsCode(html, code)) return null;
+
+  const detailLanded = normalizeIqqtvRoot(detailPage?.finalUrl || "");
+  if (detailLanded && detailLanded !== landedRoot) {
+    rememberIqqtvMirror(detailLanded, landedRoot);
+  }
 
   const $ = cheerio.load(html);
   let title = cleanTitle(
@@ -1829,10 +1870,28 @@ export async function scrapeIqqtv(
   };
 }
 
+export async function scrapeIqqtv(
+  codeRaw: string,
+  opts?: { baseUrl?: string },
+): Promise<PartialFromSource | null> {
+  const code = stdCode(codeRaw);
+  if (!code) return null;
+  const preferred = normalizeIqqtvBase(opts?.baseUrl);
+  let root = await resolveIqqtvRoot({ preferred });
+  let parsed = await scrapeIqqtvOnce(code, root);
+  if (!parsed) {
+    invalidateIqqtvMirror();
+    root = await resolveIqqtvRoot({ preferred, forceRefresh: true });
+    parsed = await scrapeIqqtvOnce(code, root);
+  }
+  return parsed;
+}
+
 export async function scrapeFreejavbt(codeRaw: string): Promise<PartialFromSource | null> {
   const code = stdCode(codeRaw);
   if (!code) return null;
-  const base = "https://freejavbt.com";
+  return withSiteMirrorBase("freejavbt", "https://freejavbt.com", async (baseRaw) => {
+  const base = baseRaw.replace(/\/$/, "") || "https://freejavbt.com";
   // 裸数字会误跳（如 4821288→48212-88）；FC2 用完整番号
   const slugs = [code];
   const fc2 = code.match(/FC2[-_]?PPV[-_]?(\d+)/i) || code.match(/^FC2[-_]?(\d+)$/i);
@@ -1974,12 +2033,14 @@ export async function scrapeFreejavbt(codeRaw: string): Promise<PartialFromSourc
         series: series || undefined,
         premiered: premiered || undefined,
         runtime: runtime && runtime > 0 ? runtime : undefined,
-        poster: cover,
+        // 封面不可靠（播放器截帧 / 推荐位串号），禁止作封面源
+        poster: null,
         source: "freejavbt",
       };
     }
   }
   return null;
+  });
 }
 
 /**
@@ -1992,41 +2053,48 @@ export async function scrapeAiravWiki(
 ): Promise<PartialFromSource | null> {
   const code = stdCode(codeRaw);
   if (!code) return null;
-  const wikiBase = (opts?.baseUrl || "https://www.airav.wiki").replace(/\/$/, "");
-  registerFlareHost(wikiBase);
-  registerFlareHost("https://airav.io");
 
-  const urls = [
-    `${wikiBase}/video/${encodeURIComponent(code)}`,
-    `https://airav.io/video?jid=${encodeURIComponent(code)}`,
-    `https://airav.io/cn/video?jid=${encodeURIComponent(code)}`,
-  ];
-
-  for (const url of urls) {
-    const page = await fetchPage(url, {
-      referer: `${wikiBase}/`,
-      sourceId: "airav",
-      viaFlare: true,
-      waitInSeconds: 2,
-      timeoutMs: 60000,
-    });
-    const html = page?.html || "";
-    const landed = page?.finalUrl || url;
-    if (!html || looksBlockedHtml(html)) continue;
-    if (
-      /找不到|404|Not Found|521:\s*Web server/i.test(html.slice(0, 2500)) &&
-      !/video-title|og:title|番[号號]/i.test(html)
-    ) {
-      continue;
-    }
-    if (!airavDetailCodeOk(html, code) && !pageMentionsCode(html, code)) {
-      continue;
-    }
-    const parsed = parseAiravIoDetail(html, landed, code);
-    if (!parsed?.title && !parsed?.poster) continue;
-    return { ...parsed, source: "airav" };
+  // 与 airav_io 同源：wiki 入口常 302→airav.io；强制过盾只会拖死 deadline。
+  // 优先走已验证的搜索 kw→hid；失败再试 wiki /video/{CODE}（代理+curl，不过盾）。
+  const fromIo = await scrapeAiravIo(codeRaw, {
+    baseUrl: "https://airav.io/cn",
+  });
+  if (fromIo?.title || fromIo?.poster) {
+    return { ...fromIo, source: "airav" };
   }
-  return null;
+
+  return withSiteMirrorBase(
+    "airav",
+    opts?.baseUrl || "https://www.airav.wiki",
+    async (wikiRaw) => {
+      const wikiBase = wikiRaw.replace(/\/$/, "");
+      const page = await fetchPage(
+        `${wikiBase}/video/${encodeURIComponent(code)}`,
+        {
+          referer: `${wikiBase}/`,
+          sourceId: "airav",
+          viaFlare: false,
+          timeoutMs: 20000,
+          strictTimeout: true,
+        },
+      );
+      const html = page?.html || "";
+      const landed = page?.finalUrl || `${wikiBase}/video/${code}`;
+      if (!html || looksBlockedHtml(html)) return null;
+      if (
+        /找不到|404|Not Found|521:\s*Web server/i.test(html.slice(0, 2500)) &&
+        !/video-title|og:title|番[号號]/i.test(html)
+      ) {
+        return null;
+      }
+      if (!airavDetailCodeOk(html, code) && !pageMentionsCode(html, code)) {
+        return null;
+      }
+      const parsed = parseAiravIoDetail(html, landed, code);
+      if (!parsed?.title && !parsed?.poster) return null;
+      return { ...parsed, source: "airav" };
+    },
+  );
 }
 
 export async function scrapeAiravIo(
@@ -2040,10 +2108,13 @@ export async function scrapeAiravIo(
   let base = await resolveAiravCnBase({ preferred });
   const tryOnce = async (cnBase: string) => {
     const searchUrl = `${cnBase}/search_result?kw=${encodeURIComponent(code)}`;
+    // 实测：代理直连即可；强制过盾只会拖死 deadline
     const searchPage = await fetchPage(searchUrl, {
       referer: `${cnBase}/`,
       sourceId: "airav_io",
-      timeoutMs: 25000,
+      timeoutMs: 18000,
+      viaFlare: false,
+      strictTimeout: true,
     });
     if (!searchPage?.html) return null;
 
@@ -2064,7 +2135,9 @@ export async function scrapeAiravIo(
     const detailPage = await fetchPage(detailUrl, {
       referer: searchUrl,
       sourceId: "airav_io",
-      timeoutMs: 25000,
+      timeoutMs: 18000,
+      viaFlare: false,
+      strictTimeout: true,
     });
     if (!detailPage?.html) return null;
     if (!airavDetailCodeOk(detailPage.html, code)) return null;
@@ -2587,7 +2660,8 @@ export async function scrapeFd2ppv(codeRaw: string): Promise<PartialFromSource |
   if (!m) return null;
   const id = m[1]!;
   const displayCode = `FC2-PPV-${id}`;
-  const base = "https://fd2ppv.cc";
+  return withSiteMirrorBase("fd2ppv", "https://fd2ppv.cc", async (baseRaw) => {
+  const base = baseRaw.replace(/\/$/, "") || "https://fd2ppv.cc";
   const url = `${base}/articles/${id}`;
   const page = await fetchPage(url, {
     referer: `${base}/`,
@@ -2721,6 +2795,7 @@ export async function scrapeFd2ppv(codeRaw: string): Promise<PartialFromSource |
     productId: id,
     source: "fd2ppv",
   };
+  });
 }
 
 export async function scrapeTheporndb(
@@ -2933,7 +3008,7 @@ export async function scrapeTheporndb(
 /**
  * LibreDMM / LibreFanza：聚合 DMM·MGStage 等官方元数据（JSON，直连代理即可）。
  * 详情 `/movies/{CODE}.json`；冷门番号可能先 `err=processing` 需短轮询。
- * 官方 mgstage.com 被拦时的首选补充源。
+ * 独立数据源；不在 mgstage runner 内自动顶替。
  */
 export async function scrapeLibreDmm(
   codeRaw: string,

@@ -6,7 +6,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fetchPage } from "./download.js";
-import { registerFlareHost } from "./flaresolverr.js";
 
 const ENTRY_SEEDS = [
   "https://airav.io/cn",
@@ -40,7 +39,6 @@ function loadFromDisk(): void {
     const raw = JSON.parse(fs.readFileSync(storePath, "utf8")) as MirrorCache;
     if (raw?.baseUrl && Number(raw.expiresAt) > Date.now()) {
       memory = raw;
-      registerFlareHost(raw.baseUrl);
     }
   } catch {
     /* ignore */
@@ -49,7 +47,6 @@ function loadFromDisk(): void {
 
 function persist(cache: MirrorCache): void {
   memory = cache;
-  registerFlareHost(cache.baseUrl);
   if (!storePath) return;
   try {
     fs.mkdirSync(path.dirname(storePath), { recursive: true });
@@ -85,6 +82,14 @@ export function rememberAiravMirror(baseUrl: string, from?: string): void {
     updatedAt: new Date().toISOString(),
     expiresAt: Date.now() + TTL_MS,
   });
+}
+
+/** 仅读缓存，不触发网络发现（连通探测用） */
+export function getCachedAiravCnBase(): string | null {
+  if (memory?.baseUrl && memory.expiresAt > Date.now()) return memory.baseUrl;
+  loadFromDisk();
+  if (memory?.baseUrl && memory.expiresAt > Date.now()) return memory.baseUrl;
+  return null;
 }
 
 /** 规范化为 https://host/cn （airav 中文站） */
@@ -178,10 +183,11 @@ async function looksLikeAiravSite(base: string): Promise<boolean> {
   const b = normalizeAiravCnBase(base);
   if (!b) return false;
   const page = await fetchPage(b, {
-    timeoutMs: 18000,
+    timeoutMs: 15000,
     referer: `${b}/`,
     sourceId: "airav_io",
     strictTimeout: true,
+    viaFlare: false,
   });
   if (!page?.html) return false;
   // 跟跳后可能又换了域名
@@ -192,8 +198,7 @@ async function looksLikeAiravSite(base: string): Promise<boolean> {
     html.length > 2000 &&
     !/Just a moment|cf-browser-verification/i.test(html.slice(0, 2500));
   if (ok && landed !== b) {
-    // 探测页自己又跳了一次
-    registerFlareHost(landed);
+    rememberAiravMirror(landed, b);
   }
   return ok;
 }
@@ -209,10 +214,11 @@ async function discoverOnce(preferred?: string): Promise<string> {
   const candidates: string[] = [];
   for (const seed of uniq) {
     const page = await fetchPage(seed, {
-      timeoutMs: 22000,
+      timeoutMs: 18000,
       referer: seed.endsWith("/") ? seed : `${seed}/`,
       sourceId: "airav_io",
       strictTimeout: true,
+      viaFlare: false,
     });
     if (!page) continue;
     const targets = extractAiravRedirectTargets(page.html, page.finalUrl, seed);
@@ -233,9 +239,10 @@ async function discoverOnce(preferred?: string): Promise<string> {
   for (const cand of ranked) {
     if (await looksLikeAiravSite(cand)) {
       const page = await fetchPage(cand, {
-        timeoutMs: 15000,
+        timeoutMs: 12000,
         sourceId: "airav_io",
         strictTimeout: true,
+        viaFlare: false,
       });
       const finalBase =
         normalizeAiravCnBase(page?.finalUrl || cand) || cand;
@@ -261,7 +268,6 @@ export async function resolveAiravCnBase(opts?: {
   forceRefresh?: boolean;
 }): Promise<string> {
   if (!opts?.forceRefresh && memory && memory.expiresAt > Date.now()) {
-    registerFlareHost(memory.baseUrl);
     return memory.baseUrl;
   }
   if (resolving) return resolving;

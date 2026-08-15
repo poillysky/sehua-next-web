@@ -31,13 +31,7 @@ export type ScrapeFn = (code: string) => Promise<PartialFromSource | null>;
 
 export const SOURCE_RUNNERS: Partial<Record<SourceId, ScrapeFn>> = {
   dmm: (code) => scrapeDmm(code),
-  mgstage: async (code) => {
-    const direct = await scrapeMgstage(code);
-    if (direct?.title || direct?.poster) return direct;
-    // 官方 CloudFront 403 时用 LibreDMM 顶 mgstage 槽位
-    const fb = await scrapeLibreDmm(code);
-    return fb?.title || fb?.poster ? { ...fb, source: "mgstage" } : null;
-  },
+  mgstage: (code) => scrapeMgstage(code),
   libredmm: (code) => scrapeLibreDmm(code),
   javlibrary: (code) => scrapeJavlibrary(code),
   avbase: (code) => scrapeAvbase(code),

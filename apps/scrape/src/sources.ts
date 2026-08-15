@@ -44,45 +44,49 @@ export type SourceDef = {
   group: string;
   defaultUrl: string;
   probePath?: string;
+  /** direct=直连 | proxy=代理直连 | proxy_flare=代理过盾 */
+  access?: "direct" | "proxy" | "proxy_flare";
 };
 
 export const SOURCE_CATALOG: SourceDef[] = [
-  { id: "airav_io", name: "Airav_io", group: "av", defaultUrl: "https://airav.io/cn", probePath: "/" },
-  { id: "avbase", name: "Avbase", group: "av", defaultUrl: "https://www.avbase.net", probePath: "/" },
-  { id: "avmoo", name: "Avmoo", group: "av", defaultUrl: "https://avmoo.shop", probePath: "/cn" },
-  { id: "avsox", name: "Avsox", group: "uncensored", defaultUrl: "https://avsox.click", probePath: "/cn" },
-  { id: "carib", name: "Carib", group: "uncensored", defaultUrl: "https://www.caribbeancom.com", probePath: "/" },
-  { id: "dmm", name: "Dmm", group: "av", defaultUrl: "https://www.dmm.co.jp", probePath: "/" },
-  { id: "fc2", name: "Fc2", group: "fc2", defaultUrl: "https://adult.contents.fc2.com", probePath: "/" },
-  { id: "fc2_hub", name: "Fc2_hub", group: "fc2", defaultUrl: "https://javten.com", probePath: "/" },
-  { id: "fd2ppv", name: "Fd2ppv", group: "fc2", defaultUrl: "https://fd2ppv.cc", probePath: "/" },
-  { id: "freejavbt", name: "Freejavbt", group: "av", defaultUrl: "https://freejavbt.com", probePath: "/" },
-  { id: "jav321", name: "Jav321", group: "av", defaultUrl: "https://www.jav321.com", probePath: "/" },
-  { id: "javbus", name: "Javbus", group: "av", defaultUrl: "https://www.javbus.com", probePath: "/" },
-  { id: "javdb", name: "Javdb", group: "av", defaultUrl: "https://javdb.com", probePath: "/" },
-  { id: "javlibrary", name: "Javlibrary", group: "av", defaultUrl: "https://www.javlibrary.com/cn", probePath: "/" },
-  { id: "madou", name: "Madou", group: "chinese", defaultUrl: "https://madou.club", probePath: "/" },
-  { id: "madouqu", name: "Madouqu", group: "chinese", defaultUrl: "https://madouqu.com", probePath: "/" },
+  { id: "airav_io", name: "Airav_io", group: "av", defaultUrl: "https://airav.io/cn", probePath: "/", access: "proxy" },
+  { id: "avbase", name: "Avbase", group: "av", defaultUrl: "https://www.avbase.net", probePath: "/", access: "proxy" },
+  { id: "avmoo", name: "Avmoo", group: "av", defaultUrl: "https://avmoo.shop", probePath: "/cn", access: "proxy_flare" },
+  { id: "avsox", name: "Avsox", group: "uncensored", defaultUrl: "https://avsox.click", probePath: "/cn", access: "proxy_flare" },
+  { id: "carib", name: "Carib", group: "uncensored", defaultUrl: "https://www.caribbeancom.com", probePath: "/", access: "proxy" },
+  { id: "dmm", name: "Dmm", group: "av", defaultUrl: "https://www.dmm.co.jp", probePath: "/", access: "proxy" },
+  { id: "fc2", name: "Fc2", group: "fc2", defaultUrl: "https://adult.contents.fc2.com", probePath: "/", access: "proxy" },
+  { id: "fc2_hub", name: "Fc2_hub", group: "fc2", defaultUrl: "https://javten.com", probePath: "/", access: "proxy_flare" },
+  { id: "fd2ppv", name: "Fd2ppv", group: "fc2", defaultUrl: "https://fd2ppv.cc", probePath: "/", access: "proxy_flare" },
+  { id: "freejavbt", name: "Freejavbt", group: "av", defaultUrl: "https://freejavbt.com", probePath: "/", access: "proxy" },
+  { id: "jav321", name: "Jav321", group: "av", defaultUrl: "https://www.jav321.com", probePath: "/", access: "proxy" },
+  { id: "javbus", name: "Javbus", group: "av", defaultUrl: "https://www.javbus.com", probePath: "/", access: "proxy" },
+  { id: "javdb", name: "Javdb", group: "av", defaultUrl: "https://javdb.com", probePath: "/", access: "proxy_flare" },
+  { id: "javlibrary", name: "Javlibrary", group: "av", defaultUrl: "https://www.javlibrary.com/cn", probePath: "/", access: "proxy_flare" },
+  { id: "madou", name: "Madou", group: "chinese", defaultUrl: "https://madou.club", probePath: "/", access: "proxy" },
+  { id: "madouqu", name: "Madouqu", group: "chinese", defaultUrl: "https://madouqu.com", probePath: "/", access: "proxy" },
   {
     id: "xiao_huang_shu",
     name: "Xiao_huang_shu",
     group: "chinese",
     defaultUrl: "https://xchina.co",
     probePath: "/",
+    access: "proxy",
   },
-  { id: "mgstage", name: "Mgstage", group: "av", defaultUrl: "https://www.mgstage.com", probePath: "/" },
+  { id: "mgstage", name: "Mgstage", group: "av", defaultUrl: "https://www.mgstage.com", probePath: "/", access: "proxy_flare" },
   {
     id: "libredmm",
     name: "LibreDMM",
     group: "av",
     defaultUrl: "https://www.libredmm.com",
     probePath: "/",
+    access: "proxy",
   },
-  { id: "miss_av", name: "Miss_av", group: "av", defaultUrl: "https://missav123.com", probePath: "/" },
-  { id: "sevenmmtv", name: "7mmtv", group: "av", defaultUrl: "https://7mmtv.sx/zh", probePath: "/" },
-  { id: "iqqtv", name: "Iqqtv", group: "av", defaultUrl: "https://iqq5.xyz/cn", probePath: "/" },
-  { id: "theporndb", name: "ThePornDB", group: "western", defaultUrl: "https://api.theporndb.net", probePath: "/" },
-  { id: "airav", name: "Airav", group: "av", defaultUrl: "https://www.airav.wiki", probePath: "/" },
+  { id: "miss_av", name: "Miss_av", group: "av", defaultUrl: "https://missav123.com", probePath: "/", access: "proxy_flare" },
+  { id: "sevenmmtv", name: "7mmtv", group: "av", defaultUrl: "https://7mmtv.sx/zh", probePath: "/", access: "proxy" },
+  { id: "iqqtv", name: "Iqqtv", group: "av", defaultUrl: "https://iqq5.xyz/cn", probePath: "/", access: "direct" },
+  { id: "theporndb", name: "ThePornDB", group: "western", defaultUrl: "https://api.theporndb.net", probePath: "/", access: "proxy" },
+  { id: "airav", name: "Airav", group: "av", defaultUrl: "https://www.airav.wiki", probePath: "/", access: "proxy" },
 ];
 
 export const KNOWN_SOURCES = new Set(SOURCE_CATALOG.map((s) => s.id));
@@ -125,15 +129,15 @@ export const DEFAULT_KIND_SOURCES: Record<
   japan_amateur: { meta: [...AMATEUR_META], cover: [...AMATEUR_META] },
   fc2: {
     meta: ["fc2", "fd2ppv", "javdb"],
-    cover: ["fc2", "fd2ppv", "freejavbt"],
+    cover: ["fc2", "fd2ppv", "javbus"],
   },
   china: {
     meta: ["madouqu", "madou", "xiao_huang_shu"],
-    cover: ["madouqu", "madou", "freejavbt"],
+    cover: ["madouqu", "madou", "javbus"],
   },
   western: {
     meta: ["airav_io", "javdb", "miss_av"],
-    cover: ["freejavbt", "airav_io", "javdb"],
+    cover: ["javbus", "airav_io", "javdb"],
   },
 };
 

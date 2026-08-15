@@ -649,9 +649,24 @@ def _reset_export_mutex_if_stale() -> None:
     log.warning("scrape export: reset stale in-process mutex")
 
 
+def _user_pause_hold_locked() -> bool:
+    """用户暂停 / 监控抑制：不可当假死强行打断。"""
+    msg = str(_state.get("message") or "")
+    return bool(
+        _state.get("paused")
+        or _control.get("pause_abort")
+        or _state.get("watchHold")
+        or _state.get("pauseSaved")
+        or msg == "paused"
+    )
+
+
 def _reconcile_stuck_export_state(*, persist: bool = False) -> None:
     """内存仍标记 running/building 但导出线程已不存在 → 清为 interrupted。
     另：worker 仍 alive 但 active=0 且长时间无进度（写完后假死 / 取消挂死）也强制解开。
+
+    注意：用户「暂停」必须排除在外——否则约 45s 后会清掉 paused，
+    等待中的 worker 会误以为已继续，自动恢复刮削（并被监控再次入队）。
     """
     global _last_progress_mono
     changed = False
@@ -661,60 +676,19 @@ def _reconcile_stuck_export_state(*, persist: bool = False) -> None:
         msg = str(_state.get("message") or "")
         active = int(_state.get("active") or 0)
         worker_alive = _export_worker_alive()
+        user_pause = _user_pause_hold_locked()
 
-        # 假死：还在 scraping/cancelling，但无人在刮且超过 45s 无事件
-        if (
-            worker_alive
-            and running
-            and active <= 0
-            and msg in ("scraping", "cancelling", "paused")
-            and _last_progress_mono > 0
-            and (time.monotonic() - _last_progress_mono) > 45.0
-        ):
-            force_zombie = True
-            log.warning(
-                "scrape export: zombie progress (msg=%s active=0 idle=%.0fs) → interrupt",
-                msg,
-                time.monotonic() - _last_progress_mono,
-            )
-
-        # 取消中且已无活动番号：不必再等被卡死的 future
-        if (
-            worker_alive
-            and running
-            and msg == "cancelling"
-            and active <= 0
-            and _last_progress_mono > 0
-            and (time.monotonic() - _last_progress_mono) > 8.0
-        ):
-            force_zombie = True
-            log.warning("scrape export: cancelling with active=0 → force stop")
-
-        if worker_alive and not force_zombie:
-            return
-        # 已 idle 但残留进行中展示（中断后未清 active）
-        if (
-            not running
-            and not force_zombie
-            and msg not in _STUCK_BUSY_MESSAGES
-        ):
-            ghost_active = (
-                int(_state.get("active") or 0) > 0
-                or bool(_state.get("activeCodes"))
-                or bool(_state.get("activeFastCodes"))
-                or bool(_state.get("activeSlowCodes"))
-            )
-            if not (ghost_active and not worker_alive):
+        # 用户暂停中：worker 活着就原样保留；线程已死则固化为可续跑的暂停态
+        if user_pause:
+            if worker_alive:
                 return
-            _clear_active_progress_locked()
-            _state["pendingFast"] = 0
-            _state["pendingSlow"] = 0
-            changed = True
-        else:
             _state.update(
                 {
                     "running": False,
                     "paused": False,
+                    "watchHold": True,
+                    "pauseSaved": True,
+                    "resumable": True,
                     "active": 0,
                     "activeCodes": [],
                     "activeFastCodes": [],
@@ -722,15 +696,83 @@ def _reconcile_stuck_export_state(*, persist: bool = False) -> None:
                     "pendingFast": 0,
                     "pendingSlow": 0,
                     "finishedAt": str(_state.get("finishedAt") or "") or _now_iso(),
-                    "message": (
-                        "cancelled"
-                        if msg == "cancelling" or _control.get("clearOnStop")
-                        else "interrupted"
-                    ),
+                    "message": "paused",
                 }
             )
+            _control["pause_abort"] = False
             _control["cancel"] = False
             changed = True
+        else:
+            # 假死：还在 scraping/cancelling，但无人在刮且超过 45s 无事件
+            # 切勿把 paused 算进来（暂停本就是 active=0 长期等待）
+            if (
+                worker_alive
+                and running
+                and active <= 0
+                and msg in ("scraping", "cancelling")
+                and _last_progress_mono > 0
+                and (time.monotonic() - _last_progress_mono) > 45.0
+            ):
+                force_zombie = True
+                log.warning(
+                    "scrape export: zombie progress (msg=%s active=0 idle=%.0fs) → interrupt",
+                    msg,
+                    time.monotonic() - _last_progress_mono,
+                )
+
+            # 取消中且已无活动番号：不必再等被卡死的 future
+            if (
+                worker_alive
+                and running
+                and msg == "cancelling"
+                and active <= 0
+                and _last_progress_mono > 0
+                and (time.monotonic() - _last_progress_mono) > 8.0
+            ):
+                force_zombie = True
+                log.warning("scrape export: cancelling with active=0 → force stop")
+
+            if worker_alive and not force_zombie:
+                return
+            # 已 idle 但残留进行中展示（中断后未清 active）
+            if (
+                not running
+                and not force_zombie
+                and msg not in _STUCK_BUSY_MESSAGES
+            ):
+                ghost_active = (
+                    int(_state.get("active") or 0) > 0
+                    or bool(_state.get("activeCodes"))
+                    or bool(_state.get("activeFastCodes"))
+                    or bool(_state.get("activeSlowCodes"))
+                )
+                if not (ghost_active and not worker_alive):
+                    return
+                _clear_active_progress_locked()
+                _state["pendingFast"] = 0
+                _state["pendingSlow"] = 0
+                changed = True
+            else:
+                _state.update(
+                    {
+                        "running": False,
+                        "paused": False,
+                        "active": 0,
+                        "activeCodes": [],
+                        "activeFastCodes": [],
+                        "activeSlowCodes": [],
+                        "pendingFast": 0,
+                        "pendingSlow": 0,
+                        "finishedAt": str(_state.get("finishedAt") or "") or _now_iso(),
+                        "message": (
+                            "cancelled"
+                            if msg == "cancelling" or _control.get("clearOnStop")
+                            else "interrupted"
+                        ),
+                    }
+                )
+                _control["cancel"] = False
+                changed = True
     if changed:
         _force_clear_export_file_lock()
         _reset_export_mutex_if_stale()
@@ -1870,6 +1912,7 @@ def _make_export_job(
         "mode": mode_key,
         "fields": export_fields,
         "localFields": local_norm,
+        "fromWatch": False,
     }
 
 
@@ -1941,6 +1984,7 @@ def _prime_state_for_job(job: dict[str, Any], *, keep_lock_message: str = "queue
             "currentDetail": None,
             "resumable": False,
             "pauseSaved": False,
+            "fromWatch": bool(job.get("fromWatch")),
         }
     )
     _clear_pending_detail_display()
@@ -2023,9 +2067,13 @@ def submit_export_job(
         fields=fields,
         local_fields=local_fields,
     )
+    job["fromWatch"] = bool(from_watch)
     start_now = False
     notify_pause = False
     with _meta_lock:
+        # 监控入队不得在用户暂停/抑制期间偷偷开跑
+        if from_watch and _user_pause_hold_locked():
+            return export_status()
         if not from_watch:
             _state["watchHold"] = False
         tid = str(job.get("taskId") or "").strip()
@@ -2254,6 +2302,61 @@ def _replace_task_result_counts(task_id: str) -> None:
         log.exception("replace scrape task counts failed task=%s", tid)
 
 
+def _set_task_watch_armed(task_id: str, armed: bool) -> None:
+    """任务级监控武装：仅手动跑完一轮后 True；暂停/取消后 False。"""
+    tid = str(task_id or "").strip()
+    if not tid:
+        return
+    try:
+        raw = settings_store.get_setting(settings_store.SCRAPE_KEY) or {}
+        tasks = scrape_profiles.normalize_scrape_tasks(
+            raw.get("scrapeTasks") or raw.get("scrape_tasks")
+        )
+        changed = False
+        want = bool(armed)
+        for t in tasks:
+            if str(t.get("id") or "") != tid:
+                continue
+            if bool(t.get("watchArmed")) != want:
+                t["watchArmed"] = want
+                t["updatedAt"] = _now_iso()
+                changed = True
+            break
+        if not changed:
+            return
+        next_raw = dict(raw)
+        next_raw["scrapeTasks"] = tasks
+        settings_store.put_setting(settings_store.SCRAPE_KEY, next_raw)
+    except Exception:
+        log.debug("set watchArmed failed task=%s", tid, exc_info=True)
+
+
+def _apply_watch_arm_after_finish(
+    task_id: str,
+    *,
+    end_message: str,
+    from_watch: bool,
+) -> None:
+    """手动开始并正常结束 → 武装监控；暂停/取消/中断 → 解除。监控自己跑完保持武装。"""
+    tid = str(task_id or "").strip()
+    if not tid:
+        return
+    msg = str(end_message or "").strip().lower()
+    if msg in ("paused", "cancelled", "interrupted") or msg.startswith("已暂停") or msg.startswith(
+        "已取消"
+    ) or msg.startswith("已中断"):
+        _set_task_watch_armed(tid, False)
+        return
+    if msg == "ok" or msg.startswith("完成"):
+        if not from_watch:
+            _set_task_watch_armed(tid, True)
+        # from_watch 完成：保持已有 armed，不额外改
+        return
+    # 其它异常结束：解除，避免监控空转重开
+    if not from_watch:
+        _set_task_watch_armed(tid, False)
+
+
 def _persist_task_result(
     task_id: str,
     *,
@@ -2393,6 +2496,7 @@ def _take_next_job_after_finish() -> dict[str, Any] | None:
         finished_snap = {
             "taskId": str(_state.get("taskId") or ""),
             "message": end_message,
+            "fromWatch": bool(_state.get("fromWatch")),
             "done": int(_state.get("done") or 0),
             "empty": int(_state.get("empty") or 0),
             "skipped": int(_state.get("skipped") or 0),
@@ -2525,6 +2629,11 @@ def _take_next_job_after_finish() -> dict[str, Any] | None:
                 empty_codes=list(finished_snap.get("emptyCodes") or []),
                 skipped_codes=list(finished_snap.get("skippedCodes") or []),
                 failed_codes=list(finished_snap.get("failedCodes") or []),
+            )
+            _apply_watch_arm_after_finish(
+                snap_tid,
+                end_message=str(finished_snap.get("message") or ""),
+                from_watch=bool(finished_snap.get("fromWatch")),
             )
     return next_job
 
@@ -4381,6 +4490,7 @@ def pause_export() -> dict[str, Any]:
         bits.append(f"打断 {flare_n} 个过盾")
     _push_event(phase="job", text=" · ".join(bits), level="warn")
     if tid:
+        _set_task_watch_armed(tid, False)
         _persist_task_result(
             tid,
             message="已暂停",
@@ -4416,6 +4526,7 @@ def resume_export() -> dict[str, Any]:
 def cancel_export(*, clear: bool = False, keep_queue: bool = False) -> dict[str, Any]:
     """取消当前导出。keep_queue=True 时保留后续排队任务（单卡取消）。"""
     with _meta_lock:
+        cancel_tid = str(_state.get("taskId") or "").strip()
         if not keep_queue:
             _state["queue"] = []
         if not _state.get("running"):
@@ -4427,8 +4538,11 @@ def cancel_export(*, clear: bool = False, keep_queue: bool = False) -> dict[str,
         _control["clearOnStop"] = bool(clear)
         _control["pause_abort"] = False
         _state["paused"] = False
+        _state["watchHold"] = True
         _state["message"] = "cancelling"
         _clear_active_progress_locked()
+    if cancel_tid:
+        _set_task_watch_armed(cancel_tid, False)
     _abort_all_inflight()
     with _pause_cv:
         _pause_cv.notify_all()
@@ -4572,8 +4686,22 @@ def _wait_if_paused_or_cancel() -> str:
         while True:
             if _control.get("cancel"):
                 return "cancel"
-            if not _state.get("paused"):
+            # 兼容：假死逻辑曾误清 paused，但 watchHold/pauseSaved 仍表示用户要停
+            still_hold = bool(
+                _state.get("paused")
+                or _control.get("pause_abort")
+                or (
+                    _state.get("watchHold")
+                    and _state.get("pauseSaved")
+                    and not _control.get("cancel")
+                )
+            )
+            if not still_hold:
                 return "continue"
+            if not _state.get("paused") and _state.get("watchHold"):
+                # 被误清 paused 时拉回暂停态，避免自动续跑
+                _state["paused"] = True
+                _control["pause_abort"] = True
             _state["message"] = "paused"
             _pause_cv.wait(timeout=0.5)
 

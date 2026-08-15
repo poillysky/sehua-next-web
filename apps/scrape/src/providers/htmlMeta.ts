@@ -1,6 +1,10 @@
 import * as cheerio from "cheerio";
 import { fetchPage, fetchText } from "../download.js";
 import { looksBlockedHtml, registerFlareHost } from "../flaresolverr.js";
+import {
+  rememberSiteMirror,
+  withSiteMirrorBase,
+} from "../siteMirror.js";
 import type { PartialFromSource } from "../sources.js";
 import { isJunkCoverUrl, isJunkTitle, isLikelyChinese, stdCode } from "../util.js";
 
@@ -105,6 +109,23 @@ function looksLikeAvFamily(html: string): boolean {
   );
 }
 
+/** Quasar 空壳：代理/curl 常见 ~1.5KB；有 movies 链则已渲染 */
+function isAvSpaShell(html: string): boolean {
+  if (!html) return true;
+  if (/\/cn\/movies\/|movie-card|识别码|識別碼/i.test(html)) return false;
+  return (
+    html.length < 4000 ||
+    /q-loading-bar|q-page-container/i.test(html)
+  );
+}
+
+/**
+ * avmoo/avsox 走 FlareSolverr 的原因：站点是 Quasar SPA，需要浏览器跑 JS。
+ * 不是 Cloudflare 挑战页；等待秒数宜短，靠 session 复用而不是反复拉长 wait。
+ */
+const AV_SPA_WAIT_S = 2;
+const AV_SPA_RETRY_WAIT_S = 3;
+
 function extractAvmooMirrors(html: string): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
@@ -172,14 +193,15 @@ async function resolveAvmooBase(preferred?: string): Promise<string> {
   const tryBase = async (base: string): Promise<string | null> => {
     const b = base.replace(/\/$/, "");
     if (!b || /tellme\.pw/i.test(b)) return null;
-    // 用搜索页探测，比 /cn 首页更接近真实刮削路径
+    // 仅未知镜像才探测；已知 avmoo.shop 已在上方短路，避免多余 Flare
     const page = await fetchPage(`${b}/cn/search/SONE-001`, {
       referer: `${b}/cn`,
       sourceId: "avmoo",
-      timeoutMs: 35000,
+      timeoutMs: 28000,
       strictTimeout: true,
       viaFlare: true,
-      waitInSeconds: 3,
+      // SPA 渲染等待（非 CF 过盾）
+      waitInSeconds: AV_SPA_WAIT_S,
     });
     if (!page?.html) return null;
     const landed = originOf(page.finalUrl) || b;
@@ -463,7 +485,14 @@ function parseFamilyDetail(
   };
 }
 
-/** AVSOX / AVMOO（新站 /cn/movies + Quasar 详情；兼容旧 /cn/movie） */
+/**
+ * AVSOX / AVMOO（新站 /cn/movies + Quasar 详情；兼容旧 /cn/movie）。
+ *
+ * 访问说明（重要）：
+ * - 代理能连上，但正文在前端 JS 里渲染；curl/undici 只有 ~1.5KB 壳。
+ * - FlareSolverr 在这里是「浏览器渲染」，不是 Cloudflare 挑战过盾。
+ * - 策略：首包带短 wait；空壳最多再补一枪；详情同理。避免 4～6 次长 wait 串行占锁。
+ */
 export async function scrapeAvsoxFamily(
   codeRaw: string,
   opts: { baseUrl: string; source: string; langPath?: string },
@@ -479,91 +508,66 @@ export async function scrapeAvsoxFamily(
   }
   if (!base) return null;
   registerFlareHost(base);
+  if (opts.source === "avmoo" || opts.source === "avsox") {
+    rememberSiteMirror(opts.source, base, opts.baseUrl);
+  }
 
   const searchUrl = `${base}/${lang}/search/${encodeURIComponent(code)}`;
-  let searchHtml = "";
-  let searchFinal = searchUrl;
-  {
-    // 同 FS session 内二次跳转（如先探测 /cn）时，搜索页也可能仍是 loading 壳
-    let searchPage = await fetchPage(searchUrl, {
+  const flareSearch = (url: string, wait: number, timeoutMs = 35000) =>
+    fetchPage(url, {
       referer: `${base}/${lang}`,
       sourceId: opts.source,
-      timeoutMs: 45000,
+      timeoutMs,
       viaFlare: true,
+      waitInSeconds: wait,
     });
-    if (
-      searchPage?.html &&
-      !pickFamilyMoviePath(searchPage.html, code, lang) &&
-      (/q-loading-bar|q-page-container/i.test(searchPage.html) ||
-        searchPage.html.length < 4000)
-    ) {
-      searchPage = await fetchPage(searchUrl, {
-        referer: `${base}/${lang}`,
-        sourceId: opts.source,
-        timeoutMs: 55000,
-        viaFlare: true,
-        waitInSeconds: 4,
-      });
-    }
-    if (!searchPage?.html) return null;
-    searchHtml = searchPage.html;
-    searchFinal = searchPage.finalUrl || searchUrl;
 
-    // 入口域名跳到 tellme 时，跟一次镜像再搜
-    if (
-      (opts.source === "avmoo" || opts.source === "avsox") &&
-      (/tellme\.pw/i.test(searchFinal) ||
-        /tellme\.pw/i.test(searchHtml.slice(0, 800)))
-    ) {
-      if (opts.source === "avmoo") {
-        avmooBaseCache = null;
-        base = await resolveAvmooBase(base);
-      } else {
-        avsoxBaseCache = null;
-        base = await resolveAvsoxBase(base);
-      }
-      const again = await fetchPage(
-        `${base}/${lang}/search/${encodeURIComponent(code)}`,
-        {
-          referer: `${base}/${lang}`,
-          sourceId: opts.source,
-          timeoutMs: 55000,
-          viaFlare: true,
-          waitInSeconds: 4,
-        },
-      );
-      if (!again?.html) return null;
-      searchHtml = again.html;
-      searchFinal = again.finalUrl || searchFinal;
+  // 1) 搜索：首包直接短 wait（省掉「空手 + 再打」的双倍排队）
+  let searchPage = await flareSearch(searchUrl, AV_SPA_WAIT_S);
+  if (
+    searchPage?.html &&
+    !pickFamilyMoviePath(searchPage.html, code, lang) &&
+    isAvSpaShell(searchPage.html)
+  ) {
+    searchPage = await flareSearch(searchUrl, AV_SPA_RETRY_WAIT_S, 40000);
+  }
+  if (!searchPage?.html) return null;
+  let searchHtml = searchPage.html;
+  let searchFinal = searchPage.finalUrl || searchUrl;
+
+  // 入口跳到 tellme 导航页：清缓存跟镜像后再搜一枪
+  if (
+    (opts.source === "avmoo" || opts.source === "avsox") &&
+    (/tellme\.pw/i.test(searchFinal) ||
+      /tellme\.pw/i.test(searchHtml.slice(0, 800)))
+  ) {
+    if (opts.source === "avmoo") {
+      avmooBaseCache = null;
+      base = await resolveAvmooBase(base);
+    } else {
+      avsoxBaseCache = null;
+      base = await resolveAvsoxBase(base);
     }
+    const againUrl = `${base}/${lang}/search/${encodeURIComponent(code)}`;
+    const again = await flareSearch(againUrl, AV_SPA_RETRY_WAIT_S, 40000);
+    if (!again?.html) return null;
+    searchHtml = again.html;
+    searchFinal = again.finalUrl || againUrl;
   }
 
-  let moviePath = pickFamilyMoviePath(searchHtml, code, lang);
-  if (!moviePath) {
-    // 最后再等一次搜索渲染
-    const again = await fetchPage(searchUrl, {
-      referer: `${base}/${lang}`,
-      sourceId: opts.source,
-      timeoutMs: 55000,
-      viaFlare: true,
-      waitInSeconds: 5,
-    });
-    if (again?.html) {
-      searchHtml = again.html;
-      moviePath = pickFamilyMoviePath(searchHtml, code, lang);
-    }
-  }
+  const moviePath = pickFamilyMoviePath(searchHtml, code, lang);
   if (!moviePath) return null;
 
   const detailUrl = absUrl(moviePath, base);
   if (!detailUrl) return null;
-  // SPA：搜索后同 session 跳详情需 wait，否则只拿到 loading 壳
+
+  // 2) 详情：同 session 短 wait；缺 h1/识别码再补等一轮
   let detailPage = await fetchPage(detailUrl, {
     referer: searchUrl,
     sourceId: opts.source,
-    timeoutMs: 55000,
+    timeoutMs: 35000,
     viaFlare: true,
-    waitInSeconds: 5,
+    waitInSeconds: AV_SPA_WAIT_S,
   });
   if (
     detailPage?.html &&
@@ -573,9 +577,9 @@ export async function scrapeAvsoxFamily(
     detailPage = await fetchPage(detailUrl, {
       referer: searchUrl,
       sourceId: opts.source,
-      timeoutMs: 60000,
+      timeoutMs: 40000,
       viaFlare: true,
-      waitInSeconds: 8,
+      waitInSeconds: AV_SPA_RETRY_WAIT_S,
     });
   }
   if (!detailPage?.html) return null;
@@ -593,7 +597,11 @@ export async function scrapeJavdb(
 ): Promise<PartialFromSource | null> {
   const code = stdCode(codeRaw);
   if (!code) return null;
-  const base = (opts?.baseUrl || "https://javdb.com").replace(/\/$/, "");
+  return withSiteMirrorBase(
+    "javdb",
+    opts?.baseUrl || "https://javdb.com",
+    async (baseRaw) => {
+  const base = baseRaw.replace(/\/$/, "");
   registerFlareHost(base);
 
   // locale=zh：UI/标签偏中文；片名多为日文。需 Flare；出口被站方封 IP 时整站空返回
@@ -800,6 +808,8 @@ export async function scrapeJavdb(
     productId,
     source: "javdb",
   };
+    },
+  );
 }
 
 /**
@@ -812,7 +822,11 @@ export async function scrapeMgstage(
 ): Promise<PartialFromSource | null> {
   const code = stdCode(codeRaw);
   if (!code) return null;
-  const base = (opts?.baseUrl || "https://www.mgstage.com").replace(/\/$/, "");
+  return withSiteMirrorBase(
+    "mgstage",
+    opts?.baseUrl || "https://www.mgstage.com",
+    async (baseRaw) => {
+  const base = baseRaw.replace(/\/$/, "");
   registerFlareHost(base);
 
   const detailUrls = [
@@ -961,6 +975,16 @@ export async function scrapeMgstage(
     poster: cover,
     source: "mgstage",
   };
+    },
+  );
+}
+
+/** javten：打开 .com 后 CF 常 302 到 /en（或 /cn）；跟语言前缀再搜。 */
+function javtenLangFromUrl(url: string): string | null {
+  const m = String(url || "").match(
+    /javten\.com\/(en|cn|ja|tw|ko)(?:\/|$|\?)/i,
+  );
+  return m ? m[1]!.toLowerCase() : null;
 }
 
 export async function scrapeFc2Hub(
@@ -972,25 +996,33 @@ export async function scrapeFc2Hub(
   if (!m) return null;
   const id = m[1]!;
   const displayCode = `FC2-PPV-${id}`;
-  const base = (opts?.baseUrl || "https://javten.com").replace(/\/$/, "");
+  return withSiteMirrorBase(
+    "fc2_hub",
+    opts?.baseUrl || "https://javten.com",
+    async (baseRaw) => {
+  const base = baseRaw.replace(/\/$/, "");
   registerFlareHost(base);
 
+  // 对齐手机：CF 后常落 /en。不先单独打首页（Flare 多一枪极易拖死）；
+  // 直接优先 /en/search，referer 用 /en；失败再 cn / 无前缀。
   const searchUrls = [
-    `${base}/search?kw=${encodeURIComponent(id)}`,
-    `${base}/cn/search?kw=${encodeURIComponent(id)}`,
     `${base}/en/search?kw=${encodeURIComponent(id)}`,
+    `${base}/cn/search?kw=${encodeURIComponent(id)}`,
+    `${base}/search?kw=${encodeURIComponent(id)}`,
   ];
+  const homeReferer = `${base}/en`;
 
   let detailUrl: string | null = null;
   let html: string | null = null;
 
   for (const searchUrl of searchUrls) {
     const searchPage = await fetchPage(searchUrl, {
-      referer: `${base}/`,
+      referer: homeReferer,
       sourceId: "fc2_hub",
       viaFlare: true,
-      waitInSeconds: 5,
-      timeoutMs: 45000,
+      waitInSeconds: 3,
+      timeoutMs: 40000,
+      strictTimeout: true,
     });
     if (!searchPage?.html) continue;
     if (
@@ -1003,6 +1035,10 @@ export async function scrapeFc2Hub(
 
     // MetaTube：搜索常 302 到 /video/{vid}/id{number}/；fetch 跟随后 finalUrl 即详情
     const landed = searchPage.finalUrl || "";
+    const landedLang = javtenLangFromUrl(landed);
+    if (landedLang === "tw" || landedLang === "ko") {
+      continue;
+    }
     if (new RegExp(`/video/\\d+/id${id}\\b`, "i").test(landed)) {
       detailUrl = landed;
       html = searchPage.html;
@@ -1037,8 +1073,9 @@ export async function scrapeFc2Hub(
       referer: searchUrl,
       sourceId: "fc2_hub",
       viaFlare: true,
-      waitInSeconds: 4,
-      timeoutMs: 45000,
+      waitInSeconds: 3,
+      timeoutMs: 40000,
+      strictTimeout: true,
     });
     if (!detailPage?.html) continue;
     if (
@@ -1164,6 +1201,8 @@ export async function scrapeFc2Hub(
     productId: id,
     source: "fc2_hub",
   };
+    },
+  );
 }
 
 async function scrapeByPaths(
@@ -1391,7 +1430,11 @@ export async function scrapeMadou(
   // 麻豆番号常 4 位前导零；stdCode 会吞零，这里单独规范化
   const code = madouStdCode(codeRaw);
   if (!code) return null;
-  const base = (opts?.baseUrl || "https://madou.club").replace(/\/$/, "");
+  return withSiteMirrorBase(
+    "madou",
+    opts?.baseUrl || "https://madou.club",
+    async (baseRaw) => {
+  const base = baseRaw.replace(/\/$/, "");
   registerFlareHost(base);
 
   // 站内搜索对「MD-0362」常 0 命中，无连字符「MD0362」才有结果
@@ -1449,6 +1492,8 @@ export async function scrapeMadou(
     if (parsed?.title || parsed?.poster) return parsed;
   }
   return null;
+    },
+  );
 }
 
 export async function scrapeMadouqu(
@@ -1458,7 +1503,11 @@ export async function scrapeMadouqu(
   // 与 madou 相同：保留前导零；本站搜索反而「带横杠」更准
   const code = madouStdCode(codeRaw);
   if (!code) return null;
-  const base = (opts?.baseUrl || "https://madouqu.com").replace(/\/$/, "");
+  return withSiteMirrorBase(
+    "madouqu",
+    opts?.baseUrl || "https://madouqu.com",
+    async (baseRaw) => {
+  const base = baseRaw.replace(/\/$/, "");
   registerFlareHost(base);
   const compact = madouCompactCode(code);
   const want = compact.toLowerCase();
@@ -1470,9 +1519,8 @@ export async function scrapeMadouqu(
     const detailPage = await fetchPage(url, {
       referer,
       sourceId: "madouqu",
-      viaFlare: true,
-      waitInSeconds: 4,
-      timeoutMs: 60000,
+      viaFlare: false,
+      timeoutMs: 25000,
     });
     const html = detailPage?.html || null;
     if (!html || html.length < 800) return null;
@@ -1493,9 +1541,8 @@ export async function scrapeMadouqu(
     const searchPage = await fetchPage(searchUrl, {
       referer: `${base}/`,
       sourceId: "madouqu",
-      viaFlare: true,
-      waitInSeconds: 3,
-      timeoutMs: 60000,
+      viaFlare: false,
+      timeoutMs: 25000,
     });
     const search = searchPage?.html || null;
     if (!search) continue;
@@ -1540,6 +1587,8 @@ export async function scrapeMadouqu(
     if (hit?.title || hit?.poster) return hit;
   }
   return null;
+    },
+  );
 }
 
 function parseMadouquDetail(
@@ -1620,10 +1669,25 @@ function parseMadouquDetail(
       $(".entry-content img.size-full, .entry-content img.wp-image-")
         .first()
         .attr("src") ||
+        $(".entry-content img.size-full, .entry-content img.wp-image-")
+          .first()
+          .attr("data-src") ||
         $(".entry-content img")
           .filter((_, el) => {
-            const s = String($(el).attr("src") || "");
-            return /uploads\//i.test(s) && !/logo|avatar/i.test(s);
+            const s =
+              String($(el).attr("src") || "") ||
+              String($(el).attr("data-src") || "") ||
+              String($(el).attr("data-lazy-src") || "");
+            return /uploads\//i.test(s) && !/logo|avatar|emoji/i.test(s);
+          })
+          .first()
+          .attr("data-src") ||
+        $(".entry-content img")
+          .filter((_, el) => {
+            const s =
+              String($(el).attr("src") || "") ||
+              String($(el).attr("data-src") || "");
+            return /uploads\//i.test(s) && !/logo|avatar|emoji/i.test(s);
           })
           .first()
           .attr("src"),
@@ -1843,7 +1907,7 @@ function parseXchinaDetail(
 
 /**
  * 小黄书 / xchina.co
- * 搜索 /search.html?keyword= → /video/id-{hex}.html；强制 Flare。
+ * 搜索 /search.html?keyword= → /video/id-{hex}.html；代理直连（一般无 CF）。
  * 番号保留前导零；勿把搜索页 og:title「站内搜索」当元数据。
  */
 export async function scrapeXchina(
@@ -1853,8 +1917,11 @@ export async function scrapeXchina(
   const code = xchinaCode(codeRaw);
   if (!code) return null;
   const compact = xchinaCompact(code);
-  const base = (opts?.baseUrl || "https://xchina.co").replace(/\/$/, "");
-  registerFlareHost(base);
+  return withSiteMirrorBase(
+    "xiao_huang_shu",
+    opts?.baseUrl || "https://xchina.co",
+    async (baseRaw) => {
+  const base = baseRaw.replace(/\/$/, "");
 
   const searchUrls = [
     `${base}/search.html?keyword=${encodeURIComponent(code)}`,
@@ -1870,9 +1937,8 @@ export async function scrapeXchina(
     const searchPage = await fetchPage(searchUrl, {
       referer: `${base}/`,
       sourceId: "xiao_huang_shu",
-      viaFlare: true,
-      waitInSeconds: 4,
-      timeoutMs: 60000,
+      viaFlare: false,
+      timeoutMs: 25000,
     });
     const html = searchPage?.html || "";
     if (!html || looksBlockedHtml(html)) continue;
@@ -1881,43 +1947,71 @@ export async function scrapeXchina(
     let best = "";
     $(".list.video-list .item.video, .item.video").each((_, el) => {
       if (best) return;
-      const text = stripTags($(el).text());
-      const title =
-        stripTags($(el).find(".title a, a[title]").first().attr("title") || "") ||
-        stripTags($(el).find(".title a").first().text());
-      const blob = `${title} ${text}`;
       const href =
         $(el).find("a[href*='/video/id-']").first().attr("href") ||
         $(el).find("a[href*='/video/']").first().attr("href") ||
         "";
       if (!href || !/\/video\/id-/i.test(href)) return;
-      if (
-        codeKey(blob).includes(want) ||
-        new RegExp(compact, "i").test(blob) ||
-        new RegExp(code.replace(/-/g, "[-_]?"), "i").test(blob)
-      ) {
-        best = href;
-      }
+      // 闭包里的 $ 才是本页；重绑匹配函数
+      const tags = $(el)
+        .find(".tags > div")
+        .map((_, node) => codeKey(stripTags($(node).text())))
+        .get()
+        .filter(Boolean);
+      const text = stripTags($(el).text());
+      const title =
+        stripTags($(el).find(".title a, a[title]").first().attr("title") || "") ||
+        stripTags($(el).find(".title a").first().text());
+      const blob = `${title} ${text}`;
+      const boundary = new RegExp(
+        `(?:^|[^A-Z0-9])${compact.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:[^A-Z0-9]|$)`,
+        "i",
+      );
+      const hit =
+        tags.some((t) => t === want) ||
+        codeKey(blob) === want ||
+        boundary.test(blob);
+      if (hit) best = href;
     });
     if (!best) {
-      // 回退：页内首个带番号的 /video/id-
-      const m = html.match(
-        new RegExp(
-          `href=["']([^"']*/video/id-[^"']+)["'][\\s\\S]{0,600}?${compact}`,
-          "i",
-        ),
-      ) ||
+      // 回退：页内紧邻 compact 的 /video/id-（仍要求边界，避免 MDSR 误命中）
+      const esc = compact.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const m =
         html.match(
           new RegExp(
-            `${compact}[\\s\\S]{0,600}?href=["']([^"']*/video/id-[^"']+)["']`,
+            `href=["']([^"']*/video/id-[^"']+)["'][\\s\\S]{0,600}?(?:^|[^A-Za-z0-9])${esc}(?:[^A-Za-z0-9]|$)`,
+            "i",
+          ),
+        ) ||
+        html.match(
+          new RegExp(
+            `(?:^|[^A-Za-z0-9])${esc}(?:[^A-Za-z0-9]|$)[\\s\\S]{0,600}?href=["']([^"']*/video/id-[^"']+)["']`,
             "i",
           ),
         );
       best = m?.[1] || "";
     }
-    if (!best && $(".item.video a[href*='/video/id-']").length === 1) {
-      best =
-        $(".item.video a[href*='/video/id-']").first().attr("href") || "";
+    // 仅一条结果时也必须番号匹配，禁止盲取
+    if (!best && $(".item.video").length === 1) {
+      const el = $(".item.video").get(0);
+      if (el) {
+        const tags = $(el)
+          .find(".tags > div")
+          .map((_, node) => codeKey(stripTags($(node).text())))
+          .get()
+          .filter(Boolean);
+        const boundary = new RegExp(
+          `(?:^|[^A-Z0-9])${compact.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:[^A-Z0-9]|$)`,
+          "i",
+        );
+        if (
+          tags.some((t) => t === want) ||
+          boundary.test(stripTags($(el).text()))
+        ) {
+          best =
+            $(el).find("a[href*='/video/id-']").first().attr("href") || "";
+        }
+      }
     }
     if (!best) continue;
     detailUrl = absUrl(best, searchPage?.finalUrl || base);
@@ -1929,9 +2023,8 @@ export async function scrapeXchina(
   const detailPage = await fetchPage(detailUrl, {
     referer: `${base}/search.html`,
     sourceId: "xiao_huang_shu",
-    viaFlare: true,
-    waitInSeconds: 3,
-    timeoutMs: 60000,
+    viaFlare: false,
+    timeoutMs: 25000,
   });
   const detailHtml = detailPage?.html || "";
   if (!detailHtml || looksBlockedHtml(detailHtml)) return null;
@@ -1939,5 +2032,7 @@ export async function scrapeXchina(
     detailHtml,
     detailPage?.finalUrl || detailUrl,
     code,
+  );
+    },
   );
 }

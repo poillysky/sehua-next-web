@@ -551,7 +551,9 @@ export function ScrapeTaskModal({
                 <span className="scrape-task-modal__watch-text">
                   <span className="scrape-task-modal__watch-title">监控</span>
                   <span className="scrape-task-modal__watch-sub mute">
-                    {draft.watchEnabled ? "定期增量" : "已关闭"}
+                    {draft.watchEnabled
+                      ? "开启后须手动开始并跑完一轮才自动增量"
+                      : "已关闭"}
                   </span>
                 </span>
                 <span className="scrape-src-card__switch scrape-task-modal__watch-switch">

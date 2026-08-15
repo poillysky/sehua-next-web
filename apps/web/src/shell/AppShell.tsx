@@ -178,9 +178,9 @@ function BottomNav({ navItems, isTabbed, tabCtx }: BottomNavProps) {
           const distance = isTabbed ? Math.abs(progress - index) : Infinity;
           const activity = isTabbed ? Math.max(0, 1 - distance) : 0;
           const isNearest = isTabbed ? tabCtx?.activeTab === tab : false;
-          const opacity = 0.45 + activity * 0.55;
+          const opacity = 0.92 + activity * 0.08;
           const scale = 1 + activity * 0.06;
-          const stroke = 1.75 + activity * 0.5;
+          const stroke = 2 + activity * 0.35;
 
           if (isTabbed) {
             return (

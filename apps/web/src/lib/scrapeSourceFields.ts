@@ -35,7 +35,7 @@ export const SOURCE_FIELD_CAPS: Record<string, ReadonlySet<SourceFieldCap>> = {
   fc2: C("cover", "titleJa", "outline", "tags", "studio"),
   fc2_hub: C("cover", "titleZh", "titleJa", "outline", "tags", "studio"),
   fd2ppv: C("cover", "titleJa", "actors", "tags", "studio"),
-  freejavbt: C("cover", "titleJa", "actors", "tags", "series"),
+  freejavbt: C("titleJa", "actors", "tags", "series"),
   jav321: C(
     "cover",
     "titleJa",
