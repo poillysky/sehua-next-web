@@ -38,6 +38,16 @@ function loadFromDisk(): void {
   try {
     const raw = JSON.parse(fs.readFileSync(storePath, "utf8")) as MirrorCache;
     if (raw?.baseUrl && Number(raw.expiresAt) > Date.now()) {
+      // 清掉历史误缓存的官方入口，否则 NAS 会一直优先打 airav.io → 过盾
+      if (isAiravOfficialBase(raw.baseUrl)) {
+        memory = null;
+        try {
+          fs.unlinkSync(storePath);
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
       memory = raw;
     }
   } catch {
@@ -71,10 +81,31 @@ export function invalidateAiravMirror(): void {
   }
 }
 
+/** 官方入口（常挂 CF）；缓存它会让 NAS Linux curl 永远落到过盾 */
+export function isAiravOfficialHost(hostname: string): boolean {
+  const h = String(hostname || "")
+    .replace(/^www\./i, "")
+    .toLowerCase();
+  return h === "airav.io";
+}
+
+export function isAiravOfficialBase(url: string): boolean {
+  try {
+    return isAiravOfficialHost(new URL(normalizeAiravCnBase(url) || url).hostname);
+  } catch {
+    return false;
+  }
+}
+
 /** 刮削过程中跟到新域名时立刻记下来 */
 export function rememberAiravMirror(baseUrl: string, from?: string): void {
   const n = normalizeAiravCnBase(baseUrl);
   if (!n) return;
+  // 勿把官方站写入缓存：本机 Windows curl 能过，NAS 容器 curl 常被挑战 → 显示永远「过盾」
+  if (isAiravOfficialBase(n)) {
+    console.log(`[scrape] airav skip cache official ${n}`);
+    return;
+  }
   if (memory?.baseUrl === n && memory.expiresAt > Date.now()) return;
   persist({
     baseUrl: n,

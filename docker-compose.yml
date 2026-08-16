@@ -6,7 +6,9 @@
 #     data/
 #     scrape-data/
 #     config/
-#       app.json / app.local.json / scrape.env   # scrape.env 建议从仓库 config/scrape.env.example 拷
+#       app.json / app.local.json / scrape.env
+#       scrape-meta/   # 本机导出的镜像缓存（airav/iqqtv/site-mirrors），与本机对齐 curl 直链
+#                      # 勿放 cf-clearance.json（绑出口 IP，拷了也没用）
 #
 # 内存目标：本容器持续 RSS 尽量 <1G（不含独立 flaresolverr）。
 # 默认：快 2 / 慢 1；同站并行 1；scrape Node 堆 512MB。

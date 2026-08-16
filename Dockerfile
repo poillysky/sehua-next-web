@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # Single image: web (3020) + api (8020) + scrape (9210)
-# Build: docker build -t sehua-next-web:1.0.11 .
+# Build: docker build -t sehua-next-web:1.0.12 .
 
 # ─── Web build ─────────────────────────────────────────────
 FROM node:22-bookworm-slim AS web-builder
@@ -43,14 +43,35 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     SCRAPE_MAX_IMAGE_BYTES=5000000 \
     NODE_OPTIONS=--max-old-space-size=512 \
     FLARESOLVERR_MAX_SESSIONS_WARN=1 \
-    FLARESOLVERR_MAX_SESSIONS_CRITICAL=2
+    FLARESOLVERR_MAX_SESSIONS_CRITICAL=2 \
+    SCRAPE_CURL_BIN=curl_chrome110 \
+    LD_LIBRARY_PATH=/usr/local/lib
 
 # Node 22 + supervisord + sharp (libvips) libs
+# + curl-impersonate：NAS Linux 普通 curl(OpenSSL) TLS 指纹易被 CF 拦；本机 Windows curl(Schannel) 常能过
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl gnupg supervisor \
       libvips42 \
+      libnss3 libnspr4 \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
+    && set -eux \
+    && curl -fsSL -o /tmp/curl-impersonate.tgz \
+         "https://github.com/lwthiker/curl-impersonate/releases/download/v0.6.1/curl-impersonate-v0.6.1.x86_64-linux-gnu.tar.gz" \
+    && mkdir -p /opt/curl-impersonate \
+    && tar -xzf /tmp/curl-impersonate.tgz -C /opt/curl-impersonate \
+    && rm -f /tmp/curl-impersonate.tgz \
+    && if [ -d /opt/curl-impersonate/bin ]; then CI_ROOT=/opt/curl-impersonate/bin; \
+       elif [ -d /opt/curl-impersonate/curl-impersonate-v0.6.1.x86_64-linux-gnu ]; then \
+         CI_ROOT=/opt/curl-impersonate/curl-impersonate-v0.6.1.x86_64-linux-gnu; \
+       else CI_ROOT=/opt/curl-impersonate; fi \
+    && find "$CI_ROOT" -maxdepth 2 -type f \( -name 'curl_chrome*' -o -name 'curl-impersonate*' \) -exec cp -a {} /usr/local/bin/ \; \
+    && find "$CI_ROOT" -maxdepth 2 -type f \( -name 'libcurl-impersonate*' -o -name '*.so*' \) -exec cp -a {} /usr/local/lib/ \; \
+    && chmod +x /usr/local/bin/curl_chrome* /usr/local/bin/curl-impersonate* 2>/dev/null || true \
+    && ldconfig \
+    && (command -v curl_chrome110 >/dev/null && curl_chrome110 --version | head -n1 || \
+        command -v curl_chrome99 >/dev/null && curl_chrome99 --version | head -n1 || \
+        echo "curl-impersonate install: bin check skipped") \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

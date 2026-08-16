@@ -85,16 +85,16 @@ docker compose up -d
 ### 本地
 
 ```bash
-docker build -t sehua-next-web:1.0.11 .
+docker build -t sehua-next-web:1.0.12 .
 docker run -d --name sehua \
   -p 3020:3020 \
   -v "$PWD/data:/app/data" \
   -v sehua-scrape:/app/apps/scrape/data \
-  sehua-next-web:1.0.11
+  sehua-next-web:1.0.12
 ```
 
 GitHub Actions（`.github/workflows/docker-publish.yml`）在推送 `v*` 标签或手动触发时，构建并推送到 Docker Hub：
 
-`poillysky/sehua-next-web:1.0.11`
+`poillysky/sehua-next-web:1.0.12`
 
 与 sehua / Anzai 对齐：用户名默认 `poillysky`；Token 读取 `DOCKERHUB_TOKEN`（或 `DOCKERHUB_PASSWORD` / Variables / 手动 Run workflow 粘贴）。

@@ -15,6 +15,21 @@ if [ ! -f "$ENV_FILE" ] && [ -f "$CFG_ENV" ]; then
   echo "[entrypoint] seeded scrape .env from $CFG_ENV"
 fi
 
+# 本机导出的镜像缓存 → NAS 对齐 curl 直链（勿拷 cf-clearance，绑出口 IP）
+META_DIR=/app/apps/scrape/data/meta
+SEED_DIR=/app/config/scrape-meta
+mkdir -p "$META_DIR"
+if [ -d "$SEED_DIR" ]; then
+  for f in airav-mirror.json iqqtv-mirror.json site-mirrors.json; do
+    if [ -f "$SEED_DIR/$f" ]; then
+      if [ ! -f "$META_DIR/$f" ] || [ "${SCRAPE_META_SEED_FORCE:-}" = "1" ]; then
+        cp "$SEED_DIR/$f" "$META_DIR/$f"
+        echo "[entrypoint] meta-seed $f"
+      fi
+    fi
+  done
+fi
+
 # 刮削 + maker-fs 并发会吃大量 FD；默认 1024 易触发
 # "unable to open database file" / Errno 24 Too many open files
 if command -v ulimit >/dev/null 2>&1; then

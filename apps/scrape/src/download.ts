@@ -256,8 +256,43 @@ async function fetchDirect(
 
 /**
  * curl 回退：部分站（airav 等）用 TLS 指纹拦 Node/undici，同代理下 Python/curl 仍 200。
- * 仅在 viaFlare:false 路径使用，避免拖慢可过盾站。
+ * NAS 容器默认 OpenSSL curl 指纹易被 CF 拦；优先 curl-impersonate（Chrome TLS）。
  */
+function resolveCurlBin(): { bin: string; impersonate: boolean } {
+  const envBin = String(process.env.SCRAPE_CURL_BIN || "").trim();
+  if (envBin) {
+    return {
+      bin: envBin,
+      impersonate: /chrome|impersonate|firefox|edge|safari/i.test(envBin),
+    };
+  }
+  if (process.platform === "win32") {
+    return { bin: "curl.exe", impersonate: false };
+  }
+  const candidates = [
+    "curl_chrome131",
+    "curl_chrome124",
+    "curl_chrome116",
+    "curl_chrome110",
+    "curl_chrome104",
+    "curl_chrome99",
+    "curl-impersonate-chrome",
+    "curl",
+  ];
+  for (const name of candidates) {
+    const abs = `/usr/local/bin/${name}`;
+    if (fs.existsSync(abs)) {
+      return {
+        bin: abs,
+        impersonate: name !== "curl",
+      };
+    }
+  }
+  return { bin: "curl", impersonate: false };
+}
+
+let loggedCurlBin = false;
+
 async function fetchViaCurl(
   url: string,
   opts: {
@@ -267,7 +302,13 @@ async function fetchViaCurl(
     userAgent?: string;
   },
 ): Promise<{ html: string; finalUrl: string } | null> {
-  const curlBin = process.platform === "win32" ? "curl.exe" : "curl";
+  const { bin: curlBin, impersonate } = resolveCurlBin();
+  if (!loggedCurlBin) {
+    loggedCurlBin = true;
+    console.log(
+      `[scrape] curl-bin=${curlBin} impersonate=${impersonate ? "yes" : "no"}`,
+    );
+  }
   const tmp = path.join(
     os.tmpdir(),
     `scrape-curl-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.body`,
@@ -276,10 +317,10 @@ async function fetchViaCurl(
     "-sS",
     "-L",
     "--compressed",
+    "--connect-timeout",
+    String(Math.max(3, Math.min(12, Math.ceil(opts.timeoutMs / 1000)))),
     "--max-time",
-    String(Math.max(3, Math.ceil(opts.timeoutMs / 1000))),
-    "-A",
-    opts.userAgent || UA,
+    String(Math.max(5, Math.ceil(opts.timeoutMs / 1000))),
     "-H",
     "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "-H",
@@ -289,6 +330,13 @@ async function fetchViaCurl(
     "-w",
     "%{http_code}\n%{url_effective}",
   ];
+  // impersonate 包装脚本自带 Chrome UA；乱盖 -A 会和 TLS 指纹不一致
+  // clearance 复用时必须用当时的 UA
+  if (opts.userAgent) {
+    args.push("-A", opts.userAgent);
+  } else if (!impersonate) {
+    args.push("-A", UA);
+  }
   const proxy = getActiveProxy();
   if (proxy) {
     args.push("-x", proxy);
@@ -309,6 +357,15 @@ async function fetchViaCurl(
       const child = spawn(curlBin, args, {
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],
+        env: {
+          ...process.env,
+          LD_LIBRARY_PATH: [
+            "/usr/local/lib",
+            String(process.env.LD_LIBRARY_PATH || ""),
+          ]
+            .filter(Boolean)
+            .join(":"),
+        },
       });
       let out = "";
       let err = "";
@@ -328,7 +385,7 @@ async function fetchViaCurl(
       });
       child.on("error", (e) => {
         console.log(
-          `[scrape] curl spawn fail host=${hostOf(url)} ${e.message}`,
+          `[scrape] curl spawn fail bin=${curlBin} host=${hostOf(url)} ${e.message}`,
         );
         resolve({ code: 1, stdout: "" });
       });
@@ -339,7 +396,7 @@ async function fetchViaCurl(
     const finalUrl = String(lines[1] || url).trim() || url;
     if (code !== 0 || httpCode < 200 || httpCode >= 400) {
       console.log(
-        `[scrape] curl fail host=${hostOf(url)} exit=${code} HTTP ${httpCode || "-"}`,
+        `[scrape] curl fail bin=${path.basename(curlBin)} host=${hostOf(url)} exit=${code} HTTP ${httpCode || "-"}`,
       );
       return null;
     }
@@ -356,12 +413,12 @@ async function fetchViaCurl(
     const html = decodeHtmlBytes(buf, "text/html; charset=utf-8");
     if (looksBlockedHtml(html)) {
       console.log(
-        `[scrape] curl blocked host=${hostOf(url)} ${html.length}b`,
+        `[scrape] curl blocked bin=${path.basename(curlBin)} host=${hostOf(url)} ${html.length}b`,
       );
       return null;
     }
     console.log(
-      `[scrape] curl-ok host=${hostOf(url)} ${html.length}b proxy=${proxy ? "on" : "off"}`,
+      `[scrape] curl-ok bin=${path.basename(curlBin)} host=${hostOf(url)} ${html.length}b proxy=${proxy ? "on" : "off"}`,
     );
     return { html, finalUrl };
   } catch (e) {
@@ -489,14 +546,33 @@ async function fetchPageUnlocked(
     ((flareOn && opts?.viaFlare === true && !hasClearance) ||
       (flareOn && shouldSkipDirect(host) && !hasClearance));
 
+  // adaptive：优先 curl（本机/NAS 同代理下 Node TLS 常被拦；NAS 上 Node 慢超时还会饿死 curl）
+  // 强制 viaFlare:true 时跳过，直接过盾
+  if (adaptive && opts?.viaFlare !== true) {
+    const curlBudget = Math.max(timeoutMs, hasClearance ? 12000 : 15000);
+    const viaCurl = await fetchViaCurl(url, {
+      timeoutMs: curlBudget,
+      referer: opts?.referer,
+      cookie,
+      userAgent,
+    });
+    if (viaCurl && viaCurl.html.length >= 500 && !looksBlockedHtml(viaCurl.html)) {
+      directSkipUntil.delete(host);
+      return { ...viaCurl, via: "curl" };
+    }
+  }
+
   if (!skipDirectFirst) {
-    const directTimeout = hasClearance
-      ? Math.max(timeoutMs, 12000)
-      : getActiveProxy() && hostNeedsFlare(url)
-        ? Math.max(timeoutMs, 15000)
-        : liveSession
-          ? Math.min(timeoutMs, 8000)
-          : timeoutMs;
+    // adaptive：Node 只短探，把时间留给上面的 curl / 后面的 Flare（避免 NAS 上 40s+ 空耗）
+    const directTimeout = adaptive
+      ? Math.min(timeoutMs, hasClearance ? 12000 : 8000)
+      : hasClearance
+        ? Math.max(timeoutMs, 12000)
+        : getActiveProxy() && hostNeedsFlare(url)
+          ? Math.max(timeoutMs, 15000)
+          : liveSession
+            ? Math.min(timeoutMs, 8000)
+            : timeoutMs;
     const direct = await fetchDirect(url, {
       timeoutMs: directTimeout,
       referer: opts?.referer,
@@ -542,20 +618,6 @@ async function fetchPageUnlocked(
       return { ...viaCurl, via: "curl" };
     }
     return null;
-  }
-
-  // adaptive 在直连失败后再 curl 一枪，仍失败才过盾
-  if (adaptive && opts?.viaFlare !== true) {
-    const viaCurl = await fetchViaCurl(url, {
-      timeoutMs,
-      referer: opts?.referer,
-      cookie,
-      userAgent,
-    });
-    if (viaCurl && viaCurl.html.length >= 500 && !looksBlockedHtml(viaCurl.html)) {
-      directSkipUntil.delete(host);
-      return { ...viaCurl, via: "curl" };
-    }
   }
 
   if (

@@ -28,6 +28,7 @@ import {
 import {
   extractAiravRedirectTargets,
   getCachedAiravCnBase,
+  isAiravOfficialBase,
   normalizeAiravCnBase,
   rememberAiravMirror,
   setAiravMirrorStorePath,
@@ -44,6 +45,7 @@ import {
   resolveSiteMirror,
   setSiteMirrorStorePath,
 } from "./siteMirror.js";
+import { seedPortableMetaFromConfig, exportPortableMeta } from "./metaSeed.js";
 import { createQueue, getMeta, scrapeOne, type Dirs } from "./scrape.js";
 import { defaultCookieFor } from "./sourceCookies.js";
 import { DEFAULT_KIND_SOURCES, SOURCE_CATALOG } from "./sources.js";
@@ -75,6 +77,8 @@ fs.mkdirSync(coversDir, { recursive: true });
 fs.mkdirSync(metaDir, { recursive: true });
 setClearanceStorePath(path.join(metaDir, "cf-clearance.json"));
 setNetworkStorePath(path.join(metaDir, "network.json"));
+// 本机/NAS 共用 config/scrape-meta 镜像种子（先于 mirror store 加载）
+seedPortableMetaFromConfig(metaDir, APP_ROOT);
 setAiravMirrorStorePath(path.join(metaDir, "airav-mirror.json"));
 setIqqtvMirrorStorePath(path.join(metaDir, "iqqtv-mirror.json"));
 setSiteMirrorStorePath(path.join(metaDir, "site-mirrors.json"));
@@ -164,6 +168,92 @@ app.get("/api/config/network", (_req, res) => {
       proxyUrl: getActiveProxy() || "",
     },
   });
+});
+
+/** 可移植镜像缓存（本机↔NAS）；不含 cf_clearance */
+app.get("/api/meta/portable", (_req, res) => {
+  const files: Record<string, unknown> = {};
+  for (const name of [
+    "airav-mirror.json",
+    "iqqtv-mirror.json",
+    "site-mirrors.json",
+  ] as const) {
+    const p = path.join(metaDir, name);
+    if (!fs.existsSync(p)) continue;
+    try {
+      files[name] = JSON.parse(fs.readFileSync(p, "utf8"));
+    } catch {
+      /* skip */
+    }
+  }
+  res.json({
+    ok: true,
+    data: {
+      files,
+      note: "勿同步 cf-clearance.json（绑出口 IP）；把 files 写入 NAS 的 config/scrape-meta/ 即可",
+    },
+  });
+});
+
+/** 导出到 config/scrape-meta，供 NAS 同目录挂载复用 */
+app.post("/api/meta/export-seed", (_req, res) => {
+  const candidates = [
+    process.env.SCRAPE_META_SEED_DIR,
+    process.env.CONFIG_DIR && path.join(process.env.CONFIG_DIR, "scrape-meta"),
+    "/app/config/scrape-meta",
+    path.resolve(APP_ROOT, "../../config/scrape-meta"),
+  ].filter(Boolean) as string[];
+  let outDir = "";
+  for (const c of candidates) {
+    const parent = path.dirname(path.resolve(c));
+    if (fs.existsSync(parent) || c.includes("config")) {
+      outDir = path.resolve(c);
+      break;
+    }
+  }
+  if (!outDir) {
+    res.status(500).json({ ok: false, message: "no config dir" });
+    return;
+  }
+  try {
+    const copied = exportPortableMeta(metaDir, outDir);
+    res.json({
+      ok: true,
+      data: { outDir, copied },
+      message: copied.length
+        ? `已导出 ${copied.join(", ")} → ${outDir}`
+        : "没有可导出的镜像缓存（先重测 airav 等源）",
+    });
+  } catch (e) {
+    res.status(500).json({
+      ok: false,
+      message: e instanceof Error ? e.message : "export failed",
+    });
+  }
+});
+
+/** 强制从 config/scrape-meta 再灌一次 */
+app.post("/api/meta/import-seed", (_req, res) => {
+  process.env.SCRAPE_META_SEED_FORCE = "1";
+  try {
+    seedPortableMetaFromConfig(metaDir, APP_ROOT);
+    // 重新加载 airav 内存缓存
+    setAiravMirrorStorePath(path.join(metaDir, "airav-mirror.json"));
+    setIqqtvMirrorStorePath(path.join(metaDir, "iqqtv-mirror.json"));
+    setSiteMirrorStorePath(path.join(metaDir, "site-mirrors.json"));
+    res.json({
+      ok: true,
+      data: { airav: getCachedAiravCnBase() },
+      message: "已从 config/scrape-meta 导入",
+    });
+  } catch (e) {
+    res.status(500).json({
+      ok: false,
+      message: e instanceof Error ? e.message : "import failed",
+    });
+  } finally {
+    delete process.env.SCRAPE_META_SEED_FORCE;
+  }
 });
 
 app.put("/api/config/network", (req, res) => {
@@ -500,6 +590,8 @@ app.post("/api/sources/probe", async (req, res) => {
     let lastError = "超时 / 无响应";
     let okBase = "";
     let probeVia: string | null = null;
+    /** airav：官方已通、改测镜像失败时回落 */
+    let airavOfficialOk: { base: string; via: string | null } | null = null;
     const access = String(def.access || "proxy").trim().toLowerCase();
     const hasProxy = Boolean(getActiveProxy());
     const hasFlare = Boolean(getFlareSolverrUrl());
@@ -553,13 +645,37 @@ app.post("/api/sources/probe", async (req, res) => {
           normalizeAiravCnBase(b) ||
           b;
         if (looksLikeAiravProbeHtml(html)) {
-          okBase = landed.replace(/\/$/, "");
+          const targets = extractAiravRedirectTargets(
+            html,
+            page?.finalUrl || url,
+            url,
+          );
+          // 业务页若仍在官方域：优先抽出非官方镜像写入缓存，下次 NAS 才能 curl 直链
+          const mirror = targets
+            .map((t) => normalizeAiravCnBase(t).replace(/\/$/, ""))
+            .find((n) => n && !isAiravOfficialBase(n));
+          const landedBase = landed.replace(/\/$/, "");
           probeVia = page?.via || null;
           try {
-            rememberAiravMirror(okBase, b);
+            if (mirror) rememberAiravMirror(mirror, b);
+            else if (!isAiravOfficialBase(landedBase))
+              rememberAiravMirror(landedBase, b);
           } catch {
             /* ignore */
           }
+          // 官方已通且发现镜像：再测一枪镜像，争取本次就显示 curl 直链
+          if (
+            mirror &&
+            isAiravOfficialBase(landedBase) &&
+            !basesToTry.includes(mirror) &&
+            i + 1 < maxTries
+          ) {
+            airavOfficialOk = { base: landedBase, via: probeVia };
+            basesToTry.splice(i + 1, 0, mirror);
+            lastError = "官方已通，改测镜像以争取 curl 直链";
+            continue;
+          }
+          okBase = (mirror || landedBase).replace(/\/$/, "");
           break;
         }
         const targets = extractAiravRedirectTargets(
@@ -571,7 +687,9 @@ app.post("/api/sources/probe", async (req, res) => {
         for (const t of targets) {
           const n = normalizeAiravCnBase(t).replace(/\/$/, "");
           if (!n || basesToTry.includes(n)) continue;
-          basesToTry.push(n);
+          // 非官方镜像优先插到前面
+          if (!isAiravOfficialBase(n)) basesToTry.splice(i + 1 + queued, 0, n);
+          else basesToTry.push(n);
           queued += 1;
           if (queued >= 3) break;
         }
@@ -609,6 +727,11 @@ app.post("/api/sources/probe", async (req, res) => {
       okBase = b;
       probeVia = page?.via || null;
       break;
+    }
+
+    if (!okBase && airavOfficialOk) {
+      okBase = airavOfficialOk.base;
+      probeVia = airavOfficialOk.via;
     }
 
     if (!okBase) {
