@@ -1240,6 +1240,9 @@ def _probe_one_source(origin: str, sid: str, base_url: str) -> dict[str, Any]:
                     }
                     if resolved:
                         hit["resolvedBaseUrl"] = str(resolved).strip()
+                    via = data.get("probeVia") or data.get("probe_via")
+                    if via:
+                        hit["probeVia"] = str(via).strip().lower()
                     return hit
                 return {
                     "id": sid,

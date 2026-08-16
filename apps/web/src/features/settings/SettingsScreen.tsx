@@ -163,80 +163,122 @@ export function SettingsScreen() {
       status === 'authenticated' ? (isAdmin ? '管理员' : '已登录') : '未登录',
       status === 'authenticated' ? 'ok' : 'warn',
     );
-
-    try {
-      const cfg = await getResourceDb();
-      if (cfg.enabled && cfg.dsn) setEntryStatus('db', '已启用', 'ok');
-      else if (cfg.dsn) setEntryStatus('db', '未启用', 'warn');
-      else setEntryStatus('db', '未配置', 'warn');
-    } catch {
-      setEntryStatus('db', '异常', 'warn');
-    }
-
-    try {
-      const cfg = await getBitmagnetDb();
-      if (cfg.enabled && cfg.dsn) setEntryStatus('bitmagnet', '已启用', 'ok');
-      else if (cfg.dsn) setEntryStatus('bitmagnet', '未启用', 'warn');
-      else setEntryStatus('bitmagnet', '未配置', 'warn');
-    } catch {
-      setEntryStatus('bitmagnet', '异常', 'warn');
-    }
-
-    try {
-      const p = await getP115();
-      setEntryStatus('p115', p.configured ? '已就绪' : '未配置', p.configured ? 'ok' : 'warn');
-    } catch {
-      setEntryStatus('p115', '异常', 'warn');
-    }
-
-    try {
-      const [m, s] = await Promise.all([fetchMakerFsManifest(), fetchMakerFsStatus()]);
-      if (s.running) setEntryStatus('makerfs', '构建中', 'mute');
-      else setEntryStatus('makerfs', m.ready ? '已就绪' : '未构建', m.ready ? 'ok' : 'warn');
-    } catch {
-      setEntryStatus('makerfs', '异常', 'warn');
-    }
-
-    try {
-      const t = await getTmdb();
-      setEntryStatus(
-        'tmdb',
-        t.configured ? (t.fromEnv ? '环境变量' : '已就绪') : '未配置',
-        t.configured ? 'ok' : 'warn',
-      );
-    } catch {
-      setEntryStatus('tmdb', '异常', 'warn');
-    }
-
-    try {
-      const sc = await getScrape();
-      const flareUrl = (sc.flareSolverrUrl || '').trim();
-      const proxyUrl = (sc.proxyUrl || '').trim();
-      if (flareUrl && proxyUrl) setEntryStatus('flare', '已就绪', 'ok');
-      else if (flareUrl) setEntryStatus('flare', '过盾已配', 'ok');
-      else if (proxyUrl) setEntryStatus('flare', '代理已配', 'ok');
-      else setEntryStatus('flare', '未配置', 'warn');
-      setEntryStatus(
-        'scrape',
-        sc.online ? '已在线' : sc.configured ? '离线' : '未配置',
-        sc.online ? 'ok' : 'warn',
-      );
-      try {
-        const st = await fetchScrapeExportStatus();
-        if (st.running) {
-          setEntryStatus('scrape', st.paused ? '已暂停' : '刮削中', st.paused ? 'warn' : 'mute');
-        }
-      } catch {
-        /* ignore */
-      }
-      setEntryStatus('covercrop', sc.posterCrop ? '已就绪' : '默认', 'ok');
-    } catch {
-      setEntryStatus('flare', '异常', 'warn');
-      setEntryStatus('scrape', '异常', 'warn');
-      setEntryStatus('covercrop', '异常', 'warn');
-    }
-
     setEntryStatus('forum', '色花堂', 'ok');
+
+    // 并行刷新：避免某一个慢接口把后面条目长时间卡在「…」
+    // 超时只标「超时」，勿全员「异常」（影视 TMDB 外连拖慢 API 时易误报）
+    const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T> =>
+      new Promise((resolve, reject) => {
+        const t = window.setTimeout(() => reject(new Error('timeout')), ms);
+        p.then(
+          (v) => {
+            window.clearTimeout(t);
+            resolve(v);
+          },
+          (e) => {
+            window.clearTimeout(t);
+            reject(e);
+          },
+        );
+      });
+    const failStatus = (e: unknown): { text: string; tone: Tone } =>
+      e instanceof Error && e.message === 'timeout'
+        ? { text: '超时', tone: 'mute' }
+        : { text: '异常', tone: 'warn' };
+
+    await Promise.all([
+      (async () => {
+        try {
+          const cfg = await withTimeout(getResourceDb(), 12000);
+          if (cfg.enabled && cfg.dsn) setEntryStatus('db', '已启用', 'ok');
+          else if (cfg.dsn) setEntryStatus('db', '未启用', 'warn');
+          else setEntryStatus('db', '未配置', 'warn');
+        } catch (e) {
+          const f = failStatus(e);
+          setEntryStatus('db', f.text, f.tone);
+        }
+      })(),
+      (async () => {
+        try {
+          const cfg = await withTimeout(getBitmagnetDb(), 12000);
+          if (cfg.enabled && cfg.dsn) setEntryStatus('bitmagnet', '已启用', 'ok');
+          else if (cfg.dsn) setEntryStatus('bitmagnet', '未启用', 'warn');
+          else setEntryStatus('bitmagnet', '未配置', 'warn');
+        } catch (e) {
+          const f = failStatus(e);
+          setEntryStatus('bitmagnet', f.text, f.tone);
+        }
+      })(),
+      (async () => {
+        try {
+          const p = await withTimeout(getP115(), 12000);
+          setEntryStatus('p115', p.configured ? '已就绪' : '未配置', p.configured ? 'ok' : 'warn');
+        } catch (e) {
+          const f = failStatus(e);
+          setEntryStatus('p115', f.text, f.tone);
+        }
+      })(),
+      (async () => {
+        try {
+          const [m, s] = await withTimeout(
+            Promise.all([fetchMakerFsManifest(), fetchMakerFsStatus()]),
+            12000,
+          );
+          if (s.running) setEntryStatus('makerfs', '构建中', 'mute');
+          else setEntryStatus('makerfs', m.ready ? '已就绪' : '未构建', m.ready ? 'ok' : 'warn');
+        } catch (e) {
+          const f = failStatus(e);
+          setEntryStatus('makerfs', f.text, f.tone);
+        }
+      })(),
+      (async () => {
+        try {
+          const t = await withTimeout(getTmdb(), 12000);
+          setEntryStatus(
+            'tmdb',
+            t.configured ? (t.fromEnv ? '环境变量' : '已就绪') : '未配置',
+            t.configured ? 'ok' : 'warn',
+          );
+        } catch (e) {
+          const f = failStatus(e);
+          setEntryStatus('tmdb', f.text, f.tone);
+        }
+      })(),
+      (async () => {
+        try {
+          const sc = await withTimeout(getScrape(), 12000);
+          const flareUrl = (sc.flareSolverrUrl || '').trim();
+          const proxyUrl = (sc.proxyUrl || '').trim();
+          if (flareUrl && proxyUrl) setEntryStatus('flare', '已就绪', 'ok');
+          else if (flareUrl) setEntryStatus('flare', '过盾已配', 'ok');
+          else if (proxyUrl) setEntryStatus('flare', '代理已配', 'ok');
+          else setEntryStatus('flare', '未配置', 'warn');
+          setEntryStatus(
+            'scrape',
+            sc.online ? '已在线' : sc.configured ? '离线' : '未配置',
+            sc.online ? 'ok' : 'warn',
+          );
+          setEntryStatus('covercrop', sc.posterCrop ? '已就绪' : '默认', 'ok');
+          try {
+            const st = await withTimeout(fetchScrapeExportStatus(), 10000);
+            if (st.running) {
+              setEntryStatus(
+                'scrape',
+                st.paused ? '已暂停' : '刮削中',
+                st.paused ? 'warn' : 'mute',
+              );
+            }
+          } catch {
+            /* ignore */
+          }
+        } catch (e) {
+          const f = failStatus(e);
+          setEntryStatus('flare', f.text, f.tone);
+          setEntryStatus('scrape', f.text, f.tone);
+          setEntryStatus('covercrop', f.text, f.tone);
+        }
+      })(),
+    ]);
   }, [isAdmin, setEntryStatus, status]);
 
   useEffect(() => {

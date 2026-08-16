@@ -786,8 +786,22 @@ export function ScrapeSourcesTab({
       const r = await testScrapeSources();
       onApplied(r.data);
       if (!opts?.quiet) {
-        const msg = r.message || "测试完成";
-        const failed = /异常\s*[1-9]|正常\s*0/.test(msg);
+        const failedCards = (r.data.sources || []).filter(
+          (s) => s.status === "error" && s.lastError,
+        );
+        let msg = r.message || "测试完成";
+        // 服务端摘要若仍是「正常 0 · 异常 1」无细节，用源错误补全
+        if (
+          failedCards.length > 0 &&
+          /异常\s*[1-9]/.test(msg) &&
+          !/·\s*\w+:/.test(msg)
+        ) {
+          const bits = failedCards
+            .slice(0, 3)
+            .map((s) => `${s.id}: ${friendlySourceError(s.lastError)}`);
+          msg = `${msg} · ${bits.join("；")}`;
+        }
+        const failed = /异常\s*[1-9]|正常\s*0|重测失败/.test(msg);
         toast(msg, failed ? "error" : "success");
       }
     } catch (e) {
@@ -819,9 +833,20 @@ export function ScrapeSourcesTab({
       }
       const r = await testScrapeSources([editId]);
       onApplied(r.data);
-      const msg = r.message || "重测完成";
-      const failed = /异常\s*[1-9]|正常\s*0/.test(msg);
-      toast(msg, failed ? "error" : "success");
+      const card = (r.data.sources || []).find((s) => s.id === editId);
+      const via = probeViaLabel(card?.lastProbeVia);
+      if (card?.status === "ok") {
+        toast(`重测成功${via ? ` · ${via}` : ""}`, "success");
+      } else if (card?.status === "error") {
+        const err = friendlySourceError(card.lastError) || "探测失败";
+        toast(`重测失败 · ${err}`, "error");
+      } else {
+        const err = friendlySourceError(card?.lastError);
+        toast(
+          err ? `重测完成 · ${err}` : r.message || "重测完成",
+          err ? "error" : "info",
+        );
+      }
     } catch (e) {
       toast(e instanceof Error ? e.message : "重测失败", "error");
     } finally {

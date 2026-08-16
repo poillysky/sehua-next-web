@@ -18,14 +18,15 @@ log = logging.getLogger(__name__)
 router = APIRouter(tags=["media"])
 
 _HTTPX_KW: dict[str, Any] = {
-    "timeout": 18.0,
+    # 外网慢/代理挂时勿拖死整站；connect 先失败，设置 Hub 才能及时返回
+    "timeout": httpx.Timeout(8.0, connect=4.0),
     "trust_env": True,
     "follow_redirects": True,
 }
 
 # 豆瓣直连：本机系统代理常会打断 TLS（ConnectError 空消息），勿 trust_env。
 _DOUBAN_HTTPX_KW: dict[str, Any] = {
-    "timeout": 18.0,
+    "timeout": httpx.Timeout(10.0, connect=5.0),
     "trust_env": False,
     "follow_redirects": True,
 }
@@ -214,60 +215,67 @@ async def tmdb_charts(
         "include_adult": "false",
     }
 
-    async with httpx.AsyncClient(**_HTTPX_KW) as client:
-        if cat == "movie":
-            if ch == "trending":
-                data = await _tmdb_get(
-                    client, "/3/trending/movie/week", params
-                )
-                fallback = "movie"
-            elif ch == "top_rated":
-                data = await _tmdb_get(client, "/3/movie/top_rated", params)
-                fallback = "movie"
-            elif ch == "now_playing":
-                data = await _tmdb_get(client, "/3/movie/now_playing", params)
-                fallback = "movie"
-            elif ch == "upcoming":
-                data = await _tmdb_get(client, "/3/movie/upcoming", params)
-                fallback = "movie"
+    try:
+        async with httpx.AsyncClient(**_HTTPX_KW) as client:
+            if cat == "movie":
+                if ch == "trending":
+                    data = await _tmdb_get(
+                        client, "/3/trending/movie/week", params
+                    )
+                    fallback = "movie"
+                elif ch == "top_rated":
+                    data = await _tmdb_get(client, "/3/movie/top_rated", params)
+                    fallback = "movie"
+                elif ch == "now_playing":
+                    data = await _tmdb_get(client, "/3/movie/now_playing", params)
+                    fallback = "movie"
+                elif ch == "upcoming":
+                    data = await _tmdb_get(client, "/3/movie/upcoming", params)
+                    fallback = "movie"
+                else:
+                    data = await _tmdb_get(client, "/3/movie/popular", params)
+                    fallback = "movie"
+            elif cat == "tv":
+                if ch == "trending":
+                    data = await _tmdb_get(client, "/3/trending/tv/week", params)
+                    fallback = "tv"
+                elif ch == "top_rated":
+                    data = await _tmdb_get(client, "/3/tv/top_rated", params)
+                    fallback = "tv"
+                elif ch == "on_the_air":
+                    data = await _tmdb_get(client, "/3/tv/on_the_air", params)
+                    fallback = "tv"
+                else:
+                    data = await _tmdb_get(client, "/3/tv/popular", params)
+                    fallback = "tv"
+            elif cat == "anime":
+                # Animation genre = 16
+                disc = {
+                    **params,
+                    "with_genres": "16",
+                    "sort_by": (
+                        "vote_average.desc" if ch == "top_rated" else "popularity.desc"
+                    ),
+                    "vote_count.gte": 50 if ch == "top_rated" else 0,
+                }
+                data = await _tmdb_get(client, "/3/discover/tv", disc)
+                fallback = "tv"
             else:
-                data = await _tmdb_get(client, "/3/movie/popular", params)
-                fallback = "movie"
-        elif cat == "tv":
-            if ch == "trending":
-                data = await _tmdb_get(client, "/3/trending/tv/week", params)
+                # variety ≈ Reality(10764) + Talk(10767)
+                disc = {
+                    **params,
+                    "with_genres": "10764|10767",
+                    "sort_by": "popularity.desc",
+                    "with_origin_country": "CN|JP|KR|TW|HK",
+                }
+                data = await _tmdb_get(client, "/3/discover/tv", disc)
                 fallback = "tv"
-            elif ch == "top_rated":
-                data = await _tmdb_get(client, "/3/tv/top_rated", params)
-                fallback = "tv"
-            elif ch == "on_the_air":
-                data = await _tmdb_get(client, "/3/tv/on_the_air", params)
-                fallback = "tv"
-            else:
-                data = await _tmdb_get(client, "/3/tv/popular", params)
-                fallback = "tv"
-        elif cat == "anime":
-            # Animation genre = 16
-            disc = {
-                **params,
-                "with_genres": "16",
-                "sort_by": (
-                    "vote_average.desc" if ch == "top_rated" else "popularity.desc"
-                ),
-                "vote_count.gte": 50 if ch == "top_rated" else 0,
-            }
-            data = await _tmdb_get(client, "/3/discover/tv", disc)
-            fallback = "tv"
-        else:
-            # variety ≈ Reality(10764) + Talk(10767)
-            disc = {
-                **params,
-                "with_genres": "10764|10767",
-                "sort_by": "popularity.desc",
-                "with_origin_country": "CN|JP|KR|TW|HK",
-            }
-            data = await _tmdb_get(client, "/3/discover/tv", disc)
-            fallback = "tv"
+    except httpx.TimeoutException as e:
+        log.warning("tmdb charts timeout cat=%s chart=%s: %s", cat, ch, e)
+        raise HTTPException(status_code=504, detail="TMDB 连接超时，请检查代理/网络") from e
+    except httpx.HTTPError as e:
+        log.warning("tmdb charts http error cat=%s chart=%s: %s", cat, ch, e)
+        raise HTTPException(status_code=502, detail="TMDB 网络异常") from e
 
     results = data.get("results") if isinstance(data.get("results"), list) else []
     items = [
