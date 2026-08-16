@@ -186,6 +186,26 @@ def init_db() -> None:
                 "CREATE INDEX IF NOT EXISTS idx_scrape_codes_task_bucket "
                 "ON scrape_export_codes(task_id, bucket)"
             )
+            # 刮削工作队列中间表：大库不靠内存/JSON 断点，按批领取
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS scrape_export_queue (
+                  task_id TEXT NOT NULL,
+                  code TEXT NOT NULL,
+                  region TEXT NOT NULL DEFAULT '',
+                  maker TEXT NOT NULL DEFAULT '',
+                  prefix TEXT NOT NULL DEFAULT '',
+                  kind TEXT NOT NULL DEFAULT '',
+                  status TEXT NOT NULL DEFAULT 'pending',
+                  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                  PRIMARY KEY (task_id, code)
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_scrape_queue_claim "
+                "ON scrape_export_queue(task_id, status, code)"
+            )
             # 磁力无 dn 时按 infohash 解析出的文件树（避免每次外网拉 .torrent）
             conn.execute(
                 """

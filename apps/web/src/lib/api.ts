@@ -748,12 +748,16 @@ export type ScrapeTask = {
   done?: number;
   empty?: number;
   skipped?: number;
+  /** 字段不全（黄）；暂停续跑不重试 */
+  incomplete?: number;
+  /** 网络/连不上等真正失败（红）；暂停续跑只重试此项 */
   failed?: number;
   total?: number;
   /** 各结果番号明细（点击统计框查看） */
   doneCodes?: string[];
   emptyCodes?: string[];
   skippedCodes?: string[];
+  incompleteCodes?: string[];
   failedCodes?: string[];
 };
 
@@ -947,6 +951,7 @@ export type ScrapeExportStatus = {
   total?: number;
   done?: number;
   failed?: number;
+  incomplete?: number;
   skipped?: number;
   /** 空目录 / 空号种子（无详情可刮） */
   empty?: number;
@@ -956,6 +961,7 @@ export type ScrapeExportStatus = {
   doneCodes?: string[];
   emptyCodes?: string[];
   skippedCodes?: string[];
+  incompleteCodes?: string[];
   failedCodes?: string[];
   /** 轮询未带全量番号列表 */
   codesTruncated?: boolean;
@@ -1227,7 +1233,7 @@ export async function fetchScrapeExportStatus(
 
 export async function fetchScrapeExportCodes(opts: {
   taskId?: string;
-  bucket: 'done' | 'empty' | 'skipped' | 'failed' | 'active' | 'total';
+  bucket: 'done' | 'empty' | 'skipped' | 'failed' | 'incomplete' | 'active' | 'total';
   limit?: number;
   offset?: number;
   signal?: AbortSignal;
@@ -1293,6 +1299,8 @@ export async function startScrapeExport(body: {
   codes?: string[];
   force?: boolean;
   mode?: 'incremental' | 'force';
+  /** 失败重试：后端清失败队列并只强制重刮失败番号 */
+  retryFailed?: boolean;
   fields?: ScrapeTaskField[];
   localFields?: ScrapeTaskField[];
   signal?: AbortSignal;

@@ -843,9 +843,29 @@ function runIsNoDetail(run: SourceRun): boolean {
   return isNoDetailRunError(String(run.error || ""));
 }
 
+function runIsSoftFail(run: SourceRun): boolean {
+  if (Boolean(run.ok)) return false;
+  if (runIsNoDetail(run)) return false;
+  const s = String(run.error || "").trim().toLowerCase();
+  if (!s) return true;
+  return (
+    s.includes("timeout") ||
+    s.includes("timed out") ||
+    s.includes("abort") ||
+    s.includes("network") ||
+    s.includes("econn") ||
+    s.includes("fetch failed") ||
+    s.includes("socket") ||
+    s.includes("502") ||
+    s.includes("503") ||
+    s.includes("429")
+  );
+}
+
 /**
- * 快通道已跑过的 meta 源是否全部「无详情」。
- * 有任一成功 / 非无详情错误 → false（仍可交慢源补）。
+ * 快通道已跑过的 meta 源是否已足够确认「无详情」。
+ * ≥2 路无详情且无一成功 → 空号（不必等齐全部源 / 次级源超时）。
+ * 1 路明确 not_found + 其余超时/失败 也可判空，避免空号卡在软失败上。
  */
 function allFastMetaRunsNoDetail(runs: SourceRun[]): boolean {
   const meta = runs.filter(
@@ -855,10 +875,26 @@ function allFastMetaRunsNoDetail(runs: SourceRun[]): boolean {
   );
   if (!meta.length) return false;
   if (meta.some((r) => Boolean(r.ok))) return false;
-  return meta.every((r) => isNoDetailRunError(String(r.error || "")));
+  const noDetail = meta.filter((r) =>
+    isNoDetailRunError(String(r.error || "")),
+  );
+  if (noDetail.length >= 2) return true;
+  const soft = meta.filter((r) => runIsSoftFail(r));
+  if (noDetail.length >= 1 && noDetail.length + soft.length >= 2) return true;
+  if (
+    meta.length === 1 &&
+    noDetail.length === 1 &&
+    EMPTY_PROBE_SOURCES.has(String(meta[0]?.id || ""))
+  ) {
+    return true;
+  }
+  return meta.length > 0 && noDetail.length === meta.length;
 }
 
-/** 主探源是否已全部返回无详情（可提前结束同波等待） */
+/** 主探源是否已足够确认无详情（可提前结束同波等待）。
+ * 至少 2 个主探返回 not_found，或 1 个 not_found + 1 个超时/失败即可。
+ * 避免空号必须等齐 4 路主探/次级源拖满超时，比成功早停还慢。
+ */
 function emptyProbeSourcesAllNoDetail(
   wave: SourceId[],
   runs: SourceRun[],
@@ -867,10 +903,18 @@ function emptyProbeSourcesAllNoDetail(
   const primary = wave.filter((id) => EMPTY_PROBE_SOURCES.has(id));
   if (!primary.length) return false;
   const metaRuns = runs.filter((r) => String(r.mode || "") === mode);
-  return primary.every((id) => {
+  let hard = 0;
+  let soft = 0;
+  for (const id of primary) {
     const r = metaRuns.find((x) => String(x.id || "") === id);
-    return Boolean(r && runIsNoDetail(r));
-  });
+    if (!r) continue;
+    if (Boolean(r.ok)) return false;
+    if (runIsNoDetail(r)) hard += 1;
+    else if (runIsSoftFail(r)) soft += 1;
+  }
+  const need = Math.min(2, primary.length);
+  if (hard >= need) return true;
+  return hard >= 1 && hard + soft >= need;
 }
 
 /** 快通道：只跑不过盾源；过盾源留给慢通道补刮。 */

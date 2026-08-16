@@ -29,6 +29,7 @@ import httpx
 from . import (
     maker_fs,
     scrape_export_log_store,
+    scrape_export_queue_store,
     scrape_metadata_optimize,
     scrape_naming,
     scrape_profiles,
@@ -208,6 +209,8 @@ _RESUME_PATH = ROOT / "data" / "scrape-export-resume.json"
 
 _lock = threading.Lock()
 _meta_lock = threading.RLock()
+# 单番号处理期内压制/强制落库（增量保留原日志 vs 重刮覆盖）
+_event_archive_tls = threading.local()
 _pause_cv = threading.Condition(_meta_lock)
 _export_worker: threading.Thread | None = None
 _STUCK_BUSY_MESSAGES = frozenset(
@@ -235,6 +238,7 @@ def _empty_code_lists() -> dict[str, list[str]]:
         "doneCodes": [],
         "skippedCodes": [],
         "failedCodes": [],
+        "incompleteCodes": [],
         "emptyCodes": [],
         "activeCodes": [],
         "activeFastCodes": [],
@@ -248,11 +252,131 @@ def _append_result_code(bucket: str, code: str) -> None:
     if not c:
         return
     lst = list(_state.get(bucket) or [])
-    if c not in lst:
+    # 大列表用尾部窗口判重，避免 O(n) 全扫拖死 API
+    if len(lst) > 4096:
+        if c in lst[-4096:]:
+            return
+        lst.append(c)
+    elif c in lst:
+        return
+    else:
         lst.append(c)
     if len(lst) > _MAX_RESULT_CODES:
         lst = lst[-_MAX_RESULT_CODES:]
     _state[bucket] = lst
+
+
+def _bulk_apply_preclassify_codes(
+    *,
+    done_codes: list[str] | set[str],
+    empty_codes: list[str] | set[str],
+) -> None:
+    """预分类批量入桶：O(n) 集合判重，禁止逐条 list 扫描。调用方须持锁。"""
+    global _result_seen
+    done_set = (
+        done_codes
+        if isinstance(done_codes, set)
+        else {str(c).strip() for c in done_codes if str(c or "").strip()}
+    )
+    empty_set = (
+        empty_codes
+        if isinstance(empty_codes, set)
+        else {str(c).strip() for c in empty_codes if str(c or "").strip()}
+    )
+    if not done_set and not empty_set:
+        return
+
+    skip_set = {
+        str(x).strip()
+        for x in list(_state.get("skippedCodes") or [])
+        if str(x or "").strip()
+    }
+    fail_set = {
+        str(x).strip()
+        for x in list(_state.get("failedCodes") or [])
+        if str(x or "").strip()
+    }
+    empty_disp = {
+        str(x).strip()
+        for x in list(_state.get("emptyCodes") or [])
+        if str(x or "").strip()
+    }
+    done_disp = {
+        str(x).strip()
+        for x in list(_state.get("doneCodes") or [])
+        if str(x or "").strip()
+    }
+
+    done_n = int(_state.get("done") or 0)
+    empty_n = int(_state.get("empty") or 0)
+    skip_n = int(_state.get("skipped") or 0)
+    fail_n = int(_state.get("failed") or 0)
+    new_done_tail: list[str] = []
+    new_empty_tail: list[str] = []
+
+    for c in done_set:
+        if c in _result_seen:
+            # 允许从旧跳过/空号/失败升级为成功
+            upgraded = False
+            if c in skip_set:
+                skip_set.discard(c)
+                skip_n = max(0, skip_n - 1)
+                upgraded = True
+            if c in empty_disp:
+                empty_disp.discard(c)
+                empty_n = max(0, empty_n - 1)
+                upgraded = True
+            if c in fail_set:
+                fail_set.discard(c)
+                fail_n = max(0, fail_n - 1)
+                upgraded = True
+            if upgraded and c not in done_disp:
+                done_n += 1
+                done_disp.add(c)
+                new_done_tail.append(c)
+            continue
+        _result_seen.add(c)
+        done_n += 1
+        done_disp.add(c)
+        new_done_tail.append(c)
+
+    for c in empty_set:
+        if c in done_disp or c in done_set:
+            continue
+        if c in fail_set or c in skip_set:
+            if c in fail_set:
+                fail_set.discard(c)
+                fail_n = max(0, fail_n - 1)
+            if c in skip_set:
+                skip_set.discard(c)
+                skip_n = max(0, skip_n - 1)
+            if c not in empty_disp:
+                empty_n += 1
+                empty_disp.add(c)
+                new_empty_tail.append(c)
+            _result_seen.add(c)
+            continue
+        if c in _result_seen:
+            continue
+        _result_seen.add(c)
+        empty_n += 1
+        empty_disp.add(c)
+        new_empty_tail.append(c)
+
+    prev_done = list(_state.get("doneCodes") or [])
+    prev_empty = list(_state.get("emptyCodes") or [])
+    _state["done"] = done_n
+    _state["empty"] = empty_n
+    _state["skipped"] = skip_n
+    _state["failed"] = fail_n
+    _state["doneCodes"] = (prev_done + new_done_tail)[-_MAX_RESULT_CODES:]
+    _state["emptyCodes"] = (prev_empty + new_empty_tail)[-_MAX_RESULT_CODES:]
+    _state["skippedCodes"] = [x for x in list(_state.get("skippedCodes") or []) if x in skip_set][
+        -_MAX_RESULT_CODES:
+    ]
+    _state["failedCodes"] = [x for x in list(_state.get("failedCodes") or []) if x in fail_set][
+        -_MAX_RESULT_CODES:
+    ]
 
 
 def _code_already_counted(code: str) -> bool:
@@ -262,7 +386,7 @@ def _code_already_counted(code: str) -> bool:
         return True
     if c in _result_seen:
         return True
-    for bucket in ("doneCodes", "emptyCodes", "failedCodes", "skippedCodes"):
+    for bucket in ("doneCodes", "emptyCodes", "failedCodes", "incompleteCodes", "skippedCodes"):
         if c in list(_state.get(bucket) or []):
             _result_seen.add(c)
             return True
@@ -270,29 +394,30 @@ def _code_already_counted(code: str) -> bool:
 
 
 def _reconcile_result_counts_locked() -> None:
-    """用去重列表回写计数；若仍超过合计则钳制成功数。调用方须持锁。"""
+    """用列表长度抬升计数；列表可能被裁剪，故不得用短列表压低已有精确计数。
+
+    调用方须持锁。
+    """
     done_n = len(list(_state.get("doneCodes") or []))
     empty_n = len(list(_state.get("emptyCodes") or []))
     skip_n = len(list(_state.get("skippedCodes") or []))
     fail_n = len(list(_state.get("failedCodes") or []))
-    # 计数不得小于列表长度（防止历史虚高被列表裁剪后仍显示更大）
-    done = max(done_n, 0)
-    empty = max(empty_n, 0)
-    skipped = max(skip_n, 0)
-    failed = max(fail_n, 0)
-    # 若内存计数被旧逻辑抬高，以唯一列表为准
-    if int(_state.get("done") or 0) != done:
-        _state["done"] = done
-    if int(_state.get("empty") or 0) != empty:
-        _state["empty"] = empty
-    if int(_state.get("skipped") or 0) != skipped:
-        _state["skipped"] = skipped
-    if int(_state.get("failed") or 0) != failed:
-        _state["failed"] = failed
+    incomplete_n = len(list(_state.get("incompleteCodes") or []))
+    # 列表裁剪后仍保留较大的显式计数（预分类 18 万级会裁列表）
+    done = max(done_n, int(_state.get("done") or 0))
+    empty = max(empty_n, int(_state.get("empty") or 0))
+    skipped = max(skip_n, int(_state.get("skipped") or 0))
+    failed = max(fail_n, int(_state.get("failed") or 0))
+    incomplete = max(incomplete_n, int(_state.get("incomplete") or 0))
+    _state["done"] = done
+    _state["empty"] = empty
+    _state["skipped"] = skipped
+    _state["failed"] = failed
+    _state["incomplete"] = incomplete
     total = int(_state.get("total") or 0)
-    processed = done + empty + skipped + failed
+    processed = done + empty + skipped + failed + incomplete
     if total > 0 and processed > total:
-        room = max(0, total - empty - skipped - failed)
+        room = max(0, total - empty - skipped - failed - incomplete)
         _state["done"] = min(done, room)
 
 
@@ -306,6 +431,7 @@ def _remove_from_result_buckets(code: str, *buckets: str) -> None:
         "emptyCodes": "empty",
         "skippedCodes": "skipped",
         "failedCodes": "failed",
+        "incompleteCodes": "incomplete",
     }
     for bucket in buckets:
         lst = list(_state.get(bucket) or [])
@@ -314,14 +440,24 @@ def _remove_from_result_buckets(code: str, *buckets: str) -> None:
         _state[bucket] = [x for x in lst if x != c]
         ck = count_key.get(bucket)
         if ck:
-            _state[ck] = len(list(_state.get(bucket) or []))
+            # 列表可能被裁剪，计数按显式键递减，禁止用 len(list) 压低
+            _state[ck] = max(0, int(_state.get(ck) or 0) - 1)
+
+
+# 线程本地：同一次持锁内可攒多条，释放锁后批量落库
+_terminal_db_tls = threading.local()
 
 
 def _record_terminal_result(result: str, code: str) -> None:
     """调用方须已持有 _meta_lock。去重后累加计数，避免暂停重入导致成功>合计。
 
-    特例：先前误记为失败的 not_found 可迁到空号；
-    已刮成功的可从跳过/空号/失败升级为成功。
+    incomplete=字段不全（黄，续跑不重试）；
+    failed=网络/连不上等（红，暂停续跑只重试此项）；
+    空号/成功可从失败/不全升级。
+    列表截断时仍允许桶迁移（凭 _result_seen），避免同号卡在旧桶。
+
+    注意：SQLite / 队列落库必须在释放 _meta_lock 之后做；持锁写库会堵
+    /scrape/export/status 轮询，任务卡数字看起来「不动」。
     """
     global _result_seen
     c = str(code or "").strip()
@@ -329,75 +465,165 @@ def _record_terminal_result(result: str, code: str) -> None:
         return
     r = str(result or "done").strip().lower()
     if r in {"skip", "skipped"}:
-        # 兼容旧路径：已存在完整条目记成功，不再进「跳过」
         r = "done"
     if r in {"not_found", "notfound"}:
         r = "empty"
+    if r in {"partial", "incomplete_data", "数据不全"}:
+        r = "incomplete"
     tid = str(_state.get("taskId") or "").strip()
-    if r == "failed":
-        in_soft = c in list(_state.get("skippedCodes") or []) or c in list(
-            _state.get("emptyCodes") or []
-        )
-        if in_soft:
-            _remove_from_result_buckets(c, "skippedCodes", "emptyCodes")
-            fail_lst = list(_state.get("failedCodes") or [])
-            if c not in fail_lst:
-                _append_result_code("failedCodes", c)
-            _state["failed"] = len(list(_state.get("failedCodes") or []))
+    # 锁内只改内存；锁外再 mark_done / upsert
+    db_write: tuple[str, str] | None = None  # (action, bucket) action=upsert|move
+
+    def _set_count_from_bump(key: str) -> None:
+        _state[key] = int(_state.get(key) or 0) + 1
+
+    def _in_bucket(bucket: str) -> bool:
+        return c in list(_state.get(bucket) or [])
+
+    soft_buckets = (
+        "skippedCodes",
+        "emptyCodes",
+        "failedCodes",
+        "incompleteCodes",
+    )
+    seen = c in _result_seen or any(_in_bucket(b) for b in (*soft_buckets, "doneCodes"))
+
+    def _upgrade_to(
+        target_bucket: str,
+        count_key: str,
+        *,
+        remove_from: tuple[str, ...],
+        db_bucket: str,
+    ) -> bool:
+        """若已在目标桶则仅确保落库；否则从其它桶迁入。返回是否已处理完毕。"""
+        nonlocal db_write
+        # 成功不可降级为失败/不全/空号
+        if db_bucket != "done" and _in_bucket("doneCodes"):
+            return True
+        if _in_bucket(target_bucket):
             _result_seen.add(c)
-            _reconcile_result_counts_locked()
             if tid:
-                scrape_export_log_store.move_result_code(tid, c, to_bucket="failed")
-            return
-    if r == "empty":
-        # 旧任务把全源无详情记成失败 → 迁到空号
-        if c in list(_state.get("failedCodes") or []) or c in list(
-            _state.get("skippedCodes") or []
+                db_write = ("move", db_bucket)
+            return True
+        if not seen and not any(_in_bucket(b) for b in remove_from):
+            return False
+        before_fail = int(_state.get("failed") or 0)
+        before_inc = int(_state.get("incomplete") or 0)
+        removed_fail = _in_bucket("failedCodes")
+        removed_inc = _in_bucket("incompleteCodes")
+        _remove_from_result_buckets(c, *remove_from)
+        _append_result_code(target_bucket, c)
+        _set_count_from_bump(count_key)
+        # 列表截断未命中时：失败↔不全仍避免双计
+        if (
+            db_bucket == "incomplete"
+            and not removed_fail
+            and before_fail > len(list(_state.get("failedCodes") or []))
         ):
-            _remove_from_result_buckets(c, "failedCodes", "skippedCodes")
-            if c not in list(_state.get("emptyCodes") or []):
-                _append_result_code("emptyCodes", c)
-            _state["empty"] = len(list(_state.get("emptyCodes") or []))
-            _result_seen.add(c)
-            _reconcile_result_counts_locked()
-            if tid:
-                scrape_export_log_store.move_result_code(tid, c, to_bucket="empty")
-            return
-    if r == "done":
-        in_soft = (
-            c in list(_state.get("skippedCodes") or [])
-            or c in list(_state.get("emptyCodes") or [])
-            or c in list(_state.get("failedCodes") or [])
+            _state["failed"] = max(0, before_fail - 1)
+        if (
+            db_bucket == "failed"
+            and not removed_inc
+            and before_inc > len(list(_state.get("incompleteCodes") or []))
+        ):
+            _state["incomplete"] = max(0, before_inc - 1)
+        _result_seen.add(c)
+        _reconcile_result_counts_locked()
+        if tid:
+            db_write = ("move", db_bucket)
+        return True
+
+    handled = False
+    if r == "failed":
+        handled = _upgrade_to(
+            "failedCodes",
+            "failed",
+            remove_from=("skippedCodes", "emptyCodes", "incompleteCodes"),
+            db_bucket="failed",
         )
-        if in_soft and c not in list(_state.get("doneCodes") or []):
-            _remove_from_result_buckets(
-                c, "skippedCodes", "emptyCodes", "failedCodes"
-            )
-            _append_result_code("doneCodes", c)
-            _state["done"] = len(list(_state.get("doneCodes") or []))
-            _result_seen.add(c)
-            _reconcile_result_counts_locked()
+    elif r == "incomplete":
+        handled = _upgrade_to(
+            "incompleteCodes",
+            "incomplete",
+            remove_from=("skippedCodes", "failedCodes", "emptyCodes"),
+            db_bucket="incomplete",
+        )
+    elif r == "empty":
+        handled = _upgrade_to(
+            "emptyCodes",
+            "empty",
+            remove_from=("failedCodes", "skippedCodes", "incompleteCodes"),
+            db_bucket="empty",
+        )
+    elif r == "done":
+        handled = _upgrade_to(
+            "doneCodes",
+            "done",
+            remove_from=soft_buckets,
+            db_bucket="done",
+        )
+
+    if not handled:
+        if _code_already_counted(c):
+            # 已计过：仍需出队（续跑/重复终态）；锁外再写
             if tid:
-                scrape_export_log_store.move_result_code(tid, c, to_bucket="done")
+                pending = getattr(_terminal_db_tls, "pending", None)
+                if pending is None:
+                    pending = []
+                    _terminal_db_tls.pending = pending
+                pending.append(("mark_done", tid, c, ""))
             return
-    if _code_already_counted(c):
+        _result_seen.add(c)
+        if r == "empty":
+            _append_result_code("emptyCodes", c)
+            _set_count_from_bump("empty")
+            bucket = "empty"
+        elif r == "incomplete":
+            _append_result_code("incompleteCodes", c)
+            _set_count_from_bump("incomplete")
+            bucket = "incomplete"
+        elif r == "failed":
+            _append_result_code("failedCodes", c)
+            _set_count_from_bump("failed")
+            bucket = "failed"
+        else:
+            _append_result_code("doneCodes", c)
+            _set_count_from_bump("done")
+            bucket = "done"
+        _reconcile_result_counts_locked()
+        if tid:
+            db_write = ("upsert", bucket)
+
+    # 调用方持锁：把落库延后到锁外（由 _flush_terminal_result_db）
+    pending = getattr(_terminal_db_tls, "pending", None)
+    if pending is None:
+        pending = []
+        _terminal_db_tls.pending = pending
+    if tid and c:
+        pending.append(("mark_done", tid, c, ""))
+    if tid and db_write:
+        action, bucket = db_write
+        pending.append((action, tid, c, bucket))
+
+
+def _flush_terminal_result_db() -> None:
+    """释放 _meta_lock 后调用：出队 + 结果桶落库，避免堵 status 轮询。"""
+    pending = getattr(_terminal_db_tls, "pending", None)
+    if not pending:
         return
-    _result_seen.add(c)
-    if r == "empty":
-        _append_result_code("emptyCodes", c)
-        _state["empty"] = len(list(_state.get("emptyCodes") or []))
-        bucket = "empty"
-    elif r == "failed":
-        _append_result_code("failedCodes", c)
-        _state["failed"] = len(list(_state.get("failedCodes") or []))
-        bucket = "failed"
-    else:
-        _append_result_code("doneCodes", c)
-        _state["done"] = len(list(_state.get("doneCodes") or []))
-        bucket = "done"
-    _reconcile_result_counts_locked()
-    if tid:
-        scrape_export_log_store.upsert_result_code(tid, bucket, c)
+    _terminal_db_tls.pending = []
+    for action, tid, c, bucket in pending:
+        try:
+            if action == "mark_done":
+                scrape_export_queue_store.mark_done(tid, c)
+            elif action == "move":
+                scrape_export_log_store.move_result_code(tid, c, to_bucket=bucket)
+            elif action == "upsert":
+                scrape_export_log_store.upsert_result_code(tid, bucket, c)
+        except Exception:
+            log.debug(
+                "flush terminal db failed %s %s %s", action, tid, c, exc_info=True
+            )
 
 
 def _remove_active_code(code: str) -> None:
@@ -446,12 +672,14 @@ _state: dict[str, Any] = {
     "total": 0,
     "done": 0,
     "failed": 0,
+    "incomplete": 0,
     "skipped": 0,
     "empty": 0,
     "active": 0,
     "doneCodes": [],
     "skippedCodes": [],
     "failedCodes": [],
+    "incompleteCodes": [],
     "emptyCodes": [],
     "activeCodes": [],
     "activeFastCodes": [],
@@ -484,6 +712,29 @@ _control: dict[str, bool] = {
     # 暂停时立即打断进行中的 HTTP，worker 回队等待继续
     "pause_abort": False,
 }
+# 控制面 Event：点击暂停/取消不抢 meta_lock，worker 热路径无锁可读
+_pause_flag = threading.Event()
+_cancel_flag = threading.Event()
+
+
+def _ctl_set_cancel(on: bool) -> None:
+    v = bool(on)
+    _control["cancel"] = v
+    if v:
+        _cancel_flag.set()
+    else:
+        _cancel_flag.clear()
+
+
+def _ctl_set_pause_abort(on: bool) -> None:
+    v = bool(on)
+    _control["pause_abort"] = v
+    if v:
+        _pause_flag.set()
+    else:
+        _pause_flag.clear()
+
+
 # 重置任务后：丢弃 worker 收尾 / persist_state 对任务卡的 max 合并写回
 _discard_finish_persist_task_id = ""
 
@@ -565,12 +816,11 @@ def _abort_all_inflight(*, origin: str | None = None) -> tuple[int, int]:
 
 
 def _work_abort_kind() -> str | None:
-    """cancel | paused | None。调用方可在任意阶段轮询。"""
-    with _meta_lock:
-        if _control.get("cancel"):
-            return "cancel"
-        if _state.get("paused") or _control.get("pause_abort"):
-            return "paused"
+    """cancel | paused | None。热路径无锁，保证大库刮削时点击立即生效。"""
+    if _cancel_flag.is_set():
+        return "cancel"
+    if _pause_flag.is_set():
+        return "paused"
     return None
 
 
@@ -695,8 +945,8 @@ def _reconcile_stuck_export_state(*, persist: bool = False) -> None:
                     "message": "paused",
                 }
             )
-            _control["pause_abort"] = False
-            _control["cancel"] = False
+            _ctl_set_pause_abort(False)
+            _ctl_set_cancel(False)
             changed = True
         else:
             # 假死：还在 scraping/cancelling，但无人在刮且超过 45s 无事件
@@ -767,7 +1017,7 @@ def _reconcile_stuck_export_state(*, persist: bool = False) -> None:
                         ),
                     }
                 )
-                _control["cancel"] = False
+                _ctl_set_cancel(False)
                 changed = True
     if changed:
         _force_clear_export_file_lock()
@@ -813,7 +1063,7 @@ def _force_unstick_export(*, wait_dead: float = 5.0) -> bool:
     """强制解除卡住的导出（同任务重开 / 热重载后）。返回 True 表示可立刻开新任务。"""
     global _lock, _export_worker
     with _meta_lock:
-        _control["cancel"] = True
+        _ctl_set_cancel(True)
         _control["clearOnStop"] = False
         _state.update(
             {
@@ -959,6 +1209,8 @@ def _snapshot_state() -> dict[str, Any]:
         mode = str(_state.get("mode") or "").strip().lower()
         if mode not in ("incremental", "force"):
             mode = "force" if _state.get("force") else "incremental"
+        # 落盘/快照只留短列表，避免 10 万+ 番号 JSON 卡死 API
+        cap = _STATUS_CODE_LIST_CAP
         base = {
             "running": bool(_state.get("running")),
             "paused": bool(_state.get("paused")),
@@ -968,13 +1220,15 @@ def _snapshot_state() -> dict[str, Any]:
             "total": int(_state.get("total") or 0),
             "done": int(_state.get("done") or 0),
             "failed": int(_state.get("failed") or 0),
+            "incomplete": int(_state.get("incomplete") or 0),
             "skipped": int(_state.get("skipped") or 0),
             "empty": int(_state.get("empty") or 0),
             "active": int(_state.get("active") or 0),
-            "doneCodes": list(_state.get("doneCodes") or []),
-            "skippedCodes": list(_state.get("skippedCodes") or []),
-            "failedCodes": list(_state.get("failedCodes") or []),
-            "emptyCodes": list(_state.get("emptyCodes") or []),
+            "doneCodes": list(_state.get("doneCodes") or [])[-cap:],
+            "skippedCodes": list(_state.get("skippedCodes") or [])[-cap:],
+            "failedCodes": list(_state.get("failedCodes") or [])[-cap:],
+            "incompleteCodes": list(_state.get("incompleteCodes") or [])[-cap:],
+            "emptyCodes": list(_state.get("emptyCodes") or [])[-cap:],
             "activeCodes": list(_state.get("activeCodes") or []),
             "activeFastCodes": list(_state.get("activeFastCodes") or []),
             "activeSlowCodes": list(_state.get("activeSlowCodes") or []),
@@ -1005,7 +1259,13 @@ def _snapshot_state() -> dict[str, Any]:
 def _checkpoint_finished_codes() -> set[str]:
     with _meta_lock:
         out: set[str] = set()
-        for bucket in ("doneCodes", "emptyCodes", "skippedCodes", "failedCodes"):
+        for bucket in (
+            "doneCodes",
+            "emptyCodes",
+            "skippedCodes",
+            "failedCodes",
+            "incompleteCodes",
+        ):
             for c in list(_state.get(bucket) or []):
                 s = str(c or "").strip()
                 if s:
@@ -1018,66 +1278,175 @@ def _write_resume_checkpoint(
     all_targets: list[dict[str, Any]] | None = None,
     reason: str = "progress",
 ) -> None:
-    """落盘断点：服务重启后可按已完成番号跳过，接着刮剩余。"""
+    """落盘断点：服务重启后可按已完成番号跳过，接着刮剩余。
+
+    大库（数万+）不写全量 allTargets / remainingTargets，避免百兆 JSON 卡死暂停 API。
+    续跑时用 SQLite 终态番号 + 重新 collect 过滤。
+    """
+    _CHECKPOINT_FULL_TARGET_CAP = 8000
+    # 剩余目标超过此数则省略列表（只记计数），避免暂停写盘卡死
+    _CHECKPOINT_REMAINING_CAP = 2500
     with _meta_lock:
         tid = str(_state.get("taskId") or "").strip()
         if not tid:
             return
-        targets = list(all_targets or _state.get("allTargets") or [])
-        if not targets:
-            return
-        finished = set()
-        for bucket in ("doneCodes", "emptyCodes", "skippedCodes", "failedCodes"):
+        targets_ref = (
+            all_targets
+            if all_targets is not None
+            else (_state.get("allTargets") or [])
+        )
+        if not isinstance(targets_ref, list):
+            targets_ref = []
+        n_targets = len(targets_ref)
+        finished = set(_result_seen)
+        for bucket in (
+            "doneCodes",
+            "emptyCodes",
+            "skippedCodes",
+            "failedCodes",
+            "incompleteCodes",
+        ):
             for c in list(_state.get(bucket) or []):
                 s = str(c or "").strip()
                 if s:
                     finished.add(s)
-        remaining = [
-            t
-            for t in targets
-            if isinstance(t, dict)
-            and str(t.get("code") or "").strip()
-            and str(t.get("code") or "").strip() not in finished
+        total_n = int(_state.get("total") or n_targets or 0)
+        done_n = int(_state.get("done") or 0)
+        empty_n = int(_state.get("empty") or 0)
+        skipped_n = int(_state.get("skipped") or 0)
+        failed_n = int(_state.get("failed") or 0)
+        incomplete_n = int(_state.get("incomplete") or 0)
+        if (
+            not n_targets
+            and reason != "paused"
+            and not (total_n or done_n or finished)
+        ):
+            return
+        done_codes = list(_state.get("doneCodes") or [])[-_STATUS_CODE_LIST_CAP:]
+        empty_codes = list(_state.get("emptyCodes") or [])[-_STATUS_CODE_LIST_CAP:]
+        skipped_codes = list(_state.get("skippedCodes") or [])[-_STATUS_CODE_LIST_CAP:]
+        failed_codes = list(_state.get("failedCodes") or [])[-_STATUS_CODE_LIST_CAP:]
+        incomplete_codes = list(_state.get("incompleteCodes") or [])[
+            -_STATUS_CODE_LIST_CAP:
         ]
         job = _state.get("currentJob")
-        payload = {
-            "version": 1,
-            "reason": reason,
-            "savedAt": _now_iso(),
-            "taskId": tid,
-            "taskName": str(_state.get("taskName") or ""),
-            "paused": bool(_state.get("paused")) or reason == "paused",
-            "message": "paused" if reason == "paused" else str(_state.get("message") or ""),
-            "total": int(_state.get("total") or len(targets)),
-            "done": int(_state.get("done") or 0),
-            "empty": int(_state.get("empty") or 0),
-            "skipped": int(_state.get("skipped") or 0),
-            "failed": int(_state.get("failed") or 0),
-            "doneCodes": list(_state.get("doneCodes") or []),
-            "emptyCodes": list(_state.get("emptyCodes") or []),
-            "skippedCodes": list(_state.get("skippedCodes") or []),
-            "failedCodes": list(_state.get("failedCodes") or []),
-            "allTargets": targets,
-            "remainingTargets": remaining,
-            "force": bool(_state.get("force")),
-            "mode": str(_state.get("mode") or "incremental"),
-            "exportFields": list(_state.get("exportFields") or []),
-            "localFields": list(_state.get("localFields") or []),
-            "region": str(_state.get("region") or ""),
-            "maker": str(_state.get("maker") or ""),
-            "prefix": str(_state.get("prefix") or ""),
-            "codeFilter": str(_state.get("codeFilter") or ""),
-            "currentJob": dict(job) if isinstance(job, dict) else None,
-            "watchHold": True if reason == "paused" else bool(_state.get("watchHold")),
-        }
-        _state["allTargets"] = targets
-        _state["resumable"] = len(remaining) > 0
-        _state["pauseSaved"] = bool(payload["paused"])
+        job_snap = dict(job) if isinstance(job, dict) else None
+        force_v = bool(_state.get("force"))
+        mode_v = str(_state.get("mode") or "incremental")
+        export_fields = list(_state.get("exportFields") or [])
+        local_fields = list(_state.get("localFields") or [])
+        region_v = str(_state.get("region") or "")
+        maker_v = str(_state.get("maker") or "")
+        prefix_v = str(_state.get("prefix") or "")
+        code_filter = str(_state.get("codeFilter") or "")
+        task_name = str(_state.get("taskName") or "")
+        paused_flag = bool(_state.get("paused")) or reason == "paused"
+        watch_hold = True if reason == "paused" else bool(_state.get("watchHold"))
+        msg_v = "paused" if reason == "paused" else str(_state.get("message") or "")
+
+        # 大库：用计数估算剩余，禁止 O(N) 扫 18 万条占锁
+        if n_targets > _CHECKPOINT_REMAINING_CAP:
+            slim = True
+            omit_remaining = True
+            processed = done_n + empty_n + skipped_n + failed_n + incomplete_n
+            if total_n > 0:
+                remaining_n = max(0, total_n - processed)
+            else:
+                remaining_n = n_targets
+            rem_slim = []
+            payload_targets = []
+        else:
+            remaining_n = 0
+            for t in targets_ref:
+                if not isinstance(t, dict):
+                    continue
+                c = str(t.get("code") or "").strip()
+                if c and c not in finished:
+                    remaining_n += 1
+            slim = n_targets > _CHECKPOINT_FULL_TARGET_CAP
+            omit_remaining = False
+            rem_slim = []
+            payload_targets = []
+            if slim:
+                for t in targets_ref:
+                    if not isinstance(t, dict):
+                        continue
+                    c = str(t.get("code") or "").strip()
+                    if not c or c in finished:
+                        continue
+                    rem_slim.append(
+                        {
+                            "code": c,
+                            "region": str(t.get("region") or ""),
+                            "maker": str(t.get("maker") or ""),
+                            "prefix": str(t.get("prefix") or ""),
+                            "kind": str(t.get("kind") or ""),
+                        }
+                    )
+            else:
+                payload_targets = list(targets_ref)
+                rem_slim = [
+                    t
+                    for t in payload_targets
+                    if isinstance(t, dict)
+                    and str(t.get("code") or "").strip()
+                    and str(t.get("code") or "").strip() not in finished
+                ]
+        payload_remaining = [] if omit_remaining else rem_slim
+        if slim:
+            payload_targets = []
+
+        _state["resumable"] = remaining_n > 0 or total_n > (
+            done_n + empty_n + skipped_n + failed_n + incomplete_n
+        )
+        _state["pauseSaved"] = bool(paused_flag)
+
+    payload = {
+        "version": 3 if (slim or omit_remaining) else 1,
+        "slim": slim,
+        "remainingOmitted": bool(omit_remaining),
+        "remainingCount": int(remaining_n),
+        "reason": reason,
+        "savedAt": _now_iso(),
+        "taskId": tid,
+        "taskName": task_name,
+        "paused": paused_flag,
+        "message": msg_v,
+        "total": total_n or n_targets,
+        "done": done_n,
+        "empty": empty_n,
+        "skipped": skipped_n,
+        "failed": failed_n,
+        "incomplete": incomplete_n,
+        "doneCodes": done_codes,
+        "emptyCodes": empty_codes,
+        "skippedCodes": skipped_codes,
+        "failedCodes": failed_codes,
+        "incompleteCodes": incomplete_codes,
+        "allTargets": payload_targets,
+        "remainingTargets": payload_remaining,
+        "force": force_v,
+        "mode": mode_v,
+        "exportFields": export_fields,
+        "localFields": local_fields,
+        "region": region_v,
+        "maker": maker_v,
+        "prefix": prefix_v,
+        "codeFilter": code_filter,
+        "currentJob": job_snap,
+        "watchHold": watch_hold,
+    }
     try:
         _RESUME_PATH.parent.mkdir(parents=True, exist_ok=True)
         tmp = _RESUME_PATH.with_suffix(".json.tmp")
+        compact = bool(payload.get("slim") or omit_remaining)
         tmp.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2),
+            json.dumps(
+                payload,
+                ensure_ascii=False,
+                indent=None if compact else 2,
+                separators=(",", ":") if compact else (",", ": "),
+            ),
             encoding="utf-8",
         )
         tmp.replace(_RESUME_PATH)
@@ -1110,6 +1479,10 @@ def clear_task_resume(task_id: str) -> dict[str, Any]:
         cleared = True
     # 重置：结果桶 + 过程日志一并清掉
     scraped = scrape_export_log_store.purge_task_logs(tid)
+    try:
+        scrape_export_queue_store.clear_task_queue(tid)
+    except Exception:
+        log.exception("clear queue on reset failed")
     with _meta_lock:
         # 丢弃本轮 worker 收尾的旧计数 max 写回（暂停后重置竞态）
         _discard_finish_persist_task_id = tid
@@ -1122,11 +1495,13 @@ def clear_task_resume(task_id: str) -> dict[str, Any]:
             _state["skipped"] = 0
             _state["empty"] = 0
             _state["failed"] = 0
+            _state["incomplete"] = 0
             _state["total"] = 0
             _state["doneCodes"] = []
             _state["skippedCodes"] = []
             _state["emptyCodes"] = []
             _state["failedCodes"] = []
+            _state["incompleteCodes"] = []
             _state["active"] = 0
             _state["activeCodes"] = []
             _state["activeFastCodes"] = []
@@ -1179,6 +1554,10 @@ def purge_task_logs(task_id: str) -> dict[str, Any]:
     if not tid:
         raise RuntimeError("缺少 taskId")
     stats = scrape_export_log_store.purge_task_logs(tid)
+    try:
+        scrape_export_queue_store.clear_task_queue(tid)
+    except Exception:
+        log.exception("clear queue on purge failed")
     # 顺带清断点
     resume = _load_resume_checkpoint()
     if resume and str(resume.get("taskId") or "").strip() == tid:
@@ -1230,6 +1609,7 @@ def _apply_resume_checkpoint_to_state(data: dict[str, Any]) -> None:
                 "empty": int(data.get("empty") or 0),
                 "skipped": int(data.get("skipped") or 0),
                 "failed": int(data.get("failed") or 0),
+                "incomplete": int(data.get("incomplete") or 0),
                 "active": 0,
                 "doneCodes": list(data.get("doneCodes") or [])[-_MAX_RESULT_CODES:],
                 "emptyCodes": list(data.get("emptyCodes") or [])[
@@ -1239,6 +1619,9 @@ def _apply_resume_checkpoint_to_state(data: dict[str, Any]) -> None:
                     -_MAX_RESULT_CODES:
                 ],
                 "failedCodes": list(data.get("failedCodes") or [])[
+                    -_MAX_RESULT_CODES:
+                ],
+                "incompleteCodes": list(data.get("incompleteCodes") or [])[
                     -_MAX_RESULT_CODES:
                 ],
                 "activeCodes": [],
@@ -1279,11 +1662,13 @@ def _apply_resume_checkpoint_to_state(data: dict[str, Any]) -> None:
             empty=int(data.get("empty") or 0),
             skipped=int(data.get("skipped") or 0),
             failed=int(data.get("failed") or 0),
+            incomplete=int(data.get("incomplete") or 0),
             total=int(data.get("total") or 0),
             done_codes=list(data.get("doneCodes") or []),
             empty_codes=list(data.get("emptyCodes") or []),
             skipped_codes=list(data.get("skippedCodes") or []),
             failed_codes=list(data.get("failedCodes") or []),
+            incomplete_codes=list(data.get("incompleteCodes") or []),
         )
     except Exception:
         log.exception("persist paused task after hydrate failed")
@@ -1304,6 +1689,7 @@ def peek_resume_for_task(task_id: str) -> dict[str, Any] | None:
         "empty": int(data.get("empty") or 0),
         "skipped": int(data.get("skipped") or 0),
         "failed": int(data.get("failed") or 0),
+        "incomplete": int(data.get("incomplete") or 0),
         "total": int(data.get("total") or 0),
         "remaining": len(remaining) if isinstance(remaining, list) else 0,
         "mode": str(data.get("mode") or ""),
@@ -1671,13 +2057,14 @@ def _bulk_skip_complete_targets(
     - 未完成（含 maker-fs 补全空种子 / 无封面空洞）→ pending 进网刮；
       空号只能由 worker 全源无详情后写入，禁止预分类直接跳过进网
     """
-    global _result_seen
     need_cover = "cover" in set(_normalize_fields(export_fields))
     poster_name = "poster.jpg"
     pending: list[dict[str, Any]] = []
     done_codes: list[str] = []
     empty_codes: list[str] = []
-    for t in targets:
+    total_n = len(targets)
+    scan_t0 = time.monotonic()
+    for i, t in enumerate(targets):
         if not isinstance(t, dict):
             continue
         c = str(t.get("code") or "").strip()
@@ -1710,55 +2097,75 @@ def _bulk_skip_complete_targets(
             empty_codes.append(c)
         else:
             done_codes.append(c)
+        # 大库扫描时心跳：让 status 轮询仍能拿到锁，避免「API 无响应」
+        if total_n >= 2000 and i > 0 and i % 2000 == 0:
+            _push_event(
+                phase="job",
+                text=(
+                    f"增量预分类扫描 {i}/{total_n}"
+                    f" · 已完成 {len(done_codes)}"
+                    f" · 待刮 {len(pending)}"
+                ),
+                level="info",
+            )
+            _touch_progress()
+            time.sleep(0)
 
     tid = ""
+    done_set = {str(c).strip() for c in done_codes if str(c or "").strip()}
+    empty_set = {str(c).strip() for c in empty_codes if str(c or "").strip()}
     with _meta_lock:
         tid = str(_state.get("taskId") or "").strip()
-        for c in done_codes:
-            if _code_already_counted(c):
-                # 允许从旧跳过/空号/失败升级为成功
-                if c in list(_state.get("doneCodes") or []):
-                    continue
-                if c in list(_state.get("skippedCodes") or []) or c in list(
-                    _state.get("emptyCodes") or []
-                ) or c in list(_state.get("failedCodes") or []):
-                    _remove_from_result_buckets(
-                        c, "skippedCodes", "emptyCodes", "failedCodes"
-                    )
-                    _append_result_code("doneCodes", c)
-                    _result_seen.add(c)
-                continue
-            _result_seen.add(c)
-            _append_result_code("doneCodes", c)
-        for c in empty_codes:
-            # 允许从旧「失败」桶迁到空号（全源无详情本应为空号）
-            if c in list(_state.get("failedCodes") or []) or c in list(
-                _state.get("skippedCodes") or []
-            ):
-                _remove_from_result_buckets(c, "failedCodes", "skippedCodes")
-                if c not in list(_state.get("emptyCodes") or []):
-                    _append_result_code("emptyCodes", c)
-                _result_seen.add(c)
-                continue
-            if _code_already_counted(c):
-                continue
-            _result_seen.add(c)
-            _append_result_code("emptyCodes", c)
-        _state["done"] = len(list(_state.get("doneCodes") or []))
-        _state["empty"] = len(list(_state.get("emptyCodes") or []))
-        _state["skipped"] = len(list(_state.get("skippedCodes") or []))
-        _state["failed"] = len(list(_state.get("failedCodes") or []))
-        _reconcile_result_counts_locked()
+        _bulk_apply_preclassify_codes(done_codes=done_set, empty_codes=empty_set)
 
+    # 大批量：后台分块写 SQLite，避免启动阶段占库拖死其它 API
+    _PRECLASSIFY_SYNC_DB_CAP = 3000
     if tid and (done_codes or empty_codes):
-        try:
-            scrape_export_log_store.bulk_upsert_result_codes(
-                tid,
-                done=done_codes,
-                empty=empty_codes,
+        n_persist = len(done_codes) + len(empty_codes)
+        if n_persist <= _PRECLASSIFY_SYNC_DB_CAP:
+            try:
+                scrape_export_log_store.bulk_upsert_result_codes(
+                    tid,
+                    done=done_codes,
+                    empty=empty_codes,
+                )
+            except Exception:
+                log.exception("bulk classify persist codes failed")
+        else:
+            done_bg = list(done_codes)
+            empty_bg = list(empty_codes)
+            task_bg = tid
+
+            def _bg_persist_preclassify() -> None:
+                chunk = 1500
+                try:
+                    for i in range(0, max(len(done_bg), len(empty_bg)), chunk):
+                        scrape_export_log_store.bulk_upsert_result_codes(
+                            task_bg,
+                            done=done_bg[i : i + chunk],
+                            empty=empty_bg[i : i + chunk],
+                        )
+                        time.sleep(0.02)
+                    log.info(
+                        "preclassify bg sqlite persist done n=%s elapsed=%.1fs",
+                        n_persist,
+                        time.monotonic() - scan_t0,
+                    )
+                except Exception:
+                    log.exception(
+                        "preclassify bg sqlite persist failed n=%s", n_persist
+                    )
+
+            threading.Thread(
+                target=_bg_persist_preclassify,
+                name="preclassify-db",
+                daemon=True,
+            ).start()
+            log.info(
+                "preclassify async sqlite persist n=%s (scan=%.1fs)",
+                n_persist,
+                time.monotonic() - scan_t0,
             )
-        except Exception:
-            log.exception("bulk classify persist codes failed")
 
     if done_codes or empty_codes or pending:
         _push_event(
@@ -1767,6 +2174,7 @@ def _bulk_skip_complete_targets(
                 f"增量预分类 · 成功 {len(done_codes)}"
                 + (f" · 空号 {len(empty_codes)}" if empty_codes else "")
                 + f" · 待刮 {len(pending)}"
+                + f" · {time.monotonic() - scan_t0:.1f}s"
             ),
             level="info",
         )
@@ -1940,9 +2348,9 @@ def _prime_state_for_job(job: dict[str, Any], *, keep_lock_message: str = "queue
         mode=str(job.get("mode") or "") or None,
         task_id=str(job.get("taskId") or "") or None,
     )
-    _control["cancel"] = False
+    _ctl_set_cancel(False)
     _control["clearOnStop"] = False
-    _control["pause_abort"] = False
+    _ctl_set_pause_abort(False)
     _result_seen = set()
     _state["currentJob"] = dict(job)
     _state.update(
@@ -1955,12 +2363,14 @@ def _prime_state_for_job(job: dict[str, Any], *, keep_lock_message: str = "queue
             "total": 0,
             "done": 0,
             "failed": 0,
+            "incomplete": 0,
             "skipped": 0,
             "empty": 0,
             "active": 0,
             "doneCodes": [],
             "skippedCodes": [],
             "failedCodes": [],
+            "incompleteCodes": [],
             "emptyCodes": [],
             "activeCodes": [],
             "activeFastCodes": [],
@@ -2049,6 +2459,7 @@ def submit_export_job(
     fields: list[str] | None = None,
     local_fields: list[str] | None = None,
     from_watch: bool = False,
+    retry_failed: bool = False,
 ) -> dict[str, Any]:
     """空闲则立刻开跑；忙碌则入队（同 taskId 去重并更新参数）。不再因忙碌 409。
 
@@ -2058,6 +2469,15 @@ def submit_export_job(
     if _export_boot_stuck():
         _force_unstick_export()
         _reconcile_stuck_export_state()
+    use_codes = list(codes) if codes else None
+    use_force = bool(force)
+    use_mode = mode
+    if retry_failed:
+        tid_rf = str(task_id or "").strip()
+        failed_codes = prepare_retry_failed(tid_rf)
+        use_codes = failed_codes
+        use_force = True
+        use_mode = "force"
     job = _make_export_job(
         task_id=task_id,
         task_name=task_name,
@@ -2066,9 +2486,9 @@ def submit_export_job(
         maker=maker,
         prefix=prefix,
         code=code,
-        codes=codes,
-        force=force,
-        mode=mode,
+        codes=use_codes,
+        force=use_force,
+        mode=use_mode,
         fields=fields,
         local_fields=local_fields,
     )
@@ -2087,9 +2507,25 @@ def submit_export_job(
             same_task = bool(tid and cur_tid == tid)
             paused_now = bool(_state.get("paused") or _control.get("pause_abort"))
             if same_task:
+                # 失败重试必须开新任务（带 codes），禁止「暂停续跑」吃掉新参数
+                if (
+                    retry_failed
+                    or (
+                        bool(job.get("force"))
+                        and bool(job.get("codes") or job.get("code"))
+                    )
+                ) and (_export_worker_alive() or paused_now):
+                    _state["pendingRestart"] = job
+                    _control["clearOnStop"] = False
+                    _ctl_set_pause_abort(False)
+                    _ctl_set_cancel(True)
+                    _state["paused"] = False
+                    _state["message"] = "cancelling"
+                    _clear_active_progress_locked()
+                    notify_pause = True
                 # 暂停中再点开始 → 继续本任务
-                if paused_now and not _export_boot_stuck() and _export_worker_alive():
-                    _control["pause_abort"] = False
+                elif paused_now and not _export_boot_stuck() and _export_worker_alive():
+                    _ctl_set_pause_abort(False)
                     _state["paused"] = False
                     _state["watchHold"] = False
                     _state["message"] = "scraping"
@@ -2110,7 +2546,7 @@ def submit_export_job(
                         if not fields_changed and not force_codes:
                             return export_status()
                         _state["pendingRestart"] = job
-                        _control["cancel"] = True
+                        _ctl_set_cancel(True)
                         return export_status()
                     if not _force_unstick_export():
                         _state["pendingRestart"] = job
@@ -2159,9 +2595,9 @@ def submit_export_job(
                 _state["queue"] = queue
                 _state["pendingRestart"] = job
                 _control["clearOnStop"] = False
-                _control["pause_abort"] = False
+                _ctl_set_pause_abort(False)
                 _state["paused"] = False
-                _control["cancel"] = True
+                _ctl_set_cancel(True)
                 _state["message"] = "cancelling"
                 _clear_active_progress_locked()
                 notify_pause = True
@@ -2204,21 +2640,32 @@ def submit_export_job(
             # unreachable safety
             pass
     if notify_pause:
-        _abort_all_inflight()
-        with _pause_cv:
-            _pause_cv.notify_all()
-        if _state.get("pendingRestart"):
-            _push_event(
-                phase="job",
-                text=(
-                    f"已切换任务 · 暂停项回队 · 即将开始 "
-                    f"{job.get('taskName') or job.get('taskId') or ''}"
-                ),
-                level="info",
-            )
-        else:
-            _push_event(phase="job", text="已继续刮削", level="ok")
-        _persist_state(force=True)
+        # 继续/切换：无锁清暂停，后台打断与落盘
+        if not _state.get("pendingRestart"):
+            _ctl_set_pause_abort(False)
+        def _bg_notify() -> None:
+            try:
+                _abort_all_inflight()
+                with _pause_cv:
+                    _pause_cv.notify_all()
+                if _state.get("pendingRestart"):
+                    _push_event(
+                        phase="job",
+                        text=(
+                            f"已切换任务 · 暂停项回队 · 即将开始 "
+                            f"{job.get('taskName') or job.get('taskId') or ''}"
+                        ),
+                        level="info",
+                    )
+                else:
+                    _push_event(phase="job", text="已继续刮削", level="ok")
+                _persist_state(force=True)
+            except Exception:
+                log.exception("submit resume/switch background failed")
+
+        threading.Thread(
+            target=_bg_notify, name="submit-notify", daemon=True
+        ).start()
         return export_status()
     if start_now:
         _spawn_export_thread(job)
@@ -2292,11 +2739,13 @@ def _replace_task_result_counts(task_id: str) -> None:
             t["empty"] = 0
             t["skipped"] = 0
             t["failed"] = 0
+            t["incomplete"] = 0
             t["total"] = 0
             t["doneCodes"] = []
             t["emptyCodes"] = []
             t["skippedCodes"] = []
             t["failedCodes"] = []
+            t["incompleteCodes"] = []
             t["lastStatus"] = ""
             t["updatedAt"] = now
             changed = True
@@ -2308,6 +2757,123 @@ def _replace_task_result_counts(task_id: str) -> None:
         settings_store.put_setting(settings_store.SCRAPE_KEY, next_raw)
     except Exception:
         log.exception("replace scrape task counts failed task=%s", tid)
+
+
+def _clear_task_card_retry_queues(task_id: str) -> None:
+    """失败重试：清任务卡失败+数据不全队列/计数，保留成功·空号。"""
+    tid = str(task_id or "").strip()
+    if not tid:
+        return
+    try:
+        raw = settings_store.get_setting(settings_store.SCRAPE_KEY) or {}
+        tasks = scrape_profiles.normalize_scrape_tasks(
+            raw.get("scrapeTasks") or raw.get("scrape_tasks")
+        )
+        changed = False
+        now = _now_iso()
+        for t in tasks:
+            if str(t.get("id") or "") != tid:
+                continue
+            t["failed"] = 0
+            t["failedCodes"] = []
+            t["incomplete"] = 0
+            t["incompleteCodes"] = []
+            ls = str(t.get("lastStatus") or "")
+            if "失败" in ls or "数据不全" in ls or ls.startswith("完成"):
+                done_n = int(t.get("done") or 0)
+                empty_n = int(t.get("empty") or 0)
+                t["lastStatus"] = (
+                    f"完成 · 成功 {done_n} · 空号 {empty_n}"
+                    f" · 数据不全 0 · 失败 0"
+                )[:120]
+            t["updatedAt"] = now
+            changed = True
+            break
+        if not changed:
+            return
+        next_raw = dict(raw)
+        next_raw["scrapeTasks"] = tasks
+        settings_store.put_setting(settings_store.SCRAPE_KEY, next_raw)
+    except Exception:
+        log.exception("clear task card retry queues task=%s", tid)
+
+
+def _collect_retry_queue_codes(task_id: str, bucket: str) -> list[str]:
+    """从 SQLite → 任务卡 → 内存收集某桶番号（去重保序）。"""
+    tid = str(task_id or "").strip()
+    key = "failedCodes" if bucket == "failed" else "incompleteCodes"
+    codes = scrape_export_log_store.list_result_codes(
+        tid, bucket, limit=100000, offset=0
+    )
+    if not codes:
+        try:
+            raw = settings_store.get_setting(settings_store.SCRAPE_KEY) or {}
+            tasks = scrape_profiles.normalize_scrape_tasks(
+                raw.get("scrapeTasks") or raw.get("scrape_tasks")
+            )
+            for t in tasks:
+                if str(t.get("id") or "") != tid:
+                    continue
+                codes = [
+                    str(c).strip()
+                    for c in list(t.get(key) or [])
+                    if str(c or "").strip()
+                ]
+                break
+        except Exception:
+            pass
+    with _meta_lock:
+        if str(_state.get("taskId") or "").strip() == tid:
+            mem = [
+                str(c).strip()
+                for c in list(_state.get(key) or [])
+                if str(c or "").strip()
+            ]
+            if mem:
+                seen = set(codes)
+                for c in mem:
+                    if c not in seen:
+                        codes.append(c)
+                        seen.add(c)
+    return codes
+
+
+def prepare_retry_failed(task_id: str) -> list[str]:
+    """取出失败+数据不全番号，清 SQLite/任务卡/内存对应桶，供强制重刮。
+
+    「失败重试」按钮：两者都重刮并清空；暂停续跑仍只重试 failed（不含 incomplete）。
+    """
+    global _result_seen
+    tid = str(task_id or "").strip()
+    if not tid:
+        raise RuntimeError("缺少 taskId")
+    failed_codes = _collect_retry_queue_codes(tid, "failed")
+    incomplete_codes = _collect_retry_queue_codes(tid, "incomplete")
+    codes: list[str] = []
+    seen: set[str] = set()
+    for c in [*failed_codes, *incomplete_codes]:
+        if c and c not in seen:
+            codes.append(c)
+            seen.add(c)
+    if not codes:
+        raise RuntimeError("没有失败或数据不全项可重试")
+    scrape_export_log_store.clear_result_bucket(tid, "failed")
+    scrape_export_log_store.clear_result_bucket(tid, "incomplete")
+    _clear_task_card_retry_queues(tid)
+    resume = _load_resume_checkpoint()
+    if resume and str(resume.get("taskId") or "").strip() == tid:
+        _clear_resume_checkpoint()
+    # 必须清内存，否则 status / persist 会把旧队列 max 写回任务卡
+    with _meta_lock:
+        if str(_state.get("taskId") or "").strip() == tid:
+            retry_set = {str(c).strip() for c in codes if str(c or "").strip()}
+            _state["failed"] = 0
+            _state["failedCodes"] = []
+            _state["incomplete"] = 0
+            _state["incompleteCodes"] = []
+            if retry_set:
+                _result_seen -= retry_set
+    return codes
 
 
 def _set_task_watch_armed(task_id: str, armed: bool) -> None:
@@ -2373,13 +2939,19 @@ def _persist_task_result(
     empty: int = 0,
     skipped: int = 0,
     failed: int,
+    incomplete: int = 0,
     total: int,
     done_codes: list[str] | None = None,
     empty_codes: list[str] | None = None,
     skipped_codes: list[str] | None = None,
     failed_codes: list[str] | None = None,
+    incomplete_codes: list[str] | None = None,
+    light: bool = False,
 ) -> None:
-    """把本轮进度合并进任务卡终身计数（不清零；仅「重置任务」由前端显式清）。"""
+    """把本轮进度合并进任务卡终身计数（不清零；仅「重置任务」由前端显式清）。
+
+    light=True：运行中快路径，不打 SQLite COUNT/LIST（大库会卡死轮询）。
+    """
     tid = str(task_id or "").strip()
     if not tid:
         return
@@ -2395,7 +2967,8 @@ def _persist_task_result(
         incoming_empty = _uniq_result_codes(empty_codes)
         incoming_skip = _uniq_result_codes(skipped_codes)
         incoming_fail = _uniq_result_codes(failed_codes)
-        # 计数以传入的 done/empty/skipped/failed 为准；列表可能被截断，不能只信 len()
+        incoming_incomplete = _uniq_result_codes(incomplete_codes)
+        # 计数以传入的显式值为准；列表可能被截断，不能只信 len()
         incoming_done_n = max(
             len(incoming_done) if done_codes is not None else 0,
             max(0, int(done)),
@@ -2412,14 +2985,29 @@ def _persist_task_result(
             len(incoming_fail) if failed_codes is not None else 0,
             max(0, int(failed)),
         )
+        incoming_incomplete_n = max(
+            len(incoming_incomplete) if incomplete_codes is not None else 0,
+            max(0, int(incomplete)),
+        )
         incoming_total = max(0, int(total))
         if status == "cancelled":
             status = "已取消"
         for t in tasks:
             if str(t.get("id") or "") != tid:
                 continue
-            # 运行中番号已在 _record_terminal_result 逐条 upsert；此处只抬高计数
-            db_counts = scrape_export_log_store.count_result_codes(tid)
+            # 运行中番号已在 _record_terminal_result 逐条 upsert；成功/空号可抬高。
+            # 失败/数据不全必须以 SQLite 为准：番号会在两桶间迁移，不能 max 留幽灵。
+            # light：信任内存计数，避免 18W+ COUNT 拖死 persist / 间接拖死 status。
+            if light:
+                db_counts = {
+                    "done": 0,
+                    "skipped": 0,
+                    "failed": 0,
+                    "empty": 0,
+                    "incomplete": 0,
+                }
+            else:
+                db_counts = scrape_export_log_store.count_result_codes(tid)
             done_n = max(
                 int(t.get("done") or 0),
                 incoming_done_n,
@@ -2435,12 +3023,18 @@ def _persist_task_result(
                 incoming_skip_n,
                 int(db_counts.get("skipped") or 0),
             )
-            failed_n = max(
-                int(t.get("failed") or 0),
-                incoming_fail_n,
-                int(db_counts.get("failed") or 0),
-            )
-            processed = done_n + empty_n + skipped_n + failed_n
+            if light:
+                failed_n = incoming_fail_n
+                incomplete_n = incoming_incomplete_n
+            else:
+                failed_n = int(db_counts.get("failed") or 0)
+                incomplete_n = int(db_counts.get("incomplete") or 0)
+                # 本轮内存态若尚未落库完，取较大值兜底（仍不读旧卡上的 failed/incomplete）
+                if failed_codes is not None:
+                    failed_n = max(failed_n, incoming_fail_n)
+                if incomplete_codes is not None:
+                    incomplete_n = max(incomplete_n, incoming_incomplete_n)
+            processed = done_n + empty_n + skipped_n + failed_n + incomplete_n
             total_n = max(
                 int(t.get("total") or 0),
                 incoming_total,
@@ -2448,33 +3042,132 @@ def _persist_task_result(
             )
             if status == "ok":
                 status = (
-                    f"完成 · 成功 {done_n} · 空号 {empty_n} · 数据不全 {failed_n}"
+                    f"完成 · 成功 {done_n} · 空号 {empty_n}"
+                    f" · 数据不全 {incomplete_n} · 失败 {failed_n}"
                 )
             t["lastStatus"] = status[:120]
             t["done"] = int(done_n)
             t["empty"] = int(empty_n)
             t["skipped"] = int(skipped_n)
-            t["failed"] = int(failed_n)
             t["total"] = int(total_n)
             # 任务卡只留短预览；点开列表走 /scrape/export/codes
+            # 传入 None=未提供则保留旧预览；传入 []=本轮明确为空，必须覆盖旧幽灵
             preview_cap = 200
-            t["doneCodes"] = incoming_done[-preview_cap:] if incoming_done else list(
-                t.get("doneCodes") or []
-            )[:preview_cap]
+            t["doneCodes"] = (
+                incoming_done[-preview_cap:]
+                if done_codes is not None
+                else list(t.get("doneCodes") or [])[:preview_cap]
+            )
             t["emptyCodes"] = (
                 incoming_empty[-preview_cap:]
-                if incoming_empty
+                if empty_codes is not None
                 else list(t.get("emptyCodes") or [])[:preview_cap]
             )
             t["skippedCodes"] = (
                 incoming_skip[-preview_cap:]
-                if incoming_skip
+                if skipped_codes is not None
                 else list(t.get("skippedCodes") or [])[:preview_cap]
             )
-            t["failedCodes"] = (
-                incoming_fail[-preview_cap:]
-                if incoming_fail
-                else list(t.get("failedCodes") or [])[:preview_cap]
+            if light:
+                # 运行中：用本轮短列表即可，结束时再对齐 SQLite
+                if failed_codes is not None:
+                    t["failedCodes"] = incoming_fail[-preview_cap:]
+                    t["failed"] = int(failed_n)
+                else:
+                    t["failedCodes"] = list(t.get("failedCodes") or [])[:preview_cap]
+                    t["failed"] = int(failed_n)
+                if incomplete_codes is not None:
+                    t["incompleteCodes"] = incoming_incomplete[-preview_cap:]
+                    t["incomplete"] = int(incomplete_n)
+                else:
+                    t["incompleteCodes"] = list(t.get("incompleteCodes") or [])[
+                        :preview_cap
+                    ]
+                    t["incomplete"] = int(incomplete_n)
+            else:
+                # 失败/数据不全：有库记录时以 SQLite 为准；否则用本轮传入（含空列表清幽灵）
+                db_fail = scrape_export_log_store.list_result_codes(
+                    tid, "failed", limit=preview_cap, offset=0
+                )
+                db_incomplete = scrape_export_log_store.list_result_codes(
+                    tid, "incomplete", limit=preview_cap, offset=0
+                )
+                db_queue_n = int(db_counts.get("failed") or 0) + int(
+                    db_counts.get("incomplete") or 0
+                )
+                if db_queue_n > 0 or db_fail or db_incomplete:
+                    t["failedCodes"] = db_fail[-preview_cap:]
+                    t["incompleteCodes"] = db_incomplete[-preview_cap:]
+                    failed_n = int(db_counts.get("failed") or 0)
+                    incomplete_n = int(db_counts.get("incomplete") or 0)
+                elif failed_codes is not None or incomplete_codes is not None:
+                    t["failedCodes"] = incoming_fail[-preview_cap:]
+                    t["incompleteCodes"] = incoming_incomplete[-preview_cap:]
+                else:
+                    t["failedCodes"] = list(t.get("failedCodes") or [])[:preview_cap]
+                    t["incompleteCodes"] = list(t.get("incompleteCodes") or [])[
+                        :preview_cap
+                    ]
+                # 互斥：成功 > 空号 > 数据不全 > 失败（同号只留一桶）
+                done_set = set(t["doneCodes"])
+                empty_set = set(t["emptyCodes"]) | set(t["skippedCodes"])
+                t["incompleteCodes"] = [
+                    c
+                    for c in t["incompleteCodes"]
+                    if c not in done_set and c not in empty_set
+                ][-preview_cap:]
+                inc_set = set(t["incompleteCodes"])
+                t["failedCodes"] = [
+                    c
+                    for c in t["failedCodes"]
+                    if c not in done_set and c not in empty_set and c not in inc_set
+                ][-preview_cap:]
+                # 计数：库有精确值用库；否则跟互斥后的预览列表（截断时保留较大库值）
+                if db_queue_n > 0:
+                    t["failed"] = int(db_counts.get("failed") or 0)
+                    t["incomplete"] = int(db_counts.get("incomplete") or 0)
+                else:
+                    t["failed"] = (
+                        len(t["failedCodes"])
+                        if (failed_codes is not None or t["failedCodes"])
+                        else int(failed_n)
+                    )
+                    t["incomplete"] = (
+                        len(t["incompleteCodes"])
+                        if (incomplete_codes is not None or t["incompleteCodes"])
+                        else int(incomplete_n)
+                    )
+            if light:
+                # 轻量互斥预览，避免同号进两框（不做全库对齐）
+                done_set = set(t["doneCodes"])
+                empty_set = set(t["emptyCodes"]) | set(t["skippedCodes"])
+                t["incompleteCodes"] = [
+                    c
+                    for c in t["incompleteCodes"]
+                    if c not in done_set and c not in empty_set
+                ][-preview_cap:]
+                inc_set = set(t["incompleteCodes"])
+                t["failedCodes"] = [
+                    c
+                    for c in t["failedCodes"]
+                    if c not in done_set and c not in empty_set and c not in inc_set
+                ][-preview_cap:]
+            if status == "ok" or str(t.get("lastStatus") or "").startswith("完成"):
+                t["lastStatus"] = (
+                    f"完成 · 成功 {int(t['done'])} · 空号 {int(t['empty'])}"
+                    f" · 数据不全 {int(t['incomplete'])} · 失败 {int(t['failed'])}"
+                )[:120]
+            # 合计 = 本地目标数（本轮 incoming_total / 历史卡），只升不压成「分项之和」
+            t["total"] = int(
+                max(
+                    int(t.get("total") or 0),
+                    int(total_n),
+                    int(t["done"])
+                    + int(t["empty"])
+                    + int(t.get("skipped") or 0)
+                    + int(t["failed"])
+                    + int(t["incomplete"]),
+                )
             )
             t["updatedAt"] = now
             changed = True
@@ -2498,7 +3191,7 @@ def _take_next_job_after_finish() -> dict[str, Any] | None:
         _end_flags["message"] = ""
         _end_flags["clearOnStop"] = False
         _end_flags["hadError"] = False
-        _control["cancel"] = False
+        _ctl_set_cancel(False)
         _control["clearOnStop"] = False
 
         finished_snap = {
@@ -2509,11 +3202,13 @@ def _take_next_job_after_finish() -> dict[str, Any] | None:
             "empty": int(_state.get("empty") or 0),
             "skipped": int(_state.get("skipped") or 0),
             "failed": int(_state.get("failed") or 0),
+            "incomplete": int(_state.get("incomplete") or 0),
             "total": int(_state.get("total") or 0),
             "doneCodes": list(_state.get("doneCodes") or []),
             "emptyCodes": list(_state.get("emptyCodes") or []),
             "skippedCodes": list(_state.get("skippedCodes") or []),
             "failedCodes": list(_state.get("failedCodes") or []),
+            "incompleteCodes": list(_state.get("incompleteCodes") or []),
         }
 
         if clear_on_stop:
@@ -2632,11 +3327,13 @@ def _take_next_job_after_finish() -> dict[str, Any] | None:
                 empty=int(finished_snap.get("empty") or 0),
                 skipped=int(finished_snap.get("skipped") or 0),
                 failed=int(finished_snap.get("failed") or 0),
+                incomplete=int(finished_snap.get("incomplete") or 0),
                 total=int(finished_snap.get("total") or 0),
                 done_codes=list(finished_snap.get("doneCodes") or []),
                 empty_codes=list(finished_snap.get("emptyCodes") or []),
                 skipped_codes=list(finished_snap.get("skippedCodes") or []),
                 failed_codes=list(finished_snap.get("failedCodes") or []),
+                incomplete_codes=list(finished_snap.get("incompleteCodes") or []),
             )
             _apply_watch_arm_after_finish(
                 snap_tid,
@@ -2684,13 +3381,26 @@ def _persist_state(*, force: bool = False) -> None:
             empty = int(_state.get("empty") or 0)
             skipped = int(_state.get("skipped") or 0)
             failed = int(_state.get("failed") or 0)
+            incomplete = int(_state.get("incomplete") or 0)
             total = int(_state.get("total") or 0)
-            done_codes = list(_state.get("doneCodes") or [])
-            empty_codes = list(_state.get("emptyCodes") or [])
-            skipped_codes = list(_state.get("skippedCodes") or [])
-            failed_codes = list(_state.get("failedCodes") or [])
+            done_codes = list(_state.get("doneCodes") or [])[-_STATUS_CODE_LIST_CAP:]
+            empty_codes = list(_state.get("emptyCodes") or [])[-_STATUS_CODE_LIST_CAP:]
+            skipped_codes = list(_state.get("skippedCodes") or [])[
+                -_STATUS_CODE_LIST_CAP:
+            ]
+            failed_codes = list(_state.get("failedCodes") or [])[-_STATUS_CODE_LIST_CAP:]
+            incomplete_codes = list(_state.get("incompleteCodes") or [])[
+                -_STATUS_CODE_LIST_CAP:
+            ]
             msg = str(_state.get("message") or "")
-            has_progress = total > 0 or done > 0 or empty > 0 or skipped > 0 or failed > 0
+            has_progress = (
+                total > 0
+                or done > 0
+                or empty > 0
+                or skipped > 0
+                or failed > 0
+                or incomplete > 0
+            )
             discard_tid = str(_discard_finish_persist_task_id or "").strip()
         # 刚重置的任务：禁止用 max 把旧卡数字抬回来
         if tid and discard_tid == tid:
@@ -2713,11 +3423,14 @@ def _persist_state(*, force: bool = False) -> None:
                 empty=empty,
                 skipped=skipped,
                 failed=failed,
+                incomplete=incomplete,
                 total=total,
                 done_codes=done_codes,
                 empty_codes=empty_codes,
                 skipped_codes=skipped_codes,
                 failed_codes=failed_codes,
+                incomplete_codes=incomplete_codes,
+                light=bool(running or paused),
             )
             if running or paused:
                 _write_resume_checkpoint(
@@ -2783,6 +3496,7 @@ def _hydrate_state() -> None:
                 "total": int(data.get("total") or 0),
                 "done": int(data.get("done") or 0),
                 "failed": int(data.get("failed") or 0),
+                "incomplete": int(data.get("incomplete") or 0),
                 "skipped": int(data.get("skipped") or 0),
                 "empty": int(data.get("empty") or 0),
                 "active": 0,
@@ -2794,6 +3508,9 @@ def _hydrate_state() -> None:
                     -_MAX_RESULT_CODES:
                 ],
                 "failedCodes": list(data.get("failedCodes") or [])[
+                    -_MAX_RESULT_CODES:
+                ],
+                "incompleteCodes": list(data.get("incompleteCodes") or [])[
                     -_MAX_RESULT_CODES:
                 ],
                 "activeCodes": [],
@@ -2839,6 +3556,7 @@ def _hydrate_state() -> None:
         or int(data.get("empty") or 0) > 0
         or int(data.get("skipped") or 0) > 0
         or int(data.get("failed") or 0) > 0
+        or int(data.get("incomplete") or 0) > 0
     ):
         try:
             _persist_task_result(
@@ -2856,11 +3574,13 @@ def _hydrate_state() -> None:
                 empty=int(data.get("empty") or 0),
                 skipped=int(data.get("skipped") or 0),
                 failed=int(data.get("failed") or 0),
+                incomplete=int(data.get("incomplete") or 0),
                 total=int(data.get("total") or 0),
                 done_codes=list(data.get("doneCodes") or []),
                 empty_codes=list(data.get("emptyCodes") or []),
                 skipped_codes=list(data.get("skippedCodes") or []),
                 failed_codes=list(data.get("failedCodes") or []),
+                incomplete_codes=list(data.get("incompleteCodes") or []),
             )
         except Exception:
             log.exception("hydrate sync task card failed")
@@ -2879,6 +3599,10 @@ def _push_event(
     ms: int | None = None,
     archive: bool = True,
 ) -> None:
+    # 番号级覆盖：增量保留原日志时整轮不落库；强制重刮时整轮落库
+    override = getattr(_event_archive_tls, "force_archive", None)
+    if override is not None:
+        archive = bool(override)
     ev: dict[str, Any] = {
         "ts": _now_iso(),
         "phase": phase,
@@ -2895,7 +3619,7 @@ def _push_event(
         if len(events) > _MAX_EVENTS:
             events = events[-_MAX_EVENTS:]
         _state["events"] = events
-    # 强制重刮会先清库再写；增量跳过可不落库，避免重复刷日志
+    # 二次刮削会先清该番号旧日志再写；增量跳过/保留原日志时不落库
     if archive:
         _archive_event_for_code(ev)
     _touch_progress()
@@ -2986,7 +3710,7 @@ def _archive_event_for_code(ev: dict[str, Any]) -> None:
 
 
 def _clear_events_for_code(code: str) -> None:
-    """强制重刮时覆盖该番号归档日志（不追加旧轮次）。"""
+    """二次刮削前覆盖该番号归档日志（只保留即将写入的本轮，不叠旧轮次）。"""
     c = _std_code(code)
     if not c:
         return
@@ -3003,8 +3727,238 @@ def _clear_events_for_code(code: str) -> None:
                 pass
 
 
+_SKIP_LOG_MARKERS = (
+    "已存在 meta/封面",
+    "增量跳过",
+    "记为成功",
+    "由 scrape.json 还原",
+)
+
+
+def _events_look_like_scrape_log(events: list[dict[str, Any]]) -> bool:
+    """是否已有可展示的具体刮削过程（非仅增量跳过一句）。"""
+    for e in events:
+        if not isinstance(e, dict):
+            continue
+        phase = str(e.get("phase") or "").strip().lower()
+        text = str(e.get("text") or "")
+        if any(m in text for m in _SKIP_LOG_MARKERS) and phase in {
+            "write",
+            "parse",
+            "job",
+        }:
+            continue
+        if phase == "scrape" and (
+            e.get("source")
+            or "成功抓取" in text
+            or "未抓取" in text
+            or "元数据" in text
+            or "字段来源" in text
+        ):
+            return True
+        if phase == "cover":
+            return True
+        if phase == "write" and ("写入完成" in text or "写入目录" in text):
+            return True
+        if phase == "nfo":
+            return True
+    return False
+
+
+def _synthesize_scrape_events_from_meta(
+    code: str,
+    meta: dict[str, Any],
+    *,
+    entry_rel: str = "",
+    kind: str = "",
+    poster_ok: bool | None = None,
+) -> list[dict[str, Any]]:
+    """无过程日志时，从 scrape.json 还原一轮可读的刮削步骤。"""
+    c = _std_code(code)
+    if not c or not isinstance(meta, dict):
+        return []
+    base_ts = str(meta.get("scrapedAt") or "").strip() or _now_iso()
+    # 同一秒内多行：用毫秒后缀保证去重键与顺序稳定
+    seq = 0
+
+    def _ev(
+        *,
+        phase: str,
+        text: str,
+        level: str = "info",
+        source: str = "",
+        ms: int | None = None,
+    ) -> dict[str, Any]:
+        nonlocal seq
+        seq += 1
+        ts = base_ts
+        if "T" in base_ts and base_ts.endswith("Z") and seq > 1:
+            # 2024-01-01T00:00:00Z → 保留可读；用 text 区分即可
+            ts = base_ts
+        out: dict[str, Any] = {
+            "ts": ts,
+            "phase": phase,
+            "level": level,
+            "text": text,
+            "code": c,
+            "source": source or "",
+        }
+        if ms is not None:
+            out["ms"] = int(ms)
+        return out
+
+    evs: list[dict[str, Any]] = []
+    kind_s = str(kind or meta.get("kind") or "").strip()
+    parse_txt = f"解析番号 · 识别为 {c}"
+    if kind_s:
+        parse_txt += f" · 方案 {kind_s}"
+    evs.append(_ev(phase="parse", text=parse_txt, level="ok"))
+    rel = str(entry_rel or meta.get("path") or "").strip()
+    if rel:
+        evs.append(_ev(phase="parse", text=f"目标路径 {rel}", level="info"))
+    scraped_at = str(meta.get("scrapedAt") or "").strip()
+    if scraped_at:
+        evs.append(
+            _ev(
+                phase="parse",
+                text=f"落盘时间 {scraped_at} · 由 scrape.json 还原日志",
+                level="info",
+            )
+        )
+    else:
+        evs.append(
+            _ev(
+                phase="parse",
+                text="由 scrape.json 还原日志（无 scrapedAt）",
+                level="info",
+            )
+        )
+
+    runs = meta.get("sourceRuns") if isinstance(meta.get("sourceRuns"), list) else []
+    for run in runs:
+        if not isinstance(run, dict):
+            continue
+        sid = str(run.get("id") or "").strip()
+        ok = bool(run.get("ok"))
+        try:
+            ms = int(run.get("ms") or 0)
+        except Exception:
+            ms = 0
+        err = str(run.get("error") or "").strip()
+        if ok:
+            evs.append(
+                _ev(
+                    phase="scrape",
+                    source=sid,
+                    ms=ms or None,
+                    text=f"成功抓取到数据, 用时 {ms / 1000:.3f}s <{sid}>",
+                    level="ok",
+                )
+            )
+        else:
+            evs.append(
+                _ev(
+                    phase="scrape",
+                    source=sid,
+                    ms=ms or None,
+                    text=f"未抓取到数据 <{sid}>" + (f"：{err}" if err else ""),
+                    level="warn",
+                )
+            )
+
+    if runs:
+        evs.append(_ev(phase="scrape", text="元数据获取成功", level="ok"))
+    else:
+        fs = (
+            meta.get("fieldSources")
+            if isinstance(meta.get("fieldSources"), dict)
+            else {}
+        )
+        if fs:
+            bits = [
+                f"{k}←{v}"
+                for k, v in list(fs.items())[:12]
+                if str(k).strip() and str(v).strip()
+            ]
+            evs.append(
+                _ev(
+                    phase="scrape",
+                    text="元数据字段来源 " + " · ".join(bits),
+                    level="ok",
+                )
+            )
+        else:
+            src = str(meta.get("source") or "").strip()
+            evs.append(
+                _ev(
+                    phase="scrape",
+                    text="元数据已落盘"
+                    + (f" · 源 {src}" if src else "")
+                    + "（无 sourceRuns 明细）",
+                    level="ok",
+                )
+            )
+
+    has_remote = bool(
+        str(meta.get("poster") or meta.get("coverUrl") or "").strip()
+    )
+    if poster_ok is True or (poster_ok is None and has_remote):
+        evs.append(
+            _ev(
+                phase="cover",
+                text="封面已就绪"
+                + ("（本地文件）" if poster_ok is True else "（落盘/远程地址）"),
+                level="ok",
+            )
+        )
+    elif poster_ok is False:
+        evs.append(_ev(phase="cover", text="无本地封面文件", level="info"))
+
+    evs.append(
+        _ev(
+            phase="write",
+            text="写入完成 · 已有 scrape.json"
+            + (" / 封面" if poster_ok is not False else ""),
+            level="ok",
+        )
+    )
+    return evs
+
+
+def _ensure_archived_scrape_log_from_meta(
+    code: str,
+    meta: dict[str, Any],
+    *,
+    entry_rel: str = "",
+    kind: str = "",
+    poster_ok: bool | None = None,
+) -> list[dict[str, Any]]:
+    """若该番号尚无具体刮削日志，从 meta 还原并落库（只写一次）。"""
+    c = _std_code(code)
+    if not c:
+        return []
+    existing = scrape_export_log_store.lookup_events(c, limit=200)
+    with _events_by_code_lock:
+        hot = list(_events_by_code.get(c) or [])
+    if _events_look_like_scrape_log(existing + hot):
+        return []
+    syn = _synthesize_scrape_events_from_meta(
+        c,
+        meta,
+        entry_rel=entry_rel,
+        kind=kind,
+        poster_ok=poster_ok,
+    )
+    for ev in syn:
+        _archive_event_for_code(ev)
+    return syn
+
+
 def lookup_export_events(code: str) -> list[dict[str, Any]]:
-    """按番号取刮削过程日志（SQLite 全量 + 内存热缓存合并）。"""
+    """按番号取刮削过程日志（SQLite 全量 + 内存热缓存合并）。
+
+    增量跳过/预分类成功常无过程日志：若落盘有 scrape.json，则还原一轮步骤。
+    """
     c = _std_code(code)
     if not c:
         return []
@@ -3027,7 +3981,48 @@ def lookup_export_events(code: str) -> list[dict[str, Any]]:
             continue
         seen.add(key)
         out.append(dict(e))
-    return out
+
+    if _events_look_like_scrape_log(out):
+        return out
+
+    entry = _find_library_entry_dir(c)
+    meta: dict[str, Any] = {}
+    entry_rel = ""
+    poster_ok: bool | None = None
+    if entry is not None and entry.is_dir():
+        meta = _load_scrape_meta(entry) or _load_index_meta(entry)
+        try:
+            lib = _resolve_library_root()
+            entry_rel = str(entry.resolve().relative_to(lib)).replace("\\", "/")
+        except Exception:
+            entry_rel = str(entry)
+        poster_ok = (entry / "poster.jpg").is_file()
+    if not meta:
+        return out
+
+    syn = _ensure_archived_scrape_log_from_meta(
+        c,
+        meta,
+        entry_rel=entry_rel,
+        kind=str(meta.get("kind") or ""),
+        poster_ok=poster_ok,
+    )
+    if not syn:
+        # 已有库但 ensure 认为够了，或无法还原
+        return out
+    for e in syn:
+        key = f"{e.get('ts')}|{e.get('phase')}|{e.get('text')}|{e.get('source')}"
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(dict(e))
+    # 把还原日志放前面，实时「增量跳过」句仍留在后
+    syn_keys = {
+        f"{e.get('ts')}|{e.get('phase')}|{e.get('text')}|{e.get('source')}" for e in syn
+    }
+    head = [e for e in out if f"{e.get('ts')}|{e.get('phase')}|{e.get('text')}|{e.get('source')}" in syn_keys]
+    tail = [e for e in out if f"{e.get('ts')}|{e.get('phase')}|{e.get('text')}|{e.get('source')}" not in syn_keys]
+    return head + tail
 
 
 def _reset_title_events() -> None:
@@ -4233,6 +5228,7 @@ def export_status(
         empty_codes, empty_n, empty_trunc = _codes("emptyCodes")
         skip_codes, skip_n, skip_trunc = _codes("skippedCodes")
         fail_codes, fail_n, fail_trunc = _codes("failedCodes")
+        incomplete_codes, incomplete_n, incomplete_trunc = _codes("incompleteCodes")
         out = {
             "running": bool(_state.get("running")),
             "paused": bool(_state.get("paused")),
@@ -4242,6 +5238,7 @@ def export_status(
             "total": int(_state.get("total") or 0),
             "done": int(_state.get("done") or 0) or done_n,
             "failed": int(_state.get("failed") or 0) or fail_n,
+            "incomplete": int(_state.get("incomplete") or 0) or incomplete_n,
             "skipped": int(_state.get("skipped") or 0) or skip_n,
             "empty": int(_state.get("empty") or 0) or empty_n,
             "active": int(_state.get("active") or 0),
@@ -4249,7 +5246,14 @@ def export_status(
             "emptyCodes": empty_codes,
             "skippedCodes": skip_codes,
             "failedCodes": fail_codes,
-            "codesTruncated": bool(done_trunc or empty_trunc or skip_trunc or fail_trunc),
+            "incompleteCodes": incomplete_codes,
+            "codesTruncated": bool(
+                done_trunc
+                or empty_trunc
+                or skip_trunc
+                or fail_trunc
+                or incomplete_trunc
+            ),
             "activeCodes": list(_state.get("activeCodes") or []),
             "activeFastCodes": list(_state.get("activeFastCodes") or []),
             "activeSlowCodes": list(_state.get("activeSlowCodes") or []),
@@ -4292,7 +5296,11 @@ def list_export_codes(
     limit: int = 50000,
     offset: int = 0,
 ) -> dict[str, Any]:
-    """按任务 + 桶取完整番号列表（点开成功/空号/失败用）。"""
+    """按任务 + 桶取完整番号列表（点开成功/空号/失败用）。
+
+    total 取 max(库计数, 当前任务内存计数)：大库预分类先抬内存、后台写库，
+    避免弹窗「N 个番号」和任务卡数字对不上。
+    """
     tid = str(task_id or "").strip()
     b = str(bucket or "").strip().lower()
     if b in {"done", "success", "ok"}:
@@ -4301,54 +5309,70 @@ def list_export_codes(
         b = "empty"
     elif b in {"skip", "skipped"}:
         b = "skipped"
+    elif b in {"incomplete", "partial", "incomplete_data"}:
+        b = "incomplete"
     elif b in {"fail", "failed", "error"}:
         b = "failed"
     else:
         b = "failed"
+    count_key = {
+        "done": "done",
+        "empty": "empty",
+        "skipped": "skipped",
+        "failed": "failed",
+        "incomplete": "incomplete",
+    }[b]
+    mem_key = {
+        "done": "doneCodes",
+        "empty": "emptyCodes",
+        "skipped": "skippedCodes",
+        "failed": "failedCodes",
+        "incomplete": "incompleteCodes",
+    }[b]
+    lim = max(1, min(int(limit or 50000), 100000))
+    off = max(0, int(offset or 0))
+
     if not tid:
         with _meta_lock:
             tid = str(_state.get("taskId") or "").strip()
-            mem_key = {
-                "done": "doneCodes",
-                "empty": "emptyCodes",
-                "skipped": "skippedCodes",
-                "failed": "failedCodes",
-            }[b]
             mem = list(_state.get(mem_key) or [])
+            mem_n = int(_state.get(count_key) or 0) or len(mem)
         if not tid:
             return {
                 "taskId": "",
                 "bucket": b,
-                "codes": mem[offset : offset + limit],
-                "total": len(mem),
+                "codes": mem[off : off + lim],
+                "total": max(mem_n, len(mem)),
             }
+
     db_codes = scrape_export_log_store.list_result_codes(
-        tid, b, limit=limit, offset=offset
+        tid, b, limit=lim, offset=off
     )
     counts = scrape_export_log_store.count_result_codes(tid)
-    if db_codes or counts.get(b, 0):
+    db_n = int(counts.get(b) or 0)
+    mem_n = 0
+    mem_codes: list[str] = []
+    with _meta_lock:
+        if str(_state.get("taskId") or "").strip() == tid:
+            mem_n = int(_state.get(count_key) or 0)
+            mem_codes = list(_state.get(mem_key) or [])
+
+    total = max(db_n, mem_n, len(db_codes))
+    if db_codes or db_n > 0:
         return {
             "taskId": tid,
             "bucket": b,
             "codes": db_codes,
-            "total": int(counts.get(b) or len(db_codes)),
+            "total": total,
         }
-    # 回退内存 / 任务卡
-    with _meta_lock:
-        mem_key = {
-            "done": "doneCodes",
-            "empty": "emptyCodes",
-            "skipped": "skippedCodes",
-            "failed": "failedCodes",
-        }[b]
-        if str(_state.get("taskId") or "").strip() == tid:
-            mem = list(_state.get(mem_key) or [])
-            return {
-                "taskId": tid,
-                "bucket": b,
-                "codes": mem[offset : offset + max(1, int(limit))],
-                "total": len(mem),
-            }
+    # 库尚未追上（预分类后台写）：回退内存预览，total 仍用内存精确计数
+    if mem_codes or mem_n > 0:
+        return {
+            "taskId": tid,
+            "bucket": b,
+            "codes": mem_codes[off : off + lim],
+            "total": max(mem_n, len(mem_codes)),
+        }
     return {"taskId": tid, "bucket": b, "codes": [], "total": 0}
 
 
@@ -4359,9 +5383,9 @@ def claim_export() -> bool:
             return False
         if not _acquire_export_file_lock(steal_if_idle=True):
             return False
-        _control["cancel"] = False
+        _ctl_set_cancel(False)
         _control["clearOnStop"] = False
-        _control["pause_abort"] = False
+        _ctl_set_pause_abort(False)
         _state.update(
             {
                 "running": True,
@@ -4372,12 +5396,14 @@ def claim_export() -> bool:
                 "total": 0,
                 "done": 0,
                 "failed": 0,
+                "incomplete": 0,
                 "skipped": 0,
                 "empty": 0,
                 "active": 0,
                 "doneCodes": [],
                 "skippedCodes": [],
                 "failedCodes": [],
+                "incompleteCodes": [],
                 "emptyCodes": [],
                 "activeCodes": [],
                 "activeFastCodes": [],
@@ -4434,7 +5460,7 @@ def abort_claim(message: str = "failed") -> None:
                     )
                     _release_export_file_lock()
             else:
-                _control["cancel"] = False
+                _ctl_set_cancel(False)
                 _control["clearOnStop"] = False
                 _state.update(
                     {
@@ -4452,9 +5478,9 @@ def abort_claim(message: str = "failed") -> None:
 
 
 def _reset_idle_state() -> None:
-    _control["cancel"] = False
+    _ctl_set_cancel(False)
     _control["clearOnStop"] = False
-    _control["pause_abort"] = False
+    _ctl_set_pause_abort(False)
     _state.update(
         {
             "running": False,
@@ -4469,12 +5495,14 @@ def _reset_idle_state() -> None:
             "total": 0,
             "done": 0,
             "failed": 0,
+            "incomplete": 0,
             "skipped": 0,
             "empty": 0,
             "active": 0,
             "doneCodes": [],
             "skippedCodes": [],
             "failedCodes": [],
+            "incompleteCodes": [],
             "emptyCodes": [],
             "activeCodes": [],
             "activeFastCodes": [],
@@ -4506,66 +5534,100 @@ def _reset_idle_state() -> None:
 
 
 def pause_export() -> dict[str, Any]:
+    # 无锁先打标：大库占着 meta_lock 时也能立刻停
+    _ctl_set_pause_abort(True)
     with _pause_cv:
         if not _state.get("running"):
+            _ctl_set_pause_abort(False)
             raise RuntimeError("当前没有进行中的刮削任务")
-        if _control.get("cancel"):
+        if _cancel_flag.is_set() or _control.get("cancel"):
             raise RuntimeError("任务正在取消中")
         _state["paused"] = True
         _state["message"] = "paused"
         _state["watchHold"] = True
         _state["pauseSaved"] = True
-        _control["pause_abort"] = True
         n_active = _clear_active_progress_locked()
         tid = str(_state.get("taskId") or "")
         done = int(_state.get("done") or 0)
         empty = int(_state.get("empty") or 0)
         skipped = int(_state.get("skipped") or 0)
         failed = int(_state.get("failed") or 0)
+        incomplete = int(_state.get("incomplete") or 0)
         total = int(_state.get("total") or 0)
-        done_codes = list(_state.get("doneCodes") or [])
-        empty_codes = list(_state.get("emptyCodes") or [])
-        skipped_codes = list(_state.get("skippedCodes") or [])
-        failed_codes = list(_state.get("failedCodes") or [])
-    http_n, flare_n = _abort_all_inflight()
-    bits = [f"已暂停，已中断进行中 {n_active} 路"]
-    if http_n:
-        bits.append(f"关闭 {http_n} 个刮削请求")
-    if flare_n:
-        bits.append(f"打断 {flare_n} 个过盾")
-    _push_event(phase="job", text=" · ".join(bits), level="warn")
-    if tid:
-        _set_task_watch_armed(tid, False)
-        _persist_task_result(
-            tid,
-            message="已暂停",
-            done=done,
-            empty=empty,
-            skipped=skipped,
-            failed=failed,
-            total=total,
-            done_codes=done_codes,
-            empty_codes=empty_codes,
-            skipped_codes=skipped_codes,
-            failed_codes=failed_codes,
-        )
-    _write_resume_checkpoint(reason="paused")
-    _persist_state(force=True)
-    return export_status()
+        done_codes = list(_state.get("doneCodes") or [])[-_STATUS_CODE_LIST_CAP:]
+        empty_codes = list(_state.get("emptyCodes") or [])[-_STATUS_CODE_LIST_CAP:]
+        skipped_codes = list(_state.get("skippedCodes") or [])[-_STATUS_CODE_LIST_CAP:]
+        failed_codes = list(_state.get("failedCodes") or [])[-_STATUS_CODE_LIST_CAP:]
+        incomplete_codes = list(_state.get("incompleteCodes") or [])[
+            -_STATUS_CODE_LIST_CAP:
+        ]
+    # 先返回暂停态；打断请求 / 回队 / 落盘全部后台
+    snap = export_status()
+
+    def _bg_pause_work() -> None:
+        try:
+            http_n, flare_n = _abort_all_inflight()
+            if tid:
+                try:
+                    scrape_export_queue_store.requeue_running(tid)
+                except Exception:
+                    log.exception("pause requeue running failed")
+            bits = [f"已暂停，已中断进行中 {n_active} 路"]
+            if http_n:
+                bits.append(f"关闭 {http_n} 个刮削请求")
+            if flare_n:
+                bits.append(f"打断 {flare_n} 个过盾")
+            _push_event(phase="job", text=" · ".join(bits), level="warn")
+            if tid:
+                _set_task_watch_armed(tid, False)
+                _persist_task_result(
+                    tid,
+                    message="已暂停",
+                    done=done,
+                    empty=empty,
+                    skipped=skipped,
+                    failed=failed,
+                    incomplete=incomplete,
+                    total=total,
+                    done_codes=done_codes,
+                    empty_codes=empty_codes,
+                    skipped_codes=skipped_codes,
+                    failed_codes=failed_codes,
+                    incomplete_codes=incomplete_codes,
+                )
+            _write_resume_checkpoint(reason="paused")
+            _persist_state(force=True)
+        except Exception:
+            log.exception("pause background work failed")
+
+    threading.Thread(
+        target=_bg_pause_work, name="pause-work", daemon=True
+    ).start()
+    return snap
 
 
 def resume_export() -> dict[str, Any]:
+    # 无锁先清暂停标，worker 立刻可跑
+    _ctl_set_pause_abort(False)
     with _pause_cv:
         if not _state.get("running"):
             raise RuntimeError("当前没有进行中的刮削任务")
-        _control["pause_abort"] = False
         _state["paused"] = False
         _state["watchHold"] = False
+        _state["pauseSaved"] = False
         _state["message"] = "scraping"
         _pause_cv.notify_all()
-    _push_event(phase="job", text="已继续刮削", level="ok")
-    _persist_state(force=True)
-    return export_status()
+    snap = export_status()
+
+    def _bg() -> None:
+        try:
+            _push_event(phase="job", text="已继续刮削", level="ok")
+            _persist_state(force=True)
+        except Exception:
+            log.exception("resume persist failed")
+
+    threading.Thread(target=_bg, name="resume-persist", daemon=True).start()
+    return snap
 
 
 def cancel_export(*, clear: bool = False, keep_queue: bool = False) -> dict[str, Any]:
@@ -4579,9 +5641,9 @@ def cancel_export(*, clear: bool = False, keep_queue: bool = False) -> dict[str,
                 _reset_idle_state()
                 return export_status()
             raise RuntimeError("当前没有进行中的刮削任务")
-        _control["cancel"] = True
+        _ctl_set_cancel(True)
         _control["clearOnStop"] = bool(clear)
-        _control["pause_abort"] = False
+        _ctl_set_pause_abort(False)
         _state["paused"] = False
         _state["watchHold"] = True
         _state["message"] = "cancelling"
@@ -4661,7 +5723,7 @@ def clear_export() -> dict[str, Any]:
         _state["queue"] = []
         _state["watchHold"] = False
         if _state.get("running"):
-            _control["cancel"] = True
+            _ctl_set_cancel(True)
             _control["clearOnStop"] = True
             _state["paused"] = False
             _state["message"] = "cancelling"
@@ -4700,9 +5762,9 @@ def prepare_process_shutdown() -> None:
     except Exception:
         log.exception("shutdown checkpoint failed")
     with _meta_lock:
-        _control["cancel"] = True
+        _ctl_set_cancel(True)
         _control["clearOnStop"] = False
-        _control["pause_abort"] = False
+        _ctl_set_pause_abort(False)
         _state["paused"] = False
         _state["queue"] = []
         msg = str(_state.get("message") or "")
@@ -4729,24 +5791,24 @@ def _wait_if_paused_or_cancel() -> str:
     """返回 continue | cancel。暂停时阻塞等待（resume 会 notify）。"""
     with _pause_cv:
         while True:
-            if _control.get("cancel"):
+            if _cancel_flag.is_set() or _control.get("cancel"):
                 return "cancel"
-            # 兼容：假死逻辑曾误清 paused，但 watchHold/pauseSaved 仍表示用户要停
+            # Event 优先；兼容假死误清 paused 但 watchHold 仍在的情况
             still_hold = bool(
-                _state.get("paused")
+                _pause_flag.is_set()
+                or _state.get("paused")
                 or _control.get("pause_abort")
                 or (
                     _state.get("watchHold")
                     and _state.get("pauseSaved")
-                    and not _control.get("cancel")
+                    and not _cancel_flag.is_set()
                 )
             )
             if not still_hold:
                 return "continue"
             if not _state.get("paused") and _state.get("watchHold"):
-                # 被误清 paused 时拉回暂停态，避免自动续跑
                 _state["paused"] = True
-                _control["pause_abort"] = True
+                _ctl_set_pause_abort(True)
             _state["message"] = "paused"
             _pause_cv.wait(timeout=0.5)
 
@@ -5328,6 +6390,70 @@ def merge_scrape_targets(
     return [best[k] for k in order if k in best]
 
 
+def count_local_scrape_total_for_task(task: dict[str, Any] | None) -> int:
+    """任务卡「合计」真值：片库本地番号文件夹数（有前缀时）。
+
+    与开跑时 collect_targets+空目录合并口径一致；无前缀/厂牌的宽任务返回 0（不扫全库）。
+    """
+    if not isinstance(task, dict):
+        return 0
+    regions = [
+        str(r).strip()
+        for r in (task.get("regions") or [])
+        if str(r or "").strip()
+    ]
+    maker = str(task.get("maker") or "").strip()
+    prefix = str(task.get("prefix") or "").strip()
+    code = str(task.get("code") or "").strip()
+    # 单番号任务
+    if code and not prefix and not maker:
+        found = _find_library_entry_dir(code)
+        return 1 if found is not None else 0
+    if not prefix and not maker:
+        return 0
+    try:
+        # 快路径：片库 区/厂牌/前缀 下子目录数
+        if prefix and maker and regions:
+            library = _resolve_library_root()
+            if library.is_dir():
+                n = 0
+                for rid in regions:
+                    label = scrape_naming.KIND_LABELS.get(rid) or ""
+                    if not label:
+                        rid2 = maker_fs.resolve_fs_region(rid) or rid
+                        label = scrape_naming.KIND_LABELS.get(rid2) or rid2
+                    root = library / str(label) / maker / prefix
+                    if not root.is_dir():
+                        continue
+                    try:
+                        n += sum(1 for p in root.iterdir() if p.is_dir())
+                    except OSError:
+                        pass
+                if n > 0:
+                    return n
+        targets = collect_targets(
+            regions=regions or None,
+            maker=maker or None,
+            prefix=prefix or None,
+            code=code or None,
+            include_fill=True,
+        )
+        try:
+            disk_extra = collect_library_empty_folder_targets(
+                regions=regions or None,
+                maker=maker or None,
+                prefix=prefix or None,
+                code=code or None,
+            )
+            targets = merge_scrape_targets(targets, disk_extra)
+        except Exception:
+            log.debug("count local disk_extra failed", exc_info=True)
+        return len(targets)
+    except Exception:
+        log.debug("count local scrape total failed", exc_info=True)
+        return 0
+
+
 _NO_DETAIL_ERR_MARKERS = (
     "未找到详情页",
     "未找到详情",
@@ -5724,12 +6850,17 @@ def _write_entry(
     fields: list[str] | None = None,
     local_fields: list[str] | None = None,
     naming: dict[str, Any] | None = None,
-) -> str:
-    """返回 done|skipped|failed。只写入本地库已有 {CODE} 目录（物化产物）。"""
+) -> tuple[str, str | None]:
+    """返回 (done|skipped|failed, cover_note)。
+
+    cover_note: ok=新写入 / kept=下载失败保留旧图 / fail=无图 / None=未勾选封面。
+    只写入本地库已有 {CODE} 目录（物化产物）。
+    """
     del write_tree, write_emby, naming  # 落盘仅 scrape.json + 封面；不改索引 meta.json
+    cover_note: str | None = None
     code = _std_code(str(target.get("code") or meta.get("code") or ""))
     if not code:
-        return "failed"
+        return "failed", None
     want = _normalize_fields(fields)
     want_set = set(want)
     reuse = [
@@ -5772,7 +6903,7 @@ def _write_entry(
                 code,
                 exc_info=True,
             )
-            return "failed"
+            return "failed", None
     _remember_entry_dir(code, existing)
 
     # 索引 meta.json 只读；激活的本地可复用字段事后按中文规则合并
@@ -5850,7 +6981,7 @@ def _write_entry(
             and _path_has_uncategorized(existing)
             and old_elsewhere is not None
         ):
-            return "skipped"
+            return "skipped", None
 
     existing_poster = None
     for name in (poster_name, "poster.jpg"):
@@ -5978,12 +7109,15 @@ def _write_entry(
         except Exception:
             log.debug("facet upsert after scrape write failed", exc_info=True)
 
-        wrote_cover = False
         if need_cover:
-            wrote_cover = _copy_cover(write_meta, entry_dir / poster_name)
-            if not wrote_cover and existing_poster is not None:
+            if _copy_cover(write_meta, entry_dir / poster_name):
+                cover_note = "ok"
+            elif existing_poster is not None:
                 if not (entry_dir / poster_name).is_file():
                     (entry_dir / poster_name).write_bytes(existing_poster)
+                cover_note = "kept"
+            else:
+                cover_note = "fail"
 
         _remember_entry_dir(code, entry_dir)
         if old_elsewhere is not None and old_elsewhere.exists():
@@ -6015,7 +7149,7 @@ def _write_entry(
             log.debug("fc2 board_name sync failed", exc_info=True)
 
     ok_files = (entry_dir / SCRAPE_META_FILE).is_file() if need_meta else True
-    return "done" if ok_files else "failed"
+    return ("done" if ok_files else "failed"), cover_note
 
 def run_export(
     *,
@@ -6146,12 +7280,14 @@ def run_export(
                 "localFields": local_export_fields,
                 "done": 0,
                 "failed": 0,
+                "incomplete": 0,
                 "skipped": 0,
                 "empty": 0,
                 "active": 0,
                 "doneCodes": [],
                 "skippedCodes": [],
                 "failedCodes": [],
+                "incompleteCodes": [],
                 "emptyCodes": [],
                 "activeCodes": [],
                 "activeFastCodes": [],
@@ -6213,66 +7349,174 @@ def run_export(
                 _end_flags["clearOnStop"] = bool(_control.get("clearOnStop"))
             return export_status()
 
-        _push_event(phase="job", text="收集目标…", level="info")
-        targets = collect_targets(
-            region=region,
-            regions=regions,
-            maker=maker,
-            prefix=prefix,
-            code=code,
-            codes=codes,
-            include_fill=True,
-        )
-        fill_n = sum(1 for t in targets if t.get("fromFill"))
-        if fill_n:
-            _push_event(
-                phase="job",
-                text=f"索引目标 {len(targets)} · 含补全号 {fill_n}",
-                level="info",
-            )
-        try:
-            disk_extra = collect_library_empty_folder_targets(
+        targets: list[dict[str, Any]] = []
+        restored_from_queue = False
+        # 中间表缓冲：同任务非强制且队列有货 → 跳过重 collect/预分类，秒开续跑
+        if tid and not bool(force_ref[0]):
+            try:
+                scrape_export_queue_store.ensure_tables()
+                qn = scrape_export_queue_store.count_queue(tid)
+                q_left = int(qn.get("pending") or 0) + int(qn.get("running") or 0)
+                if q_left > 0:
+                    scrape_export_queue_store.requeue_running(tid)
+                    _push_event(
+                        phase="job",
+                        text=f"从工作队列恢复 {q_left} …",
+                        level="info",
+                    )
+                    batch_n = 5000
+                    off = 0
+                    while True:
+                        if _work_abort_kind() == "cancel":
+                            break
+                        while _work_abort_kind() == "paused":
+                            if _wait_if_paused_or_cancel() == "cancel":
+                                break
+                        if _work_abort_kind() == "cancel":
+                            break
+                        part = scrape_export_queue_store.list_pending(
+                            tid, limit=batch_n, offset=off
+                        )
+                        if not part:
+                            break
+                        targets.extend(part)
+                        off += len(part)
+                        if len(part) < batch_n:
+                            break
+                    if targets:
+                        restored_from_queue = True
+                        finished_q = scrape_export_log_store.list_all_result_codes(
+                            tid,
+                            buckets=[
+                                "done",
+                                "empty",
+                                "skipped",
+                                "incomplete",
+                                "failed",
+                            ],
+                        )
+                        with _meta_lock:
+                            _result_seen = set(finished_q)
+                            dbc = scrape_export_log_store.count_result_codes(tid)
+                            _state["done"] = int(dbc.get("done") or 0)
+                            _state["empty"] = int(dbc.get("empty") or 0)
+                            _state["skipped"] = int(dbc.get("skipped") or 0)
+                            _state["incomplete"] = int(dbc.get("incomplete") or 0)
+                            _state["failed"] = int(dbc.get("failed") or 0)
+                            processed = (
+                                int(_state["done"])
+                                + int(_state["empty"])
+                                + int(_state["skipped"])
+                                + int(_state["incomplete"])
+                                + int(_state["failed"])
+                            )
+                            _state["total"] = max(
+                                int(_state.get("total") or 0),
+                                processed + len(targets),
+                            )
+                            _state["allTargets"] = []
+                        _push_event(
+                            phase="job",
+                            text=(
+                                f"队列续跑 · 待刮 {len(targets)}"
+                                f" · 已完成 {processed}"
+                            ),
+                            level="ok",
+                        )
+            except Exception:
+                log.exception("restore scrape queue failed")
+                targets = []
+                restored_from_queue = False
+
+        if not restored_from_queue:
+            if tid and bool(force_ref[0]):
+                try:
+                    scrape_export_queue_store.clear_task_queue(tid)
+                except Exception:
+                    log.exception("clear queue on force failed")
+            _push_event(phase="job", text="收集目标…", level="info")
+            targets = collect_targets(
                 region=region,
                 regions=regions,
                 maker=maker,
                 prefix=prefix,
                 code=code,
+                codes=codes,
+                include_fill=True,
             )
-            before_n = len(targets)
-            targets = merge_scrape_targets(targets, disk_extra)
-            added = len(targets) - before_n
-            if disk_extra:
+            fill_n = sum(1 for t in targets if t.get("fromFill"))
+            if fill_n:
                 _push_event(
                     phase="job",
-                    text=(
-                        f"片库空目录补入 {len(disk_extra)} 条"
-                        + (f" · 净增 {added}" if added else " · 均已在索引目标中")
-                    ),
+                    text=f"索引目标 {len(targets)} · 含补全号 {fill_n}",
                     level="info",
                 )
-        except Exception:
-            log.exception("collect library empty folder targets failed")
+            try:
+                disk_extra = collect_library_empty_folder_targets(
+                    region=region,
+                    regions=regions,
+                    maker=maker,
+                    prefix=prefix,
+                    code=code,
+                )
+                before_n = len(targets)
+                targets = merge_scrape_targets(targets, disk_extra)
+                added = len(targets) - before_n
+                if disk_extra:
+                    _push_event(
+                        phase="job",
+                        text=(
+                            f"片库空目录补入 {len(disk_extra)} 条"
+                            + (f" · 净增 {added}" if added else " · 均已在索引目标中")
+                        ),
+                        level="info",
+                    )
+            except Exception:
+                log.exception("collect library empty folder targets failed")
         # 强制重刮指定番号：忽略断点里的已完成集合，否则空号/成功不会再进池
-        resume = _load_resume_checkpoint()
+        resume = None if restored_from_queue else _load_resume_checkpoint()
         resume_tid = str((resume or {}).get("taskId") or "").strip()
         cur_tid = str(task_id or tid or "").strip()
         force_code_rerun = bool(force_ref[0]) and bool(code_list)
         if resume and resume_tid and resume_tid == cur_tid and force_code_rerun:
             _clear_resume_checkpoint()
             resume = None
-        if resume and resume_tid and resume_tid == cur_tid:
+        if (not restored_from_queue) and resume and resume_tid and resume_tid == cur_tid:
             finished = set()
-            # 失败不进 finished：增量/续跑都会重新入队再刮
-            for bucket in ("doneCodes", "emptyCodes", "skippedCodes"):
+            # 成功/空号/跳过/数据不全进 finished；仅真正失败（网络等）续跑重试
+            for bucket in (
+                "doneCodes",
+                "emptyCodes",
+                "skippedCodes",
+                "incompleteCodes",
+            ):
                 for c in list((resume or {}).get(bucket) or []):
                     s = str(c or "").strip()
                     if s:
                         finished.add(s)
+            # 大库断点省略剩余列表：用 SQLite + 内存终态补全 finished
+            remaining_omitted = bool((resume or {}).get("remainingOmitted"))
+            if remaining_omitted or bool((resume or {}).get("slim")):
+                finished |= set(_result_seen)
+                try:
+                    finished |= scrape_export_log_store.list_all_result_codes(
+                        cur_tid,
+                        buckets=["done", "empty", "skipped", "incomplete"],
+                    )
+                except Exception:
+                    log.exception("resume load finished codes from sqlite failed")
             failed_resume = {
                 str(c or "").strip()
                 for c in list((resume or {}).get("failedCodes") or [])
                 if str(c or "").strip()
             }
+            if remaining_omitted or bool((resume or {}).get("slim")):
+                try:
+                    failed_resume |= scrape_export_log_store.list_all_result_codes(
+                        cur_tid, buckets=["failed"]
+                    )
+                except Exception:
+                    log.exception("resume load failed codes from sqlite failed")
             pause_resume = bool(
                 (resume or {}).get("paused")
                 or str((resume or {}).get("reason") or "") == "paused"
@@ -6293,7 +7537,7 @@ def run_export(
                 for t in (all_saved or targets)
                 if str(t.get("code") or "").strip() in failed_resume
             ]
-            if pause_resume and remaining_saved:
+            if pause_resume and remaining_saved and not remaining_omitted:
                 # 未跑完的 + 本轮已失败的重试
                 seen_q: set[str] = set()
                 merged: list[dict[str, Any]] = []
@@ -6304,17 +7548,29 @@ def run_export(
                     seen_q.add(c)
                     merged.append(t)
                 targets = merged
-            elif finished or failed_resume:
+            elif finished or failed_resume or remaining_omitted:
+                # 省略剩余列表时：用 collect 全量扣掉已完成
                 targets = [
                     t
                     for t in targets
                     if str(t.get("code") or "").strip() not in finished
                 ]
+                if failed_resume and retry_failed:
+                    # 网络失败项优先插回队头
+                    seen_q = {str(t.get("code") or "").strip() for t in targets}
+                    head = [
+                        t
+                        for t in retry_failed
+                        if str(t.get("code") or "").strip() not in seen_q
+                    ]
+                    if head:
+                        targets = [*head, *targets]
             with _meta_lock:
                 _state["done"] = int((resume or {}).get("done") or 0)
                 _state["empty"] = int((resume or {}).get("empty") or 0)
                 _state["skipped"] = int((resume or {}).get("skipped") or 0)
-                # 失败项将重刮，本轮计数从 0 再累计
+                _state["incomplete"] = int((resume or {}).get("incomplete") or 0)
+                # 仅网络失败项将重刮，本轮失败计数从 0 再累计
                 _state["failed"] = 0
                 _state["doneCodes"] = list((resume or {}).get("doneCodes") or [])[
                     -_MAX_RESULT_CODES:
@@ -6325,6 +7581,9 @@ def run_export(
                 _state["skippedCodes"] = list(
                     (resume or {}).get("skippedCodes") or []
                 )[-_MAX_RESULT_CODES:]
+                _state["incompleteCodes"] = list(
+                    (resume or {}).get("incompleteCodes") or []
+                )[-_MAX_RESULT_CODES:]
                 _state["failedCodes"] = []
                 total_saved = int((resume or {}).get("total") or 0)
                 _state["total"] = total_saved or (
@@ -6332,6 +7591,7 @@ def run_export(
                     + int(_state["done"])
                     + int(_state["empty"])
                     + int(_state["skipped"])
+                    + int(_state["incomplete"])
                     + int(_state["failed"])
                 )
                 _state["allTargets"] = all_saved or list(targets)
@@ -6351,7 +7611,7 @@ def run_export(
                 _state["allTargets"] = list(targets)
 
         # 增量：按本地真实状态预分类（成功/空号/失败），只把未完成送进工作池
-        if not bool(force_ref[0]) and targets:
+        if (not restored_from_queue) and not bool(force_ref[0]) and targets:
             try:
                 lib_root = _resolve_library_root()
                 before_pending = len(targets)
@@ -6367,12 +7627,28 @@ def run_export(
                 )
                 if len(targets) < before_pending:
                     with _meta_lock:
-                        # total 保持 allTargets 全量；processed = done+empty+fail
-                        all_n = len(list(_state.get("allTargets") or []))
+                        # total 保持预分类前全量；allTargets 缩成待刮，避免断点拷贝 18 万条
+                        all_n = int(_state.get("total") or 0) or before_pending
                         if all_n > 0:
                             _state["total"] = all_n
+                        _state["allTargets"] = list(targets)
             except Exception:
                 log.exception("bulk classify complete targets failed")
+
+        # 写入工作队列中间表：后续暂停/重启直接读表，不再重扫 18 万
+        if tid and targets:
+            try:
+                n_buf = scrape_export_queue_store.replace_task_queue(tid, targets)
+                _push_event(
+                    phase="job",
+                    text=f"工作队列已缓冲 {n_buf}",
+                    level="info",
+                )
+                with _meta_lock:
+                    if n_buf > 2500:
+                        _state["allTargets"] = []
+            except Exception:
+                log.exception("buffer scrape queue failed")
 
         if _control.get("cancel"):
             _push_event(phase="job", text="任务已取消", level="warn")
@@ -6386,13 +7662,15 @@ def run_export(
                 empty_n = int(_state.get("empty") or 0)
                 skip_n = int(_state.get("skipped") or 0)
                 fail_n = int(_state.get("failed") or 0)
-            if done_n + empty_n + skip_n + fail_n > 0:
+                incomplete_n = int(_state.get("incomplete") or 0)
+            if done_n + empty_n + skip_n + fail_n + incomplete_n > 0:
                 _push_event(
                     phase="job",
                     text=(
                         f"增量无需新刮 · 成功 {done_n} · 空号 {empty_n}"
                         + (f" · 跳过 {skip_n}" if skip_n else "")
-                        + f" · 数据不全 {fail_n}"
+                        + f" · 数据不全 {incomplete_n}"
+                        + f" · 失败 {fail_n}"
                     ),
                     level="ok",
                 )
@@ -6566,9 +7844,16 @@ def run_export(
                     ):
                         already = False
 
-                # 详情与日志都只展示当前片子，覆盖上一片（不预填色花堂封面）
+                # 日志策略：增量永不覆盖原过程日志；仅强制重刮清库后写新一轮
+                has_prior_log = False
+                if not item_force:
+                    prior_archived = scrape_export_log_store.lookup_events(c, limit=80)
+                    with _events_by_code_lock:
+                        prior_hot = list(_events_by_code.get(c) or [])
+                    has_prior_log = _events_look_like_scrape_log(
+                        prior_archived + prior_hot
+                    )
                 if item_force:
-                    # 强制重刮：清旧日志，后面整段重写
                     _clear_events_for_code(c)
                 _reset_title_events()
                 _set_current_detail(
@@ -6582,21 +7867,25 @@ def run_export(
                         meta={},
                     )
                 )
-                # 增量已完成：只刷实时条，不落库重写；强制/新刮才写库
-                log_archive = bool(item_force or not already)
+                # 增量跳过/已有原日志：只刷实时条；强制重刮或首次刮削才落库
+                if already:
+                    log_archive = False
+                elif item_force:
+                    log_archive = True
+                else:
+                    log_archive = not has_prior_log
+                _event_archive_tls.force_archive = bool(log_archive)
                 _push_event(
                     phase="parse",
                     code=c,
                     text=f"解析番号 · 识别为 {c} · 方案 {kind}",
                     level="ok",
-                    archive=log_archive,
                 )
                 _push_event(
                     phase="parse",
                     code=c,
                     text=f"目标路径 {entry_rel}",
                     level="info",
-                    archive=log_archive,
                 )
                 if item_force and found_dir is not None and _entry_complete(
                     found_dir,
@@ -6706,10 +7995,18 @@ def run_export(
                             archive=False,
                         )
                     else:
+                        # 预分类/增量跳过常无过程日志：从落盘还原一轮具体步骤并归档
+                        _ensure_archived_scrape_log_from_meta(
+                            c,
+                            existing,
+                            entry_rel=entry_rel,
+                            kind=kind,
+                            poster_ok=bool(poster_local),
+                        )
                         _push_event(
                             phase="write",
                             code=c,
-                            text="已存在 meta/封面，记为成功",
+                            text="已存在 meta/封面 · 增量跳过",
                             level="ok",
                             archive=False,
                         )
@@ -6790,7 +8087,7 @@ def run_export(
                     meta_src_use, cover_src_use = (
                         scrape_profiles.derive_sources_from_fields(fp_use)
                     )
-                    # 无封面补全号：不砍超时，让快源跑完以便立即判空号
+                    # 无封面补全号：短 deadline，避免空号拖满默认 35–40s
                     is_fill_empty = (
                         bool(t.get("fromFill")) or bool(t.get("fromLibraryDir"))
                     ) and not str(t.get("coverUrl") or "").strip()
@@ -6798,7 +8095,8 @@ def run_export(
                         urls = t.get("coverUrls") or []
                         if not any(str(u).strip() for u in urls):
                             is_fill_empty = True
-                    scrape_deadline_ms: int | None = None
+                    # 空号/补全空洞：18s 截止；有封面的正常刮削仍用服务默认
+                    scrape_deadline_ms: int | None = 18000 if is_fill_empty else None
                     need_net = bool(meta_src_use or cover_src_use)
                     _push_event(
                         phase="parse",
@@ -7022,10 +8320,35 @@ def run_export(
                         fail_txt = scrape_msg or "刮削失败"
                         if scrape_msg in {"scrape_timeout", "scrape_deadline"}:
                             fail_txt = "刮削超时（源站过慢或无响应）"
+                        elif scrape_msg.startswith(
+                            ("刮削服务", "无法连接刮削服务")
+                        ):
+                            fail_txt = "无法连接刮削服务 · 记为失败"
                         elif scrape_msg in {"no_meta", "not_found", "notfound"}:
                             fail_txt = "未确认无数据 · 记为失败（可重试）"
                         if has_partial:
-                            fail_txt = "字段数据不齐全 · 记为失败"
+                            fail_txt = "字段数据不齐全 · 记为数据不全"
+                            _push_event(
+                                phase="scrape",
+                                code=c,
+                                text=fail_txt,
+                                level="warn",
+                            )
+                            _set_current_detail(
+                                _detail_payload(
+                                    code=c,
+                                    kind=kind,
+                                    region=rid,
+                                    region_label=label,
+                                    path=entry_rel,
+                                    phase="incomplete",
+                                    meta=meta,
+                                    source_runs=runs,
+                                    field_sources=field_sources,
+                                )
+                            )
+                            result = "incomplete"
+                            return "incomplete", c
                         _push_event(
                             phase="scrape",
                             code=c,
@@ -7040,9 +8363,9 @@ def run_export(
                                 region_label=label,
                                 path=entry_rel,
                                 phase="failed",
-                                meta=meta if has_partial else {},
-                                source_runs=runs if has_partial else None,
-                                field_sources=field_sources if has_partial else None,
+                                meta={},
+                                source_runs=None,
+                                field_sources=None,
                             )
                         )
                         result = "failed"
@@ -7117,14 +8440,32 @@ def run_export(
                             and _all_network_sources_no_detail(runs)
                         )
                         if has_partial or not confirmed_empty:
+                            if has_partial:
+                                _push_event(
+                                    phase="scrape",
+                                    code=c,
+                                    text="字段数据不齐全 · 记为数据不全",
+                                    level="warn",
+                                )
+                                _set_current_detail(
+                                    _detail_payload(
+                                        code=c,
+                                        kind=kind,
+                                        region=rid,
+                                        region_label=label,
+                                        path=entry_rel,
+                                        phase="incomplete",
+                                        meta=meta,
+                                        source_runs=runs,
+                                        field_sources=field_sources,
+                                    )
+                                )
+                                result = "incomplete"
+                                return "incomplete", c
                             _push_event(
                                 phase="scrape",
                                 code=c,
-                                text=(
-                                    "字段数据不齐全 · 记为失败"
-                                    if has_partial
-                                    else "未确认全源无数据 · 记为失败（可重试）"
-                                ),
+                                text="未确认全源无数据 · 记为失败（可重试）",
                                 level="error",
                             )
                             _set_current_detail(
@@ -7205,20 +8546,13 @@ def run_export(
                         text=f"创建目录 {entry_rel}",
                         level="info",
                     )
-                    if need_cover:
-                        _push_event(
-                            phase="cover",
-                            code=c,
-                            text=f"下载封面 {poster_name}",
-                            level="info",
-                        )
                     _push_event(
                         phase="write",
                         code=c,
                         text="写入 scrape.json",
                         level="info",
                     )
-                    result = _write_entry(
+                    result, cover_note = _write_entry(
                         t,
                         meta,
                         library=library,
@@ -7243,6 +8577,29 @@ def run_export(
                         if (entry_dir / cand).is_file():
                             poster_local = f"{entry_rel}/{cand}"
                             break
+                    # 封面结果放在写入阶段之后，避免与 write 日志交错拆成灰色半截步骤
+                    if need_cover and cover_note:
+                        if cover_note == "ok":
+                            _push_event(
+                                phase="cover",
+                                code=c,
+                                text=f"封面已写入 {poster_name}",
+                                level="ok",
+                            )
+                        elif cover_note == "kept":
+                            _push_event(
+                                phase="cover",
+                                code=c,
+                                text=f"封面下载失败 · 已保留旧 {poster_name}",
+                                level="warn",
+                            )
+                        else:
+                            _push_event(
+                                phase="cover",
+                                code=c,
+                                text="封面下载失败",
+                                level="warn",
+                            )
                     # 有数据但任务勾选强制字段不齐 → 失败（系列白名单不计入）
                     if result == "done":
                         miss = _meta_missing_required_fields(
@@ -7265,12 +8622,12 @@ def run_export(
                             miss_zh = "、".join(
                                 labels.get(x, x) for x in miss
                             )
-                            result = "failed"
+                            result = "incomplete"
                             _push_event(
                                 phase="write",
                                 code=c,
-                                text=f"字段数据不齐全（缺 {miss_zh}）· 记为失败",
-                                level="error",
+                                text=f"字段数据不齐全（缺 {miss_zh}）· 记为数据不全",
+                                level="warn",
                             )
                             _set_current_detail(
                                 _detail_payload(
@@ -7279,7 +8636,7 @@ def run_export(
                                     region=rid,
                                     region_label=label,
                                     path=entry_rel,
-                                    phase="failed",
+                                    phase="incomplete",
                                     meta=meta,
                                     source_runs=runs,
                                     field_sources=field_sources,
@@ -7287,7 +8644,7 @@ def run_export(
                                     fallback_cover=str(meta.get("poster") or ""),
                                 )
                             )
-                            return "failed", c
+                            return "incomplete", c
                     _set_current_detail(
                         _detail_payload(
                             code=c,
@@ -7356,6 +8713,8 @@ def run_export(
                     if failed_detail is not None:
                         _set_current_detail(failed_detail)
             finally:
+                if hasattr(_event_archive_tls, "force_archive"):
+                    delattr(_event_archive_tls, "force_archive")
                 with _meta_lock:
                     _state["active"] = max(0, int(_state.get("active") or 0) - 1)
                     _remove_active_code(c)
@@ -7453,7 +8812,7 @@ def run_export(
                             _sync_channel_queue()
                             break
                         with _meta_lock:
-                            _control["pause_abort"] = False
+                            _ctl_set_pause_abort(False)
                         _fill()
                         continue
                 if not inflight:
@@ -7549,6 +8908,7 @@ def run_export(
                         if result not in ("cancel", "paused", "defer_slow"):
                             _record_terminal_result(str(result or "done"), code)
                         _rebuild_active_from_inflight(inflight)
+                    _flush_terminal_result_db()
                     _touch_progress()
                 if not cancelled and not (
                     _state.get("paused") or _control.get("pause_abort")

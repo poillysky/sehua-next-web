@@ -48,6 +48,8 @@ class ExportBody(BaseModel):
     mode: Literal["incremental", "force"] | str | None = None
     fields: list[str] | None = None
     local_fields: list[str] | None = Field(default=None, alias="localFields")
+    # 失败重试：清失败+数据不全队列并以强制模式只刮这些番号
+    retry_failed: bool = Field(default=False, alias="retryFailed")
 
     model_config = {"populate_by_name": True}
 
@@ -137,6 +139,7 @@ def start_export(
             local_fields=(
                 list(body.local_fields) if body.local_fields is not None else None
             ),
+            retry_failed=bool(body.retry_failed),
         )
     except RuntimeError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e

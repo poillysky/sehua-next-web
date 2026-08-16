@@ -48,17 +48,34 @@ function groupEvents(events: ScrapeExportEvent[]) {
     items: ScrapeExportEvent[];
     level: string;
   }> = [];
+  const indexByKey = new Map<string, number>();
+
+  const levelOf = (items: ScrapeExportEvent[]) => {
+    // 步骤点颜色：取最后一个非 info 结局（ok/warn/error）；error 一旦出现即锁定
+    // 避免「某源失败 warn」把整段「元数据获取成功 ok」钉成橙色
+    let level = "info";
+    for (const ev of items) {
+      const lv = ev.level || "info";
+      if (lv === "error") {
+        level = "error";
+        break;
+      }
+      if (lv === "warn" || lv === "ok") level = lv;
+    }
+    return level;
+  };
+
   for (const ev of events) {
     const phase = phaseOf(ev);
     const code = ev.code || "";
     const key = `${code}::${phase}`;
-    const last = groups[groups.length - 1];
-    if (last && last.key === key) {
-      last.items.push(ev);
-      if (ev.level === "error") last.level = "error";
-      else if (ev.level === "warn" && last.level !== "error") last.level = "warn";
-      else if (ev.level === "ok" && last.level === "info") last.level = "ok";
+    const idx = indexByKey.get(key);
+    if (idx !== undefined) {
+      const g = groups[idx];
+      g.items.push(ev);
+      g.level = levelOf(g.items);
     } else {
+      indexByKey.set(key, groups.length);
       groups.push({
         key,
         phase,
@@ -341,21 +358,25 @@ function phaseBadge(detail: ScrapeExportDetail | null | undefined, running: bool
         ? "空号"
         : phase === "skipped"
           ? "空号"
-          : phase === "failed"
-            ? "失败"
-            : phase === "done" || phase === "write"
-              ? "已写入"
-              : running
-                ? "进行中"
-                : "完成";
+          : phase === "incomplete"
+            ? "数据不全"
+            : phase === "failed"
+              ? "失败"
+              : phase === "done" || phase === "write"
+                ? "已写入"
+                : running
+                  ? "进行中"
+                  : "完成";
   const phaseTone =
     phase === "empty" || phase === "skipped"
       ? "idle"
-      : phase === "failed"
-        ? "err"
-        : running || phase === "scrape"
-          ? "run"
-          : "ok";
+      : phase === "incomplete"
+        ? "warn"
+        : phase === "failed"
+          ? "err"
+          : running || phase === "scrape"
+            ? "run"
+            : "ok";
   return { phaseLabel, phaseTone };
 }
 
@@ -658,6 +679,7 @@ export function ScrapeProgressSummary({
             (((progress.done || 0) +
               (progress.empty || 0) +
               (progress.skipped || 0) +
+              (progress.incomplete || 0) +
               (progress.failed || 0)) /
               progress.total) *
               100,
@@ -668,6 +690,7 @@ export function ScrapeProgressSummary({
     (progress?.done || 0) +
     (progress?.empty || 0) +
     (progress?.skipped || 0) +
+    (progress?.incomplete || 0) +
     (progress?.failed || 0);
 
   return (
@@ -719,7 +742,8 @@ export function ScrapeProgressSummary({
           [
             ["成功", progress?.done ?? 0, "ok"],
             ["空号", progress?.empty ?? 0, "mute"],
-            ["数据不全", progress?.failed ?? 0, "err"],
+            ["数据不全", progress?.incomplete ?? 0, "warn"],
+            ["失败", progress?.failed ?? 0, "err"],
             ["合计", progress?.total ?? 0, "total"],
           ] as const
         ).map(([label, n, tone]) => (
@@ -791,9 +815,11 @@ export function ScrapeProgressLog({
   const events = useMemo(() => {
     const norm = (c: string) => c.trim().toUpperCase();
     const want = currentCode ? norm(currentCode) : "";
-    const fromLive = (progress?.events || []).filter(
-      (ev) => !want || !ev.code || norm(ev.code) === want,
-    );
+    // 钉住某番号时只收该号日志，勿把无 code 的任务级事件混进时间线
+    const fromLive = (progress?.events || []).filter((ev) => {
+      if (!want) return true;
+      return norm(ev.code || "") === want;
+    });
     if (!pinnedCode) return fromLive;
     if (!pinnedEvents.length) return fromLive;
     if (!fromLive.length) return pinnedEvents;

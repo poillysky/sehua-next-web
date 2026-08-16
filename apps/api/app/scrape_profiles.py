@@ -847,6 +847,7 @@ def normalize_scrape_tasks(raw: Any) -> list[dict[str, Any]]:
         empty_v = _int("empty")
         skipped_v = _int("skipped")
         failed_v = _int("failed")
+        incomplete_v = _int("incomplete")
         total_v = _int("total")
         done_codes = _code_list(item.get("doneCodes") or item.get("done_codes"))
         empty_codes = _code_list(item.get("emptyCodes") or item.get("empty_codes"))
@@ -856,26 +857,56 @@ def normalize_scrape_tasks(raw: Any) -> list[dict[str, Any]]:
         failed_codes = _code_list(
             item.get("failedCodes") or item.get("failed_codes")
         )
-        # 有番号列表时以列表长度为准，并钳制成功>合计的历史脏数据
+        incomplete_codes = _code_list(
+            item.get("incompleteCodes") or item.get("incomplete_codes")
+        )
+        # 同号互斥：成功 > 空号/跳过 > 数据不全 > 失败（禁止同一番号进两框）
+        done_set = set(done_codes)
+        empty_codes = [c for c in empty_codes if c not in done_set]
+        empty_set = set(empty_codes)
+        skipped_codes = [
+            c for c in skipped_codes if c not in done_set and c not in empty_set
+        ]
+        skip_set = set(skipped_codes)
+        incomplete_codes = [
+            c
+            for c in incomplete_codes
+            if c not in done_set and c not in empty_set and c not in skip_set
+        ]
+        inc_set = set(incomplete_codes)
+        failed_codes = [
+            c
+            for c in failed_codes
+            if c not in done_set
+            and c not in empty_set
+            and c not in skip_set
+            and c not in inc_set
+        ]
+        # 预览列表可能截断（如只留 200）：只能抬高计数，绝不可用 len(预览) 压低
         if done_codes:
-            done_v = min(done_v, len(done_codes)) if done_v else len(done_codes)
-            done_v = len(done_codes)
+            done_v = max(done_v, len(done_codes))
         if empty_codes:
-            empty_v = len(empty_codes)
+            empty_v = max(empty_v, len(empty_codes))
         if skipped_codes:
-            skipped_v = len(skipped_codes)
+            skipped_v = max(skipped_v, len(skipped_codes))
         if failed_codes:
-            failed_v = len(failed_codes)
-        processed = done_v + empty_v + skipped_v + failed_v
-        # 任务卡是终身累计：合计不够时抬高合计，绝不压低成功数
-        if processed > total_v:
-            total_v = processed
+            failed_v = max(failed_v, len(failed_codes))
+        elif incomplete_codes and failed_v and not failed_codes:
+            # 旧卡把同一号同时记失败+不全时，列表互斥后失败列表为空 → 清幽灵计数
+            failed_v = 0
+        if incomplete_codes:
+            incomplete_v = max(incomplete_v, len(incomplete_codes))
+        processed = done_v + empty_v + skipped_v + failed_v + incomplete_v
+        # 合计 = 本地目标数（固定），只允许抬高到分项之和，完成态也不得压成 processed
         last_status = str(
             item.get("lastStatus") or item.get("last_status") or ""
         ).strip()
+        if processed > total_v:
+            total_v = processed
         if last_status.startswith("完成") and total_v >= 0:
             last_status = (
-                f"完成 · 成功 {done_v} · 空号 {empty_v} · 失败 {failed_v}"
+                f"完成 · 成功 {done_v} · 空号 {empty_v}"
+                f" · 数据不全 {incomplete_v} · 失败 {failed_v}"
             )
         out.append(
             {
@@ -899,11 +930,13 @@ def normalize_scrape_tasks(raw: Any) -> list[dict[str, Any]]:
                 "empty": empty_v,
                 "skipped": skipped_v,
                 "failed": failed_v,
+                "incomplete": incomplete_v,
                 "total": total_v,
                 "doneCodes": done_codes,
                 "emptyCodes": empty_codes,
                 "skippedCodes": skipped_codes,
                 "failedCodes": failed_codes,
+                "incompleteCodes": incomplete_codes,
             }
         )
     return out
@@ -1056,11 +1089,13 @@ def profiles_public(
     ref = kinds.get("japan_censored") or {}
     fields = normalize_field_priority(ref.get("fieldPriority"))
     tasks = normalize_scrape_tasks(raw_tasks)
-    # 预览 codes 可能截断；对外返回的计数以 SQLite 为准抬高
+    # 预览 codes 可能截断；对外返回的计数以 SQLite 为准抬高；合计对齐本地文件夹数
     try:
         from . import scrape_export_log_store
+        from . import scrape_export as scrape_export_mod
 
         enriched: list[dict[str, Any]] = []
+        heal_persist = False
         for t in tasks:
             tid = str(t.get("id") or "").strip()
             if not tid:
@@ -1073,18 +1108,86 @@ def profiles_public(
             nt["skipped"] = max(
                 int(t.get("skipped") or 0), int(dbc.get("skipped") or 0)
             )
-            nt["failed"] = max(
-                int(t.get("failed") or 0), int(dbc.get("failed") or 0)
-            )
+            # 失败/数据不全以 SQLite 为准，避免卡上残留幽灵与同号双计
+            db_fail_n = int(dbc.get("failed") or 0)
+            db_inc_n = int(dbc.get("incomplete") or 0)
+            db_any = any(int(dbc.get(k) or 0) > 0 for k in dbc)
+            if db_any:
+                nt["failed"] = db_fail_n
+                nt["incomplete"] = db_inc_n
+                preview_cap = 200
+                nt["failedCodes"] = scrape_export_log_store.list_result_codes(
+                    tid, "failed", limit=preview_cap, offset=0
+                )
+                nt["incompleteCodes"] = scrape_export_log_store.list_result_codes(
+                    tid, "incomplete", limit=preview_cap, offset=0
+                )
+            else:
+                nt["failed"] = max(int(t.get("failed") or 0), db_fail_n)
+                nt["incomplete"] = max(int(t.get("incomplete") or 0), db_inc_n)
             processed = (
                 int(nt["done"])
                 + int(nt["empty"])
                 + int(nt["skipped"])
                 + int(nt["failed"])
+                + int(nt["incomplete"])
             )
-            nt["total"] = max(int(t.get("total") or 0), processed)
+            ls = str(nt.get("lastStatus") or "")
+            card_total = int(t.get("total") or 0)
+            # 自检：有前缀的任务合计 = 本地片库文件夹数（固定真值）
+            local_n = 0
+            try:
+                if str(nt.get("prefix") or "").strip() or str(nt.get("maker") or "").strip():
+                    local_n = int(
+                        scrape_export_mod.count_local_scrape_total_for_task(nt) or 0
+                    )
+            except Exception:
+                local_n = 0
+            if local_n > 0:
+                nt["total"] = local_n
+                if local_n != card_total:
+                    heal_persist = True
+            else:
+                nt["total"] = max(card_total, processed)
+            if ls.startswith("完成"):
+                nt["lastStatus"] = (
+                    f"完成 · 成功 {int(nt['done'])} · 空号 {int(nt['empty'])}"
+                    f" · 数据不全 {int(nt['incomplete'])} · 失败 {int(nt['failed'])}"
+                )
             enriched.append(nt)
         tasks = enriched
+        # 合计与本地不一致时写回，避免下次又漂
+        if heal_persist:
+            try:
+                from . import settings_store
+
+                raw_set = settings_store.get_setting(settings_store.SCRAPE_KEY) or {}
+                if not isinstance(raw_set, dict):
+                    raw_set = {}
+                next_raw = dict(raw_set)
+                # 只更新 total，保留其它已存字段
+                by_id = {
+                    str(x.get("id") or ""): int(x.get("total") or 0)
+                    for x in tasks
+                    if str(x.get("id") or "").strip()
+                }
+                stored = list(
+                    next_raw.get("scrapeTasks") or next_raw.get("scrape_tasks") or []
+                )
+                out_tasks: list[Any] = []
+                for item in stored:
+                    if not isinstance(item, dict):
+                        continue
+                    row = dict(item)
+                    tid2 = str(row.get("id") or "").strip()
+                    if tid2 and tid2 in by_id:
+                        row["total"] = by_id[tid2]
+                    out_tasks.append(row)
+                next_raw["scrapeTasks"] = out_tasks
+                settings_store.put_setting(settings_store.SCRAPE_KEY, next_raw)
+            except Exception:
+                log = __import__("logging").getLogger("sns.scrape_profiles")
+                log.debug("persist healed task totals failed", exc_info=True)
     except Exception:
         pass
     sources = sources_public_list(raw_sources)

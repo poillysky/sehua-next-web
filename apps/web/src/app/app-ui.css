@@ -10076,8 +10076,9 @@ textarea {
 }
 
 .scrape-task-card .scrape-prog-stats {
-  gap: 6px;
-  padding: 6px 12px 0;
+  gap: 4px;
+  padding: 6px 10px 0;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 
 .scrape-channel-box {
@@ -10163,18 +10164,19 @@ textarea {
 
 .scrape-task-card .scrape-prog-stat {
   gap: 2px;
-  padding: 8px 2px 7px;
+  padding: 6px 1px 6px;
   border-radius: 8px;
 }
 
 .scrape-task-card .scrape-prog-stat__n {
-  font-size: 17px;
+  font-size: 15px;
   line-height: 1.05;
 }
 
 .scrape-task-card .scrape-prog-stat__l {
-  font-size: 10px;
+  font-size: 9px;
   line-height: 1.1;
+  white-space: nowrap;
 }
 
 .scrape-task-card .scrape-progress-bar {
@@ -10343,11 +10345,6 @@ textarea {
 
 .scrape-task-modal__watch.is-on .scrape-task-modal__watch-title {
   color: #0a7e8c;
-}
-
-.scrape-task-modal__watch-sub {
-  font-size: 10px;
-  line-height: 1.2;
 }
 
 /* ?? .scrape-src-card__switch ? absolute?????????????????? */
@@ -11599,9 +11596,9 @@ textarea {
 
 .scrape-prog-stats {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 6px;
-  padding: 10px 10px 4px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 4px;
+  padding: 8px 10px 4px;
 }
 
 .scrape-prog-stat {
@@ -11609,7 +11606,8 @@ textarea {
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  padding: 8px 4px;
+  padding: 6px 2px;
+  min-width: 0;
   border-radius: 8px;
   border: 0.5px solid var(--border-subtle);
   background: color-mix(in srgb, var(--bg-soft) 40%, transparent);
@@ -11641,7 +11639,7 @@ textarea {
 }
 
 .scrape-prog-stat__n {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 750;
   font-variant-numeric: tabular-nums;
   line-height: 1.1;
@@ -11649,7 +11647,12 @@ textarea {
 }
 
 .scrape-prog-stat__l {
-  font-size: 10px;
+  font-size: 9px;
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 .scrape-prog-stat--ok .scrape-prog-stat__n {
@@ -11704,6 +11707,12 @@ textarea {
   padding: 12px 12px 10px 16px;
   border-bottom: none;
   background: transparent;
+}
+
+.scrape-stat-codes-modal-card .modal-header::before,
+.scrape-stat-codes-modal-card .app-modal-card__head::before {
+  content: none;
+  display: none;
 }
 
 .scrape-stat-codes-modal-card .modal-title,
@@ -12000,6 +12009,14 @@ textarea {
 
 .scrape-prog-stat--err .scrape-prog-stat__n {
   color: #c9342a;
+}
+
+.scrape-prog-stat--warn .scrape-prog-stat__n {
+  color: #9a5b00;
+}
+
+html.dark .scrape-prog-stat--warn .scrape-prog-stat__n {
+  color: #ff9f0a;
 }
 
 .scrape-progress-bar {

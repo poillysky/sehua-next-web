@@ -17,7 +17,8 @@ _FLUSH_EVERY = 0.4
 _last_flush_mono = 0.0
 
 # 强制重刮清空时标记；读侧无需关心
-_VALID_BUCKETS = frozenset({"done", "skipped", "failed", "empty"})
+# incomplete=字段不全；failed=网络/连不上等可重试失败
+_VALID_BUCKETS = frozenset({"done", "skipped", "failed", "empty", "incomplete"})
 
 
 def _now_iso() -> str:
@@ -249,6 +250,7 @@ def bulk_upsert_result_codes(
     failed: list[str] | None = None,
     done: list[str] | None = None,
     empty: list[str] | None = None,
+    incomplete: list[str] | None = None,
 ) -> None:
     """预跳过等批量落库：单事务，避免逐条开关库卡死 building。"""
     tid = str(task_id or "").strip()
@@ -262,6 +264,7 @@ def bulk_upsert_result_codes(
         ("skipped", skipped or []),
         ("failed", failed or []),
         ("empty", empty or []),
+        ("incomplete", incomplete or []),
     ):
         for c in codes:
             s = str(c or "").strip()
@@ -334,10 +337,44 @@ def list_result_codes(
         return []
 
 
+def list_all_result_codes(
+    task_id: str,
+    *,
+    buckets: list[str] | None = None,
+) -> set[str]:
+    """取任务卡已入桶番号全集（续跑过滤用，不截断）。"""
+    tid = str(task_id or "").strip()
+    if not tid:
+        return set()
+    want = [b for b in (buckets or list(_VALID_BUCKETS)) if b in _VALID_BUCKETS]
+    if not want:
+        return set()
+    try:
+        with db.connect() as conn:
+            placeholders = ",".join("?" * len(want))
+            rows = conn.execute(
+                f"""
+                SELECT DISTINCT code FROM scrape_export_codes
+                WHERE task_id = ? AND bucket IN ({placeholders})
+                """,
+                (tid, *want),
+            ).fetchall()
+        return {str(r["code"]).strip() for r in rows if str(r["code"] or "").strip()}
+    except Exception:
+        log.exception("list all result codes failed %s", tid)
+        return set()
+
+
 def count_result_codes(task_id: str, bucket: str | None = None) -> dict[str, int]:
     tid = str(task_id or "").strip()
     if not tid:
-        return {"done": 0, "skipped": 0, "failed": 0, "empty": 0}
+        return {
+            "done": 0,
+            "skipped": 0,
+            "failed": 0,
+            "empty": 0,
+            "incomplete": 0,
+        }
     try:
         with db.connect() as conn:
             if bucket and bucket in _VALID_BUCKETS:
@@ -355,7 +392,13 @@ def count_result_codes(task_id: str, bucket: str | None = None) -> dict[str, int
                 """,
                 (tid,),
             ).fetchall()
-        out = {"done": 0, "skipped": 0, "failed": 0, "empty": 0}
+        out = {
+            "done": 0,
+            "skipped": 0,
+            "failed": 0,
+            "empty": 0,
+            "incomplete": 0,
+        }
         for r in rows:
             b = str(r["bucket"] or "")
             if b in out:
@@ -363,7 +406,32 @@ def count_result_codes(task_id: str, bucket: str | None = None) -> dict[str, int
         return out
     except Exception:
         log.exception("count result codes failed %s", tid)
-        return {"done": 0, "skipped": 0, "failed": 0, "empty": 0}
+        return {
+            "done": 0,
+            "skipped": 0,
+            "failed": 0,
+            "empty": 0,
+            "incomplete": 0,
+        }
+
+
+def clear_result_bucket(task_id: str, bucket: str) -> int:
+    """清空某任务某一结果桶（失败重试前清 failed）。返回删除行数。"""
+    tid = str(task_id or "").strip()
+    b = str(bucket or "").strip()
+    if not tid or b not in _VALID_BUCKETS:
+        return 0
+    try:
+        with db.connect() as conn:
+            cur = conn.execute(
+                "DELETE FROM scrape_export_codes WHERE task_id = ? AND bucket = ?",
+                (tid, b),
+            )
+            conn.commit()
+            return int(cur.rowcount or 0)
+    except Exception:
+        log.exception("clear result bucket failed %s %s", tid, b)
+        return 0
 
 
 def clear_task_result_codes(task_id: str) -> None:
@@ -388,6 +456,7 @@ def replace_task_result_codes(
     skipped: list[str] | None = None,
     failed: list[str] | None = None,
     empty: list[str] | None = None,
+    incomplete: list[str] | None = None,
 ) -> None:
     """用完整列表覆盖（任务卡重置 / 大合并后落库）。"""
     tid = str(task_id or "").strip()
@@ -400,6 +469,7 @@ def replace_task_result_codes(
         ("skipped", skipped or []),
         ("failed", failed or []),
         ("empty", empty or []),
+        ("incomplete", incomplete or []),
     ):
         for c in codes:
             s = str(c or "").strip()
