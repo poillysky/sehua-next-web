@@ -7,11 +7,15 @@ export const APP_ROOT = path.resolve(__dirname, "..");
 
 export function loadEnv(): void {
   const envPath = path.join(APP_ROOT, ".env");
-  if (!fs.existsSync(envPath)) return;
-  for (const line of fs.readFileSync(envPath, "utf8").split(/\r?\n/)) {
-    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
-    if (!m || process.env[m[1]!]) continue;
-    process.env[m[1]!] = m[2];
+  try {
+    if (!fs.existsSync(envPath) || !fs.statSync(envPath).isFile()) return;
+    for (const line of fs.readFileSync(envPath, "utf8").split(/\r?\n/)) {
+      const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
+      if (!m || process.env[m[1]!]) continue;
+      process.env[m[1]!] = m[2];
+    }
+  } catch {
+    /* .env 缺失 / 被误挂成目录时不阻断启动 */
   }
 }
 

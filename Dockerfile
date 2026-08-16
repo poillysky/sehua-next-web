@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # Single image: web (3020) + api (8020) + scrape (9210)
-# Build: docker build -t sehua-next-web:1.0.9 .
+# Build: docker build -t sehua-next-web:1.0.10 .
 
 # ─── Web build ─────────────────────────────────────────────
 FROM node:22-bookworm-slim AS web-builder

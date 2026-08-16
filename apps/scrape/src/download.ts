@@ -16,6 +16,7 @@ import {
 import { getActiveProxy } from "./proxy.js";
 import { cookieForUrl } from "./sourceCookies.js";
 import { UA } from "./util.js";
+import { isAdaptiveFlareSource } from "./adaptiveFlare.js";
 
 /** HTML 上限（防异常大页 / 压缩炸弹撑爆 RSS） */
 const MAX_HTML_BYTES = Math.max(
@@ -420,7 +421,14 @@ function decodeHtmlBytes(
   }
 }
 
-export type FetchPageResult = { html: string; finalUrl: string };
+export type FetchPageVia = "direct" | "curl" | "flare";
+
+export type FetchPageResult = {
+  html: string;
+  finalUrl: string;
+  /** 实际取页通道：代理/直连 Node · curl · FlareSolverr */
+  via?: FetchPageVia;
+};
 
 /**
  * 抓取页面并带回最终落地 URL（用于识别镜像跳转）。
@@ -461,7 +469,11 @@ async function fetchPageUnlocked(
     : Math.max(timeoutMs, 45000);
   const baseCookie =
     String(opts?.cookie || "").trim() || cookieForUrl(url, opts?.sourceId);
-  const flareOn = Boolean(getFlareSolverrUrl()) && opts?.viaFlare !== false;
+  const adaptive = isAdaptiveFlareSource(opts?.sourceId);
+  // adaptive：允许过盾回落（即使调用方写了 viaFlare:false）
+  const flareOn =
+    Boolean(getFlareSolverrUrl()) &&
+    (adaptive || opts?.viaFlare !== false);
   const waitInSeconds = opts?.waitInSeconds;
   // 进闸后再读缓存：前面同站请求可能刚写好 cf_clearance / session
   const cached = getCachedClearance(url);
@@ -470,14 +482,12 @@ async function fetchPageUnlocked(
   const userAgent = cached?.userAgent || undefined;
   const host = hostOf(url);
 
-  // viaFlare:true 仅表示「这站可能要过盾/渲染」，不再等于「永远跳过直连」。
-  // 已有 cf_clearance → 一律先 Cookie 直连；只有无 clearance 时才首包直走 FS / 尊重直连冷却。
-  // 重要：directSkip 只能在「还能走 Flare」时生效。iqqtv 等 viaFlare:false 的源若也跳过直连，
-  // 会 0 次请求就返回 null（~百毫秒假「未找到详情页」），而连通性探测仍正常。
+  // viaFlare:true 对强制过盾站可跳过直连；不稳定过盾站（adaptive）始终先试直连/代理
   const hasClearance = Boolean(cached?.cookieHeader);
   const skipDirectFirst =
-    (flareOn && opts?.viaFlare === true && !hasClearance) ||
-    (flareOn && shouldSkipDirect(host) && !hasClearance);
+    !adaptive &&
+    ((flareOn && opts?.viaFlare === true && !hasClearance) ||
+      (flareOn && shouldSkipDirect(host) && !hasClearance));
 
   if (!skipDirectFirst) {
     const directTimeout = hasClearance
@@ -496,18 +506,21 @@ async function fetchPageUnlocked(
     });
     // SPA 源要求 wait 时，直连结果太短/空壳则视为未渲染，回退 FS
     const minBytes = waitInSeconds && waitInSeconds > 0 ? 2000 : 500;
-    if (direct && direct.html.length >= minBytes) {
+    if (direct && direct.html.length >= minBytes && !looksBlockedHtml(direct.html)) {
       // 直连恢复：清掉该 host 的短时 skip，避免后续误伤
       directSkipUntil.delete(host);
       console.log(
-        `[scrape] cookie-direct host=${host} ${direct.html.length}b proxy=${getActiveProxy() ? "on" : "off"} clearance=${hasClearance ? "yes" : "no"}`,
+        `[scrape] cookie-direct host=${host} ${direct.html.length}b proxy=${getActiveProxy() ? "on" : "off"} clearance=${hasClearance ? "yes" : "no"}${adaptive ? " adaptive" : ""}`,
       );
-      return direct;
+      return { ...direct, via: "direct" };
     }
-    if (direct && direct.html.length < minBytes) {
+    if (direct && (direct.html.length < minBytes || looksBlockedHtml(direct.html))) {
       console.log(
-        `[scrape] cookie-direct thin host=${host} ${direct.html.length}b < ${minBytes} → flare`,
+        `[scrape] cookie-direct ${looksBlockedHtml(direct.html) ? "blocked" : "thin"} host=${host} ${direct.html.length}b → ${adaptive || flareOn ? "flare" : "fail"}`,
       );
+      if (adaptive && direct.html.length >= minBytes && looksBlockedHtml(direct.html)) {
+        markDirectSkip(host);
+      }
     }
     // clearance 过期/失效：丢掉缓存，后面走 FS 重建，勿再盲信旧 Cookie
     if (hasClearance && !direct) {
@@ -516,8 +529,8 @@ async function fetchPageUnlocked(
   }
 
   // Node/undici 易被 CF TLS 指纹拦（同代理 Python/curl 仍 200）：viaFlare:false 时用 curl 回退
-  // 显式 false：禁止再回落 Flare（否则代理直连站会被 hostNeedsFlare / else 分支拖成「过盾超时」）
-  if (opts?.viaFlare === false) {
+  // 显式 false 且非 adaptive：禁止再回落 Flare
+  if (opts?.viaFlare === false && !adaptive) {
     const viaCurl = await fetchViaCurl(url, {
       timeoutMs,
       referer: opts?.referer,
@@ -526,20 +539,38 @@ async function fetchPageUnlocked(
     });
     if (viaCurl) {
       directSkipUntil.delete(host);
-      return viaCurl;
+      return { ...viaCurl, via: "curl" };
     }
     return null;
   }
 
+  // adaptive 在直连失败后再 curl 一枪，仍失败才过盾
+  if (adaptive && opts?.viaFlare !== true) {
+    const viaCurl = await fetchViaCurl(url, {
+      timeoutMs,
+      referer: opts?.referer,
+      cookie,
+      userAgent,
+    });
+    if (viaCurl && viaCurl.html.length >= 500 && !looksBlockedHtml(viaCurl.html)) {
+      directSkipUntil.delete(host);
+      return { ...viaCurl, via: "curl" };
+    }
+  }
+
   if (
     flareOn &&
-    (opts?.viaFlare === true ||
+    (adaptive ||
+      opts?.viaFlare === true ||
       hostNeedsFlare(url) ||
       hasClearance ||
       liveSession ||
       skipDirectFirst)
   ) {
     try {
+      if (adaptive) {
+        console.log(`[scrape] adaptive-flare host=${host}`);
+      }
       // 把 clearance 也带进 FS，session 重建时少打一轮挑战
       const hit = await fetchViaFlareSolverrFull(url, {
         timeoutMs: flareTimeoutMs,
@@ -551,6 +582,7 @@ async function fetchPageUnlocked(
         return {
           html: hit.html,
           finalUrl: hit.finalUrl || url,
+          via: "flare",
         };
       }
     } catch {

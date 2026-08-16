@@ -44,13 +44,13 @@ export type SourceDef = {
   group: string;
   defaultUrl: string;
   probePath?: string;
-  /** direct=直连 | proxy=代理直连 | proxy_flare=代理过盾 */
-  access?: "direct" | "proxy" | "proxy_flare";
+  /** direct=直连 | proxy=代理直连 | proxy_flare=代理过盾 | proxy_adaptive=不稳定过盾（先直连/代理，遇盾再 Flare） */
+  access?: "direct" | "proxy" | "proxy_flare" | "proxy_adaptive";
 };
 
 export const SOURCE_CATALOG: SourceDef[] = [
-  { id: "airav_io", name: "Airav_io", group: "av", defaultUrl: "https://airav.io/cn", probePath: "/", access: "proxy" },
-  { id: "avbase", name: "Avbase", group: "av", defaultUrl: "https://www.avbase.net", probePath: "/", access: "proxy" },
+  { id: "airav_io", name: "Airav_io", group: "av", defaultUrl: "https://airav.io/cn", probePath: "/", access: "proxy_adaptive" },
+  { id: "avbase", name: "Avbase", group: "av", defaultUrl: "https://www.avbase.net", probePath: "/", access: "proxy_adaptive" },
   { id: "avmoo", name: "Avmoo", group: "av", defaultUrl: "https://avmoo.shop", probePath: "/cn", access: "proxy_flare" },
   { id: "avsox", name: "Avsox", group: "uncensored", defaultUrl: "https://avsox.click", probePath: "/cn", access: "proxy_flare" },
   { id: "carib", name: "Carib", group: "uncensored", defaultUrl: "https://www.caribbeancom.com", probePath: "/", access: "proxy" },
@@ -73,7 +73,7 @@ export const SOURCE_CATALOG: SourceDef[] = [
     probePath: "/",
     access: "proxy",
   },
-  { id: "mgstage", name: "Mgstage", group: "av", defaultUrl: "https://www.mgstage.com", probePath: "/", access: "proxy_flare" },
+  { id: "mgstage", name: "Mgstage", group: "av", defaultUrl: "https://www.mgstage.com", probePath: "/", access: "proxy_adaptive" },
   {
     id: "libredmm",
     name: "LibreDMM",
@@ -83,10 +83,10 @@ export const SOURCE_CATALOG: SourceDef[] = [
     access: "proxy",
   },
   { id: "miss_av", name: "Miss_av", group: "av", defaultUrl: "https://missav123.com", probePath: "/", access: "proxy_flare" },
-  { id: "sevenmmtv", name: "7mmtv", group: "av", defaultUrl: "https://7mmtv.sx/zh", probePath: "/", access: "proxy" },
+  { id: "sevenmmtv", name: "7mmtv", group: "av", defaultUrl: "https://7mmtv.sx/zh", probePath: "/", access: "proxy_adaptive" },
   { id: "iqqtv", name: "Iqqtv", group: "av", defaultUrl: "https://iqq5.xyz/cn", probePath: "/", access: "direct" },
   { id: "theporndb", name: "ThePornDB", group: "western", defaultUrl: "https://api.theporndb.net", probePath: "/", access: "proxy" },
-  { id: "airav", name: "Airav", group: "av", defaultUrl: "https://www.airav.wiki", probePath: "/", access: "proxy" },
+  { id: "airav", name: "Airav", group: "av", defaultUrl: "https://www.airav.wiki", probePath: "/", access: "proxy_adaptive" },
 ];
 
 export const KNOWN_SOURCES = new Set(SOURCE_CATALOG.map((s) => s.id));

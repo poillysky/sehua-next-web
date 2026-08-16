@@ -840,7 +840,7 @@ export async function scrapeMgstage(
     const page = await fetchPage(url, {
       referer: `${base}/`,
       sourceId: "mgstage",
-      viaFlare: true,
+      // 不稳定过盾：adaptive 先直连/代理，遇盾再 Flare（勿 skipDirect）
       waitInSeconds: 2,
       timeoutMs: 60000,
     });

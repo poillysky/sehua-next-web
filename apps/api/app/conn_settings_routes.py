@@ -1195,7 +1195,7 @@ def _is_transient_probe_error(exc: BaseException) -> bool:
 def _probe_one_source(origin: str, sid: str, base_url: str) -> dict[str, Any]:
     """调 :9210 探测；forum 本地视为 ok。
 
-    探测路径禁止全量镜像发现；过盾单枪约 ≤28s，代理直连 ≤18s。
+    探测路径禁止全量镜像发现；过盾单枪约 ≤42s（airav 跟镜像），代理直连 ≤18s。
     httpx 留一点余量。遇连接重置（刮削热重载）自动重试。
     """
     import time
@@ -1204,9 +1204,11 @@ def _probe_one_source(origin: str, sid: str, base_url: str) -> dict[str, Any]:
         return {"id": sid, "status": "ok", "lastError": None, "cooldownSec": 0}
     payload = {"id": sid, "baseUrl": base_url}
     last_err: Exception | None = None
+    # airav 等不稳定过盾可能多跳镜像，单枪留足时间
+    probe_timeout = 70.0 if sid in {"airav_io", "airav", "mgstage"} else 50.0
     for attempt in range(3):
         try:
-            with httpx.Client(timeout=50.0, trust_env=False) as client:
+            with httpx.Client(timeout=probe_timeout, trust_env=False) as client:
                 r = client.post(
                     f"{origin.rstrip('/')}/api/sources/probe", json=payload
                 )
@@ -1341,6 +1343,7 @@ def run_scrape_sources_test(
             last_error=hit.get("lastError"),
             cooldown_sec=cd,
             resolved_base_url=hit.get("resolvedBaseUrl"),
+            probe_via=hit.get("probeVia"),
         )
         if st == "ok":
             ok_n += 1
@@ -1355,17 +1358,44 @@ def run_scrape_sources_test(
     saved = settings_store.put_setting(settings_store.SCRAPE_KEY, raw)
     data = _scrape_public(saved["value"])
     data["updated_at"] = saved["updated_at"]
-    # 仅测过「代理过盾」源时才清理 Flare；纯直连/代理直连（如 airav_io）不碰过盾
+
+    # 单源失败时把 lastError 拼进摘要，避免 UI 只看到「异常 1」
+    detail = ""
+    if err_n > 0 and len(probe_ids) == 1:
+        sid0 = probe_ids[0]
+        err0 = str((sources.get(sid0) or {}).get("lastError") or "").strip()
+        if err0:
+            detail = f" · {sid0}: {err0}"
+    elif err_n > 0 and ok_n == 0 and len(probe_ids) <= 3:
+        bits: list[str] = []
+        for sid0 in probe_ids:
+            err0 = str((sources.get(sid0) or {}).get("lastError") or "").strip()
+            if err0:
+                bits.append(f"{sid0}: {err0}")
+        if bits:
+            detail = " · " + "；".join(bits[:3])
+    elif ok_n > 0 and err_n == 0 and len(probe_ids) == 1:
+        # 单源成功：标明实际走直连还是过盾
+        sid0 = probe_ids[0]
+        via0 = str((sources.get(sid0) or {}).get("lastProbeVia") or "").strip().lower()
+        via_label = {"direct": "代理直连", "curl": "curl直连", "flare": "过盾"}.get(
+            via0
+        )
+        if via_label:
+            detail = f" · {via_label}"
+
+    # 仅测过「代理过盾 / 不稳定过盾」源时才清理 Flare；纯直连/代理直连不碰过盾
     used_flare = False
     for sid in probe_ids:
         access = str((sources.get(sid) or {}).get("access") or "").strip().lower()
-        if access == "proxy_flare":
+        if access in ("proxy_flare", "proxy_adaptive"):
             used_flare = True
             break
+    summary = f"测试完成 · 正常 {ok_n} · 异常 {err_n}{detail}"
     if used_flare:
         flare_msg = _restart_flare_after_source_probe(origin)
-        return data, f"测试完成 · 正常 {ok_n} · 异常 {err_n} · {flare_msg}"
-    return data, f"测试完成 · 正常 {ok_n} · 异常 {err_n}"
+        return data, f"{summary} · {flare_msg}"
+    return data, summary
 
 
 def _restart_flare_after_source_probe(origin: str) -> str:

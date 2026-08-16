@@ -799,7 +799,7 @@ function mergeByFieldPriority(
   };
 }
 
-/** 强制/高概率走 FlareSolverr 的源（与 sources.access=proxy_flare 对齐） */
+/** 强制/高概率走 FlareSolverr 的源（proxy_flare；mgstage 虽 adaptive 仍常过盾） */
 const FLARE_HEAVY_SOURCES = new Set<string>([
   "javdb",
   "javlibrary",

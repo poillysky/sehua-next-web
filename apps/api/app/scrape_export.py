@@ -117,7 +117,8 @@ def _resolve_channel_concurrency(cfg: dict[str, Any]) -> tuple[int, int]:
     return fast, slow
 
 
-# 与 sources.access=proxy_flare 对齐：仅这些占过盾锁 / 慢通道
+# 与 sources.access=proxy_flare / 高概率过盾对齐：占过盾锁 / 慢通道
+# mgstage 虽为 proxy_adaptive，出口不稳时仍常走 Flare，保留慢通道
 _FLARE_BOUND_SOURCES = frozenset(
     {
         "javdb",

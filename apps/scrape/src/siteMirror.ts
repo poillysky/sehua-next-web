@@ -167,8 +167,7 @@ export const SITE_MIRROR_PROFILES: Record<string, SiteMirrorProfile> = {
       defaultLooksLike(html) &&
       (/7mmtv|censored_content|searchall|search_keyword/i.test(html) ||
         html.length > 5000),
-    viaFlare: false,
-    registerFlare: false,
+    // 不稳定过盾：由 sourceId adaptive 决定，勿锁死 viaFlare:false
     probePath: "/zh/",
   },
   avmoo: {
@@ -237,8 +236,7 @@ export const SITE_MIRROR_PROFILES: Record<string, SiteMirrorProfile> = {
     looksLike: (html) =>
       defaultLooksLike(html) &&
       (/avbase|作品|女優|女优/i.test(html) || html.length > 8000),
-    viaFlare: false,
-    registerFlare: false,
+    // 不稳定过盾：adaptive
     probePath: "/",
   },
   fc2_hub: {
@@ -357,7 +355,7 @@ export const SITE_MIRROR_PROFILES: Record<string, SiteMirrorProfile> = {
     looksLike: (html) =>
       defaultLooksLike(html) &&
       (/mgstage|adc/i.test(html) || html.length > 2000),
-    viaFlare: true,
+    // 不稳定过盾：先直连/代理，遇盾再 Flare（勿锁死 viaFlare:true）
     probePath: "/",
   },
   carib: {
@@ -398,8 +396,7 @@ export const SITE_MIRROR_PROFILES: Record<string, SiteMirrorProfile> = {
     looksLike: (html) =>
       defaultLooksLike(html) &&
       (/airav|wiki|video/i.test(html) || html.length > 2000),
-    viaFlare: false,
-    registerFlare: false,
+    // 不稳定过盾：由 sourceId adaptive 决定
     probePath: "/",
   },
 };

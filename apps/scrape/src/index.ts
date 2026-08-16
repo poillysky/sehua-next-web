@@ -1,7 +1,7 @@
 import express from "express";
 import fs from "node:fs";
 import path from "node:path";
-import { fetchText } from "./download.js";
+import { fetchPage, fetchText } from "./download.js";
 import {
   applyFlareSolverr,
   abortAllFlareRequests,
@@ -25,7 +25,13 @@ import {
   persistActiveNetwork,
   setNetworkStorePath,
 } from "./networkStore.js";
-import { setAiravMirrorStorePath } from "./airavMirror.js";
+import {
+  extractAiravRedirectTargets,
+  getCachedAiravCnBase,
+  normalizeAiravCnBase,
+  rememberAiravMirror,
+  setAiravMirrorStorePath,
+} from "./airavMirror.js";
 import { setIqqtvMirrorStorePath } from "./iqqtvMirror.js";
 import {
   createScrapeCancelFlag,
@@ -48,6 +54,15 @@ loadEnv();
 applyProxyFromEnv();
 applyFlareSolverr(process.env.FLARESOLVERR_URL || "");
 
+/** 探测页是否像真正的 airav 业务页（排除跳转壳 / 挑战页） */
+function looksLikeAiravProbeHtml(html: string): boolean {
+  const h = String(html || "");
+  if (h.length < 2000) return false;
+  if (/Just a moment|cf-browser-verification|Attention Required/i.test(h.slice(0, 2500))) {
+    return false;
+  }
+  return /airav|瘋AV|疯AV|oneVideo|search_result|女优|女優/i.test(h);
+}
 const PORT = Number(process.env.PORT || 9210);
 const HOST = process.env.HOST || "0.0.0.0";
 const coversDir = path.resolve(APP_ROOT, process.env.COVERS_DIR || "./data/covers");
@@ -397,8 +412,13 @@ app.post("/api/sources/probe", async (req, res) => {
       basesToTry.push(seed.replace(/\/$/, ""));
     }
   }
-  // airav.io 常跳镜像：无缓存时顺带试官方入口，便于 NAS 探测跟上跳转
+  // airav.io 常 JS/meta 跳镜像：优先磁盘缓存，再官方入口（NAS 无本地缓存时也能跟一跳）
   if (id === "airav_io") {
+    const cached = getCachedAiravCnBase();
+    if (cached) {
+      const c = cached.replace(/\/$/, "");
+      if (c && !basesToTry.includes(c)) basesToTry.unshift(c);
+    }
     for (const seed of ["https://airav.io/cn", "https://www.airav.io/cn"]) {
       const s = seed.replace(/\/$/, "");
       if (s && !basesToTry.includes(s)) basesToTry.push(s);
@@ -479,57 +499,115 @@ app.post("/api/sources/probe", async (req, res) => {
 
     let lastError = "超时 / 无响应";
     let okBase = "";
+    let probeVia: string | null = null;
     const access = String(def.access || "proxy").trim().toLowerCase();
     const hasProxy = Boolean(getActiveProxy());
+    const hasFlare = Boolean(getFlareSolverrUrl());
     // access 决定是否过盾；勿再用 hostNeedsFlare 覆盖（会把代理直连站标成「过盾超时」）
-    const needsFlare =
-      access === "proxy_flare" && Boolean(getFlareSolverrUrl());
-    if (access === "proxy" && !hasProxy) {
-      lastError = "未配置代理（本源需代理直连）";
-    } else if (access === "proxy_flare" && !getFlareSolverrUrl()) {
+    const needsFlare = access === "proxy_flare" && hasFlare;
+    const adaptive = access === "proxy_adaptive";
+    if ((access === "proxy" || adaptive) && !hasProxy) {
+      lastError = "未配置代理（本源需代理）";
+    } else if (access === "proxy_flare" && !hasFlare) {
       lastError = "未配置 FlareSolverr（本源需代理过盾）";
     }
 
-    for (const tryBase of basesToTry) {
-      const b = String(tryBase || "").replace(/\/$/, "");
+    // NAS+代理偏慢：adaptive / airav 跟镜像可能要直连失败再过盾
+    const probeTimeoutMs =
+      id === "airav_io" ? 42000 : needsFlare || adaptive ? 36000 : 18000;
+
+    // 动态追加镜像候选（airav JS 跳转）；限制总尝试次数防止拖死整批
+    const maxTries = id === "airav_io" ? 6 : basesToTry.length;
+    for (let i = 0; i < basesToTry.length && i < maxTries; i++) {
+      const b = String(basesToTry[i] || "").replace(/\/$/, "");
       if (!b) continue;
       const url = joinBaseProbePath(b, probePath);
-      const html = await fetchText(url, {
-        // NAS+代理偏慢：直连略放宽；过盾单枪仍封顶，避免拖死整批测试
-        timeoutMs: needsFlare ? 28000 : 18000,
+      const page = await fetchPage(url, {
+        timeoutMs: probeTimeoutMs,
         strictTimeout: true,
-        // 禁止 undefined：否则直连失败后仍会回落 Flare，把代理站拖到半分钟
         viaFlare: needsFlare,
         sourceId: id,
         cookie: defaultCookieFor(id),
         referer: `${b}/`,
       });
+      const html = page?.html || "";
       if (!html) {
-        if (access === "proxy" && !hasProxy) {
-          lastError = "未配置代理（本源需代理直连）";
-        } else if (access === "proxy_flare" && !getFlareSolverrUrl()) {
+        if ((access === "proxy" || adaptive) && !hasProxy) {
+          lastError = "未配置代理（本源需代理）";
+        } else if (access === "proxy_flare" && !hasFlare) {
           lastError = "未配置 FlareSolverr（本源需代理过盾）";
+        } else if (adaptive) {
+          lastError = hasFlare
+            ? "直连与过盾均无响应（NAS 请确认代理/Flare 可达）"
+            : "超时 / 无响应（未配 Flare，无法自适应过盾）";
         } else {
           lastError = needsFlare ? "过盾超时 / 无响应" : "超时 / 无响应";
         }
         continue;
       }
+
+      // airav：官方常返回跳转壳，需抽镜像再测；勿把壳页当「连通正常」
+      if (id === "airav_io") {
+        const landed =
+          normalizeAiravCnBase(page?.finalUrl || "") ||
+          normalizeAiravCnBase(b) ||
+          b;
+        if (looksLikeAiravProbeHtml(html)) {
+          okBase = landed.replace(/\/$/, "");
+          probeVia = page?.via || null;
+          try {
+            rememberAiravMirror(okBase, b);
+          } catch {
+            /* ignore */
+          }
+          break;
+        }
+        const targets = extractAiravRedirectTargets(
+          html,
+          page?.finalUrl || url,
+          url,
+        );
+        let queued = 0;
+        for (const t of targets) {
+          const n = normalizeAiravCnBase(t).replace(/\/$/, "");
+          if (!n || basesToTry.includes(n)) continue;
+          basesToTry.push(n);
+          queued += 1;
+          if (queued >= 3) break;
+        }
+        lastError = queued
+          ? "入口为跳转壳，已跟镜像重试"
+          : looksBlockedHtml(html)
+            ? hasFlare
+              ? "仍是挑战页（自适应过盾未完成）"
+              : "仍是挑战页（请确认 NAS 上 FlareSolverr 可用）"
+            : "未识别到可用 airav 镜像";
+        continue;
+      }
+
       if (looksBlockedHtml(html)) {
         const challenge =
           /Just a moment|cf-browser-verification|Attention Required|Cloudflare/i.test(
             html.slice(0, 4000),
           );
         lastError =
-          id === "fc2_hub" || id === "mgstage" || id === "javdb"
+          id === "fc2_hub" || id === "javdb"
             ? "出口 IP 被站方封锁（换代理或暂时依赖其它源）"
-            : challenge
-              ? needsFlare
-                ? "仍是挑战页（过盾未完成）"
-                : "仍是挑战页（本源为代理直连，请换代理出口）"
-              : "空响应 / 封锁页";
+            : adaptive
+              ? challenge
+                ? hasFlare
+                  ? "仍是挑战页（自适应过盾未完成）"
+                  : "仍是挑战页（不稳定过盾站，请配置 FlareSolverr）"
+                : "空响应 / 封锁页"
+              : challenge
+                ? needsFlare
+                  ? "仍是挑战页（过盾未完成）"
+                  : "仍是挑战页（本源为代理直连，请换代理出口）"
+                : "空响应 / 封锁页";
         continue;
       }
       okBase = b;
+      probeVia = page?.via || null;
       break;
     }
 
@@ -541,6 +619,7 @@ app.post("/api/sources/probe", async (req, res) => {
           status: "error",
           lastError,
           cooldownSec: 15,
+          probeVia: null,
         },
       });
       return;
@@ -550,6 +629,13 @@ app.post("/api/sources/probe", async (req, res) => {
       rememberSiteMirror(id, okBase);
     } catch {
       /* ignore */
+    }
+    if (id === "airav_io") {
+      try {
+        rememberAiravMirror(okBase);
+      } catch {
+        /* ignore */
+      }
     }
 
     res.json({
@@ -562,6 +648,8 @@ app.post("/api/sources/probe", async (req, res) => {
         // 探测实际可用地址（镜像跳转后），供设置回写
         resolvedBaseUrl: okBase,
         resolvedFrom: resolvedNote || preferred || null,
+        /** direct=代理/直连 Node · curl · flare=过盾 */
+        probeVia: probeVia || null,
       },
     });
   } catch (e) {

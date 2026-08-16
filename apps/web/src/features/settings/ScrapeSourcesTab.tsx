@@ -112,7 +112,7 @@ const SOURCE_GROUP_LABEL: Record<string, string> = {
 };
 
 /** 访问方式：与 api SOURCE_CATALOG.access 对齐 */
-type SourceAccess = "direct" | "proxy" | "proxy_flare";
+type SourceAccess = "direct" | "proxy" | "proxy_flare" | "proxy_adaptive";
 
 const ACCESS_FALLBACK: Record<string, SourceAccess> = {
   freejavbt: "proxy",
@@ -125,20 +125,20 @@ const ACCESS_FALLBACK: Record<string, SourceAccess> = {
   javbus: "proxy",
   libredmm: "proxy",
   theporndb: "proxy",
-  airav_io: "proxy",
-  airav: "proxy",
-  avbase: "proxy",
+  airav_io: "proxy_adaptive",
+  airav: "proxy_adaptive",
+  avbase: "proxy_adaptive",
   avmoo: "proxy_flare",
   avsox: "proxy_flare",
   javdb: "proxy_flare",
   javlibrary: "proxy_flare",
   miss_av: "proxy_flare",
-  sevenmmtv: "proxy",
+  sevenmmtv: "proxy_adaptive",
   fc2_hub: "proxy_flare",
   fd2ppv: "proxy_flare",
   madouqu: "proxy",
   xiao_huang_shu: "proxy",
-  mgstage: "proxy_flare",
+  mgstage: "proxy_adaptive",
 };
 
 const ACCESS_SECTIONS: Array<{
@@ -157,6 +157,11 @@ const ACCESS_SECTIONS: Array<{
     hint: "需代理，不过 Cloudflare 浏览器盾",
   },
   {
+    id: "proxy_adaptive",
+    title: "不稳定过盾",
+    hint: "先代理直连，遇盾自动过盾；出口不稳",
+  },
+  {
     id: "proxy_flare",
     title: "代理过盾",
     hint: "代理 + FlareSolverr",
@@ -167,7 +172,14 @@ function resolveAccess(s: { id: string; access?: string }): SourceAccess {
   const raw = String(s.access || ACCESS_FALLBACK[s.id] || "proxy")
     .trim()
     .toLowerCase();
-  if (raw === "direct" || raw === "proxy" || raw === "proxy_flare") return raw;
+  if (
+    raw === "direct" ||
+    raw === "proxy" ||
+    raw === "proxy_flare" ||
+    raw === "proxy_adaptive"
+  ) {
+    return raw;
+  }
   return "proxy";
 }
 
@@ -230,10 +242,12 @@ const SOURCE_NOTES: Record<
   }
 > = {
   airav_io: {
-    blurb: "偏中文元数据；镜像域名会自动跟随。",
+    blurb: "偏中文元数据；镜像域名会自动跟随。不稳定过盾网站。",
     codeRule: "前缀-数字，至少 3 位（SONE-1→SONE-001）；按标准化番号搜索",
     tips: [
-      "代理直连即可，正式刮削不强制过盾",
+      "不稳定过盾：能直连则直连，遇 CF/封锁自动过盾",
+      "官方常 JS 跳临时镜像；探测会自动跟一跳并缓存（NAS/本机缓存不互通）",
+      "NAS 异常时先看本条 lastError；确认容器内代理与 FlareSolverr 地址可达",
       "搜索 kw→hid，勿用旧 /video/CODE",
       "详情女優为 /actor?id=；廠商 /tag?fid=",
     ],
@@ -242,10 +256,10 @@ const SOURCE_NOTES: Record<
     fieldsCommon: "封面",
   },
   airav: {
-    blurb: "入口 airav.wiki；实站常落到 airav.io，与 airav_io 同源不同入口。",
+    blurb: "入口 airav.wiki；实站常落到 airav.io，与 airav_io 同源不同入口。不稳定过盾网站。",
     codeRule: "前缀-数字，至少 3 位；优先 io 搜索，wiki /video/{CODE} 回退",
     tips: [
-      "代理直连即可，正式刮削不强制过盾",
+      "不稳定过盾：能直连则直连，遇盾自动过盾",
       "优先复用 airav.io 搜索 kw→hid；wiki /video/{CODE} 作回退",
       "解析同 airav.io（女優 /actor?id=、標籤 /tag?tid=、廠商 /tag?fid=）",
       "过滤导航垃圾（女優一覽、720p、HD 等）",
@@ -255,10 +269,10 @@ const SOURCE_NOTES: Record<
     fieldsCommon: "封面",
   },
   avbase: {
-    blurb: "日文综合库（FANZA/MGS 聚合）；不作中文标题源。",
+    blurb: "日文综合库（FANZA/MGS 聚合）；不作中文标题源。不稳定过盾网站。",
     codeRule: "前缀-数字，至少 3 位；详情 ID 形如 honnaka:HMN-001",
     tips: [
-      "代理直连即可，正式刮削不强制过盾",
+      "不稳定过盾：能直连则直连，遇盾自动过盾",
       "走 Next.js __NEXT_DATA__",
       "详情 ID 形如 honnaka:HMN-001",
     ],
@@ -483,15 +497,15 @@ const SOURCE_NOTES: Record<
     fieldsCommon: "封面 · 发售日 · 时长",
   },
   mgstage: {
-    blurb: "MGS 官方（素人系番号 SIRO / 200GANA / 300MIUM 等）；全日文。",
+    blurb: "MGS 官方（素人系番号 SIRO / 200GANA / 300MIUM 等）；全日文。不稳定过盾网站。",
     codeRule: "素人完整号（SIRO-xxxx / 200GANA-xxx 等）；直达 product_detail/{CODE}",
     tips: [
+      "不稳定过盾：能直连则直连，遇盾自动过盾",
       "直达 /product/product_detail/{CODE}/；需年龄门 Cookie adc=1",
-      "强制 FlareSolverr；过盾须带 domain=.mgstage.com",
+      "过盾时须带 domain=.mgstage.com",
       "默认关闭（出口不稳时易卡年龄门）",
       "女优常为素人化名+年龄；标签/片商/系列日文",
       "已取消 LibreDMM 回落：失败即本源失败，勿与独立源 LibreDMM 混淆",
-      "「重测/探测」打官网首页过盾（上限~22s）；正式刮削只打 mgstage.com",
     ],
     fieldsZh: "无",
     fieldsJa: "标题 · 简介 · 女优名 · 片商 · 系列 · 标签 · 发售日 · 时长 · 评分",
@@ -513,10 +527,10 @@ const SOURCE_NOTES: Record<
     fieldsCommon: "封面 · 发售日 · 发行商/标签",
   },
   sevenmmtv: {
-    blurb: "7MMTV；中文标题为主，可作中文标题补充。",
+    blurb: "7MMTV；中文标题为主，可作中文标题补充。不稳定过盾网站。",
     codeRule: "前缀-数字，至少 3 位；搜索 /zh/searchall_search/all/{CODE}/",
     tips: [
-      "代理直连即可，正式刮削不强制过盾",
+      "不稳定过盾：能直连则直连，遇盾自动过盾",
       "搜索走 /zh/searchall_search/all/{CODE}/1.html；必要时 POST 表单",
       "详情优先 censored_content，chinese/破解版次之",
       "女优/片商/发行/导演/时长/发售日可补；封面为站内 webp",
@@ -602,6 +616,14 @@ function relativeTime(iso?: string | null): string {
   if (sec < 3600) return `${Math.floor(sec / 60)} 分钟前`;
   if (sec < 86400) return `${Math.floor(sec / 3600)} 小时前`;
   return `${Math.floor(sec / 86400)} 天前`;
+}
+
+function probeViaLabel(via?: string | null): string {
+  const v = String(via || "").trim().toLowerCase();
+  if (v === "flare") return "过盾";
+  if (v === "curl") return "curl直连";
+  if (v === "direct") return "代理直连";
+  return "";
 }
 
 /** 探测错误短文案（WinError 等） */
@@ -726,7 +748,6 @@ export function ScrapeSourcesTab({
   const [editUrl, setEditUrl] = useState("");
   const [localKinds, setLocalKinds] = useState(kindProfiles);
   const [localRetry, setLocalRetry] = useState(retryDefault);
-  const autoProbeRef = useRef(false);
   const localKindsRef = useRef(kindProfiles);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -765,7 +786,9 @@ export function ScrapeSourcesTab({
       const r = await testScrapeSources();
       onApplied(r.data);
       if (!opts?.quiet) {
-        toast(r.message || "测试完成", "success");
+        const msg = r.message || "测试完成";
+        const failed = /异常\s*[1-9]|正常\s*0/.test(msg);
+        toast(msg, failed ? "error" : "success");
       }
     } catch (e) {
       if (!opts?.quiet) {
@@ -776,20 +799,8 @@ export function ScrapeSourcesTab({
     }
   }
 
-  // 进入页时：未探测过的源自动测一次，联通即绿点
-  useEffect(() => {
-    if (autoProbeRef.current || testing || !sources.length) return;
-    const need = sources.some(
-      (s) =>
-        s.enabled &&
-        (s.status === "unknown" || !s.lastCheckedAt) &&
-        s.id !== "forum",
-    );
-    if (!need) return;
-    autoProbeRef.current = true;
-    void runProbeAll({ quiet: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 仅首屏自动探测
-  }, [sources]);
+  // 连通探测：手动点「测试全部」；每日自动测由 API 侧 scheduler 负责，
+  // 进页勿自动跑——全量测会长时间把按钮锁成「测试中」灰态。
 
   async function onTestAll() {
     await runProbeAll();
@@ -808,7 +819,9 @@ export function ScrapeSourcesTab({
       }
       const r = await testScrapeSources([editId]);
       onApplied(r.data);
-      toast(r.message || "重测完成", "success");
+      const msg = r.message || "重测完成";
+      const failed = /异常\s*[1-9]|正常\s*0/.test(msg);
+      toast(msg, failed ? "error" : "success");
     } catch (e) {
       toast(e instanceof Error ? e.message : "重测失败", "error");
     } finally {
@@ -967,6 +980,7 @@ export function ScrapeSourcesTab({
     const buckets: Record<SourceAccess, RegionBuckets> = {
       direct: emptyRegion(),
       proxy: emptyRegion(),
+      proxy_adaptive: emptyRegion(),
       proxy_flare: emptyRegion(),
     };
     for (const s of sources) {
@@ -1380,6 +1394,10 @@ export function ScrapeSourcesTab({
                   <span className="scrape-src-edit__lab">上次探测</span>
                   <span className="scrape-src-edit__val allow-select">
                     {relativeTime(editSource.lastCheckedAt)}
+                    {editSource.status === "ok" &&
+                    probeViaLabel(editSource.lastProbeVia)
+                      ? ` · ${probeViaLabel(editSource.lastProbeVia)}`
+                      : ""}
                   </span>
                 </div>
                 {editSource.lastError && editSource.status === "error" ? (

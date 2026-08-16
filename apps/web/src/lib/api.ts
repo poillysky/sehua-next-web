@@ -673,6 +673,8 @@ export type ScrapeSourceCard = {
   status: 'ok' | 'error' | 'unknown' | string;
   lastCheckedAt?: string | null;
   lastError?: string | null;
+  /** 上次探测实际通道：direct / curl / flare */
+  lastProbeVia?: 'direct' | 'curl' | 'flare' | string | null;
   retry?: number;
   cooldownUntil?: string | null;
   cooldownRemainingSec?: number;

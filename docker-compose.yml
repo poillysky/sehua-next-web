@@ -6,13 +6,16 @@
 #     data/
 #     scrape-data/
 #     config/
-#       app.json / app.local.json / scrape.env
+#       app.json / app.local.json / scrape.env   # scrape.env 建议从仓库 config/scrape.env.example 拷
 #
-# 内存目标：本容器持续 RSS < 1G（不含独立 flaresolverr）。
-# 默认：快 2 / 慢 1；同站并行 1；scrape Node 堆 512MB；硬顶 mem_limit 1g。
+# 内存目标：本容器持续 RSS 尽量 <1G（不含独立 flaresolverr）。
+# 默认：快 2 / 慢 1；同站并行 1；scrape Node 堆 512MB。
+# mem_limit 给 1.5g 硬顶（web+api+scrape 同容器；1g 易把 scrape OOM 成「离线」）。
 #
 # 启动:
 #   mkdir -p /vol1/1000/Docker/sehua-next-web/{data,scrape-data,config}
+#   # 若还没有 scrape.env：
+#   cp config/scrape.env.example /vol1/1000/Docker/sehua-next-web/config/scrape.env
 #   cd /vol1/1000/Docker/sehua-next-web && docker compose pull && docker compose up -d
 # 访问: http://NAS_IP:3020
 
@@ -23,8 +26,8 @@ services:
     image: poillysky/sehua-next-web:latest
     container_name: sehua-next-web
     restart: always
-    # 持续运行硬顶；尖峰超限会被 OOM 杀整容器（故并发保持偏低）
-    mem_limit: 1g
+    # 硬顶略高于 1G：三进程同容器，过紧会只杀 scrape → 设置页「离线」
+    mem_limit: 1536m
     ports:
       - "3020:3020"
     environment:
@@ -33,7 +36,7 @@ services:
       SCRAPE_ORIGIN: http://127.0.0.1:9210
       API_INTERNAL_BASE: http://127.0.0.1:8020
       WEB_PORT: "3020"
-      # —— 内存安全（整栈持续 <1G）——
+      # —— 内存安全（整栈）——
       SCRAPE_CONCURRENCY: "2"
       SCRAPE_FAST_CONCURRENCY: "2"
       SCRAPE_SLOW_CONCURRENCY: "1"
@@ -58,7 +61,9 @@ services:
       - /vol1/1000/Docker/sehua-next-web/scrape-data:/app/apps/scrape/data
       - /vol1/1000/Docker/sehua-next-web/config:/app/config
       - /var/run/docker.sock:/var/run/docker.sock
-      - /vol1/1000/Docker/sehua-next-web/config/scrape.env:/app/apps/scrape/.env:ro
+      # 勿在宿主机缺文件时挂这一行（Docker 会建成目录弄崩 scrape）。
+      # 有真实文件再取消注释；或只靠上面 config/ + entrypoint 自动拷到 .env
+      # - /vol1/1000/Docker/sehua-next-web/config/scrape.env:/app/apps/scrape/.env:ro
     dns:
       - 223.5.5.5
       - 8.8.8.8

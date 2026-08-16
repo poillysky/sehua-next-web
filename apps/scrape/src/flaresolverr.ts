@@ -13,17 +13,19 @@ const directAgent = new Agent();
 
 /**
  * 易 403/CF、且 access=proxy_flare 的站：直连失败后再过盾。
- * 勿把代理直连源（airav / avbase / 7mmtv / madouqu 等）写进来，否则探测会误走 Flare。
+ * 不稳定过盾站（airav / avbase / 7mmtv / mgstage）走 adaptive，勿写死进 CF_HOST_RE。
  */
 const CF_HOST_RE =
-  /(?:^|\.)(javdb\.|javlibrary\.|missav|javten\.|fd2ppv\.|avmoo\.|avsox\.|tellme\.pw|mgstage\.)/i;
+  /(?:^|\.)(javdb\.|javlibrary\.|missav|javten\.|fd2ppv\.|avmoo\.|avsox\.|tellme\.pw)/i;
 
-/** 运行时登记的镜像域名（仅 proxy_flare / viaFlare:true 源） */
+/** 运行时登记的镜像域名（仅 proxy_flare / viaFlare:true / adaptive 源） */
 const extraFlareHosts = new Set<string>();
 
-/** 代理直连 / 直连源：禁止登记，避免探测与刮削被误吸入过盾通道 */
+/** 稳定代理直连源：禁止登记，避免探测与刮削被误吸入过盾通道。
+ * airav/avbase/7mmtv 已改为 adaptive，允许登记。
+ */
 const NEVER_REGISTER_FLARE_RE =
-  /(?:^|\.)(airav|avbase|7mmtv|7mm\.tv|madouqu|madou\.club|theporndb|javbus|seejav|caribbeancom|jav321|freejavbt|libredmm|contents\.fc2|dmm\.co\.jp|xchina|iqq[0-9]|airav\.wiki)/i;
+  /(?:^|\.)(madouqu|madou\.club|theporndb|javbus|seejav|caribbeancom|jav321|freejavbt|libredmm|contents\.fc2|dmm\.co\.jp|xchina|iqq[0-9])/i;
 
 export function registerFlareHost(hostOrUrl: string): void {
   try {

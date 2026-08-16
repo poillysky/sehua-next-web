@@ -32,8 +32,8 @@ KIND_LABELS: dict[str, str] = {
 # 与 apps/scrape / mdc-ng 源 id 对齐（色花堂不在刮削源目录，仅 maker-fs 种子兜底）
 SOURCE_CATALOG: list[dict[str, str]] = [
     # access: direct=直连 | proxy=代理直连 | proxy_flare=代理过盾
-    {"id": "airav_io", "name": "Airav_io", "group": "av", "defaultUrl": "https://airav.io/cn", "access": "proxy"},
-    {"id": "avbase", "name": "Avbase", "group": "av", "defaultUrl": "https://www.avbase.net", "access": "proxy"},
+    {"id": "airav_io", "name": "Airav_io", "group": "av", "defaultUrl": "https://airav.io/cn", "access": "proxy_adaptive"},
+    {"id": "avbase", "name": "Avbase", "group": "av", "defaultUrl": "https://www.avbase.net", "access": "proxy_adaptive"},
     {"id": "avmoo", "name": "Avmoo", "group": "av", "defaultUrl": "https://avmoo.shop", "access": "proxy_flare"},
     {"id": "avsox", "name": "Avsox", "group": "uncensored", "defaultUrl": "https://avsox.click", "access": "proxy_flare"},
     {"id": "carib", "name": "Carib", "group": "uncensored", "defaultUrl": "https://www.caribbeancom.com", "access": "proxy"},
@@ -49,13 +49,13 @@ SOURCE_CATALOG: list[dict[str, str]] = [
     {"id": "madou", "name": "Madou", "group": "chinese", "defaultUrl": "https://madou.club", "access": "proxy"},
     {"id": "madouqu", "name": "Madouqu", "group": "chinese", "defaultUrl": "https://madouqu.com", "access": "proxy"},
     {"id": "xiao_huang_shu", "name": "Xiao_huang_shu", "group": "chinese", "defaultUrl": "https://xchina.co", "access": "proxy"},
-    {"id": "mgstage", "name": "Mgstage", "group": "av", "defaultUrl": "https://www.mgstage.com", "access": "proxy_flare"},
+    {"id": "mgstage", "name": "Mgstage", "group": "av", "defaultUrl": "https://www.mgstage.com", "access": "proxy_adaptive"},
     {"id": "libredmm", "name": "LibreDMM", "group": "av", "defaultUrl": "https://www.libredmm.com", "access": "proxy"},
     {"id": "miss_av", "name": "Miss_av", "group": "av", "defaultUrl": "https://missav123.com", "access": "proxy_flare"},
-    {"id": "sevenmmtv", "name": "7mmtv", "group": "av", "defaultUrl": "https://7mmtv.sx/zh", "access": "proxy"},
+    {"id": "sevenmmtv", "name": "7mmtv", "group": "av", "defaultUrl": "https://7mmtv.sx/zh", "access": "proxy_adaptive"},
     {"id": "iqqtv", "name": "Iqqtv", "group": "av", "defaultUrl": "https://iqq5.xyz/cn", "access": "direct"},
     {"id": "theporndb", "name": "ThePornDB", "group": "western", "defaultUrl": "https://api.theporndb.net", "access": "proxy"},
-    {"id": "airav", "name": "Airav", "group": "av", "defaultUrl": "https://www.airav.wiki", "access": "proxy"},
+    {"id": "airav", "name": "Airav", "group": "av", "defaultUrl": "https://www.airav.wiki", "access": "proxy_adaptive"},
 ]
 
 # 色花堂不在刮削源目录；仅作 maker-fs 种子 / fieldSources 标记
@@ -573,7 +573,7 @@ def default_cookie_for(sid: str) -> str:
 def default_source_config(sid: str) -> dict[str, Any]:
     defn = _CATALOG_BY_ID.get(sid) or {"defaultUrl": "", "name": sid, "group": "other"}
     access = str(defn.get("access") or "proxy").strip().lower()
-    if access not in ("direct", "proxy", "proxy_flare"):
+    if access not in ("direct", "proxy", "proxy_flare", "proxy_adaptive"):
         access = "proxy"
     return {
         "id": sid,
@@ -586,6 +586,7 @@ def default_source_config(sid: str) -> dict[str, Any]:
         "status": "unknown",
         "lastCheckedAt": None,
         "lastError": None,
+        "lastProbeVia": None,
         "retry": 0,
         "cooldownUntil": None,
         "cooldownRemainingSec": 0,
@@ -635,6 +636,8 @@ def normalize_sources_map(raw: Any) -> dict[str, dict[str, Any]]:
         base["status"] = st
         base["lastCheckedAt"] = cur.get("lastCheckedAt") or cur.get("last_checked_at")
         base["lastError"] = cur.get("lastError") or cur.get("last_error")
+        via = str(cur.get("lastProbeVia") or cur.get("last_probe_via") or "").strip().lower()
+        base["lastProbeVia"] = via if via in ("direct", "curl", "flare") else None
         try:
             base["retry"] = max(0, min(8, int(cur.get("retry") or 0)))
         except (TypeError, ValueError):
@@ -673,6 +676,7 @@ def apply_source_probe(
     last_error: str | None = None,
     cooldown_sec: int | None = None,
     resolved_base_url: str | None = None,
+    probe_via: str | None = None,
 ) -> dict[str, dict[str, Any]]:
     out = normalize_sources_map(sources)
     if sid not in out:
@@ -683,6 +687,8 @@ def apply_source_probe(
     out[sid]["status"] = status if status in ("ok", "error", "unknown") else "unknown"
     out[sid]["lastCheckedAt"] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     out[sid]["lastError"] = last_error
+    via = str(probe_via or "").strip().lower()
+    out[sid]["lastProbeVia"] = via if via in ("direct", "curl", "flare") else None
     # 探测跟到可用镜像时回写 baseUrl（iqqtv / airav_io / javbus 等）
     resolved = str(resolved_base_url or "").strip().rstrip("/")
     if status == "ok" and resolved and resolved.startswith("http"):
