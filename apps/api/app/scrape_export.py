@@ -2778,14 +2778,8 @@ def _clear_task_card_retry_queues(task_id: str) -> None:
             t["failedCodes"] = []
             t["incomplete"] = 0
             t["incompleteCodes"] = []
-            ls = str(t.get("lastStatus") or "")
-            if "失败" in ls or "数据不全" in ls or ls.startswith("完成"):
-                done_n = int(t.get("done") or 0)
-                empty_n = int(t.get("empty") or 0)
-                t["lastStatus"] = (
-                    f"完成 · 成功 {done_n} · 空号 {empty_n}"
-                    f" · 数据不全 0 · 失败 0"
-                )[:120]
+            # 即将开跑重试：保持 running，禁止写成「完成」造成任务卡错乱
+            t["lastStatus"] = "running"
             t["updatedAt"] = now
             changed = True
             break
@@ -7220,6 +7214,10 @@ def run_export(
         ]
         force_ref[0] = bool(opts["force"])
         mode_ref[0] = str(opts["mode"])
+        # 指定番号强制重试/重刮：勿被任务卡「增量」热更新盖掉
+        if code_list:
+            force_ref[0] = True
+            mode_ref[0] = "force"
         with _meta_lock:
             _state["exportFields"] = list(export_fields)
             _state["localFields"] = list(local_export_fields)
@@ -7300,6 +7298,45 @@ def run_export(
             }
         )
         _clear_pending_detail_display()
+    # 指定番号强制重刮（失败重试）：保留终身成功/空号计数，只清失败桶再跑
+    if tid and bool(force_ref[0]) and code_list:
+        try:
+            dbc = scrape_export_log_store.count_result_codes(tid)
+            finished = scrape_export_log_store.list_all_result_codes(
+                tid,
+                buckets=["done", "empty", "skipped"],
+            )
+            done_n = int(dbc.get("done") or 0)
+            empty_n = int(dbc.get("empty") or 0)
+            skip_n = int(dbc.get("skipped") or 0)
+            retry_n = len(code_list)
+            with _meta_lock:
+                _result_seen = set(finished)
+                for c in code_list:
+                    s = str(c or "").strip()
+                    if s:
+                        _result_seen.discard(s)
+                _state["done"] = done_n
+                _state["empty"] = empty_n
+                _state["skipped"] = skip_n
+                _state["failed"] = 0
+                _state["incomplete"] = 0
+                _state["failedCodes"] = []
+                _state["incompleteCodes"] = []
+                processed = done_n + empty_n + skip_n
+                _state["total"] = max(
+                    int(_state.get("total") or 0),
+                    processed + retry_n,
+                )
+            _push_event(
+                phase="job",
+                text=(
+                    f"失败重试 {retry_n} · 保留成功 {done_n} · 空号 {empty_n}"
+                ),
+                level="info",
+            )
+        except Exception:
+            log.exception("hydrate lifetime counts for force-codes retry failed")
     field_hint = ""
     if set(export_fields) != set(DEFAULT_EXPORT_FIELDS):
         field_hint = " · 字段 " + "/".join(export_fields)

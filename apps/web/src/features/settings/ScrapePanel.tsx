@@ -886,13 +886,19 @@ export function ScrapePanel({
               let next = t;
               if (id && id === liveTid && (st.running || st.paused)) {
                 const truncated = Boolean(st.codesTruncated);
-                // 直播计数：直接覆盖本卡，禁止 Math.max 抬假高
-                const nextDone = Number(st.done || 0);
-                const nextEmpty =
-                  Number(st.empty || 0) + Number(st.skipped || 0);
+                // 成功/空号终身只抬高；失败/不全跟本轮（重试清零后从 0 再计）
+                const nextDone = Math.max(
+                  Number(t.done || 0),
+                  Number(st.done || 0),
+                );
+                const nextEmpty = Math.max(
+                  Number(t.empty || 0),
+                  Number(st.empty || 0) + Number(st.skipped || 0),
+                );
                 const nextIncomplete = Number(st.incomplete || 0);
                 const nextFail = Number(st.failed || 0);
                 const nextTotal = Math.max(
+                  Number(t.total || 0),
                   Number(st.total || 0),
                   nextDone + nextEmpty + nextIncomplete + nextFail,
                 );
@@ -1463,22 +1469,7 @@ export function ScrapePanel({
       const draft = draftFromTask(task);
       const fields = normalizeTaskFields(draft.fields);
       const localFields = normalizeLocalFields(draft.localFields, fields);
-      const now = new Date().toISOString();
-      // 本地立刻清空失败/数据不全框，避免「状态变了队列还在」
-      const nextTasks = scrapeTasks.map((t) =>
-        t.id === task.id
-          ? {
-              ...t,
-              failed: 0,
-              failedCodes: [],
-              incomplete: 0,
-              incompleteCodes: [],
-              lastStatus: "running",
-              updatedAt: now,
-            }
-          : t,
-      );
-      await persistTasks(nextTasks.slice(0, 12));
+      // 先启动：后端从 SQLite/任务卡收集失败号；禁止先清卡导致「没有可重试」
       const st = await startScrapeExport({
         taskId: draft.id,
         name: draft.name || draft.prefix || draft.maker || "刮削任务",
@@ -1493,15 +1484,28 @@ export function ScrapePanel({
         localFields,
         signal: ac.signal,
       });
-      // 再拉一次配置，避免轮询 max 把旧队列抬回来
-      try {
-        const cfgNext = await getScrape();
-        applyCfg(cfgNext);
-      } catch {
-        /* ignore */
-      }
+      const now = new Date().toISOString();
+      // 只清失败/不全；成功·空号·合计终身保留
+      const nextTasks = scrapeTasks
+        .map((t) =>
+          t.id === task.id
+            ? {
+                ...t,
+                failed: 0,
+                failedCodes: [],
+                incomplete: 0,
+                incompleteCodes: [],
+                lastStatus: "running",
+                updatedAt: now,
+              }
+            : t,
+        )
+        .slice(0, 12);
+      setScrapeTasks(nextTasks);
+      void persistTasks(nextTasks).catch(() => {});
       setProgress({
         ...st,
+        // 保留后端带回的终身成功/空号；只强制本轮失败桶为 0
         failed: 0,
         failedCodes: [],
         incomplete: 0,
@@ -2160,20 +2164,37 @@ export function ScrapePanel({
                   );
                   const cancelling =
                     liveActive && progress?.message === "cancelling";
-                  // 唯一准绳：本卡在跑/暂停 → 只用直播 progress（内存实时计数）
-                  // 已结束 → 用任务卡落盘数字（结束时已与结果库对齐）
-                  // 禁止 Math.max(旧卡, 直播)：会把数字抬成「假高」且与弹窗对不上
+                  // 成功/空号：终身累计（任务卡 ∪ 直播只抬高）
+                  // 失败/数据不全：本轮直播为准（失败重试会清零再计）
+                  // 禁止直播清零把终身成功打成 0
                   const archivedStats = taskStats(task);
                   const stats =
                     liveActive && progress
                       ? reconcileStats({
-                          done: Number(progress.done ?? 0),
-                          empty:
+                          done: Math.max(
+                            archivedStats.done,
+                            Number(progress.done ?? 0),
+                          ),
+                          empty: Math.max(
+                            archivedStats.empty,
                             Number(progress.empty ?? 0) +
-                            Number(progress.skipped ?? 0),
+                              Number(progress.skipped ?? 0),
+                          ),
                           incomplete: Number(progress.incomplete ?? 0),
                           failed: Number(progress.failed ?? 0),
-                          total: Number(progress.total ?? 0),
+                          total: Math.max(
+                            archivedStats.total,
+                            Number(progress.total ?? 0),
+                            archivedStats.done +
+                              archivedStats.empty +
+                              Number(progress.incomplete ?? 0) +
+                              Number(progress.failed ?? 0),
+                            Number(progress.done ?? 0) +
+                              Number(progress.empty ?? 0) +
+                              Number(progress.skipped ?? 0) +
+                              Number(progress.incomplete ?? 0) +
+                              Number(progress.failed ?? 0),
+                          ),
                         })
                       : archivedStats;
                   const sessionStats = stats;
