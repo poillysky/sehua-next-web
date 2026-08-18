@@ -109,6 +109,38 @@ def makers_library_root() -> Path:
     return root
 
 
+def resolve_library_media_path(rel: str) -> Path | None:
+    """解析 library 内封面/海报相对路径（兼容 片商目录 前缀可有可无、library 独立挂载）。"""
+    raw = str(rel or "").replace("\\", "/").strip().lstrip("/")
+    if not raw or ".." in Path(raw).parts:
+        return None
+    base = library_base().resolve()
+    makers = makers_library_root().resolve()
+    variants = [raw]
+    prefix = f"{LIBRARY_MAKERS_DIR}/"
+    if raw.startswith(prefix):
+        variants.append(raw[len(prefix) :])
+    roots = [makers, base]
+    seen: set[str] = set()
+    for root in roots:
+        for variant in variants:
+            try:
+                target = (root / variant).resolve()
+            except OSError:
+                continue
+            key = str(target)
+            if key in seen:
+                continue
+            seen.add(key)
+            try:
+                target.relative_to(base)
+            except ValueError:
+                continue
+            if target.is_file():
+                return target
+    return None
+
+
 def _merge_dir_tree(src: Path, dst: Path) -> None:
     dst.mkdir(parents=True, exist_ok=True)
     for item in src.iterdir():

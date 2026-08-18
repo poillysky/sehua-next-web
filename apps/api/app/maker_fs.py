@@ -629,13 +629,13 @@ def _supplement_covers_from_bitmagnet(
     if not likes:
         return covers, 0, []
 
-    like_sql = " OR ".join(["t.name ILIKE %s ESCAPE '\\\\'"] * len(likes))
-    file_like_sql = " OR ".join(["f.path ILIKE %s ESCAPE '\\\\'"] * len(likes))
+    like_sql = " OR ".join(["t.name ILIKE %s ESCAPE '\\'"] * len(likes))
+    file_like_sql = " OR ".join(["f.path ILIKE %s ESCAPE '\\'"] * len(likes))
     exclude_sql = ""
     exclude_params: list[Any] = []
     if excludes:
         exclude_sql = " AND " + " AND ".join(
-            ["t.name NOT ILIKE %s ESCAPE '\\\\'"] * len(excludes)
+            ["t.name NOT ILIKE %s ESCAPE '\\'"] * len(excludes)
         )
         exclude_params.extend(excludes)
 

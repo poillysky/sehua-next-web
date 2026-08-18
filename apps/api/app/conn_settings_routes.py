@@ -825,10 +825,18 @@ async def test_tmdb(
         key = str(stored.get("apiKey") or stored.get("api_key") or "").strip()
     if not key:
         raise HTTPException(status_code=400, detail="请先填写 TMDB API Key")
+    from .outbound_http import resolve_scrape_proxy_url
+
+    client_kw: dict[str, Any] = {
+        "timeout": httpx.Timeout(12.0, connect=4.0),
+        "trust_env": False,
+        "follow_redirects": True,
+    }
+    proxy = resolve_scrape_proxy_url()
+    if proxy:
+        client_kw["proxy"] = proxy
     try:
-        async with httpx.AsyncClient(
-            timeout=12.0, trust_env=True, follow_redirects=True
-        ) as client:
+        async with httpx.AsyncClient(**client_kw) as client:
             r = await client.get(
                 "https://api.themoviedb.org/3/search/multi",
                 params={

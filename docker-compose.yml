@@ -1,27 +1,30 @@
 # NAS 部署 — 单镜像（web + api），Postgres 独立（不进本 compose）
 #
+# 刮削由外部 MDC-ng 写入 library；本镜像不再内置 scrape Worker (:9210)。
+#
 # 目录:
 #   /vol1/1000/Docker/sehua-next-web/
 #     docker-compose.yml
-#     data/
+#     data/              → /app/data（SQLite、缓存等；不含 library 正文）
+#     library/           → /app/data/library（MDC-ng 片库，单独挂载便于备份/共享）
 #     config/
 #       app.json / app.local.json
 #
-# 刮削改由外部 MDC-ng 写入 library；本镜像不再内置 scrape Worker。
-#
 # 启动:
-#   mkdir -p /vol1/1000/Docker/sehua-next-web/{data,config}
+#   mkdir -p /vol1/1000/Docker/sehua-next-web/{data,library,config}
 #   cd /vol1/1000/Docker/sehua-next-web && docker compose pull && docker compose up -d
 # 访问: http://NAS_IP:3020
+#
+# 说明: library 挂到 /app/data/library 会覆盖 data 卷内的同名子目录（Docker 嵌套挂载）。
 
 name: sehua-next-web
 
 services:
   app:
-    image: poillysky/sehua-next-web:latest
+    image: poillysky/sehua-next-web:1.0.16
     container_name: sehua-next-web
     restart: always
-    mem_limit: 1024m
+    mem_limit: 1g
     ports:
       - "3020:3020"
     environment:
@@ -31,6 +34,7 @@ services:
       WEB_PORT: "3020"
     volumes:
       - /vol1/1000/Docker/sehua-next-web/data:/app/data
+      - /vol1/1000/Docker/sehua-next-web/library:/app/data/library
       - /vol1/1000/Docker/sehua-next-web/config:/app/config
     dns:
       - 223.5.5.5

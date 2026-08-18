@@ -73,21 +73,9 @@ def export_library_file(
         raise HTTPException(status_code=400, detail="非法路径")
     from . import library_materialize as lm
 
-    base = lm.library_base()
-    makers = lm.makers_library_root()
-    candidates = [
-        makers / raw,
-        base / raw,
-        base / lm.LIBRARY_MAKERS_DIR / raw,
-    ]
-    for cand in candidates:
-        try:
-            target = cand.resolve()
-            target.relative_to(base.resolve())
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail="越界路径") from e
-        if target.is_file():
-            return FileResponse(target, headers=_file_cache_headers(target))
+    target = lm.resolve_library_media_path(raw)
+    if target is not None:
+        return FileResponse(target, headers=_file_cache_headers(target))
     raise HTTPException(status_code=404, detail="文件不存在")
 
 
