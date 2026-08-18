@@ -10,6 +10,7 @@ import time
 from typing import Any
 from urllib.parse import urlparse
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 
@@ -34,6 +35,19 @@ _ALLOWED_HOST_SUFFIX = (
     ".top",
     ".xyz",
 )
+
+# 色花论坛图床：防盗链认 sehuatang Referer
+_FORUM_IMG_HOST_RE = re.compile(
+    r"(?:^|\.)("
+    r"ewrewej\.la|ymawv\.la|ldkms\.la|picdcd\.com|adipcd\.com|"
+    r"pkapic\.cc|imgccc\.com|11img\.com|yichkp\.com|qpic\.ws|"
+    r"gdvdvb\.com|img906\.com|microsoftsa\.com|xunse\.pics|"
+    r"023pic3\.cc|pic26077\.cc|pic2607a\.cc|pic505hz\.cc|pid505st\.cc"
+    r")(?:$|:)",
+    re.I,
+)
+
+_COVER_FETCH_TIMEOUT = httpx.Timeout(12.0, connect=4.0)
 
 
 def _cache_get(key: str) -> dict[str, Any] | None:
@@ -108,13 +122,13 @@ def _looks_like_image(data: bytes, ctype: str) -> bool:
     return False
 
 
-def _fetch_bytes(url: str) -> tuple[bytes, str]:
-    parsed = urlparse(url)
-    host = (parsed.hostname or "").lower()
-    # 论坛图床常校验 Referer；无 Referer / 错 Referer 会 403
-    scheme = parsed.scheme or "https"
+def _is_forum_image_host(host: str) -> bool:
+    return bool(_FORUM_IMG_HOST_RE.search(host or ""))
+
+
+def _referers_for_host(host: str, scheme: str) -> list[str | None]:
+    """论坛图床优先 sehuatang Referer，减少 403 / 无效 HTML。"""
     referers: list[str | None] = []
-    # 豆瓣图床：桌面 Referer / 空 Referer 常返回 JS 挑战 HTML；移动站 Referer 可用
     if host.endswith("doubanio.com") or host.endswith("douban.com"):
         referers.extend(
             [
@@ -122,28 +136,45 @@ def _fetch_bytes(url: str) -> tuple[bytes, str]:
                 "https://movie.douban.com/",
             ]
         )
+    if "netcdn.space" in host or host.endswith("dmm.co.jp") or "dmm.co.jp" in host:
+        referers.append("https://www.dmm.co.jp/")
+    if _is_forum_image_host(host):
+        referers.extend(
+            [
+                "https://www.sehuatang.org/",
+                "https://sehuatang.net/",
+            ]
+        )
     if host:
         referers.append(f"{scheme}://{host}/")
-    referers.extend(
-        [
-            "https://www.sehuatang.org/",
-            "https://sehuatang.net/",
-            None,
-        ]
-    )
-    # 去重保序
+    if not _is_forum_image_host(host):
+        referers.extend(
+            [
+                "https://www.sehuatang.org/",
+                "https://sehuatang.net/",
+            ]
+        )
+    referers.append(None)
     seen: set[str | None] = set()
-    uniq_refs: list[str | None] = []
+    uniq: list[str | None] = []
     for ref in referers:
         if ref in seen:
             continue
         seen.add(ref)
-        uniq_refs.append(ref)
+        uniq.append(ref)
+    return uniq
+
+
+def _fetch_bytes(url: str) -> tuple[bytes, str]:
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    scheme = parsed.scheme or "https"
+    uniq_refs = _referers_for_host(host, scheme)
 
     last_status = 0
     last_err: Exception | None = None
     # 走设置里的 proxyUrl，否则浏览器直连 CDN 会 ERR_CONNECTION_CLOSED
-    with httpx_client(timeout=20.0) as client:
+    with httpx_client(timeout=_COVER_FETCH_TIMEOUT) as client:
         for ref in uniq_refs:
             try:
                 headers = _image_headers(url, referer=ref)
@@ -159,7 +190,7 @@ def _fetch_bytes(url: str) -> tuple[bytes, str]:
                 log.warning("cover fetch transport error ref=%s: %s", ref, e)
                 continue
             last_status = r.status_code
-            if r.status_code in {403, 418}:
+            if r.status_code in {403, 404, 418}:
                 continue
             if r.status_code >= 400:
                 raise HTTPException(

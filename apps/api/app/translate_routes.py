@@ -36,6 +36,17 @@ _HTTPX_KW: dict[str, Any] = {
     "headers": {"User-Agent": "sehua-next-search/1.0"},
 }
 
+def _get_network_proxy_url() -> str:
+    """从网络管理配置里取 HTTP 代理 URL（用于 TMDB 外联）。"""
+    raw = settings_store.get_setting(settings_store.SCRAPE_KEY) or {}
+    proxy = str(raw.get("proxyUrl") or raw.get("proxy_url") or "").strip()
+    if not proxy:
+        return ""
+    # 容错：如果没有协议头，默认补 http://
+    if "://" not in proxy:
+        proxy = f"http://{proxy}"
+    return proxy.rstrip("/")
+
 
 class TranslateBody(BaseModel):
     text: str = Field(..., min_length=1, max_length=500)
@@ -140,7 +151,14 @@ async def translate_tmdb(text: str) -> str | None:
     query = clean_media_query(text)
     if len(query) < 2:
         return None
-    async with httpx.AsyncClient(**_HTTPX_KW) as client:
+    proxy = _get_network_proxy_url()
+    client_kw = dict(_HTTPX_KW)
+    if proxy:
+        # 明确走配置的代理，避免 trust_env 把系统代理干扰进来
+        client_kw["trust_env"] = False
+        client_kw["proxy"] = proxy
+
+    async with httpx.AsyncClient(**client_kw) as client:
         r = await client.get(
             "https://api.themoviedb.org/3/search/multi",
             params={

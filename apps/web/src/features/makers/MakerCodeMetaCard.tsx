@@ -16,16 +16,33 @@ function isChineseTitle(s: string | null | undefined): boolean {
   return han >= 2 && han >= kana;
 }
 
+function normalizePlotText(s: string): string {
+  return String(s || '')
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function pickTitle(detail: ScrapeExportDetail): string {
   const codeU = String(detail.code || '')
     .trim()
     .toUpperCase();
-  const zh = String(detail.titleZh || '').trim();
-  if (zh && isChineseTitle(zh)) return zh;
-  const ja = [detail.originalTitle, detail.title]
-    .map((x) => String(x || '').trim())
-    .find((t) => t && t.toUpperCase() !== codeU);
-  return ja || zh || '';
+  for (const raw of [detail.titleZh, detail.title]) {
+    const t = String(raw || '').trim();
+    if (t && t.toUpperCase() !== codeU && isChineseTitle(t)) return t;
+  }
+  for (const raw of [detail.originalTitle, detail.title]) {
+    const t = String(raw || '').trim();
+    if (t && t.toUpperCase() !== codeU) return t;
+  }
+  return codeU || '';
+}
+
+function pickPlot(detail: ScrapeExportDetail, title: string): string {
+  const plot = normalizePlotText(detail.plot || '');
+  if (!plot) return '';
+  if (plot === title.trim()) return '';
+  return plot;
 }
 
 function posterCandidates(detail: ScrapeExportDetail): string[] {
@@ -84,21 +101,21 @@ export function MakerCodeMetaCard({
   }, [code]);
 
   const title = useMemo(() => (detail ? pickTitle(detail) : ''), [detail]);
+  const plot = useMemo(() => (detail ? pickPlot(detail, title) : ''), [detail, title]);
   const actors = useMemo(
     () => (detail?.actors || []).map((a) => String(a || '').trim()).filter(Boolean),
     [detail],
   );
   const tags = useMemo(
-    () => (detail?.genres || []).map((g) => String(g || '').trim()).filter(Boolean),
+    () =>
+      (detail?.genres || [])
+        .map((g) => String(g || '').trim())
+        .filter((g) => g && !/^(4k|8k|hd|fhd|1080p|720p|高清)$/i.test(g)),
     [detail],
   );
-  const plot = String(detail?.plot || '').trim();
-  const studio = String(detail?.studio || '').trim();
-  const series = String(detail?.series || '').trim();
   const covers = useMemo(() => (detail ? posterCandidates(detail) : []), [detail]);
   const cropRegion = String(detail?.region || region || '').trim() || undefined;
 
-  const metaBits = [studio, series].filter(Boolean);
   const hasContent =
     covers.length > 0 ||
     Boolean(title) ||
@@ -119,7 +136,22 @@ export function MakerCodeMetaCard({
     );
   }
 
-  if (!hasContent) return null;
+  if (!hasContent) {
+    const codeLabel = String(code || '').trim();
+    if (!codeLabel) return null;
+    return (
+      <section className="mk-code-meta" aria-label="片库元数据">
+        <div className="mk-code-meta__cover">
+          <div className="mk-code-meta__cover-empty">无封面</div>
+        </div>
+        <div className="mk-code-meta__body">
+          <h2 className="mk-code-meta__title mk-code-meta__title--code allow-select">
+            {codeLabel}
+          </h2>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="mk-code-meta" aria-label="片库元数据">
@@ -147,9 +179,6 @@ export function MakerCodeMetaCard({
         )}
         {actors.length > 0 ? (
           <p className="mk-code-meta__actors allow-select">{actors.join('、')}</p>
-        ) : null}
-        {metaBits.length > 0 ? (
-          <p className="mk-code-meta__meta allow-select">{metaBits.join(' · ')}</p>
         ) : null}
         {tags.length > 0 ? (
           <div className="mk-code-meta__tags" aria-label="标签">

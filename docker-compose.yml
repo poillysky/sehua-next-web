@@ -1,23 +1,16 @@
-# NAS 部署 — 单镜像（web+api+scrape），两套独立 Postgres（均不进本 compose）
+# NAS 部署 — 单镜像（web + api），Postgres 独立（不进本 compose）
 #
 # 目录:
 #   /vol1/1000/Docker/sehua-next-web/
 #     docker-compose.yml
 #     data/
-#     scrape-data/
 #     config/
-#       app.json / app.local.json / scrape.env
-#       scrape-meta/   # 本机导出的镜像缓存（airav/iqqtv/site-mirrors），与本机对齐 curl 直链
-#                      # 勿放 cf-clearance.json（绑出口 IP，拷了也没用）
+#       app.json / app.local.json
 #
-# 内存目标：本容器持续 RSS 尽量 <1G（不含独立 flaresolverr）。
-# 默认：快 2 / 慢 1；同站并行 1；scrape Node 堆 512MB。
-# mem_limit 给 1.5g 硬顶（web+api+scrape 同容器；1g 易把 scrape OOM 成「离线」）。
+# 刮削改由外部 MDC-ng 写入 library；本镜像不再内置 scrape Worker。
 #
 # 启动:
-#   mkdir -p /vol1/1000/Docker/sehua-next-web/{data,scrape-data,config}
-#   # 若还没有 scrape.env：
-#   cp config/scrape.env.example /vol1/1000/Docker/sehua-next-web/config/scrape.env
+#   mkdir -p /vol1/1000/Docker/sehua-next-web/{data,config}
 #   cd /vol1/1000/Docker/sehua-next-web && docker compose pull && docker compose up -d
 # 访问: http://NAS_IP:3020
 
@@ -28,44 +21,17 @@ services:
     image: poillysky/sehua-next-web:latest
     container_name: sehua-next-web
     restart: always
-    # 硬顶略高于 1G：三进程同容器，过紧会只杀 scrape → 设置页「离线」
-    mem_limit: 1536m
+    mem_limit: 1024m
     ports:
       - "3020:3020"
     environment:
       TZ: Asia/Shanghai
       SNS_COOKIE_SECURE: "0"
-      SCRAPE_ORIGIN: http://127.0.0.1:9210
       API_INTERNAL_BASE: http://127.0.0.1:8020
       WEB_PORT: "3020"
-      # —— 内存安全（整栈）——
-      SCRAPE_CONCURRENCY: "2"
-      SCRAPE_FAST_CONCURRENCY: "2"
-      SCRAPE_SLOW_CONCURRENCY: "1"
-      SCRAPE_HOST_PARALLEL: "1"
-      SCRAPE_MAX_HTML_BYTES: "3000000"
-      SCRAPE_MAX_IMAGE_BYTES: "5000000"
-      NODE_OPTIONS: "--max-old-space-size=512"
-      FLARESOLVERR_MAX_SESSIONS_WARN: "1"
-      FLARESOLVERR_MAX_SESSIONS_CRITICAL: "2"
-      FLARESOLVERR_MEM_WARN: "70"
-      FLARESOLVERR_MEM_CRITICAL: "85"
-      FLARESOLVERR_DOCKER_NAME: flaresolverr
-      FLARESOLVERR_AUTO_MANAGE: "1"
-      FLARESOLVERR_RESTART_CMD: >-
-        curl -fsS --unix-socket /var/run/docker.sock
-        -X POST http://localhost/containers/flaresolverr/restart
-      FLARESOLVERR_STATS_CMD: >-
-        curl -fsS --unix-socket /var/run/docker.sock
-        "http://localhost/containers/flaresolverr/stats?stream=0"
     volumes:
       - /vol1/1000/Docker/sehua-next-web/data:/app/data
-      - /vol1/1000/Docker/sehua-next-web/scrape-data:/app/apps/scrape/data
       - /vol1/1000/Docker/sehua-next-web/config:/app/config
-      - /var/run/docker.sock:/var/run/docker.sock
-      # 勿在宿主机缺文件时挂这一行（Docker 会建成目录弄崩 scrape）。
-      # 有真实文件再取消注释；或只靠上面 config/ + entrypoint 自动拷到 .env
-      # - /vol1/1000/Docker/sehua-next-web/config/scrape.env:/app/apps/scrape/.env:ro
     dns:
       - 223.5.5.5
       - 8.8.8.8

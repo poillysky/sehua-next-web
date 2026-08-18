@@ -277,7 +277,9 @@ def add_offline_tasks(
     info_hashes: set[str] = set()
     added = 0
 
-    with httpx.Client(timeout=30.0, follow_redirects=True) as client:
+    with httpx.Client(
+        timeout=30.0, follow_redirects=True, trust_env=False
+    ) as client:
         for i in range(0, len(cleaned), BATCH_LIMIT):
             chunk = cleaned[i : i + BATCH_LIMIT]
             try:

@@ -21,6 +21,10 @@ const LINK_KIND_LABEL: Record<string, string> = {
 const PREVIEW_SLOT_MAX = 5;
 /** 预加载上限：够填满 5 格即可，避免一次打太多图 */
 const PREVIEW_PRELOAD_MAX = 8;
+/** 过小图视为占位/防盗链页；与详情 PreviewGrid 一致 */
+const MIN_PREVIEW_PX = 48;
+/** 单张预加载超时，避免 cover-proxy 挂起时骨架永远 pending */
+const PREVIEW_LOAD_TIMEOUT_MS = 20_000;
 
 type PreviewOrient = 'landscape' | 'portrait';
 
@@ -79,57 +83,57 @@ function CardPreviewBody({
   const proxied = images.map((u) => proxiedCoverUrl(u)).filter(Boolean);
   const proxiedKey = proxied.join('\0');
 
-  // 用 Image() 探测横竖；勿用 0×0 隐藏 <img>+lazy（WebKit 常不发请求，槽位永远 pending）
+  const markFailed = (index: number) => {
+    setFailed((prev) => (prev[index] ? prev : { ...prev, [index]: true }));
+  };
+
+  const handleLoad = (index: number, img: HTMLImageElement) => {
+    if (
+      !img.naturalWidth ||
+      !img.naturalHeight ||
+      img.naturalWidth < MIN_PREVIEW_PX ||
+      img.naturalHeight < MIN_PREVIEW_PX
+    ) {
+      markFailed(index);
+      return;
+    }
+    const next: PreviewOrient =
+      img.naturalWidth > img.naturalHeight ? 'landscape' : 'portrait';
+    setOrientations((prev) =>
+      prev[index] === next ? prev : { ...prev, [index]: next },
+    );
+  };
+
+  /** 逐张走 proxy，避免列表多卡同时打满图床/代理导致 502 */
+  const canLoad = (index: number) => {
+    for (let i = 0; i < index; i++) {
+      if (!orientations[i] && !failed[i]) return false;
+    }
+    return true;
+  };
+
+  // 超时兜底：proxy 502 / 挂起时跳过该张，继续试下一张
   useEffect(() => {
     setFailed({});
     setOrientations({});
     if (!proxied.length) return;
 
     let cancelled = false;
-    const loaders: HTMLImageElement[] = [];
-    const list = proxied.slice(0, PREVIEW_PRELOAD_MAX);
-
-    list.forEach((src, index) => {
-      const img = new Image();
-      loaders.push(img);
-
-      const applyOk = () => {
+    const timers = proxied.slice(0, PREVIEW_PRELOAD_MAX).map((_, index) =>
+      window.setTimeout(() => {
         if (cancelled) return;
-        if (!img.naturalWidth || !img.naturalHeight) {
-          setFailed((prev) =>
-            prev[index] ? prev : { ...prev, [index]: true },
-          );
-          return;
-        }
-        const next: PreviewOrient =
-          img.naturalWidth > img.naturalHeight ? 'landscape' : 'portrait';
-        setOrientations((prev) =>
-          prev[index] === next ? prev : { ...prev, [index]: next },
-        );
-      };
-      const applyErr = () => {
-        if (cancelled) return;
-        setFailed((prev) =>
-          prev[index] ? prev : { ...prev, [index]: true },
-        );
-      };
-
-      img.onload = applyOk;
-      img.onerror = applyErr;
-      img.src = src;
-      // 缓存命中时部分浏览器不再触发 onload
-      if (img.complete && img.naturalWidth > 0) applyOk();
-    });
+        setOrientations((prev) => {
+          if (prev[index]) return prev;
+          markFailed(index);
+          return prev;
+        });
+      }, PREVIEW_LOAD_TIMEOUT_MS),
+    );
 
     return () => {
       cancelled = true;
-      for (const img of loaders) {
-        img.onload = null;
-        img.onerror = null;
-        img.src = '';
-      }
+      for (const id of timers) window.clearTimeout(id);
     };
-    // proxied 由 proxiedKey 派生；只跟 key 重置
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [proxiedKey]);
 
@@ -159,10 +163,17 @@ function CardPreviewBody({
                 pending ? ' bm-card__preview-slot--pending' : ''
               }`}
             >
-              {!pending ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={src} alt="" className="bm-card__preview-img" />
-              ) : null}
+              {/* 槽内直接走 cover-proxy 加载；pending 时也发请求，勿用隐藏 Image() 预探 */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={canLoad(index) ? src : undefined}
+                alt=""
+                className={`bm-card__preview-img${
+                  pending ? ' bm-card__preview-img--loading' : ''
+                }`}
+                onLoad={(e) => handleLoad(index, e.currentTarget)}
+                onError={() => markFailed(index)}
+              />
             </span>
           ))}
         </button>

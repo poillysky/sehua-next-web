@@ -5629,6 +5629,20 @@ textarea {
 
 
 
+.mfs-code-row__head {
+
+  display: inline-flex;
+
+  align-items: center;
+
+  gap: 8px;
+
+  min-width: 0;
+
+}
+
+
+
 .mfs-code-row__code {
 
   font-size: 14px;
@@ -5638,6 +5652,58 @@ textarea {
   letter-spacing: -0.02em;
 
   color: var(--ink);
+
+}
+
+
+
+.mfs-code-row__src {
+
+  display: inline-flex;
+
+  align-items: center;
+
+  justify-content: center;
+
+  min-height: 18px;
+
+  padding: 0 6px;
+
+  border-radius: 999px;
+
+  border: 0.5px solid transparent;
+
+  font-size: 10px;
+
+  font-weight: 700;
+
+  line-height: 1;
+
+  letter-spacing: 0.02em;
+
+  white-space: nowrap;
+
+}
+
+
+.mfs-code-row__src--sehua {
+
+  color: #0b5ed7;
+
+  border-color: color-mix(in srgb, #0b5ed7 40%, var(--hairline));
+
+  background: color-mix(in srgb, #0b5ed7 10%, #fff);
+
+}
+
+
+.mfs-code-row__src--bit {
+
+  color: #b54708;
+
+  border-color: color-mix(in srgb, #ff9f0a 45%, var(--hairline));
+
+  background: color-mix(in srgb, #ff9f0a 14%, #fff);
 
 }
 
@@ -7605,6 +7671,53 @@ textarea {
   /* ????????????????????? */
   align-items: start;
 
+}
+
+.mk-browse-grid {
+  padding-bottom: 12px;
+}
+
+.mk-browse-grid .prefix-tile__code {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: unset;
+}
+
+.mk-browse-grid .prefix-tile__code--solo {
+  display: -webkit-box;
+}
+
+.prefix-tile__overlay--center {
+  inset: 0;
+  bottom: 0;
+  justify-content: center;
+  padding: 10px 8px;
+  background: linear-gradient(
+    180deg,
+    rgba(0, 0, 0, 0.18) 0%,
+    rgba(0, 0, 0, 0.42) 45%,
+    rgba(0, 0, 0, 0.18) 100%
+  );
+}
+
+.mk-browse-grid--center .prefix-tile__code,
+.prefix-grid.mk-browse-grid--center[data-cols='2'] .prefix-tile__code,
+.prefix-grid.mk-browse-grid--center[data-cols='3'] .prefix-tile__code {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.75);
+}
+
+.mk-browse-grid--center .prefix-tile__code--solo,
+.prefix-grid.mk-browse-grid--center[data-cols='2'] .prefix-tile__code--solo {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--ink);
 }
 
 

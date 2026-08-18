@@ -357,11 +357,9 @@ export function guessNetcdnJacketUrls(code: string): string[] {
   if (!m) return [];
   const prefix = m[1].toLowerCase();
   const num = m[2].replace(/^0+/, "") || "0";
-  const pad = num.padStart(5, "0");
-  const ids = Array.from(new Set([`${prefix}${pad}`, `1${prefix}${pad}`]));
-  return ids.map(
-    (id) => `https://jp.netcdn.space/digital/video/${id}/${id}pl.jpg`,
-  );
+  const pad = num.padStart(5, '0');
+  const cid = `${prefix}${pad}`;
+  return [`https://jp.netcdn.space/digital/video/${cid}/${cid}pl.jpg`];
 }
 
 export function isUnreliableCoverHost(url: string) {
@@ -427,6 +425,26 @@ export function galleryPreviewImages(
   return preferred.length ? preferred : ordered;
 }
 
+function pathContainsNeedle(path: string, needle: string): boolean {
+  if (!needle) return false;
+  let pos = 0;
+  while (pos < path.length) {
+    const idx = path.indexOf(needle, pos);
+    if (idx < 0) return false;
+    if (idx > 0 && /\d/.test(path[idx - 1]!)) {
+      pos = idx + 1;
+      continue;
+    }
+    const after = idx + needle.length;
+    if (after < path.length && /\d/.test(path[after]!)) {
+      pos = idx + 1;
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
 export function imageUrlMatchesMakerCode(url: string, code: string): boolean {
   const raw = String(code || "").trim();
   if (!raw || !url) return false;
@@ -447,8 +465,8 @@ export function imageUrlMatchesMakerCode(url: string, code: string): boolean {
       ].filter(Boolean),
     ),
   );
-  const path = url.toLowerCase().replace(/[^a-z0-9./_-]/g, "");
-  return needles.some((n) => path.includes(n));
+  const path = url.toLowerCase().replace(/[^a-z0-9./_-]/g, '');
+  return needles.some((n) => pathContainsNeedle(path, n));
 }
 
 export function pickCoversForCode(
@@ -603,26 +621,28 @@ export function formatDescriptionLinesForItem(
 export function normalizeResourceView(item: ResourceItem): ResourceItem {
   const bleed = isPackBleedItem(item);
   const rawImgs = item.preview_images || [];
+  const picked = pickPreviewsForResource(
+    item.hash,
+    item.name,
+    item.ed2k_links,
+    item.ed2k_link,
+    rawImgs,
+    item.title,
+  );
   let previews = bleed
-    ? pickPreviewsForResource(
-        item.hash,
-        item.name,
-        item.ed2k_links,
-        item.ed2k_link,
-        rawImgs,
-        item.title,
-      )
+    ? picked
     : // 详情/列表同源：不过滤上限；列表卡片自行按槽位截断展示
       galleryPreviewImages(rawImgs, 0);
   if (!previews.length) {
-    previews = pickPreviewsForResource(
-      item.hash,
-      item.name,
-      item.ed2k_links,
-      item.ed2k_link,
-      rawImgs,
-      item.title,
+    previews = picked;
+  } else if (!bleed && picked.length) {
+    // 帖内 netcdn 夹克 cid 错误（如 1sone00968）时，改用按番号选取结果
+    const badJacket = previews.some(
+      (u) =>
+        isJacketCoverUrl(u) &&
+        picked.some((p) => isJacketCoverUrl(p) && p !== u),
     );
+    if (badJacket) previews = picked;
   }
 
   const links = linksForResourceHash(

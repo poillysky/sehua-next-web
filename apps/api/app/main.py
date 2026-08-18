@@ -135,6 +135,13 @@ async def lifespan(_app: FastAPI):
 
     scrape_source_probe.start_source_probe_scheduler()
 
+    try:
+        from . import library_materialize
+
+        library_materialize.migrate_library_layout()
+    except Exception:
+        logging.getLogger("sns.api").exception("library layout migrate failed")
+
     def _sync_scrape_network() -> None:
         try:
             from .conn_settings_routes import ensure_scrape_network_synced

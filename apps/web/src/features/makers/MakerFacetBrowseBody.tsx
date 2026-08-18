@@ -1,82 +1,44 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { RefreshCw, Search, Tags } from 'lucide-react';
-import {
-  fetchLibraryRegionFacets,
-  type LibraryFacetItem,
-  type LibraryRegionFacets,
-} from '@/lib/api';
+import { useMemo, useState } from 'react';
+import { Search, Tags } from 'lucide-react';
+import type { MakerFsRegionCatalog } from '@/lib/api';
+import { aggregateCatalogFacets, type CatalogFacetItem } from '@/lib/makerFsUi';
 
 type FacetTab = 'tag' | 'series';
 
 /**
- * 分区标签 / 系列分类浏览。
- * 默认只读落库；点「更新」才扫盘同步。
+ * 分区索引：标签 / 系列，来自片商目录 catalog。
  */
 export function MakerFacetBrowseBody({
   regionId,
+  catalog,
   onOpenFacet,
 }: {
   regionId: string;
+  catalog: MakerFsRegionCatalog;
   onOpenFacet: (kind: FacetTab, value: string, count: number) => void;
 }) {
+  void regionId;
   const [tab, setTab] = useState<FacetTab>('tag');
-  const [data, setData] = useState<LibraryRegionFacets | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
-  const [error, setError] = useState('');
   const [q, setQ] = useState('');
 
-  const load = useCallback(
-    async (opts?: { sync?: boolean; signal?: AbortSignal }) => {
-      const sync = Boolean(opts?.sync);
-      if (sync) setSyncing(true);
-      else setLoading(true);
-      setError('');
-      try {
-        const d = await fetchLibraryRegionFacets(regionId, {
-          sync,
-          signal: opts?.signal,
-        });
-        if (opts?.signal?.aborted) return;
-        setData(d);
-      } catch (e) {
-        if (opts?.signal?.aborted) return;
-        setError(e instanceof Error ? e.message : '加载分类失败');
-      } finally {
-        if (!opts?.signal?.aborted) {
-          setLoading(false);
-          setSyncing(false);
-        }
-      }
-    },
-    [regionId],
+  const facets = useMemo(
+    () => aggregateCatalogFacets(catalog.prefixes),
+    [catalog.prefixes],
   );
 
-  useEffect(() => {
-    const ac = new AbortController();
-    setData(null);
-    void load({ signal: ac.signal });
-    return () => ac.abort();
-  }, [load]);
-
-  const list = useMemo(() => {
-    const raw: LibraryFacetItem[] =
-      tab === 'tag' ? data?.tags || [] : data?.series || [];
+  const list = useMemo((): CatalogFacetItem[] => {
+    const raw = tab === 'tag' ? facets.tags : facets.series;
     const key = q.trim().toLowerCase();
     if (!key) return raw;
     return raw.filter((it) => String(it.name || '').toLowerCase().includes(key));
-  }, [data, tab, q]);
-
-  const updatedLabel = data?.updatedAt
-    ? String(data.updatedAt).replace('T', ' ').replace('Z', '')
-    : '';
+  }, [facets, tab, q]);
 
   return (
     <div className="mk-facet-page">
       <div className="mk-facet-page__top">
-        <div className="mk-facet-tabs" role="tablist" aria-label="分类">
+        <div className="mk-facet-tabs" role="tablist" aria-label="索引">
           <button
             type="button"
             role="tab"
@@ -110,62 +72,15 @@ export function MakerFacetBrowseBody({
               spellCheck={false}
             />
           </div>
-          <button
-            type="button"
-            className="mk-facet-sync-btn"
-            disabled={loading || syncing}
-            title="从刮削落盘增量更新分类"
-            onClick={() => void load({ sync: true })}
-          >
-            <RefreshCw
-              size={15}
-              strokeWidth={2.25}
-              aria-hidden
-              className={syncing ? 'mk-facet-sync-btn__spin' : undefined}
-            />
-            <span>{syncing ? '更新中' : '更新'}</span>
-          </button>
         </div>
-
-        {loading || syncing || error || list.length === 0 || updatedLabel ? (
-          <p className="app-hint" style={{ marginTop: 0, marginBottom: 8 }}>
-            {loading
-              ? '读取落库分类…'
-              : syncing
-                ? '正在同步刮削分类…'
-                : error
-                  ? error
-                  : list.length === 0
-                    ? '暂无分类，可先刮削后点「更新」'
-                    : updatedLabel
-                      ? `落库 ${updatedLabel}`
-                      : null}
-          </p>
-        ) : null}
       </div>
 
-      {loading ? (
-        <div
-          className={`mk-facet-grid mk-facet-grid--skel${tab === 'series' ? ' mk-facet-grid--rows' : ''}`}
-          aria-busy="true"
-        >
-          {Array.from({ length: tab === 'series' ? 8 : 12 }).map((_, i) => (
-            <div key={i} className="mk-facet-card mk-facet-card--skel" />
-          ))}
-        </div>
-      ) : list.length === 0 ? (
+      {list.length === 0 ? (
         <div className="app-empty" style={{ paddingTop: 24 }}>
           <Tags size={22} strokeWidth={2} aria-hidden />
-          <p style={{ marginTop: 8 }}>没有可展示的分类</p>
-          <button
-            type="button"
-            className="mk-facet-sync-btn mk-facet-sync-btn--empty"
-            disabled={syncing}
-            onClick={() => void load({ sync: true })}
-          >
-            <RefreshCw size={15} strokeWidth={2.25} aria-hidden />
-            <span>{syncing ? '更新中…' : '更新分类'}</span>
-          </button>
+          <p style={{ marginTop: 8 }}>
+            {tab === 'tag' ? '片商目录暂无标签' : '片商目录暂无系列'}
+          </p>
         </div>
       ) : (
         <div

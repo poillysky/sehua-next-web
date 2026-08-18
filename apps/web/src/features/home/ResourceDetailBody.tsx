@@ -60,12 +60,17 @@ type PreviewOrient = 'landscape' | 'portrait';
 
 /** 详情预览：一行 4 槽，竖图 1 / 横图 2，同高；加载全部图 */
 function PreviewGrid({ images }: { images: string[] }) {
+  const MIN_PREVIEW_PX = 48;
   const [failed, setFailed] = useState<Record<number, true>>({});
   const [orientations, setOrientations] = useState<
     Record<number, PreviewOrient>
   >({});
   const proxied = images.map((u) => proxiedCoverUrl(u)).filter(Boolean);
   const proxiedKey = proxied.join('\0');
+
+  const markFailed = (index: number) => {
+    setFailed((prev) => (prev[index] ? prev : { ...prev, [index]: true }));
+  };
 
   useEffect(() => {
     setFailed({});
@@ -80,10 +85,13 @@ function PreviewGrid({ images }: { images: string[] }) {
       loaders.push(img);
       const applyOk = () => {
         if (cancelled) return;
-        if (!img.naturalWidth || !img.naturalHeight) {
-          setFailed((prev) =>
-            prev[index] ? prev : { ...prev, [index]: true },
-          );
+        if (
+          !img.naturalWidth ||
+          !img.naturalHeight ||
+          img.naturalWidth < MIN_PREVIEW_PX ||
+          img.naturalHeight < MIN_PREVIEW_PX
+        ) {
+          markFailed(index);
           return;
         }
         const next: PreviewOrient =
@@ -94,9 +102,7 @@ function PreviewGrid({ images }: { images: string[] }) {
       };
       const applyErr = () => {
         if (cancelled) return;
-        setFailed((prev) =>
-          prev[index] ? prev : { ...prev, [index]: true },
-        );
+        markFailed(index);
       };
       img.onload = applyOk;
       img.onerror = applyErr;
@@ -142,7 +148,12 @@ function PreviewGrid({ images }: { images: string[] }) {
               className={`detail-preview-grid__slot detail-preview-grid__slot--${orient}`}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={src} alt="" className="detail-preview-grid__img" />
+              <img
+                src={src}
+                alt=""
+                className="detail-preview-grid__img"
+                onError={() => markFailed(index)}
+              />
             </span>
           ))}
           {stillLoading ? (

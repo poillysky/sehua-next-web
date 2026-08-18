@@ -532,26 +532,10 @@ def indexes_forum_actors(region: str | None) -> bool:
 
 
 def should_fill_digit_range(fs_region: str | None, prefix: str) -> bool:
-    """日本有码 / 国产无码 的 digit_pad 前缀：列表按首尾补全。
-
-    FC2、欧美区以及 SKIP / date6 / western / fc2 / alnum 等特殊格式一律不补。
-    """
-    rid = resolve_fs_region(fs_region) or str(fs_region or "").strip()
-    if rid not in FILL_DIGIT_RANGE_REGIONS:
-        return False
-    pref = _std_prefix(prefix)
-    if not pref:
-        return False
-    try:
-        from .prefix_ranges import SKIP_PREFIXES
-        from .search_av import prefix_format_meta
-
-        if pref in SKIP_PREFIXES or pref.replace("-", "") in SKIP_PREFIXES:
-            return False
-        meta = prefix_format_meta(pref)
-        return str(meta.get("codeFormat") or "") == "digit_pad"
-    except Exception:
-        return False
+    """本地索引禁止按范围补号：只保留数据库里真实存在的番号。"""
+    _ = fs_region
+    _ = prefix
+    return False
 
 
 def _filled_range_total(from_n: int, to_n: int) -> int:
@@ -612,6 +596,143 @@ def _iter_filled_digit_codes(prefix: str, from_n: int, to_n: int, pad: int):
         hi = lo + FILL_DIGIT_RANGE_MAX - 1
     for n in range(lo, hi + 1):
         yield f"{pref}-{n:0{width}d}"
+
+
+def _supplement_covers_from_bitmagnet(
+    *,
+    prefix: str,
+    covers: dict[str, Any],
+    pad: int,
+    from_n: int,
+    to_n: int,
+    max_covers: int,
+) -> tuple[dict[str, Any], int, list[str]]:
+    """用 bitmagnet 独立资源库补 sehua 缺失番号。
+
+    规则：
+    - sehua 已有：绝不覆盖
+    - sehua 没有：bitmagnet 命中则补一个“真实存在”的空封面条目
+    - 仅保证“至少一个库有资源”，不强行为 BT 生成论坛标题/封面
+    """
+    try:
+        from . import bitmagnet_pg
+        from .pack_bleed import own_maker_codes_for_index_row
+        from .prefix_service import prefix_exclude_like_patterns, prefix_like_patterns
+    except Exception:
+        return covers, 0, []
+
+    if not bitmagnet_pg.is_configured():
+        return covers, 0, []
+
+    likes = prefix_like_patterns(prefix)
+    excludes = prefix_exclude_like_patterns(prefix)
+    if not likes:
+        return covers, 0, []
+
+    like_sql = " OR ".join(["t.name ILIKE %s ESCAPE '\\\\'"] * len(likes))
+    file_like_sql = " OR ".join(["f.path ILIKE %s ESCAPE '\\\\'"] * len(likes))
+    exclude_sql = ""
+    exclude_params: list[Any] = []
+    if excludes:
+        exclude_sql = " AND " + " AND ".join(
+            ["t.name NOT ILIKE %s ESCAPE '\\\\'"] * len(excludes)
+        )
+        exclude_params.extend(excludes)
+
+    sql = f"""
+        SELECT
+          t.name,
+          t.created_at,
+          COALESCE(
+            (
+              SELECT json_agg(json_build_object('path', f.path) ORDER BY f.index)
+              FROM (
+                SELECT path, index
+                FROM torrent_files f
+                WHERE f.info_hash = t.info_hash
+                  AND ({file_like_sql})
+                ORDER BY index
+                LIMIT 24
+              ) f
+            ),
+            '[]'::json
+          ) AS files
+        FROM torrents t
+        WHERE ({like_sql})
+        {exclude_sql}
+        ORDER BY t.created_at DESC
+        LIMIT %s
+    """
+    params: list[Any] = []
+    params.extend(likes)
+    params.extend(likes)
+    params.extend(excludes)
+    params.append(max(500, min(20000, int(max_covers or 20000))))
+
+    try:
+        rows = bitmagnet_pg.query(sql, params)
+    except Exception as e:
+        log.warning("maker-fs bitmagnet supplement %s failed: %s", prefix, e)
+        return covers, 0, []
+
+    added = 0
+    added_codes: list[str] = []
+    out = dict(covers)
+    for row in rows:
+        if len(out) >= max_covers:
+            break
+        torrent_name = str(row.get("name") or "").strip()
+        candidates: list[str] = []
+        if torrent_name:
+            candidates.append(torrent_name)
+        for it in row.get("files") or []:
+            if not isinstance(it, dict):
+                continue
+            path = str(it.get("path") or "").strip()
+            if path:
+                candidates.append(path)
+
+        seen_codes: set[str] = set()
+        for cand in candidates:
+            try:
+                codes, _pack = own_maker_codes_for_index_row(
+                    prefix=prefix,
+                    filename=cand,
+                    title=torrent_name,
+                    film="",
+                    resource="",
+                    description="",
+                    hash_=None,
+                    ed2k_links=None,
+                    ed2k_link=None,
+                )
+            except Exception:
+                continue
+            for raw_code in codes:
+                code = _index_code_key(
+                    str(raw_code or ""),
+                    pad=pad,
+                    prefix=prefix,
+                    from_n=from_n,
+                    to_n=to_n,
+                )
+                if not code or code in seen_codes or code in out:
+                    continue
+                seen_codes.add(code)
+                out[code] = {
+                    "coverUrl": None,
+                    "coverUrls": [],
+                    "file": None,
+                    "source": "bitmagnet",
+                }
+                added += 1
+                added_codes.append(code)
+                if len(out) >= max_covers:
+                    break
+            if len(out) >= max_covers:
+                break
+
+    return out, added, added_codes
 
 
 def _normalize_forum_actors_field(actors_raw: Any) -> list[str] | None:
@@ -1005,15 +1126,6 @@ def _read_cover_count_fast(path: Path) -> int:
         n = int(m.group(1))
         if n > 0:
             return n
-    # 旧索引未写准 coverCount 时，用已发现首尾估算补全条数
-    if re.search(r'"fillRange"\s*:\s*true', text):
-        mf = re.search(r'"fillFrom"\s*:\s*(\d+)', text)
-        mt = re.search(r'"fillTo"\s*:\s*(\d+)', text)
-        if mf and mt:
-            lo = int(mf.group(1))
-            hi = int(mt.group(1))
-            if hi >= lo > 0:
-                return min(FILL_DIGIT_RANGE_MAX, hi - lo + 1)
     # 旧文件无 coverCount 时数 covers 键（慢路径，尽量少走）
     m2 = re.search(r'"covers"\s*:\s*\{', text)
     if not m2:
@@ -1498,9 +1610,7 @@ def list_prefix_codes(
     cover_map = _rekey_covers_to_pad(
         cover_map_raw, prefix=pref, pad=pad, from_n=from_n, to_n=to_n
     )
-    fill_range = bool(idx.get("fillRange")) or should_fill_digit_range(
-        fs_region, pref
-    )
+    fill_range = should_fill_digit_range(fs_region, pref)
     # 补全上下界：只认 covers 里已发现流水，不用 ranges 余量
     fill_from = int(idx.get("fillFrom") or 0)
     fill_to = int(idx.get("fillTo") or 0)
@@ -1542,10 +1652,14 @@ def list_prefix_codes(
         cover_url = None
         forum_title = None
         forum_actors = None
+        source = "sehua"
         if isinstance(hit, dict):
             urls = [u for u in (hit.get("coverUrls") or []) if u]
             cover_url = hit.get("coverUrl") or (urls[0] if urls else None)
             forum_title = hit.get("forumTitle")
+            src_raw = str(hit.get("source") or "").strip().lower()
+            if src_raw in {"bitmagnet", "bit"}:
+                source = "bit"
             if want_actors:
                 forum_actors = _normalize_forum_actors_field(hit.get("forumActors"))
         if needle:
@@ -1564,6 +1678,7 @@ def list_prefix_codes(
             "code": key,
             "coverUrl": cover_url,
             "forumTitle": forum_title,
+            "source": source,
         }
         if want_actors:
             row["forumActors"] = forum_actors
@@ -1808,13 +1923,32 @@ def _export_prefix_index(
             from_n=from_reuse,
             to_n=to_reuse,
         )
+        bm_added = 0
+        bm_added_codes: list[str] = []
+        try:
+            covers_norm, bm_added, bm_added_codes = _supplement_covers_from_bitmagnet(
+                prefix=prefix,
+                covers=covers_norm,
+                pad=pad_reuse,
+                from_n=from_reuse,
+                to_n=to_reuse,
+                max_covers=max_covers,
+            )
+        except Exception:
+            log.warning(
+                "maker-fs bitmagnet supplement %s crashed (reuse)",
+                prefix,
+                exc_info=True,
+            )
+            bm_added = 0
+            bm_added_codes = []
         fill = should_fill_digit_range(fs_region, prefix)
         d_from, d_to = _discovered_digit_bounds(covers_norm, prefix)
         fill = fill and d_to >= d_from > 0
         range_total = (
             _filled_range_total(d_from, d_to) if fill else len(covers_norm)
         )
-        dirty = False
+        dirty = bm_added > 0
         if (
             set(covers0.keys()) != set(covers_norm.keys())
             or len(covers0) != len(covers_norm)
@@ -1825,6 +1959,7 @@ def _export_prefix_index(
             or int(reused.get("coverCount") or 0) != range_total
             or int(reused.get("fillFrom") or 0) != (d_from if fill else 0)
             or int(reused.get("fillTo") or 0) != (d_to if fill else 0)
+            or bm_added > 0
         ):
             reused["covers"] = covers_norm
             reused["hitCount"] = len(covers_norm)
@@ -1847,6 +1982,21 @@ def _export_prefix_index(
             if fill:
                 reused["fillFrom"] = d_from
                 reused["fillTo"] = d_to
+        if bm_added_codes:
+            prev_bm = reused.get("bmAddedCodes")
+            merged_bm = sorted(
+                set(
+                    [
+                        str(x)
+                        for x in (prev_bm if isinstance(prev_bm, list) else [])
+                        if str(x).strip()
+                    ]
+                    + bm_added_codes
+                )
+            )
+            if merged_bm != (prev_bm if isinstance(prev_bm, list) else []):
+                reused["bmAddedCodes"] = merged_bm
+                dirty = True
         if not indexes_forum_actors(fs_region):
             covers = reused.get("covers")
             if isinstance(covers, dict):
@@ -1964,13 +2114,30 @@ def _export_prefix_index(
     if last_err is not None:
         raise last_err
 
+    bm_added = 0
+    bm_added_codes: list[str] = []
+    try:
+        covers, bm_added, bm_added_codes = _supplement_covers_from_bitmagnet(
+            prefix=prefix,
+            covers=covers,
+            pad=pad,
+            from_n=from_n,
+            to_n=to_n,
+            max_covers=max_covers,
+        )
+    except Exception:
+        log.warning("maker-fs bitmagnet supplement %s crashed", prefix, exc_info=True)
+        bm_added = 0
+        bm_added_codes = []
+
     wall_ms = (time.perf_counter() - t0) * 1000
     log.debug(
-        "maker-fs export %s region=%s coverCount=%s matchedRows=%s wall_ms=%.0f",
+        "maker-fs export %s region=%s coverCount=%s matchedRows=%s bmAdded=%s wall_ms=%.0f",
         prefix,
         fs_region,
         len(covers),
         matched_rows,
+        bm_added,
         wall_ms,
     )
 
@@ -2058,6 +2225,8 @@ def _export_prefix_index(
         "truncated": truncated,
         "covers": covers,
     }
+    if bm_added_codes:
+        data["bmAddedCodes"] = sorted(set(bm_added_codes))
     if fill_range:
         data["fillFrom"] = d_from
         data["fillTo"] = d_to

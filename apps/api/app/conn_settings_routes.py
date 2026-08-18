@@ -8,6 +8,7 @@ import os
 import re
 import time
 from pathlib import Path
+from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
 
@@ -653,7 +654,7 @@ def _scrape_public(raw: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
-def _probe_scrape_online(origin: str, *, timeout: float = 1.5) -> bool:
+def _probe_scrape_online(origin: str, *, timeout: float = 0.6) -> bool:
     """探测刮削服务 /health 是否可达（短超时，供设置页状态）。"""
     base = _normalize_origin_url(origin)
     try:
@@ -797,7 +798,11 @@ def put_tmdb(
     body: TmdbConfig,
     _user: dict[str, Any] = Depends(require_user),
 ) -> Envelope:
-    key = body.api_key.strip()
+    prev = settings_store.get_setting(settings_store.TMDB_KEY) or {}
+    prev_key = str(prev.get("apiKey") or prev.get("api_key") or "").strip()
+    next_key = body.api_key.strip()
+    # 已有 key 时，空提交不允许覆盖清空；只有明确输入新 key 才替换
+    key = next_key or prev_key
     saved = settings_store.put_setting(
         settings_store.TMDB_KEY,
         {"apiKey": key},
@@ -849,7 +854,8 @@ async def test_tmdb(
 @router.get("/scrape", response_model=Envelope)
 def get_scrape(_user: dict[str, Any] | None = Depends(get_optional_user)) -> Envelope:
     data = _scrape_public(settings_store.get_setting(settings_store.SCRAPE_KEY))
-    data["online"] = _probe_scrape_online(str(data.get("origin") or ""))
+    # 刮削端已移除：不再对 apps/scrape 发起 /health 探测
+    data["online"] = False
     return Envelope(
         data=data,
         message="online"
@@ -1115,7 +1121,7 @@ def put_scrape(
             "fieldPrioritySchema": scrape_profiles.FIELD_PRIORITY_SCHEMA,
         },
     )
-    _sync_network_to_scrape(origin, flare, proxy)
+    # 刮削端已移除：网络管理配置仅保存到 meta，不再尝试同步到 apps/scrape
     # 暂停/进行中：任务卡改动立即热更新到当前导出
     if body.scrape_tasks is not None:
         try:
@@ -1128,7 +1134,8 @@ def put_scrape(
             )
     data = _scrape_public(saved["value"])
     data["updated_at"] = saved["updated_at"]
-    data["online"] = _probe_scrape_online(origin)
+    # 刮削端已移除：不再对 apps/scrape 发起 /health 探测
+    data["online"] = False
     return Envelope(data=data, message="saved")
 
 
@@ -1155,17 +1162,53 @@ def test_scrape(
 
 
 def _friendly_probe_error(raw: str | Exception | None) -> str:
-    """把 WinError / httpx 连接异常收成短中文。"""
+    """把 WinError / httpx / 代理连接异常收成短中文。"""
     msg = str(raw or "").strip()
     if not msg:
         return "探测失败"
     if re.search(r"10054|ECONNRESET|ConnectionReset|强迫关闭|forcibly closed", msg, re.I):
         return "连接被重置"
-    if re.search(r"10061|ECONNREFUSED|ConnectError", msg, re.I):
-        return "无法连接刮削服务"
+    if re.search(r"10061|ECONNREFUSED|Connection refused", msg, re.I):
+        return "连接被拒绝"
+    if re.search(r"ConnectError", msg, re.I):
+        return "无法建立连接"
     if re.search(r"timed?\s*out|Timeout", msg, re.I):
         return "探测超时"
+    if re.search(r"proxy", msg, re.I) and re.search(r"407|auth", msg, re.I):
+        return "代理认证失败"
+    if re.search(r"proxy", msg, re.I) and re.search(r"refused|connect|unreachable", msg, re.I):
+        return "代理连接失败"
+    if re.search(r"InvalidURL|No host supplied|URL has an invalid label|Invalid port", msg, re.I):
+        return "地址格式不正确"
+    if re.search(r"getaddrinfo failed|Name or service not known|nodename nor servname", msg, re.I):
+        return "域名解析失败"
+    if re.search(r"certificate|ssl|tls", msg, re.I):
+        return "SSL 连接失败"
     return msg[:160]
+
+
+def _friendly_flare_message(raw: str | Exception | None) -> str:
+    """把 FlareSolverr 原始英文 message 收成短中文。"""
+    msg = str(raw or "").strip()
+    if not msg:
+        return "过盾失败"
+    if re.search(r"Challenge not detected", msg, re.I):
+        return "过盾正常"
+    if re.search(r"Challenge solved", msg, re.I):
+        return "过盾正常"
+    if re.search(r"timed?\s*out|Timeout", msg, re.I):
+        return "过盾超时"
+    if re.search(r"session.+doesn't exist|session.+not exist", msg, re.I):
+        return "过盾会话不存在"
+    if re.search(r"blocked this request|ip is banned|Access denied", msg, re.I):
+        return "目标站点拒绝访问"
+    if re.search(r"proxy", msg, re.I) and re.search(r"auth|407", msg, re.I):
+        return "代理认证失败"
+    if re.search(r"proxy", msg, re.I):
+        return "过盾代理异常"
+    if re.search(r"invalid.+cmd|mandatory", msg, re.I):
+        return "过盾请求参数错误"
+    return _friendly_probe_error(msg)
 
 
 def _is_transient_probe_error(exc: BaseException) -> bool:
@@ -1415,31 +1458,35 @@ def _restart_flare_after_source_probe(origin: str) -> str:
             return "跳过清理 Flare（刮削进行中）"
     except Exception:
         pass
+    # 不依赖 apps/scrape：直接销毁 FlareSolverr sessions，达到“重启/回收”同等效果（会话级重置）
     try:
-        _data, msg = _scrape_flare_proxy(
-            origin,
-            "/api/config/flaresolverr/restart",
-            method="POST",
-            timeout=90.0,
+        raw = settings_store.get_setting(settings_store.SCRAPE_KEY) or {}
+        flare = _normalize_flare_url(
+            raw.get("flareSolverrUrl") or raw.get("flare_solverr_url") or DEFAULT_FLARESOLVERR_URL
         )
-        text = str(msg or "").strip()
-        if text:
-            return text
-        return "已清理 Flare"
+        with httpx.Client(timeout=60.0, trust_env=False) as client:
+            r = client.post(flare, json={"cmd": "sessions.list"})
+            payload = r.json() if r.content else {}
+            session_ids = payload.get("sessions") if isinstance(payload, dict) else None
+            if not isinstance(session_ids, list):
+                session_ids = []
+
+            destroyed = 0
+            last_msg = ""
+            for sid in session_ids:
+                dr = client.post(
+                    flare,
+                    json={"cmd": "sessions.destroy", "session": sid},
+                )
+                dp = dr.json() if dr.content else {}
+                last_msg = str(dp.get("message") or "") if isinstance(dp, dict) else ""
+                if isinstance(dp, dict) and dp.get("status") == "ok":
+                    destroyed += 1
+
+        if destroyed > 0:
+            return f"已清理 Flare 会话（{destroyed}）{('：' + last_msg) if last_msg else ''}"
+        return "已清理 Flare（无会话可回收）"
     except Exception as e:
-        # 再试回收会话，避免整次重测被收尾失败盖住
-        try:
-            _d2, msg2 = _scrape_flare_proxy(
-                origin,
-                "/api/config/flaresolverr/recycle",
-                method="POST",
-                timeout=60.0,
-            )
-            soft = str(msg2 or "").strip()
-            if soft:
-                return f"重启不可用，已回收会话：{soft}"
-        except Exception:
-            pass
         return f"清理 Flare 失败：{e}"
 
 
@@ -1449,7 +1496,6 @@ def test_scrape_flaresolverr(
     _user: dict[str, Any] = Depends(require_user),
 ) -> Envelope:
     raw = settings_store.get_setting(settings_store.SCRAPE_KEY) or {}
-    origin = _normalize_origin_url(body.origin or raw.get("origin"))
     flare = _normalize_flare_url(
         body.flare_solverr_url
         if body.flare_solverr_url is not None
@@ -1461,62 +1507,43 @@ def test_scrape_flaresolverr(
         else raw.get("proxyUrl") or raw.get("proxy_url")
     )
     try:
-        with httpx.Client(timeout=90.0, trust_env=False) as client:
-            # 先确认刮削服务在线
-            try:
-                hr = client.get(f"{origin}/health")
-                if hr.status_code >= 500:
-                    raise HTTPException(
-                        status_code=502,
-                        detail="刮削服务异常，请先重启 apps/scrape",
-                    )
-            except HTTPException:
-                raise
-            except Exception as e:
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"刮削服务未启动（:9210）：{e}",
-                ) from e
+        if not flare:
+            raise HTTPException(status_code=400, detail="请先填写 FlareSolverr 地址")
+        sample_url = body.sample_url or "https://javdb.com/"
+        req: dict[str, Any] = {
+            "cmd": "request.get",
+            "url": sample_url,
+            "maxTimeout": 60000,
+        }
+        if proxy:
+            req["proxy"] = {"url": proxy}
 
-            client.put(
-                f"{origin}/api/config/network",
-                json={"flareSolverrUrl": flare, "proxyUrl": proxy},
-            )
-            r = client.post(
-                f"{origin}/api/config/flaresolverr/test",
-                json={
-                    "flareSolverrUrl": flare,
-                    "proxyUrl": proxy,
-                    "sampleUrl": body.sample_url or "https://javdb.com/",
-                },
-            )
+        with httpx.Client(timeout=90.0, trust_env=False) as client:
+            r = client.post(flare, json=req)
             payload = r.json() if r.content else {}
-            data = payload.get("data") if isinstance(payload, dict) else None
-            msg = (
-                str(payload.get("message") or "")
-                if isinstance(payload, dict)
-                else ""
-            )
-            if r.status_code >= 400:
-                raise HTTPException(
-                    status_code=502, detail=msg or f"过盾测试 HTTP {r.status_code}"
-                )
-            ok = bool(isinstance(data, dict) and data.get("ok"))
-            sample_ok = data.get("sampleOk") if isinstance(data, dict) else None
+            status = payload.get("status") if isinstance(payload, dict) else None
+            msg = str(payload.get("message") or "") if isinstance(payload, dict) else ""
+
+            # FlareSolverr：HTTP 可能 200，但 status 会给 ok/error
+            ok = status == "ok"
+            solution_present = bool(isinstance(payload, dict) and payload.get("solution"))
             return Envelope(
                 data={
                     "ok": ok,
-                    "sampleOk": sample_ok,
+                    "sampleOk": solution_present if ok else None,
                     "flareSolverrUrl": flare,
-                    "proxyUrl": proxy or (data.get("proxyUrl") if isinstance(data, dict) else ""),
-                    "detail": data,
+                    "proxyUrl": proxy,
+                    "detail": payload if isinstance(payload, dict) else {},
                 },
-                message=msg or ("过盾正常" if ok else "过盾失败"),
+                message=("过盾正常" if ok else _friendly_flare_message(msg)),
             )
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"过盾测试失败：{e}") from e
+        raise HTTPException(
+            status_code=502,
+            detail=f"过盾测试失败：{_friendly_probe_error(e)}",
+        ) from e
 
 
 def _scrape_flare_proxy(
@@ -1556,36 +1583,24 @@ def _scrape_flare_proxy(
 def get_scrape_flaresolverr_monitor(
     _user: dict[str, Any] = Depends(require_user),
 ) -> Envelope:
-    raw = settings_store.get_setting(settings_store.SCRAPE_KEY) or {}
-    origin = _normalize_origin_url(raw.get("origin"))
-    data, msg = _scrape_flare_proxy(
-        origin, "/api/config/flaresolverr/monitor", method="GET", timeout=20.0
-    )
-    return Envelope(data=data, message=msg or "ok")
+    # 刮削端已移除：网络管理不再提供“过盾监控/回收/重启”能力
+    raise HTTPException(status_code=404, detail="已移除：过盾监控")
 
 
 @router.post("/scrape/flaresolverr/recycle", response_model=Envelope)
 def post_scrape_flaresolverr_recycle(
     _user: dict[str, Any] = Depends(require_user),
 ) -> Envelope:
-    raw = settings_store.get_setting(settings_store.SCRAPE_KEY) or {}
-    origin = _normalize_origin_url(raw.get("origin"))
-    data, msg = _scrape_flare_proxy(
-        origin, "/api/config/flaresolverr/recycle", method="POST", timeout=60.0
-    )
-    return Envelope(data=data, message=msg or "已回收")
+    # 刮削端已移除：网络管理不再提供“过盾监控/回收/重启”能力
+    raise HTTPException(status_code=404, detail="已移除：回收会话")
 
 
 @router.post("/scrape/flaresolverr/restart", response_model=Envelope)
 def post_scrape_flaresolverr_restart(
     _user: dict[str, Any] = Depends(require_user),
 ) -> Envelope:
-    raw = settings_store.get_setting(settings_store.SCRAPE_KEY) or {}
-    origin = _normalize_origin_url(raw.get("origin"))
-    data, msg = _scrape_flare_proxy(
-        origin, "/api/config/flaresolverr/restart", method="POST", timeout=90.0
-    )
-    return Envelope(data=data, message=msg or "已重启")
+    # 刮削端已移除：网络管理不再提供“过盾监控/回收/重启”能力
+    raise HTTPException(status_code=404, detail="已移除：重启过盾")
 
 
 @router.post("/scrape/proxy/test", response_model=Envelope)
@@ -1594,61 +1609,45 @@ def test_scrape_proxy(
     _user: dict[str, Any] = Depends(require_user),
 ) -> Envelope:
     raw = settings_store.get_setting(settings_store.SCRAPE_KEY) or {}
-    origin = _normalize_origin_url(body.origin or raw.get("origin"))
     proxy = _normalize_proxy_url(
         body.proxy_url
         if body.proxy_url is not None
         else raw.get("proxyUrl") or raw.get("proxy_url")
     )
     try:
-        with httpx.Client(timeout=30.0, trust_env=False) as client:
-            try:
-                hr = client.get(f"{origin}/health")
-                if hr.status_code >= 500:
-                    raise HTTPException(
-                        status_code=502,
-                        detail="刮削服务异常，请先重启 apps/scrape",
-                    )
-            except HTTPException:
-                raise
-            except Exception as e:
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"刮削服务未启动（:9210）：{e}",
-                ) from e
+        if not proxy:
+            raise HTTPException(status_code=400, detail="请先填写代理地址")
 
-            r = client.post(
-                f"{origin}/api/config/proxy/test",
-                json={"proxyUrl": proxy},
-            )
-            payload = r.json() if r.content else {}
-            data = payload.get("data") if isinstance(payload, dict) else None
-            msg = (
-                str(payload.get("message") or "")
-                if isinstance(payload, dict)
-                else ""
-            )
-            if r.status_code >= 400:
-                raise HTTPException(
-                    status_code=502, detail=msg or f"代理测试 HTTP {r.status_code}"
-                )
-            ok = bool(
-                (isinstance(data, dict) and data.get("ok"))
-                or (isinstance(payload, dict) and payload.get("ok"))
-            )
-            return Envelope(
-                data={
-                    "ok": ok,
-                    "proxyUrl": proxy
-                    or (data.get("proxyUrl") if isinstance(data, dict) else ""),
-                    "detail": data,
-                },
-                message=msg or ("代理正常" if ok else "代理失败"),
-            )
+        sample_urls = ["https://httpbin.org/ip", "https://api.ipify.org?format=json"]
+        last_err = ""
+
+        with httpx.Client(timeout=30.0, trust_env=False, proxy=proxy) as client:
+            for sample_url in sample_urls:
+                try:
+                    r = client.get(sample_url)
+                    payload = r.json() if r.content else {}
+                    ok = r.status_code < 400
+                    detail = payload if isinstance(payload, dict) else {"status": r.status_code}
+                    return Envelope(
+                        data={
+                            "ok": ok,
+                            "proxyUrl": proxy,
+                            "detail": detail,
+                        },
+                        message=("代理正常" if ok else f"代理失败（HTTP {r.status_code}）"),
+                    )
+                except Exception as e:
+                    last_err = _friendly_probe_error(e)
+                    continue
+
+        raise HTTPException(status_code=502, detail=f"代理测试失败：{last_err}")
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"代理测试失败：{e}") from e
+        raise HTTPException(
+            status_code=502,
+            detail=f"代理测试失败：{_friendly_probe_error(e)}",
+        ) from e
 
 
 @router.post("/scrape/sources/test", response_model=Envelope)
@@ -1698,35 +1697,47 @@ def patch_scrape_source(
 def get_p115(_user: dict[str, Any] | None = Depends(get_optional_user)) -> Envelope:
     raw = settings_store.get_setting(settings_store.P115_KEY)
     data = _p115_public(raw)
-    # 已配置时拉取云转存额度 + 网盘空间
-    if data.get("configured"):
-        cookie = str((raw or {}).get("cookie") or "").strip()
-        if cookie:
-            quota_res = p115_client.fetch_offline_quota(cookie)
-            if quota_res.get("ok"):
-                data["quota"] = quota_res.get("quota")
-                data["quotaTotal"] = quota_res.get("quotaTotal")
-            else:
-                data["quota"] = None
-                data["quotaTotal"] = None
-                data["quotaError"] = str(quota_res.get("message") or "额度读取失败")
-
-            space_res = p115_client.fetch_space_info(cookie)
-            if space_res.get("ok"):
-                data["spaceTotal"] = space_res.get("spaceTotal")
-                data["spaceTotalText"] = space_res.get("spaceTotalText")
-                data["spaceUsed"] = space_res.get("spaceUsed")
-                data["spaceUsedText"] = space_res.get("spaceUsedText")
-                data["spaceRemain"] = space_res.get("spaceRemain")
-                data["spaceRemainText"] = space_res.get("spaceRemainText")
-
-            sign_res = p115_client.fetch_offline_sign(cookie)
-            if sign_res.get("ok") and sign_res.get("offlineLimit") is not None:
-                data["offlineLimit"] = sign_res.get("offlineLimit")
     return Envelope(
         data=data,
         message="configured" if data["configured"] else "not_configured",
     )
+
+
+@router.get("/p115/status", response_model=Envelope)
+def get_p115_status(_user: dict[str, Any] | None = Depends(get_optional_user)) -> Envelope:
+    """115 实时状态：额度 / 空间 / 单任务上限。用于设置页异步补状态，避免首屏阻塞。"""
+    raw = settings_store.get_setting(settings_store.P115_KEY)
+    data = _p115_public(raw)
+    if not data.get("configured"):
+        return Envelope(data=data, message="not_configured")
+
+    cookie = str((raw or {}).get("cookie") or "").strip()
+    if not cookie:
+        return Envelope(data=data, message="not_configured")
+
+    quota_res = p115_client.fetch_offline_quota(cookie)
+    if quota_res.get("ok"):
+        data["quota"] = quota_res.get("quota")
+        data["quotaTotal"] = quota_res.get("quotaTotal")
+    else:
+        data["quota"] = None
+        data["quotaTotal"] = None
+        data["quotaError"] = str(quota_res.get("message") or "额度读取失败")
+
+    space_res = p115_client.fetch_space_info(cookie)
+    if space_res.get("ok"):
+        data["spaceTotal"] = space_res.get("spaceTotal")
+        data["spaceTotalText"] = space_res.get("spaceTotalText")
+        data["spaceUsed"] = space_res.get("spaceUsed")
+        data["spaceUsedText"] = space_res.get("spaceUsedText")
+        data["spaceRemain"] = space_res.get("spaceRemain")
+        data["spaceRemainText"] = space_res.get("spaceRemainText")
+
+    sign_res = p115_client.fetch_offline_sign(cookie)
+    if sign_res.get("ok") and sign_res.get("offlineLimit") is not None:
+        data["offlineLimit"] = sign_res.get("offlineLimit")
+
+    return Envelope(data=data, message="ok")
 
 
 @router.put("/p115", response_model=Envelope)

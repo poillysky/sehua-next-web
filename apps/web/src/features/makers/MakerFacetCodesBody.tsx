@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { BROWSE_PAGE_MAX, PREFIX_CODE_PAGE_SIZE } from '@/config/search';
 import { resolveCoverDisplay } from '@/config/av-makers';
 import {
@@ -23,6 +23,30 @@ import { PrefixCodeGridSkeleton } from '@/features/boards/PrefixCodeGridSkeleton
 
 const FLAKY_COVER_HOST =
   /xms45\.com|imghost\.biz|gifyu\.com|imagetwist\.com/i;
+
+type FacetCodesCache = {
+  page: number;
+  scrollTop: number;
+  total: number;
+  loaded: boolean;
+  pages: Record<number, LibraryFacetCodeItem[]>;
+};
+
+const FACET_CODES_CACHE = new Map<string, FacetCodesCache>();
+
+function facetCodesCacheKey(regionId: string, kind: string, value: string) {
+  return `${regionId}|${kind}|${value}`;
+}
+
+function getFacetCodesCache(regionId: string, kind: string, value: string): FacetCodesCache {
+  const key = facetCodesCacheKey(regionId, kind, value);
+  let c = FACET_CODES_CACHE.get(key);
+  if (!c) {
+    c = { page: 1, scrollTop: 0, total: 0, loaded: false, pages: {} };
+    FACET_CODES_CACHE.set(key, c);
+  }
+  return c;
+}
 
 function coversForHit(it: LibraryFacetCodeItem): string[] {
   const raw: string[] = [];
@@ -48,6 +72,15 @@ function facetHasCover(it: LibraryFacetCodeItem): boolean {
   if (String(it.posterLocal || '').trim()) return true;
   if (String(it.coverUrl || '').trim()) return true;
   return (it.coverUrls || []).some((u) => Boolean(String(u || '').trim()));
+}
+
+function filterFacetItems(items: LibraryFacetCodeItem[]): LibraryFacetCodeItem[] {
+  return (items || []).filter((it) => {
+    if (facetHasCover(it)) return true;
+    if (String(it.forumTitle || '').trim()) return true;
+    if ((it.forumActors || []).some((a) => String(a || '').trim())) return true;
+    return false;
+  });
 }
 
 function FacetTileCover({
@@ -110,12 +143,54 @@ export function MakerFacetCodesBody({
   value: string;
   onOpenCode: (code: string, studio: string, prefix: string) => void;
 }) {
-  const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
-  const [items, setItems] = useState<LibraryFacetCodeItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const cached = getFacetCodesCache(regionId, kind, value);
+  const [page, setPage] = useState(() => cached.page);
+  const [total, setTotal] = useState(() => cached.total);
+  const [items, setItems] = useState<LibraryFacetCodeItem[]>(
+    () => cached.pages[cached.page] || [],
+  );
+  const [loading, setLoading] = useState(
+    () => !cached.loaded && !(cached.pages[cached.page]?.length),
+  );
   const [cropTick, setCropTick] = useState(0);
   const listScrollRef = useRef<HTMLDivElement>(null);
+  const pageRef = useRef(page);
+  const pinToTop = useRef(false);
+  const pendingScrollY = useRef<number | null>(null);
+  const skipScrollRestore = useRef(true);
+
+  pageRef.current = page;
+
+  function scrollCache() {
+    return getFacetCodesCache(regionId, kind, value);
+  }
+
+  function saveListScroll() {
+    const el = listScrollRef.current;
+    if (!el) return;
+    const c = scrollCache();
+    c.scrollTop = el.scrollTop;
+    c.page = pageRef.current;
+  }
+
+  function tryRestoreListScroll(): boolean {
+    const el = listScrollRef.current;
+    if (!el || pendingScrollY.current == null) return true;
+    const y = pendingScrollY.current;
+    if (y <= 0) {
+      pendingScrollY.current = null;
+      return true;
+    }
+    const max = el.scrollHeight - el.clientHeight;
+    if (max <= 0) return false;
+    const target = Math.min(y, max);
+    el.scrollTop = target;
+    if (Math.abs(el.scrollTop - target) <= 2) {
+      pendingScrollY.current = null;
+      return true;
+    }
+    return false;
+  }
 
   useEffect(() => {
     void ensurePosterCropLoaded();
@@ -123,15 +198,87 @@ export function MakerFacetCodesBody({
   }, []);
 
   useEffect(() => {
+    pinToTop.current = true;
+    skipScrollRestore.current = false;
+    pendingScrollY.current = null;
     setPage(1);
     setItems([]);
     setTotal(0);
+    setLoading(true);
   }, [regionId, kind, value]);
 
   useEffect(() => {
+    const el = listScrollRef.current;
+    if (!el) return;
+    const onScroll = () => saveListScroll();
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      saveListScroll();
+      el.removeEventListener('scroll', onScroll);
+    };
+  }, [regionId, kind, value]);
+
+  useLayoutEffect(() => {
+    if (skipScrollRestore.current) {
+      pendingScrollY.current = scrollCache().scrollTop;
+      skipScrollRestore.current = false;
+      return;
+    }
+    if (pinToTop.current) {
+      listScrollRef.current && (listScrollRef.current.scrollTop = 0);
+      saveListScroll();
+    }
+  }, [regionId, kind, value, page]);
+
+  useLayoutEffect(() => {
+    if (loading) return;
+    if (pinToTop.current) {
+      if (listScrollRef.current) listScrollRef.current.scrollTop = 0;
+      saveListScroll();
+      pinToTop.current = false;
+      return;
+    }
+    tryRestoreListScroll();
+  }, [items, loading, page]);
+
+  useEffect(() => {
+    if (pendingScrollY.current == null) return;
+    const el = listScrollRef.current;
+    if (!el) return;
+    const attempt = () => tryRestoreListScroll();
+    attempt();
+    const ro = new ResizeObserver(attempt);
+    ro.observe(el);
+    const raf = requestAnimationFrame(attempt);
+    const t1 = window.setTimeout(attempt, 60);
+    const t2 = window.setTimeout(attempt, 200);
+    return () => {
+      ro.disconnect();
+      cancelAnimationFrame(raf);
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+  }, [items, loading, page, regionId, kind, value]);
+
+  useEffect(() => {
+    const c = getFacetCodesCache(regionId, kind, value);
+    const safePage = Math.min(Math.max(page, 1), BROWSE_PAGE_MAX);
+    if (safePage !== page) {
+      setPage(safePage);
+      return;
+    }
+
+    const cachedPage = c.pages[safePage];
+    if (cachedPage) {
+      setItems(cachedPage);
+      setTotal(c.total);
+      setLoading(false);
+      return;
+    }
+
     const ac = new AbortController();
-    const offset = (page - 1) * PREFIX_CODE_PAGE_SIZE;
     setLoading(true);
+    const offset = (safePage - 1) * PREFIX_CODE_PAGE_SIZE;
     void fetchLibraryFacetCodes({
       region: regionId,
       kind,
@@ -142,14 +289,11 @@ export function MakerFacetCodesBody({
     })
       .then((data) => {
         if (ac.signal.aborted) return;
-        setTotal(data.total || 0);
-        const next = (data.items || []).filter((it) => {
-          if (facetHasCover(it)) return true;
-          if (String(it.forumTitle || '').trim()) return true;
-          if ((it.forumActors || []).some((a) => String(a || '').trim()))
-            return true;
-          return false;
-        });
+        const next = filterFacetItems(data.items || []);
+        c.total = data.total || 0;
+        c.loaded = true;
+        c.pages[safePage] = next;
+        setTotal(c.total);
         setItems(next);
       })
       .catch(() => {
@@ -163,9 +307,12 @@ export function MakerFacetCodesBody({
     return () => ac.abort();
   }, [regionId, kind, value, page]);
 
-  useEffect(() => {
-    listScrollRef.current?.scrollTo({ top: 0 });
-  }, [page]);
+  function goPage(next: number) {
+    pinToTop.current = true;
+    skipScrollRestore.current = false;
+    pendingScrollY.current = null;
+    setPage(next);
+  }
 
   const cropMode = (() => {
     void cropTick;
@@ -197,7 +344,7 @@ export function MakerFacetCodesBody({
         <div ref={listScrollRef} className="prefix-grid-scroll" data-ptr-scroll>
           {showEmpty ? (
             <div className="app-empty" style={{ padding: '24px 8px' }}>
-              <p>该分类下暂无番号</p>
+              <p>该索引项下暂无番号</p>
             </div>
           ) : showSkel ? (
             <PrefixCodeGridSkeleton prefix="" count={12} />
@@ -211,13 +358,14 @@ export function MakerFacetCodesBody({
                     key={`${it.studio}|${it.prefix}|${it.code}`}
                     type="button"
                     className="prefix-tile"
-                    onClick={() =>
+                    onClick={() => {
+                      saveListScroll();
                       onOpenCode(
                         it.code,
                         String(it.studio || ''),
                         String(it.prefix || ''),
-                      )
-                    }
+                      );
+                    }}
                   >
                     <span
                       className={
@@ -278,7 +426,7 @@ export function MakerFacetCodesBody({
               type="button"
               className="prefix-pager__btn"
               disabled={page <= 1 || loading}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              onClick={() => goPage(Math.max(1, page - 1))}
             >
               上一页
             </button>
@@ -289,7 +437,7 @@ export function MakerFacetCodesBody({
               type="button"
               className="prefix-pager__btn"
               disabled={page >= totalPages || loading}
-              onClick={() => setPage((p) => p + 1)}
+              onClick={() => goPage(page + 1)}
             >
               下一页
             </button>

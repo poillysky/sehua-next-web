@@ -1,27 +1,17 @@
-# NextWeb stop: kill listeners on 3020 / 8020 / 9210 and close start-dev cmd windows
-# ASCII only. Double-click stop-dev.cmd to run.
-
-param(
-  [switch]$SkipScrape
-)
+# NextWeb stop: kill listeners on 3020 / 8020 and close start-dev cmd windows
 
 $ErrorActionPreference = "Continue"
 
 $Root = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 
 $ApiPort = 8020
-$ScrapePort = 9210
 $WebPort = 3020
 $ports = @($WebPort, $ApiPort)
-if (-not $SkipScrape) { $ports = @($WebPort, $ApiPort, $ScrapePort) }
 
 $scriptTitles = @("NextWeb API", "NextWeb Web")
-if (-not $SkipScrape) { $scriptTitles = @("NextWeb API", "NextWeb Scrape", "NextWeb Web") }
 $scriptNames = @("dev:api", "dev:web")
-if (-not $SkipScrape) { $scriptNames = @("dev:api", "dev:scrape", "dev:web") }
 
 function Get-ListenPids([int]$Port) {
-  # NOTE: never use $PID — it is a read-only automatic variable in PowerShell
   $listenPids = [System.Collections.Generic.HashSet[int]]::new()
   try {
     $conns = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
@@ -56,7 +46,6 @@ function Get-NextWebCmdPids {
   $found = [System.Collections.Generic.HashSet[int]]::new()
   $rootNorm = $Root.TrimEnd('\')
 
-  # 1) Window title set by start-dev: "NextWeb API :8020" etc.
   foreach ($p in @(Get-Process -Name cmd -ErrorAction SilentlyContinue)) {
     $title = $p.MainWindowTitle
     if (-not $title) { continue }
@@ -68,7 +57,6 @@ function Get-NextWebCmdPids {
     }
   }
 
-  # 2) Command line fallback (title empty / race): cmd running npm run dev:* in this repo
   try {
     $cmds = Get-CimInstance Win32_Process -Filter "Name='cmd.exe'" -ErrorAction SilentlyContinue
     foreach ($proc in @($cmds)) {
@@ -90,14 +78,12 @@ Write-Host "[NextWeb] Stopping services on ports $($ports -join ' / ')..."
 
 $killed = 0
 
-# Close start-dev cmd windows first — /T also drops npm/node/python children
 foreach ($procId in @(Get-NextWebCmdPids)) {
   if (Stop-ProcessTree $procId "NextWeb cmd window") { $killed++ }
 }
 
 Start-Sleep -Milliseconds 800
 
-# Free any remaining listeners (orphans not under those cmd trees)
 foreach ($port in $ports) {
   $listenPids = Get-ListenPids $port
   if (-not $listenPids -or $listenPids.Count -eq 0) {
@@ -111,7 +97,6 @@ foreach ($port in $ports) {
 
 Start-Sleep -Milliseconds 1000
 
-# Second pass: leftover cmd windows + port holders
 foreach ($procId in @(Get-NextWebCmdPids)) {
   if (Stop-ProcessTree $procId "NextWeb cmd window (2nd)") { $killed++ }
 }

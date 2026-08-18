@@ -472,6 +472,26 @@ def is_pack_bleed_item(
     return False
 
 
+def _path_contains_needle(path: str, needle: str) -> bool:
+    """路径含番号 cid；排除 1sone00968 误命中 sone00968。"""
+    if not needle:
+        return False
+    pos = 0
+    while pos < len(path):
+        idx = path.find(needle, pos)
+        if idx < 0:
+            return False
+        if idx > 0 and path[idx - 1].isdigit():
+            pos = idx + 1
+            continue
+        after = idx + len(needle)
+        if after < len(path) and path[after].isdigit():
+            pos = idx + 1
+            continue
+        return True
+    return False
+
+
 def image_url_matches_maker_code(url: str, code: str) -> bool:
     raw = str(code or "").strip()
     if not raw or not url:
@@ -493,7 +513,7 @@ def image_url_matches_maker_code(url: str, code: str) -> bool:
         needles.add(f"{prefix}{num.zfill(3)}")
         needles.add(f"{prefix}{num.zfill(5)}")
     path = re.sub(r"[^a-z0-9./_-]", "", url.lower())
-    return any(n and n in path for n in needles)
+    return any(n and _path_contains_needle(path, n) for n in needles)
 
 
 def guess_netcdn_jacket_urls(code: str) -> list[str]:
@@ -508,10 +528,8 @@ def guess_netcdn_jacket_urls(code: str) -> list[str]:
     prefix = m.group(1).lower()
     num = re.sub(r"^0+", "", m.group(2)) or "0"
     pad = num.zfill(5)
-    ids = list(dict.fromkeys([f"{prefix}{pad}", f"1{prefix}{pad}"]))
-    return [
-        f"https://jp.netcdn.space/digital/video/{cid}/{cid}pl.jpg" for cid in ids
-    ]
+    cid = f"{prefix}{pad}"
+    return [f"https://jp.netcdn.space/digital/video/{cid}/{cid}pl.jpg"]
 
 
 def is_valid_preview_url(src: str) -> bool:

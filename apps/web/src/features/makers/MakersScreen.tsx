@@ -1,6 +1,6 @@
 'use client';
 
-import { startTransition, useCallback, useEffect, useMemo, useState } from 'react';
+import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ChevronRight, Search, Tags } from 'lucide-react';
 import {
   fetchLibraryRegion,
@@ -14,11 +14,18 @@ import {
   indexesMakerFsActors,
   makerFsGroupNoun,
   makerFsPrefixMatchesQuery,
+  pickMakerGroupCover,
+  clearLibraryBrowseCaches,
+  getLibraryCatalogCache,
+  getLibraryRegionsCache,
   LIBRARY_SYNCED,
   MAKER_FS_FALLBACK_REGIONS,
+  prefetchLibraryRegion,
+  setLibraryCatalogCache,
+  setLibraryRegionsCache,
   type MakerFsMakerGroup,
 } from '@/lib/makerFsUi';
-import { makerDescription, makerKind, prefixNote } from '@/config/av-makers';
+import { makerDescription, prefixNote } from '@/config/av-makers';
 import { useTabNavigation } from '@/shell';
 import { AppPush } from '@/components/ui/AppPush';
 import { BrowsePrefToggles } from '@/components/BrowsePrefToggles';
@@ -26,6 +33,7 @@ import { PrefixCodeGrid } from '@/features/boards/PrefixCodeGrid';
 import { MakerCodeSearchBody } from './MakerCodeSearchBody';
 import { MakerFacetBrowseBody } from './MakerFacetBrowseBody';
 import { MakerFacetCodesBody } from './MakerFacetCodesBody';
+import { MakerPosterGrid } from './MakerPosterTile';
 
 type Stack =
   | { kind: 'hub' }
@@ -64,7 +72,7 @@ type Stack =
       maker: string;
       prefix: string;
       code: string;
-      /** 从标签/系列进入时，返回该分类页 */
+      /** 从索引进入时，返回索引页 */
       viaFacet?: {
         facetKind: 'tag' | 'series';
         facetValue: string;
@@ -99,6 +107,28 @@ function showBrowsePrefs(region: MakerFsRegionSummary): boolean {
   return indexesMakerFsActors(region.id);
 }
 
+function stackBodyScrollKey(s: Stack): string | null {
+  switch (s.kind) {
+    case 'region':
+      return `region:${s.region.id}`;
+    case 'maker':
+      return `maker:${s.region.id}:${s.maker}`;
+    case 'facets':
+      return `facets:${s.region.id}`;
+    default:
+      return null;
+  }
+}
+
+function prefixStackKey(
+  regionId: string,
+  maker: string,
+  prefix: string,
+  query: string,
+): string {
+  return `${regionId}|${maker}|${prefix}|${query.trim()}`;
+}
+
 /**
  * 片商：Hub → 分区 → 厂牌 → 前缀 → 番号
  * 分区页只渲染厂牌行，避免一次挂载全部前缀格导致卡顿。
@@ -113,15 +143,99 @@ export function MakersScreen() {
   const [q, setQ] = useState('');
   const [prefixTotal, setPrefixTotal] = useState<number | null>(null);
   const [prefsTick, setPrefsTick] = useState(0);
+  const pushBodyScroll = useRef(new Map<string, number>());
+  const pendingBodyScrollY = useRef<number | null>(null);
+  const prefixStatsRef = useRef(new Map<string, number>());
+
+  useEffect(() => {
+    const body = document.querySelector('.app-stack-root .app-push__body');
+    if (!(body instanceof HTMLElement)) return;
+    const key = stackBodyScrollKey(stack);
+    if (!key) return;
+
+    const save = () => {
+      pushBodyScroll.current.set(key, body.scrollTop);
+    };
+    body.addEventListener('scroll', save, { passive: true });
+    return () => {
+      save();
+      body.removeEventListener('scroll', save);
+    };
+  }, [stack]);
+
+  useLayoutEffect(() => {
+    const body = document.querySelector('.app-stack-root .app-push__body');
+    if (!(body instanceof HTMLElement)) return;
+
+    if (stack.kind === 'code' || stack.kind === 'prefix' || stack.kind === 'facet') {
+      pendingBodyScrollY.current = null;
+      body.scrollTop = 0;
+      return;
+    }
+
+    const key = stackBodyScrollKey(stack);
+    if (!key) return;
+    const y = pushBodyScroll.current.get(key) ?? 0;
+    if (y <= 0) {
+      pendingBodyScrollY.current = null;
+      body.scrollTop = 0;
+      return;
+    }
+    pendingBodyScrollY.current = y;
+    const max = body.scrollHeight - body.clientHeight;
+    if (max > 0) {
+      body.scrollTop = Math.min(y, max);
+      if (Math.abs(body.scrollTop - Math.min(y, max)) <= 2) {
+        pendingBodyScrollY.current = null;
+      }
+    }
+  }, [stack]);
+
+  useEffect(() => {
+    if (pendingBodyScrollY.current == null) return;
+    const body = document.querySelector('.app-stack-root .app-push__body');
+    if (!(body instanceof HTMLElement)) return;
+    const attempt = () => {
+      if (pendingBodyScrollY.current == null) return;
+      const y = pendingBodyScrollY.current;
+      const max = body.scrollHeight - body.clientHeight;
+      if (max <= 0) return;
+      const target = Math.min(y, max);
+      body.scrollTop = target;
+      if (Math.abs(body.scrollTop - target) <= 2) {
+        pendingBodyScrollY.current = null;
+      }
+    };
+    attempt();
+    const ro = new ResizeObserver(attempt);
+    ro.observe(body);
+    const raf = requestAnimationFrame(attempt);
+    const t1 = window.setTimeout(attempt, 60);
+    const t2 = window.setTimeout(attempt, 200);
+    return () => {
+      ro.disconnect();
+      cancelAnimationFrame(raf);
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+  }, [stack]);
 
   const refreshHub = useCallback(async () => {
     setLoadingHub(true);
     try {
+      const cached = getLibraryRegionsCache();
+      if (cached?.regions?.length) {
+        setRegions(cached.regions);
+        setReady(
+          Boolean(cached.ready || cached.regions.some((r) => (r.codeCount || 0) > 0)),
+        );
+      }
       const overview = await fetchLibraryRegions().catch(() => null);
       const list =
         overview?.regions && overview.regions.length > 0
           ? overview.regions
           : MAKER_FS_FALLBACK_REGIONS;
+      if (overview) setLibraryRegionsCache(overview);
       setRegions(list);
       setReady(
         Boolean(overview?.ready || overview?.regions?.some((r) => (r.codeCount || 0) > 0)),
@@ -137,6 +251,7 @@ export function MakersScreen() {
 
   useEffect(() => {
     const onSynced = () => {
+      clearLibraryBrowseCaches();
       setStack({ kind: 'hub' });
       setQ('');
       setPrefixTotal(null);
@@ -155,12 +270,6 @@ export function MakersScreen() {
       void refreshHub();
     }
   }, [tabCtx?.tabReselect, tabCtx?.activeTab, refreshHub]);
-
-  useEffect(() => {
-    if (tabCtx?.activeTab === '/makers') {
-      void refreshHub();
-    }
-  }, [tabCtx?.activeTab, refreshHub]);
 
   const makers = useMemo((): MakerFsMakerGroup[] => {
     if (stack.kind !== 'region' && stack.kind !== 'maker') return [];
@@ -186,9 +295,29 @@ export function MakersScreen() {
   }, [stack, q]);
 
   async function openRegion(region: MakerFsRegionSummary) {
+    const cached = getLibraryCatalogCache(region.id);
+    if (cached) {
+      setQ('');
+      setPrefixTotal(null);
+      startTransition(() => {
+        setStack({ kind: 'region', region, catalog: cached });
+      });
+      void fetchLibraryRegion(region.id)
+        .then((catalog) => {
+          setLibraryCatalogCache(region.id, catalog);
+          setStack((s) =>
+            s.kind === 'region' && s.region.id === region.id
+              ? { ...s, catalog }
+              : s,
+          );
+        })
+        .catch(() => undefined);
+      return;
+    }
     setOpening(true);
     try {
       const catalog = await fetchLibraryRegion(region.id);
+      setLibraryCatalogCache(region.id, catalog);
       setQ('');
       setPrefixTotal(null);
       startTransition(() => {
@@ -268,7 +397,7 @@ export function MakersScreen() {
         <h1 className="app-hub__title">片商</h1>
         {!ready && !loadingHub ? (
           <p className="app-empty" style={{ marginTop: 8 }}>
-            暂无片库，请到设置 → 本地索引 → 扫库后「同步本地片库」
+            片商目录暂无厂牌内容（结构：分区 / 厂牌 / 前缀 / 番号）
           </p>
         ) : null}
         <div className="mk-zone-list">
@@ -281,6 +410,7 @@ export function MakersScreen() {
                 className="mk-zone-row"
                 data-zone={i % 4}
                 disabled={opening || loadingHub}
+                onPointerDown={() => prefetchLibraryRegion(r.id)}
                 onClick={() => void openRegion(r)}
               >
                 <span className="mk-zone-row__mark" aria-hidden>
@@ -348,7 +478,7 @@ export function MakersScreen() {
             }}
           >
             <Tags size={16} strokeWidth={2.25} aria-hidden />
-            <span>分类</span>
+            <span>索引</span>
           </button>
         </div>
         {makers.length === 0 ? (
@@ -356,42 +486,32 @@ export function MakersScreen() {
             {ready ? '无匹配' : `暂无${noun}，请先同步本地片库`}
           </p>
         ) : (
-          <ul className="settings-group">
-            {makers.map((g) => {
+          <MakerPosterGrid
+            regionId={stack.region.id}
+            overlay="center"
+            items={makers.map((g) => {
               const desc = makerDescription(g.maker);
-              const kind = makerKind(g.maker);
-              return (
-                <li key={g.maker}>
-                  <button
-                    type="button"
-                    className="settings-nav"
-                    onClick={() => openMaker(stack.region, stack.catalog, g)}
-                  >
-                    <span className="settings-nav__main">
-                      <span className="settings-nav__title">{g.maker}</span>
-                      <span className="settings-nav__desc">
-                        {kind ? `${kind} · ` : ''}
-                        {g.prefixCount} 前缀 · {formatMakerFsCount(g.codeCount)} 条
-                        {desc ? ` · ${desc}` : ''}
-                      </span>
-                    </span>
-                    <ChevronRight
-                      className="settings-nav__chev"
-                      size={18}
-                      strokeWidth={2.25}
-                    />
-                  </button>
-                </li>
-              );
+              const cover = pickMakerGroupCover(g);
+              return {
+                key: g.maker,
+                label: g.maker,
+                title: desc || undefined,
+                posterLocal: cover.posterLocal,
+                posterRev: cover.posterRev,
+                coverUrl: cover.coverUrl,
+                coverUrls: cover.coverUrls,
+                coverCode: cover.coverCode,
+                onClick: () => openMaker(stack.region, stack.catalog, g),
+              };
             })}
-          </ul>
+          />
         )}
       </AppPush>
     );
   } else if (stack.kind === 'facets') {
     push = (
       <AppPush
-        title="标签与系列"
+        title="索引"
         onBack={() =>
           setStack({
             kind: 'region',
@@ -402,6 +522,7 @@ export function MakersScreen() {
       >
         <MakerFacetBrowseBody
           regionId={stack.region.id}
+          catalog={stack.catalog}
           onOpenFacet={(facetKind, facetValue, facetCount) => {
             startTransition(() => {
               setStack({
@@ -477,48 +598,44 @@ export function MakersScreen() {
         {prefixes.length === 0 ? (
           <p className="app-empty">无匹配</p>
         ) : (
-          <div className="mk-maker-card__grid" style={{ paddingBottom: 12 }}>
-            {prefixes.map((p) => {
+          <MakerPosterGrid
+            regionId={stack.region.id}
+            overlay="center"
+            items={prefixes.map((p) => {
               const note = prefixNote(g.maker, p.prefix);
-              const codes = p.codeCount ?? 0;
-              return (
-                <button
-                  key={p.prefix}
-                  type="button"
-                  className="mk-maker-tile"
-                  title={note || p.prefix}
-                  onClick={() =>
-                    openPrefix(stack.region, stack.catalog, g.maker, p.prefix)
-                  }
-                >
-                  <span className="mk-maker-tile__code allow-select">{p.prefix}</span>
-                  {note ? (
-                    <span className="mk-maker-tile__note">{note}</span>
-                  ) : codes > 0 ? (
-                    <span className="mk-maker-tile__note">
-                      {formatMakerFsCount(codes)} 条
-                    </span>
-                  ) : (
-                    <span
-                      className="mk-maker-tile__note mk-maker-tile__note--empty"
-                      aria-hidden
-                    />
-                  )}
-                </button>
-              );
+              return {
+                key: p.prefix,
+                label: p.prefix,
+                title: note || undefined,
+                posterLocal: p.posterLocal,
+                posterRev: p.posterRev,
+                coverUrl: p.coverUrl,
+                coverUrls: p.coverUrls,
+                coverCode: p.coverCode,
+                onClick: () =>
+                  openPrefix(stack.region, stack.catalog, g.maker, p.prefix),
+              };
             })}
-          </div>
+          />
         )}
       </AppPush>
     );
   } else if (stack.kind === 'prefix') {
+    const prefixKey = prefixStackKey(
+      stack.region.id,
+      stack.maker,
+      stack.prefix,
+      q,
+    );
+    const knownTotal = prefixStatsRef.current.get(prefixKey);
+    const displayTotal = prefixTotal ?? knownTotal ?? null;
     const hint =
-      prefixTotal == null
+      displayTotal == null
         ? '读取本地片库…'
-        : prefixTotal > 0
+        : displayTotal > 0
           ? q.trim()
-            ? `匹配 ${formatMakerFsCount(prefixTotal)} 个`
-            : `片库 ${formatMakerFsCount(prefixTotal)} 个番号`
+            ? `匹配 ${formatMakerFsCount(displayTotal)} 个`
+            : `片库 ${formatMakerFsCount(displayTotal)} 个番号`
           : q.trim()
             ? '无匹配'
             : '本地片库暂无番号';
@@ -579,11 +696,9 @@ export function MakersScreen() {
               query={q}
               onOpenCode={searchCode}
               onStatusChange={(st) => {
-                if (!st) {
-                  setPrefixTotal(null);
-                  return;
-                }
-                if (!st.loading) setPrefixTotal(st.total);
+                if (!st || st.loading) return;
+                prefixStatsRef.current.set(prefixKey, st.total);
+                setPrefixTotal(st.total);
               }}
             />
           </div>
@@ -591,7 +706,6 @@ export function MakersScreen() {
       </AppPush>
     );
   } else if (stack.kind === 'code') {
-    const dbRegion = String(stack.region.dbRegion || stack.region.id || '').trim();
     const showPrefs = showBrowsePrefs(stack.region);
     const via = stack.viaFacet;
     push = (
@@ -625,7 +739,6 @@ export function MakersScreen() {
       >
         <MakerCodeSearchBody
           code={stack.code}
-          region={dbRegion || undefined}
           cropRegion={stack.region.id}
           prefsTick={prefsTick}
           applyBrowsePrefs={showPrefs}

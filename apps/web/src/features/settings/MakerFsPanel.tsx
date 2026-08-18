@@ -192,6 +192,7 @@ function PrefixCodesBody({
           const code = formatMakerFsIndexCode(it.code, { prefix, pad });
           const { actors, title } = makerFsIndexLines(it, regionId);
           const actorsRegion = indexesMakerFsActors(regionId);
+          const src = it.source === 'bit' ? 'bit' : 'sehua';
           return (
             <li key={code} className="mfs-code-row">
               <CroppedCoverImg
@@ -205,7 +206,18 @@ function PrefixCodesBody({
                 alt=""
               />
               <span className="mfs-code-row__main">
-                <span className="mfs-code-row__code allow-select">{code}</span>
+                <span className="mfs-code-row__head">
+                  <span className="mfs-code-row__code allow-select">{code}</span>
+                  <span
+                    className={cn(
+                      'mfs-code-row__src',
+                      src === 'bit' ? 'mfs-code-row__src--bit' : 'mfs-code-row__src--sehua',
+                    )}
+                    title={src === 'bit' ? '来源：bitmagnet 补充' : '来源：sehua 主库'}
+                  >
+                    {src === 'bit' ? 'BIT' : 'SEHUA'}
+                  </span>
+                </span>
                 {title ? (
                   <span className="mfs-code-row__title allow-select" title="标题">
                     {title}
@@ -771,7 +783,7 @@ export function MakerFsPanel({
                         : '';
                       return `同步中 ${done}/${total} · 跳过 ${sk} · 更新 ${up} · 新写 ${wr} · 清理 ${rm}${cur}`;
                     })()
-                  : '对齐索引：补齐缺失、删除多余；FC2 作者目录白名单保留'}
+                  : '严格对齐索引：每番号仅 {番号}.strm，多余文件/目录一律删除'}
               </span>
             </span>
             <ChevronRight className="settings-nav__chev" size={16} strokeWidth={2.25} />
@@ -783,13 +795,13 @@ export function MakerFsPanel({
             className="settings-nav"
             disabled={busy || running}
             onClick={() =>
-              void runBuild({ skipFreshHours: 24, label: '增量扫库' })
+              void runBuild({ skipFreshHours: 0, label: '增量扫库' })
             }
           >
             <span className="mfs-action-dot mfs-action-dot--incr" aria-hidden />
             <span className="settings-nav__main">
               <span className="settings-nav__title">增量扫库</span>
-              <span className="settings-nav__desc">跳过 24 小时内已导出前缀</span>
+              <span className="settings-nav__desc">重扫全部前缀，补全 sehua / bit 缺失番号</span>
             </span>
             <ChevronRight className="settings-nav__chev" size={16} strokeWidth={2.25} />
           </button>

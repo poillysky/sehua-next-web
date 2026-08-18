@@ -142,7 +142,9 @@ def _as_int(value: Any) -> int | None:
 
 def fetch_offline_sign(cookie: str) -> dict[str, Any]:
     try:
-        with httpx.Client(timeout=12.0, follow_redirects=True) as client:
+        with httpx.Client(
+            timeout=12.0, follow_redirects=True, trust_env=False
+        ) as client:
             res = client.get(
                 "https://115.com/?ct=offline&ac=space",
                 headers=headers(cookie, "https://115.com/web/lixian/"),
@@ -193,7 +195,9 @@ def fetch_offline_sign(cookie: str) -> dict[str, Any]:
 def fetch_offline_quota(cookie: str) -> dict[str, Any]:
     """云转存额度：来自离线任务列表 quota/total（剩余 / 总额）。"""
     try:
-        with httpx.Client(timeout=12.0, follow_redirects=True) as client:
+        with httpx.Client(
+            timeout=12.0, follow_redirects=True, trust_env=False
+        ) as client:
             res = client.get(
                 "https://115.com/web/lixian/?ct=lixian&ac=task_lists&page=1",
                 headers=headers(cookie, "https://115.com/web/lixian/"),
@@ -227,7 +231,9 @@ def fetch_offline_quota(cookie: str) -> dict[str, Any]:
 def fetch_space_info(cookie: str) -> dict[str, Any]:
     """网盘容量：已用 / 总量 / 剩余。"""
     try:
-        with httpx.Client(timeout=12.0, follow_redirects=True) as client:
+        with httpx.Client(
+            timeout=12.0, follow_redirects=True, trust_env=False
+        ) as client:
             res = client.get(
                 "https://webapi.115.com/files/index_info",
                 headers=headers(cookie),
@@ -291,7 +297,9 @@ def validate_p115(cookie: str, folder_cid: str = "0") -> dict[str, Any]:
         }
     )
     try:
-        with httpx.Client(timeout=12.0, follow_redirects=True) as client:
+        with httpx.Client(
+            timeout=12.0, follow_redirects=True, trust_env=False
+        ) as client:
             res = client.get(
                 f"https://webapi.115.com/files?{qs}",
                 headers=headers(cookie),
@@ -390,7 +398,9 @@ def list_folders(cookie: str, parent_cid: str = "0") -> dict[str, Any]:
         }
     )
     try:
-        with httpx.Client(timeout=15.0, follow_redirects=True) as client:
+        with httpx.Client(
+            timeout=15.0, follow_redirects=True, trust_env=False
+        ) as client:
             res = client.get(
                 f"https://webapi.115.com/files?{qs}",
                 headers=headers(cookie),

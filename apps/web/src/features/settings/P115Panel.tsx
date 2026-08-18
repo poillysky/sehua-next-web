@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Folder, FolderOpen, KeyRound } from 'lucide-react';
 import {
   getP115,
+  getP115Status,
   listP115Folders,
   putP115,
   validateP115,
@@ -110,15 +111,29 @@ export function P115Panel({
     let cancelled = false;
     void (async () => {
       try {
-        setQuotaLoading(true);
         const data = await getP115();
         if (cancelled) return;
         applyConfig(data);
+        if (data.configured) {
+          setQuotaLoading(true);
+          try {
+            const status = await getP115Status();
+            if (cancelled) return;
+            applyQuotaInfo(status);
+          } catch (e) {
+            if (cancelled) return;
+            setQuotaError(e instanceof Error ? e.message : '状态读取失败');
+          } finally {
+            if (!cancelled) setQuotaLoading(false);
+          }
+        } else {
+          setQuotaLoading(false);
+        }
       } catch (e) {
         if (cancelled) return;
         setMsg(e instanceof Error ? e.message : '读取失败');
       } finally {
-        if (!cancelled) setQuotaLoading(false);
+        if (!cancelled && !configured) setQuotaLoading(false);
       }
     })();
     return () => {

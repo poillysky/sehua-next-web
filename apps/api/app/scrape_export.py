@@ -4146,12 +4146,35 @@ def _cache_detail(code: str, detail: dict[str, Any]) -> None:
 
 
 def _resolve_library_root() -> Path:
-    lib = Path(scrape_settings()["libraryRoot"])
-    if not lib.is_absolute():
-        lib = (ROOT / lib).resolve()
-    else:
-        lib = lib.resolve()
-    return lib
+    from . import library_materialize as lm
+
+    return lm.makers_library_root()
+
+
+def _library_search_roots() -> list[Path]:
+    """刮削/定位：片商目录优先，兼容旧版 library 根下直接分区。"""
+    from . import library_materialize as lm
+
+    roots: list[Path] = []
+    makers = lm.makers_library_root()
+    if makers.is_dir():
+        roots.append(makers)
+    base = lm.library_base()
+    labels = set(scrape_naming.KIND_LABELS.values())
+    try:
+        for child in base.iterdir():
+            if (
+                child.is_dir()
+                and child.name in labels
+                and base not in roots
+            ):
+                roots.append(base)
+                break
+    except OSError:
+        pass
+    if not roots:
+        roots.append(makers)
+    return roots
 
 
 def _remember_entry_dir(code: str, entry_dir: Path) -> None:
@@ -4173,6 +4196,44 @@ def _remember_entry_dir(code: str, entry_dir: Path) -> None:
         while len(_entry_dir_code_order) > _MAX_ENTRY_DIR_CACHE:
             old = _entry_dir_code_order.pop(0)
             _entry_dir_by_code.pop(old, None)
+
+
+def _library_entry_has_assets(entry_dir: Path) -> bool:
+    if not entry_dir.is_dir():
+        return False
+    for cand in ("poster.jpg", "poster.jpeg", "poster.png", "poster.webp"):
+        if (entry_dir / cand).is_file():
+            return True
+    try:
+        return any(entry_dir.glob("*.nfo"))
+    except OSError:
+        return False
+
+
+def _meta_from_library_entry(entry_dir: Path) -> dict[str, Any]:
+    """无 scrape/index json 时，从 nfo + poster 组装 meta。"""
+    from . import library_materialize as lm
+
+    summary = lm._read_meta_summary(entry_dir)
+    if not summary:
+        return {}
+    code = str(summary.get("code") or entry_dir.name).strip().upper()
+    title = str(summary.get("forumTitle") or "").strip()
+    original = str(summary.get("originalTitle") or "").strip()
+    plot = _normalize_plot_text(str(summary.get("plot") or ""))
+    return {
+        "code": code,
+        "title": title,
+        "titleZh": title if is_likely_chinese(title) else "",
+        "originalTitle": original,
+        "actors": summary.get("forumActors") or [],
+        "genres": summary.get("genres") or [],
+        "series": str(summary.get("series") or "").strip(),
+        "studio": str(summary.get("studio") or "").strip(),
+        "plot": plot,
+        "coverUrl": str(summary.get("coverUrl") or "").strip(),
+        "posterLocal": str(summary.get("posterLocal") or "").strip(),
+    }
 
 
 def _detail_from_entry_dir(
@@ -4266,10 +4327,6 @@ def _find_library_entry_dir(code: str) -> Path | None:
         ):
             return p
 
-    lib = _resolve_library_root()
-    if not lib.is_dir():
-        return None
-
     prefixes = []
     for name in code_names:
         pref = name.split("-", 1)[0] if "-" in name else name
@@ -4287,19 +4344,59 @@ def _find_library_entry_dir(code: str) -> Path | None:
             return cand
         return None
 
-    preferred: Path | None = None
-    fallback: Path | None = None
-    try:
-        for region in lib.iterdir():
-            if not region.is_dir():
-                continue
-            for maker in region.iterdir():
-                if not maker.is_dir():
+    from . import library_materialize as lm
+
+    reserved = lm._LIBRARY_RESERVED_TOP
+
+    for lib in _library_search_roots():
+        if not lib.is_dir():
+            continue
+        preferred: Path | None = None
+        fallback: Path | None = None
+        try:
+            for region in lib.iterdir():
+                if not region.is_dir() or region.name.startswith("."):
                     continue
-                uncat = maker.name == "未分类"
-                for prefix in prefixes:
+                if region.name in reserved:
+                    continue
+                for maker in region.iterdir():
+                    if not maker.is_dir():
+                        continue
+                    uncat = maker.name == "未分类"
+                    for prefix in prefixes:
+                        for cn in code_names:
+                            found = _hit(maker / prefix / cn)
+                            if found is None:
+                                continue
+                            if uncat:
+                                if fallback is None:
+                                    fallback = found
+                            else:
+                                preferred = found
+                                _remember_entry_dir(c, found)
+                                return found
+                        try:
+                            for child in maker.iterdir():
+                                if not child.is_dir():
+                                    continue
+                                if child.name.upper() != prefix.upper():
+                                    continue
+                                for cn in code_names:
+                                    found = _hit(child / cn)
+                                    if found is None:
+                                        continue
+                                    if uncat:
+                                        if fallback is None:
+                                            fallback = found
+                                    else:
+                                        preferred = found
+                                        _remember_entry_dir(c, found)
+                                        return found
+                                break
+                        except OSError:
+                            pass
                     for cn in code_names:
-                        found = _hit(maker / prefix / cn)
+                        found = _hit(maker / cn)
                         if found is None:
                             continue
                         if uncat:
@@ -4309,44 +4406,13 @@ def _find_library_entry_dir(code: str) -> Path | None:
                             preferred = found
                             _remember_entry_dir(c, found)
                             return found
-                    # 前缀目录大小写不一致时扫一层
-                    try:
-                        for child in maker.iterdir():
-                            if not child.is_dir():
-                                continue
-                            if child.name.upper() != prefix.upper():
-                                continue
-                            for cn in code_names:
-                                found = _hit(child / cn)
-                                if found is None:
-                                    continue
-                                if uncat:
-                                    if fallback is None:
-                                        fallback = found
-                                else:
-                                    preferred = found
-                                    _remember_entry_dir(c, found)
-                                    return found
-                            break
-                    except OSError:
-                        pass
-                for cn in code_names:
-                    found = _hit(maker / cn)
-                    if found is None:
-                        continue
-                    if uncat:
-                        if fallback is None:
-                            fallback = found
-                    else:
-                        preferred = found
-                        _remember_entry_dir(c, found)
-                        return found
-    except OSError:
-        return None
-    hit = preferred or fallback
-    if hit is not None:
-        _remember_entry_dir(c, hit)
-    return hit
+        except OSError:
+            continue
+        hit = preferred or fallback
+        if hit is not None:
+            _remember_entry_dir(c, hit)
+            return hit
+    return None
 
 
 def lookup_export_detail(code: str) -> dict[str, Any] | None:
@@ -4368,9 +4434,14 @@ def lookup_export_detail(code: str) -> dict[str, Any] | None:
     if entry is not None:
         scraped = _load_scrape_meta(entry)
         meta = scraped if scraped else _load_index_meta(entry)
-        if meta:
+        if not meta:
+            meta = _meta_from_library_entry(entry)
+        if meta or _library_entry_has_assets(entry):
             detail = _detail_from_entry_dir(
-                entry, code=c, phase="done", meta_override=meta
+                entry,
+                code=c,
+                phase="done",
+                meta_override=meta if meta else None,
             )
             detail["events"] = lookup_export_events(c)
             _cache_detail(c, detail)
@@ -5027,6 +5098,27 @@ def _forum_title_for_code(code: str, **kwargs: Any) -> str:
     return str(_forum_seed_for_code(code, **kwargs).get("title") or "")
 
 
+def _normalize_plot_text(raw: str) -> str:
+    s = str(raw or "").strip()
+    if not s:
+        return ""
+    s = re.sub(r"<br\s*/?>", " ", s, flags=re.I)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _pick_display_plot(meta: dict[str, Any]) -> str:
+    """简介：plot/outline/originalplot，保留日文兜底。"""
+    return _normalize_plot_text(
+        str(
+            meta.get("plot")
+            or meta.get("outline")
+            or meta.get("originalplot")
+            or meta.get("originalPlot")
+            or ""
+        )
+    )
+
+
 def _detail_payload(
     *,
     code: str,
@@ -5061,7 +5153,6 @@ def _detail_payload(
         or fallback_cover
         or ""
     ).strip()
-    plot = str(m.get("plot") or m.get("outline") or "").strip()
     publisher = str(m.get("publisher") or "").strip()
     # 只用明确的 studio；禁止 makers[0] 冒充（未勾选制片方时也会带上）
     studio = str(m.get("studio") or "").strip()
@@ -5072,8 +5163,9 @@ def _detail_payload(
         if isinstance(m.get("fieldTimings"), dict)
         else {}
     )
+    raw_plot = str(m.get("plot") or m.get("outline") or "").strip()
     # 前端简介字段读 plot；刮削侧来源记在 outline
-    if plot and not fs.get("plot") and fs.get("outline"):
+    if raw_plot and not fs.get("plot") and fs.get("outline"):
         fs["plot"] = fs["outline"]
     if "outline" in ft and "plot" not in ft:
         ft["plot"] = ft["outline"]
@@ -5098,6 +5190,8 @@ def _detail_payload(
                 title_zh = ""
                 fs.pop("titleZh", None)
                 ft.pop("titleZh", None)
+
+    plot = _pick_display_plot(m)
 
     # 详情展示不按任务勾选裁剪：有数据就返回；未勾选字段仅在 _write_entry 不落盘。
 

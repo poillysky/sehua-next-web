@@ -2337,6 +2337,10 @@
   border: 0;
 }
 
+.bm-card__preview-img--loading {
+  opacity: 0;
+}
+
 .bm-action-btn,
 .bm-detail .detail-compact-btn {
   display: inline-flex;

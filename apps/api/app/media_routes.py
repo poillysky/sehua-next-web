@@ -12,6 +12,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query
 
 from .translate_routes import get_tmdb_api_key
+from . import settings_store
 
 log = logging.getLogger(__name__)
 
@@ -64,6 +65,16 @@ DOUBAN_CHARTS = (
     "jp",
     "kr",
 )
+
+def _get_network_proxy_url() -> str:
+    """从网络管理配置里取 HTTP 代理 URL（用于 TMDB 外联）。"""
+    raw = settings_store.get_setting(settings_store.SCRAPE_KEY) or {}
+    proxy = str(raw.get("proxyUrl") or raw.get("proxy_url") or "").strip()
+    if not proxy:
+        return ""
+    if "://" not in proxy:
+        proxy = f"http://{proxy}"
+    return proxy.rstrip("/")
 
 
 def _wrap(data: Any, message: str = "ok", status: int = 200) -> dict[str, Any]:
@@ -216,7 +227,12 @@ async def tmdb_charts(
     }
 
     try:
-        async with httpx.AsyncClient(**_HTTPX_KW) as client:
+        proxy = _get_network_proxy_url()
+        client_kw = dict(_HTTPX_KW)
+        if proxy:
+            client_kw["trust_env"] = False
+            client_kw["proxy"] = proxy
+        async with httpx.AsyncClient(**client_kw) as client:
             if cat == "movie":
                 if ch == "trending":
                     data = await _tmdb_get(
@@ -310,7 +326,12 @@ async def tmdb_detail(media_type: str, media_id: str) -> dict[str, Any]:
         return _wrap(cached)
 
     key = _require_tmdb_key()
-    async with httpx.AsyncClient(**_HTTPX_KW) as client:
+    proxy = _get_network_proxy_url()
+    client_kw = dict(_HTTPX_KW)
+    if proxy:
+        client_kw["trust_env"] = False
+        client_kw["proxy"] = proxy
+    async with httpx.AsyncClient(**client_kw) as client:
         data = await _tmdb_get(
             client,
             f"/3/{mt}/{mid}",
@@ -431,7 +452,12 @@ async def tmdb_related(media_type: str, media_id: str) -> dict[str, Any]:
 
     key = _require_tmdb_key()
     params = {"api_key": key, "language": "zh-CN", "page": 1}
-    async with httpx.AsyncClient(**_HTTPX_KW) as client:
+    proxy = _get_network_proxy_url()
+    client_kw = dict(_HTTPX_KW)
+    if proxy:
+        client_kw["trust_env"] = False
+        client_kw["proxy"] = proxy
+    async with httpx.AsyncClient(**client_kw) as client:
         sim = await _tmdb_get(client, f"/3/{mt}/{mid}/similar", params)
         rec = await _tmdb_get(client, f"/3/{mt}/{mid}/recommendations", params)
 
@@ -487,7 +513,12 @@ async def media_search(
 
     if src == "tmdb":
         key = _require_tmdb_key()
-        async with httpx.AsyncClient(**_HTTPX_KW) as client:
+        proxy = _get_network_proxy_url()
+        client_kw = dict(_HTTPX_KW)
+        if proxy:
+            client_kw["trust_env"] = False
+            client_kw["proxy"] = proxy
+        async with httpx.AsyncClient(**client_kw) as client:
             if multi:
                 batches = await asyncio.gather(
                     *[
@@ -512,7 +543,7 @@ async def media_search(
         _cache_set(cache_key, payload, ttl=1800)
         return _wrap(payload)
 
-    # 豆瓣 subject_suggest
+    # 豆瓣 subject_suggest（国内直连）
     try:
         async with httpx.AsyncClient(**_DOUBAN_HTTPX_KW) as client:
             if multi:
@@ -869,8 +900,10 @@ async def _douban_top250(
             try:
                 rating_f = float(rm.group(1))
             except ValueError:
-                pass
-                items.append(
+                rating_f = None
+
+        # 不依赖 rating 是否解析成功：只要命中了条目，就必须 append
+        items.append(
             _norm_item(
                 source="douban",
                 id_=sid,

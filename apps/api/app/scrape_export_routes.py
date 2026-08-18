@@ -4,17 +4,15 @@ from __future__ import annotations
 
 from email.utils import formatdate
 from pathlib import Path
-from typing import Any, Literal
-from urllib.parse import urlparse
+from typing import Any
 import threading
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, Response
-from pydantic import BaseModel, Field
 
 from .auth_routes import get_optional_user, require_user
 from . import library_materialize, scrape_export
-from .outbound_http import httpx_client
+from .cover_focus_routes import _fetch_bytes, _safe_image_url
 
 router = APIRouter(tags=["scrape-export"])
 
@@ -34,234 +32,29 @@ def _wrap(data: Any, message: str = "ok", status: int = 200) -> dict[str, Any]:
     return {"data": data, "message": message, "status": status}
 
 
-class ExportBody(BaseModel):
-    task_id: str = Field(default="", alias="taskId")
-    name: str = ""
-    region: str = ""
-    regions: list[str] | None = None
-    maker: str = ""
-    prefix: str = ""
-    code: str = ""
-    # 多番号强制重刮（与 code 合并，逗号/顿号亦可写在 code）
-    codes: list[str] | None = None
-    force: bool = False
-    mode: Literal["incremental", "force"] | str | None = None
-    fields: list[str] | None = None
-    local_fields: list[str] | None = Field(default=None, alias="localFields")
-    # 失败重试：清失败+数据不全队列并以强制模式只刮这些番号
-    retry_failed: bool = Field(default=False, alias="retryFailed")
-
-    model_config = {"populate_by_name": True}
-
-
-@router.get("/scrape/export/status")
-def get_export_status(
-    events: int = Query(default=80, ge=0, le=400),
-    codes: int = Query(
-        default=0,
-        ge=0,
-        le=1,
-        description="1=返回完整番号列表（可能很大）；0=截断，适合轮询",
-    ),
-    _user: dict[str, Any] | None = Depends(get_optional_user),
-) -> dict[str, Any]:
-    return _wrap(
-        scrape_export.export_status(
-            event_limit=events,
-            include_codes=bool(codes),
-        )
-    )
-
-
-@router.get("/scrape/export/codes")
-def get_export_codes(
-    task_id: str = Query(default="", alias="taskId"),
-    bucket: str = Query(default="failed"),
-    limit: int = Query(default=50000, ge=1, le=100000),
-    offset: int = Query(default=0, ge=0),
-    _user: dict[str, Any] | None = Depends(get_optional_user),
-) -> dict[str, Any]:
-    """任务卡点开成功/跳过/失败时取完整番号列表（SQLite）。"""
-    return _wrap(
-        scrape_export.list_export_codes(
-            task_id=task_id or None,
-            bucket=bucket,
-            limit=limit,
-            offset=offset,
-        )
-    )
+# 刮削端任务路由已移除（改用 MDC 代理）
+# 保留 detail/events、file/img、library/* 供本地库与番号页元数据使用
 
 
 @router.get("/scrape/export/detail")
-def get_export_detail(
+def export_detail(
     code: str = Query(..., min_length=1, max_length=64),
     _user: dict[str, Any] | None = Depends(get_optional_user),
 ) -> dict[str, Any]:
-    """按番号查看刮削详细数据（任务卡统计点击用）。"""
-    detail = scrape_export.lookup_export_detail(code)
-    if not detail:
-        raise HTTPException(status_code=404, detail="未找到该番号详情")
-    return _wrap(detail)
+    data = scrape_export.lookup_export_detail(code)
+    if not data:
+        raise HTTPException(status_code=404, detail="未找到番号")
+    return _wrap(data)
 
 
 @router.get("/scrape/export/events")
-def get_export_events(
+def export_events(
     code: str = Query(..., min_length=1, max_length=64),
     _user: dict[str, Any] | None = Depends(get_optional_user),
 ) -> dict[str, Any]:
-    """按番号查看刮削过程日志（成功队列点进「刮削日志」用）。"""
-    events = scrape_export.lookup_export_events(code)
-    c = str(code or "").strip().upper().replace("_", "-")
-    if events and isinstance(events[0], dict) and events[0].get("code"):
-        c = str(events[0].get("code") or c)
+    c = str(code or "").strip()
+    events = scrape_export.lookup_export_events(c)
     return _wrap({"code": c, "events": events})
-
-
-@router.post("/scrape/export")
-def start_export(
-    body: ExportBody = Body(default_factory=ExportBody),
-    _user: dict[str, Any] = Depends(require_user),
-) -> dict[str, Any]:
-    regions = [str(r).strip() for r in (body.regions or []) if str(r).strip()]
-    try:
-        st = scrape_export.submit_export_job(
-            task_id=(body.task_id or "").strip() or None,
-            task_name=(body.name or "").strip() or None,
-            region=(body.region or "").strip() or None,
-            regions=regions or None,
-            maker=(body.maker or "").strip() or None,
-            prefix=(body.prefix or "").strip() or None,
-            code=(body.code or "").strip() or None,
-            codes=list(body.codes) if body.codes else None,
-            force=bool(body.force),
-            mode=(str(body.mode).strip() if body.mode else None) or None,
-            fields=list(body.fields) if body.fields is not None else None,
-            local_fields=(
-                list(body.local_fields) if body.local_fields is not None else None
-            ),
-            retry_failed=bool(body.retry_failed),
-        )
-    except RuntimeError as e:
-        raise HTTPException(status_code=409, detail=str(e)) from e
-    q = st.get("queue") or []
-    running = bool(st.get("running"))
-    tid = str(st.get("taskId") or "")
-    req_tid = (body.task_id or "").strip()
-    if running and req_tid and tid != req_tid:
-        msg = "已加入队列"
-    elif running and q:
-        msg = "已开始导出（后续任务排队中）"
-    elif running:
-        msg = "已开始导出"
-    else:
-        msg = "已加入队列"
-    return _wrap(st, msg)
-
-
-@router.get("/scrape/export/preview")
-def preview_export(
-    region: str = "",
-    regions: list[str] | None = Query(default=None),
-    maker: str = "",
-    prefix: str = "",
-    code: str = "",
-    _user: dict[str, Any] | None = Depends(get_optional_user),
-) -> dict[str, Any]:
-    region_list = [str(r).strip() for r in (regions or []) if str(r).strip()]
-    items = scrape_export.collect_targets(
-        region=region or None,
-        regions=region_list or None,
-        maker=maker or None,
-        prefix=prefix or None,
-        code=code or None,
-    )
-    return _wrap(
-        {
-            "count": len(items),
-            "sample": items[:8],
-            "libraryRoot": scrape_export.scrape_settings()["libraryRoot"],
-        }
-    )
-
-
-@router.post("/scrape/export/pause")
-def pause_export(
-    _user: dict[str, Any] = Depends(require_user),
-) -> dict[str, Any]:
-    try:
-        return _wrap(scrape_export.pause_export(), "已暂停")
-    except RuntimeError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-
-
-@router.post("/scrape/export/resume")
-def resume_export(
-    _user: dict[str, Any] = Depends(require_user),
-) -> dict[str, Any]:
-    try:
-        return _wrap(scrape_export.resume_export(), "已继续")
-    except RuntimeError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-
-
-@router.post("/scrape/export/reset-checkpoint")
-def reset_checkpoint(
-    task_id: str = Query(..., alias="taskId"),
-    _user: dict[str, Any] = Depends(require_user),
-) -> dict[str, Any]:
-    """重置任务卡时清除该任务断点，避免再次开始只续跑残留番号。"""
-    try:
-        return _wrap(scrape_export.clear_task_resume(task_id), "已清除断点")
-    except RuntimeError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-
-
-@router.post("/scrape/export/purge-task")
-def purge_task_logs(
-    task_id: str = Query(..., alias="taskId"),
-    _user: dict[str, Any] = Depends(require_user),
-) -> dict[str, Any]:
-    """删除任务卡时清理该任务的 SQLite 过程日志与结果番号。"""
-    try:
-        return _wrap(scrape_export.purge_task_logs(task_id), "已清理任务日志")
-    except RuntimeError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-
-
-@router.delete("/scrape/export")
-def clear_export(
-    task_id: str = Query(default="", alias="taskId"),
-    _user: dict[str, Any] = Depends(require_user),
-) -> dict[str, Any]:
-    """无 taskId：清空全局进度/停当前并清队列。
-    有 taskId：只停该任务（取消当前或移出队列），不影响其它排队任务。
-    """
-    tid = str(task_id or "").strip()
-    if tid:
-        try:
-            return _wrap(scrape_export.stop_export_task(tid), "已停止该任务")
-        except RuntimeError as e:
-            raise HTTPException(status_code=400, detail=str(e)) from e
-    return _wrap(scrape_export.clear_export(), "已删除")
-
-
-@router.post("/scrape/export/cancel")
-def cancel_export_task(
-    task_id: str = Query(default="", alias="taskId"),
-    keep_queue: bool = Query(default=True, alias="keepQueue"),
-    _user: dict[str, Any] = Depends(require_user),
-) -> dict[str, Any]:
-    """取消当前刮削；默认保留队列。传 taskId 时按任务隔离停止。"""
-    tid = str(task_id or "").strip()
-    try:
-        if tid:
-            return _wrap(scrape_export.stop_export_task(tid), "已停止该任务")
-        return _wrap(
-            scrape_export.cancel_export(keep_queue=bool(keep_queue)),
-            "已取消",
-        )
-    except RuntimeError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.get("/scrape/export/file")
@@ -278,22 +71,24 @@ def export_library_file(
         or Path(raw).suffix.lower() not in _EXPORT_MEDIA_EXT
     ):
         raise HTTPException(status_code=400, detail="非法路径")
-    lib = Path(scrape_export.scrape_settings()["libraryRoot"])
-    # libraryRoot 可能是相对路径
-    if not lib.is_absolute():
-        from .db import ROOT
+    from . import library_materialize as lm
 
-        lib = (ROOT / lib).resolve()
-    else:
-        lib = lib.resolve()
-    target = (lib / raw).resolve()
-    try:
-        target.relative_to(lib)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail="越界路径") from e
-    if not target.is_file():
-        raise HTTPException(status_code=404, detail="文件不存在")
-    return FileResponse(target, headers=_file_cache_headers(target))
+    base = lm.library_base()
+    makers = lm.makers_library_root()
+    candidates = [
+        makers / raw,
+        base / raw,
+        base / lm.LIBRARY_MAKERS_DIR / raw,
+    ]
+    for cand in candidates:
+        try:
+            target = cand.resolve()
+            target.relative_to(base.resolve())
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail="越界路径") from e
+        if target.is_file():
+            return FileResponse(target, headers=_file_cache_headers(target))
+    raise HTTPException(status_code=404, detail="文件不存在")
 
 
 @router.get("/scrape/export/img")
@@ -303,33 +98,26 @@ def export_remote_img(
     code: str = Query(default="", max_length=64),
     _user: dict[str, Any] | None = Depends(get_optional_user),
 ) -> Response:
-    """代理远程封面（进度预览）。前端传 u= / 可选 code。"""
+    """代理远程封面（进度预览）。与 /cover-proxy 共用 Referer / 超时策略。"""
+    _ = code
     raw = (u or url or "").strip()
     if not raw:
         raise HTTPException(status_code=400, detail="缺少图片地址")
-    parsed = urlparse(raw)
-    if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        raise HTTPException(status_code=400, detail="非法 URL")
+    safe = _safe_image_url(raw)
     try:
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            ),
-            "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
-            "Referer": f"{parsed.scheme}://{parsed.netloc}/",
-        }
-        with httpx_client(timeout=20.0) as client:
-            res = client.get(raw, headers=headers)
-            if res.status_code >= 400:
-                raise HTTPException(status_code=502, detail=f"拉取失败 {res.status_code}")
-            ctype = res.headers.get("content-type") or "image/jpeg"
-            return Response(content=res.content, media_type=ctype.split(";")[0].strip())
+        data, ctype = _fetch_bytes(safe)
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
+    return Response(
+        content=data,
+        media_type=ctype,
+        headers={
+            "Cache-Control": "private, max-age=86400",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 # ---- library materialize + browse ----

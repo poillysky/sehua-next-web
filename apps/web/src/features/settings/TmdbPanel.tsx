@@ -76,8 +76,10 @@ export function TmdbPanel({
         next.fromEnv
           ? '已保存（仍以环境变量为准）'
           : next.configured
-            ? '已保存'
-            : '已清空',
+            ? apiKey.trim()
+              ? '已保存'
+              : '未修改原有 Key'
+            : '未配置',
       );
     } catch (e) {
       setMsg(e instanceof Error ? e.message : '保存失败');
@@ -162,7 +164,7 @@ export function TmdbPanel({
           <AppFootnote>
             {fromEnv
               ? '当前优先使用环境变量 TMDB_API_KEY。'
-              : '用于标题翻译；留空保存可清空已存 Key。'}
+              : '用于标题翻译；已有 Key 时，只有输入新 Key 并保存才会替换。'}
           </AppFootnote>
           {configured && !fromEnv ? (
             <button
@@ -193,7 +195,7 @@ export function TmdbPanel({
           type="button"
           className="app-btn-primary"
           style={{ flex: 1 }}
-          disabled={busy}
+          disabled={busy || (configured && !fromEnv && !showEdit)}
           onClick={() => void onSave()}
         >
           保存

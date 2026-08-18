@@ -508,7 +508,9 @@ def run_poll_then_extract(job: dict[str, Any]) -> dict[str, Any]:
     if not cookie:
         return {"ok": False, "message": "无 Cookie", "extracted": 0}
 
-    with httpx.Client(timeout=30.0, follow_redirects=True) as client:
+    with httpx.Client(
+        timeout=30.0, follow_redirects=True, trust_env=False
+    ) as client:
         ready = _wait_until_transfer_ready(client, job)
         if not ready.get("ok"):
             return {

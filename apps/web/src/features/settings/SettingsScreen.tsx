@@ -8,7 +8,6 @@ import {
   Crop,
   Database,
   FolderTree,
-  Image as ImageIcon,
   MessagesSquare,
   Network,
   UserRound,
@@ -19,7 +18,6 @@ import { useTabNavigation } from '@/shell';
 import {
   fetchMakerFsManifest,
   fetchMakerFsStatus,
-  fetchScrapeExportStatus,
   getP115,
   getResourceDb,
   getBitmagnetDb,
@@ -33,7 +31,6 @@ import { BitmagnetDbPanel } from './BitmagnetDbPanel';
 import { P115Panel } from './P115Panel';
 import { MakerFsPanel } from './MakerFsPanel';
 import { TmdbPanel } from './TmdbPanel';
-import { ScrapePanel } from './ScrapePanel';
 import { FlareSolverrPanel } from './FlareSolverrPanel';
 import { CoverCropPanel } from './CoverCropPanel';
 import { ForumManagePanel } from './ForumManagePanel';
@@ -47,7 +44,6 @@ type Panel =
   | 'makerfs'
   | 'tmdb'
   | 'flare'
-  | 'scrape'
   | 'covercrop'
   | 'forum';
 type Tone = 'ok' | 'warn' | 'mute';
@@ -119,13 +115,6 @@ const ENTRIES: Entry[] = [
     accent: 'violet',
   },
   {
-    id: 'scrape',
-    title: '刮削端',
-    desc: '配置 · 任务 · 详情 · 数据源',
-    Icon: ImageIcon,
-    accent: 'teal',
-  },
-  {
     id: 'forum',
     title: '论坛管理',
     desc: '色花堂 · 板块地区',
@@ -143,7 +132,6 @@ const emptyMeta: Record<Exclude<Panel, 'hub'>, { text: string; tone: Tone }> = {
   covercrop: { text: '…', tone: 'mute' },
   tmdb: { text: '…', tone: 'mute' },
   flare: { text: '…', tone: 'mute' },
-  scrape: { text: '…', tone: 'mute' },
   forum: { text: '…', tone: 'mute' },
 };
 
@@ -253,28 +241,10 @@ export function SettingsScreen() {
           else if (flareUrl) setEntryStatus('flare', '过盾已配', 'ok');
           else if (proxyUrl) setEntryStatus('flare', '代理已配', 'ok');
           else setEntryStatus('flare', '未配置', 'warn');
-          setEntryStatus(
-            'scrape',
-            sc.online ? '已在线' : sc.configured ? '离线' : '未配置',
-            sc.online ? 'ok' : 'warn',
-          );
           setEntryStatus('covercrop', sc.posterCrop ? '已就绪' : '默认', 'ok');
-          try {
-            const st = await withTimeout(fetchScrapeExportStatus(), 10000);
-            if (st.running) {
-              setEntryStatus(
-                'scrape',
-                st.paused ? '已暂停' : '刮削中',
-                st.paused ? 'warn' : 'mute',
-              );
-            }
-          } catch {
-            /* ignore */
-          }
         } catch (e) {
           const f = failStatus(e);
           setEntryStatus('flare', f.text, f.tone);
-          setEntryStatus('scrape', f.text, f.tone);
           setEntryStatus('covercrop', f.text, f.tone);
         }
       })(),
@@ -383,12 +353,6 @@ export function SettingsScreen() {
         <CoverCropPanel
           onBack={() => setPanel('hub')}
           onStatus={(text, tone) => setEntryStatus('covercrop', text, tone)}
-        />
-      ) : null}
-      {panel === 'scrape' ? (
-        <ScrapePanel
-          onBack={() => setPanel('hub')}
-          onStatus={(text, tone) => setEntryStatus('scrape', text, tone)}
         />
       ) : null}
       {panel === 'forum' ? (

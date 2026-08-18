@@ -224,23 +224,27 @@ def _created_at_ms(v: Any) -> float:
 
 
 def _sort_like_search(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """旧序：BT 优先。番号格封面改走 _sort_for_prefix_cover。"""
+    """搜索类排序：sehua 主库优先，BT 只作补充。"""
     indexed = list(enumerate(rows))
 
     def key(pair: tuple[int, dict[str, Any]]) -> tuple[int, float, int]:
         i, row = pair
-        bt = 0 if _is_bt_board_fid(row.get("board_fid")) else 1
-        return bt, -_created_at_ms(row.get("created_at")), i
+        non_bt_first = 1 if _is_bt_board_fid(row.get("board_fid")) else 0
+        return non_bt_first, -_created_at_ms(row.get("created_at")), i
 
     indexed.sort(key=key)
     return [row for _, row in indexed]
 
 
 def _sort_for_prefix_cover(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """与点进番号后的默认搜索列表一致：created_at 新→旧。"""
+    """本地索引生成：sehua 主库优先，BT 只补空缺；同源内按 created_at 新→旧。"""
     indexed = list(enumerate(rows))
     indexed.sort(
-        key=lambda pair: (-_created_at_ms(pair[1].get("created_at")), pair[0])
+        key=lambda pair: (
+            1 if _is_bt_board_fid(pair[1].get("board_fid")) else 0,
+            -_created_at_ms(pair[1].get("created_at")),
+            pair[0],
+        )
     )
     return [row for _, row in indexed]
 

@@ -2,6 +2,7 @@ import type {
   MakerFsPrefixCodeItem,
   MakerFsRegionCatalog,
   MakerFsRegionSummary,
+  MakerFsRegionsOverview,
 } from '@/lib/api';
 import { makerCodeFormatMeta } from '@/lib/makerCode';
 import { prefixNote } from '@/config/av-makers';
@@ -260,6 +261,26 @@ export type MakerFsMakerGroup = {
   codeCount: number;
 };
 
+export type MakerFsPrefixCover = Pick<
+  MakerFsRegionCatalog['prefixes'][number],
+  'posterLocal' | 'posterRev' | 'coverUrl' | 'coverUrls' | 'coverCode'
+>;
+
+export function prefixHasCover(p: MakerFsPrefixCover | undefined | null): boolean {
+  if (!p) return false;
+  if (String(p.posterLocal || '').trim()) return true;
+  if (String(p.coverUrl || '').trim()) return true;
+  return (p.coverUrls || []).some((u) => Boolean(String(u || '').trim()));
+}
+
+/** 厂牌卡片封面：优先番号最多且有海报的前缀 */
+export function pickMakerGroupCover(g: MakerFsMakerGroup): MakerFsPrefixCover {
+  const ranked = [...g.prefixes].sort(
+    (a, b) => (b.codeCount || 0) - (a.codeCount || 0),
+  );
+  return ranked.find((p) => prefixHasCover(p)) || ranked[0] || {};
+}
+
 /** FC2 是个人作者产出，不是片商厂牌；索引阶段无作者名时归「未分类」。 */
 export const MAKER_FS_FC2_UNCATEGORIZED = '未分类';
 
@@ -354,7 +375,133 @@ export function groupMakerFsByMaker(
     g.prefixCount += 1;
     g.codeCount += p.codeCount ?? 0;
   }
-  return [...map.values()].sort((a, b) => a.order - b.order);
+    return [...map.values()].sort((a, b) => a.order - b.order);
+}
+
+export type CatalogFacetItem = {
+  name: string;
+  count: number;
+};
+
+const TAG_META_KEYS = new Set(
+  [
+    '系列',
+    '片商',
+    '发行',
+    '發行',
+    '发行商',
+    '發行商',
+    '发行日期',
+    '發行日期',
+    '女优',
+    '女優',
+    '女优名',
+    '女優名',
+    '演员',
+    '演員',
+    '制作',
+    '製作',
+    '导演',
+    '導演',
+    '出品',
+    '工作室',
+    '厂商',
+    '廠商',
+    'studio',
+    'maker',
+    'publisher',
+    'label',
+    'series',
+    'set',
+    'actress',
+    'actor',
+    'director',
+    '番号',
+    'id',
+    'num',
+  ].map((x) => x.toLowerCase()),
+);
+
+const SERIES_META_KEYS = new Set(['系列', 'series', 'set']);
+
+function splitTagMetaField(raw: string): { key: string; value: string } | null {
+  const s = String(raw || '').trim();
+  const m = s.match(/^(.{1,16}?)[:：]\s*(.+)$/);
+  if (!m) return null;
+  const key = m[1].trim().toLowerCase();
+  const value = m[2].trim();
+  if (!value || !TAG_META_KEYS.has(key)) return null;
+  return { key, value };
+}
+
+function foldFacetName(s: string): string {
+  return String(s || '')
+    .trim()
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[・·‧･•∙⋅\s　…]+/g, '');
+}
+
+function looksLikeSeriesTitle(name: string): boolean {
+  const folded = foldFacetName(name);
+  return folded.length >= 10 && /[\u3040-\u309f]/.test(name);
+}
+
+/** 从片商目录 catalog 聚合标签 / 系列；过滤 nfo 混入的女优、系列、片商 */
+export function aggregateCatalogFacets(
+  prefixes: MakerFsRegionCatalog['prefixes'] | undefined,
+): { tags: CatalogFacetItem[]; series: CatalogFacetItem[] } {
+  const tagBag = new Map<string, number>();
+  const seriesBag = new Map<string, number>();
+  const seriesFold = new Map<string, string>();
+  for (const p of prefixes || []) {
+    const n = Math.max(1, p.codeCount ?? 0);
+    const actorCf = new Set(
+      (p.actors || []).map((a) => foldFacetName(String(a))).filter(Boolean),
+    );
+    const seriesNames = (p.series || [])
+      .map((s) => String(s || '').trim())
+      .filter(Boolean);
+    const seriesCf = new Set(seriesNames.map((s) => foldFacetName(s)));
+    const prefixCf = foldFacetName(String(p.prefix || ''));
+    const studioCf = foldFacetName(String(p.board_name || ''));
+
+    const addSeries = (name: string) => {
+      const s = String(name || '').trim();
+      if (!s) return;
+      const cf = foldFacetName(s);
+      if (!cf) return;
+      const display = seriesFold.get(cf) || s;
+      seriesFold.set(cf, display);
+      seriesBag.set(display, (seriesBag.get(display) || 0) + n);
+    };
+    for (const s of seriesNames) addSeries(s);
+
+    for (const raw of p.tags || []) {
+      const name = String(raw || '').trim();
+      if (!name) continue;
+      const split = splitTagMetaField(name);
+      if (split) {
+        if (SERIES_META_KEYS.has(split.key)) addSeries(split.value);
+        continue;
+      }
+      const cf = foldFacetName(name);
+      if (actorCf.has(cf) || seriesCf.has(cf)) continue;
+      if (prefixCf && cf === prefixCf) continue;
+      if (studioCf && cf === studioCf) continue;
+      if (looksLikeSeriesTitle(name)) {
+        addSeries(name);
+        continue;
+      }
+      tagBag.set(name, (tagBag.get(name) || 0) + n);
+    }
+  }
+  const sort = (bag: Map<string, number>) =>
+    [...bag.entries()]
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'zh-CN'))
+      .slice(0, 800);
+  return { tags: sort(tagBag), series: sort(seriesBag) };
 }
 
 /** 本地索引目录同步完成后通知片商等界面刷新 */
@@ -363,6 +510,47 @@ export const MAKER_FS_CATALOGS_SYNCED = 'nextweb:maker-fs-catalogs-synced';
 /** 本地片库（library）物化完成后通知片商刷新 */
 export const LIBRARY_SYNCED = 'nextweb:library-synced';
 
+const libraryCatalogCache = new Map<string, MakerFsRegionCatalog>();
+let libraryRegionsCache: MakerFsRegionsOverview | null = null;
+
+export function getLibraryCatalogCache(
+  regionId: string,
+): MakerFsRegionCatalog | null {
+  const id = String(regionId || '').trim();
+  return id ? libraryCatalogCache.get(id) || null : null;
+}
+
+export function setLibraryCatalogCache(
+  regionId: string,
+  catalog: MakerFsRegionCatalog,
+) {
+  const id = String(regionId || '').trim();
+  if (id) libraryCatalogCache.set(id, catalog);
+}
+
+export function getLibraryRegionsCache(): MakerFsRegionsOverview | null {
+  return libraryRegionsCache;
+}
+
+export function setLibraryRegionsCache(data: MakerFsRegionsOverview) {
+  libraryRegionsCache = data;
+}
+
+export function clearLibraryBrowseCaches() {
+  libraryCatalogCache.clear();
+  libraryRegionsCache = null;
+}
+
+export function prefetchLibraryRegion(regionId: string) {
+  const id = String(regionId || '').trim();
+  if (!id || libraryCatalogCache.has(id)) return;
+  void import('@/lib/api').then(({ fetchLibraryRegion }) =>
+    fetchLibraryRegion(id)
+      .then((catalog) => setLibraryCatalogCache(id, catalog))
+      .catch(() => undefined),
+  );
+}
+
 export function notifyMakerFsCatalogsSynced() {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(new Event(MAKER_FS_CATALOGS_SYNCED));
@@ -370,6 +558,7 @@ export function notifyMakerFsCatalogsSynced() {
 
 export function notifyLibrarySynced() {
   if (typeof window === 'undefined') return;
+  clearLibraryBrowseCaches();
   window.dispatchEvent(new Event(LIBRARY_SYNCED));
   window.dispatchEvent(new Event(MAKER_FS_CATALOGS_SYNCED));
 }

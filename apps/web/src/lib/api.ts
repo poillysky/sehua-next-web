@@ -477,6 +477,12 @@ export async function getP115(): Promise<P115Config> {
   return ((await res.json()) as Envelope<P115Config>).data;
 }
 
+export async function getP115Status(): Promise<P115Config> {
+  const res = await apiFetch('/settings/p115/status');
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<P115Config>).data;
+}
+
 export async function putP115(body: {
   cookie?: string;
   folderCid: string;
@@ -1521,6 +1527,14 @@ export type MakerFsRegionCatalog = {
     actors?: string[];
     /** 片库聚合：刮削标签 */
     tags?: string[];
+    /** 片库聚合：系列 */
+    series?: string[];
+    /** 前缀代表作番号（卡片封面来源） */
+    coverCode?: string;
+    coverUrl?: string | null;
+    coverUrls?: string[];
+    posterLocal?: string | null;
+    posterRev?: string | null;
   }>;
 };
 
@@ -1575,6 +1589,7 @@ export type MakerFsPrefixCodeItem = {
   coverUrls?: string[] | null;
   forumTitle?: string | null;
   forumActors?: string[] | null;
+  source?: 'sehua' | 'bit';
   /** 刮削标签 */
   genres?: string[] | null;
   /** library 内刮削海报相对路径（优先展示） */
@@ -2054,10 +2069,11 @@ export type LibraryRegionFacets = {
   scanned?: number;
   reused?: number;
   updated?: number;
+  /** 片商目录 catalog 聚合女优 */
+  actors?: LibraryFacetItem[];
   tags: LibraryFacetItem[];
   series: LibraryFacetItem[];
   source?: string;
-  /** 尚无落库，需点更新 */
   empty?: boolean;
   stale?: boolean;
 };

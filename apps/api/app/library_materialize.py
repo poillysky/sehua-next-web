@@ -1,13 +1,18 @@
-"""从 maker-fs 索引物化到 scrape library 目录，并提供目录浏览。
+"""从 maker-fs 索引物化到 library，并提供片商目录浏览。
 
-结构与刮削命名一致：{category}/{studio}/{series_name}/{number}/
-  meta.json   — 本地索引物化（本模块写入）
-  scrape.json — 刮削结果（刮削模块写入，本模块不改）
-  封面.url
+library 根下两层：
+  本地索引/  — 「同步本地片库」写入；每番号仅 {番号}.strm
+  片商目录/  — mdc-ng 刮削落盘；片商页读此层
+    分区/前缀/番号/{poster.jpg, 番号.nfo, 番号.strm}
+    或 分区/厂牌/前缀/番号/
 
-同步：本地与索引路径完全对齐（补齐 + 删除多余）。
-FC2 刮削搬家产生的作者目录写入白名单，同步时不删；
-片商/定位读取时优先非「未分类」，同番号在未分类中则跳过。
+路径模板与刮削命名一致：{category}/{studio}/{series_name}/{number}
+  本地索引：…/{number}.strm（文件，非目录）
+  片商目录：…/{number}/scrape.json …
+
+同步：本地索引与 maker-fs 严格一致（全区同一逻辑，含 FC2）：
+  仅保留索引内番号对应的 {番号}.strm，其余文件/目录/文件夹一律删除。
+片商目录（刮削落盘）与本地索引分离；片商浏览仍可读片商目录。
 """
 
 from __future__ import annotations
@@ -18,6 +23,8 @@ import os
 import re
 import shutil
 import threading
+import unicodedata
+import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,10 +37,15 @@ from .scrape_metadata_optimize import normalize_actor_names
 
 log = logging.getLogger("nextweb.library")
 
+LIBRARY_INDEX_DIR = "本地索引"
+LIBRARY_MAKERS_DIR = "片商目录"
+INDEX_STRM_EXT = ".strm"
 COVER_URL_NAME = "封面.url"
 INDEX_META_FILE = "meta.json"
 SCRAPE_META_FILE = "scrape.json"
 FC2_KEEP_FILE = ".fc2-keep.json"
+_LIBRARY_RESERVED_TOP = frozenset({LIBRARY_INDEX_DIR, LIBRARY_MAKERS_DIR})
+_POSTER_NAMES = ("poster.jpg", "poster.jpeg", "poster.png", "poster.webp")
 # 本地小文件写入：并行度（IO 为主）
 _DEFAULT_MAT_WORKERS = max(4, min(12, (os.cpu_count() or 4) * 2))
 _PROGRESS_EVERY = 32
@@ -75,7 +87,7 @@ def _set_state(**kwargs: Any) -> None:
         _mat_state["updatedAt"] = _now_iso()
 
 
-def _library_root() -> Path:
+def library_base() -> Path:
     raw = scrape_export.scrape_settings()["libraryRoot"]
     lib = Path(str(raw))
     if not lib.is_absolute():
@@ -83,6 +95,115 @@ def _library_root() -> Path:
     else:
         lib = lib.resolve()
     return lib
+
+
+def library_index_root() -> Path:
+    root = library_base() / LIBRARY_INDEX_DIR
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def makers_library_root() -> Path:
+    root = library_base() / LIBRARY_MAKERS_DIR
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _merge_dir_tree(src: Path, dst: Path) -> None:
+    dst.mkdir(parents=True, exist_ok=True)
+    for item in src.iterdir():
+        target = dst / item.name
+        if item.is_dir():
+            if target.is_dir():
+                _merge_dir_tree(item, target)
+                try:
+                    item.rmdir()
+                except OSError:
+                    pass
+            else:
+                shutil.move(str(item), str(target))
+        else:
+            if target.exists():
+                try:
+                    target.unlink()
+                except OSError:
+                    pass
+            shutil.move(str(item), str(target))
+
+
+def migrate_library_layout() -> dict[str, Any]:
+    """整理 library 布局：根下仅「本地索引 / 片商目录」，片商目录下保证七区一级目录。"""
+    base = library_base()
+    makers = makers_library_root()
+    index = library_index_root()
+    labels = [scrape_naming.KIND_LABELS[kid] for kid in scrape_naming.KIND_ORDER]
+    label_set = set(labels)
+    moved: list[str] = []
+    merged: list[str] = []
+    created: list[str] = []
+    skipped: list[str] = []
+
+    try:
+        children = list(base.iterdir())
+    except OSError:
+        children = []
+
+    for p in children:
+        if not p.is_dir() or p.name.startswith("."):
+            continue
+        if p.name in _LIBRARY_RESERVED_TOP:
+            continue
+        # 仅迁移旧七区目录；其它顶层目录不动
+        if p.name not in label_set:
+            continue
+        dst = makers / p.name
+        try:
+            if not dst.exists():
+                shutil.move(str(p), str(dst))
+                moved.append(p.name)
+            else:
+                _merge_dir_tree(p, dst)
+                try:
+                    p.rmdir()
+                except OSError:
+                    skipped.append(p.name)
+                else:
+                    merged.append(p.name)
+        except OSError as e:
+            log.warning("migrate library %s -> %s failed: %s", p, dst, e)
+            skipped.append(p.name)
+
+    for name in labels:
+        dest = makers / name
+        if dest.is_dir():
+            continue
+        try:
+            dest.mkdir(parents=True, exist_ok=True)
+            created.append(name)
+        except OSError as e:
+            log.warning("ensure maker region dir %s failed: %s", dest, e)
+            skipped.append(name)
+
+    return {
+        "libraryRoot": str(base),
+        "indexRoot": str(index),
+        "makersRoot": str(makers),
+        "moved": moved,
+        "merged": merged,
+        "created": created,
+        "skipped": skipped,
+        "regions": labels,
+    }
+
+
+def _library_root() -> Path:
+    """兼容旧调用：library 根（data/library）。"""
+    return library_base()
+
+
+def _makers_root_for_browse() -> Path:
+    """片商页只读「片商目录」，目录结构：分区/厂牌/前缀/番号。"""
+    return makers_library_root()
 
 
 def _internet_shortcut(url: str) -> str:
@@ -214,12 +335,12 @@ def _is_network_scraped(meta: dict[str, Any]) -> bool:
 
 
 def _normalize_fc2_maker(maker: str, region: str) -> str:
+    """片商目录浏览/FC2 未分类跳过（仅片商目录，不参与本地索引同步）。"""
     rid = maker_fs.resolve_fs_region(region) or str(region or "").strip()
     bn = str(maker or "").strip()
     if rid != "fc2":
         return bn or "未分组"
     if bn and bn not in {"自定义", "未分组", "未知"}:
-        # plate shell → 未分类
         s = "".join(ch for ch in bn.lower() if ch not in " ·-_/=")
         if s in {"fc2", "fc2ppv", "fc2ppvfc2"} or s.startswith("fc2fc2"):
             return "未分类"
@@ -227,6 +348,34 @@ def _normalize_fc2_maker(maker: str, region: str) -> str:
             return "未分类"
         return bn
     return "未分类"
+
+
+def _sync_maker(maker: str) -> str:
+    """本地索引同步：全区统一，直接使用索引里的厂牌/作者名。"""
+    bn = str(maker or "").strip()
+    return bn or "未分组"
+
+
+def _resolve_index_strm_path(
+    library_index: Path,
+    naming: dict[str, Any],
+    *,
+    code: str,
+    meta: dict[str, Any],
+    target: dict[str, Any],
+    category: str,
+    kind: str | None = None,
+) -> Path:
+    entry_dir = scrape_naming.resolve_entry_dir(
+        library_index,
+        naming,
+        code=code,
+        meta=meta,
+        target=target,
+        category=category,
+        kind=kind,
+    )
+    return entry_dir.parent / f"{entry_dir.name}{INDEX_STRM_EXT}"
 
 
 def _write_entry(
@@ -237,10 +386,8 @@ def _write_entry(
     actor_map_enable: bool | None = None,
     actor_map_lang: str | None = None,
 ) -> str:
-    """返回 written|updated|skipped|error。
-
-    二次同步热路径：已存在且未变则只读 meta 比对，不 mkdir、不重写封面.url。
-    """
+    """本地索引：仅写入 {番号}.strm，不生成 meta.json / 封面.url。"""
+    del actor_map_enable, actor_map_lang
     rid = str(target.get("region") or "")
     code, prefix = _canonicalize_seed_identity(
         code=str(target.get("code") or ""),
@@ -252,113 +399,60 @@ def _write_entry(
     label = scrape_naming.KIND_LABELS.get(
         scrape_naming.resolve_kind(region=rid, code=code), ""
     ) or maker_fs.REGION_META.get(rid, {}).get("label") or rid
-    maker = _normalize_fc2_maker(str(target.get("maker") or ""), rid)
+    maker = _sync_maker(str(target.get("maker") or ""))
     target = {**target, "maker": maker, "prefix": prefix, "code": code}
-
-    raw_actors = target.get("forumActors")
-    actors: list[str] = []
-    if isinstance(raw_actors, list):
-        actors = normalize_actor_names(
-            [str(a) for a in raw_actors if str(a).strip()],
-            lang=actor_map_lang,
-            enable=actor_map_enable,
-        )
-
-    title = str(target.get("forumTitle") or "").strip()
-    cover_url = str(target.get("coverUrl") or "").strip()
-    cover_urls = [
-        str(u).strip()
-        for u in (target.get("coverUrls") or [])
-        if str(u).strip()
-    ]
-    if cover_url and cover_url not in cover_urls:
-        cover_urls = [cover_url, *cover_urls]
-
-    meta_seed: dict[str, Any] = {
+    kind_id = scrape_naming.resolve_kind(region=rid, code=code)
+    meta = {
         "code": code,
         "prefix": prefix,
         "maker": maker,
         "studio": maker,
         "region": rid,
-        "regionLabel": label,
-        "title": title or None,
-        # 日文正片题只放 title；titleZh 仅真正中文
-        "titleZh": title if (title and is_likely_chinese(title)) else None,
-        "actors": actors,
-        "coverUrl": cover_url or None,
-        "coverUrls": cover_urls[:6],
-        "poster": cover_url or None,
-        "source": "maker-fs",
-        "seededAt": _now_iso(),
     }
-
-    kind_id = scrape_naming.resolve_kind(region=rid, code=code)
-    entry_dir = scrape_naming.resolve_entry_dir(
-        library,
-        naming,
-        code=code,
-        meta=meta_seed,
-        target=target,
-        category=label,
-        kind=kind_id,
-    )
-    meta_path = entry_dir / INDEX_META_FILE
-    scrape_path = entry_dir / SCRAPE_META_FILE
-    url_path = entry_dir / COVER_URL_NAME
-
-    if meta_path.is_file():
-        try:
-            existing = json.loads(meta_path.read_text(encoding="utf-8"))
-        except Exception:
-            existing = {}
-        if not isinstance(existing, dict):
-            existing = {}
-
-        scraped = _is_network_scraped(existing)
-        if scraped and not scrape_path.is_file():
-            # 旧版把刮削写进 meta.json：迁到 scrape.json 后，索引文件改回种子
-            entry_dir.mkdir(parents=True, exist_ok=True)
-            try:
-                scrape_path.write_text(
-                    json.dumps(existing, ensure_ascii=False, indent=2),
-                    encoding="utf-8",
-                )
-            except Exception:
-                log.warning(
-                    "migrate scrape meta failed %s", entry_dir, exc_info=True
-                )
-
-        # 空壳索引不覆盖已有标题/封面（FC2 / FC2-PPV 同目录）
-        meta_seed = _merge_seed_preserve(existing, meta_seed)
-        prev_seeded = str(existing.get("seededAt") or "").strip()
-        if prev_seeded:
-            meta_seed["seededAt"] = prev_seeded
-
-        if not scraped and _seed_unchanged(existing, meta_seed):
-            cover = str(meta_seed.get("coverUrl") or "")
-            if cover and not url_path.is_file():
-                entry_dir.mkdir(parents=True, exist_ok=True)
-                _ensure_cover_url_file(url_path, cover)
-                return "updated"
-            return "skipped"
-
-        meta_seed["updatedAt"] = _now_iso()
-        entry_dir.mkdir(parents=True, exist_ok=True)
-        meta_path.write_text(
-            json.dumps(meta_seed, ensure_ascii=False, separators=(",", ":")),
-            encoding="utf-8",
+    try:
+        strm_path = _resolve_index_strm_path(
+            library,
+            naming,
+            code=code,
+            meta=meta,
+            target=target,
+            category=str(label),
+            kind=kind_id,
         )
-        _ensure_cover_url_file(url_path, str(meta_seed.get("coverUrl") or ""))
-        return "updated"
+        legacy_dir = scrape_naming.resolve_entry_dir(
+            library,
+            naming,
+            code=code,
+            meta=meta,
+            target=target,
+            category=str(label),
+            kind=kind_id,
+        )
+    except Exception:
+        return "error"
 
-    # 新条目
-    entry_dir.mkdir(parents=True, exist_ok=True)
-    meta_path.write_text(
-        json.dumps(meta_seed, ensure_ascii=False, separators=(",", ":")),
-        encoding="utf-8",
-    )
-    _ensure_cover_url_file(url_path, cover_url)
-    return "written"
+    body = f"{code}\n"
+    strm_path.parent.mkdir(parents=True, exist_ok=True)
+    if strm_path.is_file():
+        try:
+            prev = strm_path.read_text(encoding="utf-8")
+            if _norm_text_newlines(prev).strip() == code:
+                return "skipped"
+        except Exception:
+            pass
+        strm_path.write_text(body, encoding="utf-8", newline="\n")
+        wrote = "updated"
+    else:
+        strm_path.write_text(body, encoding="utf-8", newline="\n")
+        wrote = "written"
+
+    # 本地索引只允许 .strm；旧版番号目录一律删除
+    if legacy_dir.is_dir():
+        try:
+            shutil.rmtree(legacy_dir)
+        except OSError:
+            pass
+    return wrote
 
 
 _CODE_DIR_RE = re.compile(
@@ -454,7 +548,7 @@ def _rel_posix(library: Path, path: Path) -> str:
 
 def load_fc2_keep(library: Path | None = None) -> set[str]:
     """FC2 刮削搬家后的作者目录白名单（相对 library 的 posix 路径）。"""
-    lib = library or _library_root()
+    lib = library or makers_library_root()
     path = lib / FC2_KEEP_FILE
     if not path.is_file():
         return set()
@@ -537,9 +631,9 @@ def _expected_paths_and_codes(
     *,
     on_progress: Any | None = None,
 ) -> tuple[set[str], set[str]]:
-    """返回 (expected_codes, expected_dir_keys)。含 FC2，一律按索引规范路径。"""
+    """返回 (expected_codes, expected_strm_path_keys)。全区同一规则。"""
     codes: set[str] = set()
-    expected_dirs: set[str] = set()
+    expected_strm: set[str] = set()
     total = len(targets)
     for i, t in enumerate(targets, 1):
         rid = str(t.get("region") or "")
@@ -555,7 +649,7 @@ def _expected_paths_and_codes(
         label = scrape_naming.KIND_LABELS.get(kind_id, "") or maker_fs.REGION_META.get(
             rid, {}
         ).get("label") or rid
-        maker = _normalize_fc2_maker(str(t.get("maker") or ""), rid)
+        maker = _sync_maker(str(t.get("maker") or ""))
         meta = {
             "code": code,
             "prefix": prefix,
@@ -564,7 +658,7 @@ def _expected_paths_and_codes(
             "region": rid,
         }
         try:
-            d = scrape_naming.resolve_entry_dir(
+            sp = _resolve_index_strm_path(
                 library,
                 naming,
                 code=code,
@@ -573,12 +667,12 @@ def _expected_paths_and_codes(
                 category=str(label),
                 kind=kind_id,
             )
-            expected_dirs.add(_path_key(d))
+            expected_strm.add(_path_key(sp))
         except Exception:
             pass
         if on_progress and (i == 1 or i % 2048 == 0 or i >= total):
             on_progress(i, total)
-    return codes, expected_dirs
+    return codes, expected_strm
 
 
 def _prune_empty_parents(path: Path, stop_at: Path) -> None:
@@ -618,50 +712,95 @@ def prune_library_to_index(
     naming: dict[str, Any],
     targets: list[dict[str, Any]],
     *,
+    region: str | None = None,
     on_progress: Any | None = None,
 ) -> dict[str, int]:
-    """与索引路径完全对齐；FC2 刮削白名单目录保留不删。"""
+    """本地索引与 maker-fs 严格对齐：仅保留预期 .strm，其余文件/目录全部删除。"""
 
     def _build_prog(done: int, total: int) -> None:
         if on_progress:
             on_progress("build", done, total, 0, 0)
 
-    codes, expected_dirs = _expected_paths_and_codes(
+    _codes, expected_strm = _expected_paths_and_codes(
         library, naming, targets, on_progress=_build_prog
     )
-    keep = load_fc2_keep(library)
+
+    prune_root = library
+    region_key = str(region or "").strip()
+    if region_key:
+        rid = maker_fs.resolve_fs_region(region_key) or region_key
+        label = scrape_naming.KIND_LABELS.get(rid)
+        if label:
+            prune_root = library / label
+
     removed = 0
     kept = 0
     scanned = 0
 
-    def _rm(entry: Path) -> None:
+    def _rm_file(p: Path) -> None:
         nonlocal removed
         try:
-            parent = entry.parent
-            shutil.rmtree(entry)
+            parent = p.parent
+            p.unlink(missing_ok=True)
             removed += 1
             _prune_empty_parents(parent, library)
         except OSError as e:
-            log.warning("prune remove %s failed: %s", entry, e)
+            log.warning("prune remove file %s failed: %s", p, e)
 
-    for entry in _iter_library_entry_dirs(library):
+    def _rm_tree(p: Path) -> None:
+        nonlocal removed
+        try:
+            parent = p.parent
+            shutil.rmtree(p)
+            removed += 1
+            _prune_empty_parents(parent, library)
+        except OSError as e:
+            log.warning("prune remove tree %s failed: %s", p, e)
+
+    if not prune_root.is_dir():
+        return {"removed": 0, "kept": 0, "scanned": 0}
+
+    try:
+        all_paths = list(prune_root.rglob("*"))
+    except OSError:
+        all_paths = []
+
+    for p in all_paths:
+        if not p.is_file():
+            continue
         scanned += 1
-        key = _path_key(entry)
-        if key in expected_dirs:
+        key = _path_key(p)
+        if key in expected_strm and p.suffix.lower() == INDEX_STRM_EXT:
             kept += 1
         else:
-            code = _read_entry_code(entry, prefer_name=True)
-            if not code:
-                if on_progress and scanned % 512 == 0:
-                    on_progress("scan", scanned, len(targets), kept, removed)
-                continue
-            # 索引仍有此番号，且目录在刮削白名单（作者夹）→ 保留
-            if code in codes and is_fc2_keep_path(library, entry, keep=keep):
-                kept += 1
-            else:
-                _rm(entry)
-        if on_progress and (scanned == 1 or scanned % 512 == 0):
+            _rm_file(p)
+        if on_progress and scanned % 512 == 0:
             on_progress("scan", scanned, len(targets), kept, removed)
+
+    try:
+        all_dirs = sorted(
+            [p for p in prune_root.rglob("*") if p.is_dir()],
+            key=lambda x: len(x.parts),
+            reverse=True,
+        )
+    except OSError:
+        all_dirs = []
+
+    for d in all_dirs:
+        scanned += 1
+        if _is_entry_dir(d):
+            _rm_tree(d)
+            continue
+        try:
+            next(d.iterdir())
+        except StopIteration:
+            try:
+                d.rmdir()
+                removed += 1
+            except OSError:
+                pass
+        except OSError:
+            pass
 
     if on_progress:
         on_progress("scan", scanned, len(targets), kept, removed)
@@ -669,24 +808,18 @@ def prune_library_to_index(
 
 
 def _collect_targets(region: str | None = None) -> list[dict[str, Any]]:
-    """收集待物化目标。
-
-    collect_targets 已按 区|前缀|番号 去重，且落盘与索引一一对应；
-    rekey=False 跳过全库重算键，避免点击后干等十余秒才见进度。
-    include_fill=True：digit_pad 前缀按 fillFrom..fillTo 建空洞目录
-    （如 SONE-014 不在 covers 也会建空文件夹，与片商列表 999 一致）。
-    """
+    """收集待物化目标：仅 maker-fs 索引 covers 内真实条目，不含空洞补全。"""
     return scrape_export.collect_targets(
         region=region or None,
         rekey=False,
-        include_fill=True,
+        include_fill=False,
     )
 
 
 def _dedupe_targets_by_entry_path(targets: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """同一落盘目录只保留信息最全的一条（保留供测试/特殊调用；热路径默认不用）。"""
     naming = scrape_naming.fixed_naming()
-    library = _library_root()
+    library = library_index_root()
     best: dict[str, tuple[tuple[int, int, int, int], dict[str, Any]]] = {}
     order: list[str] = []
     for t in targets:
@@ -698,10 +831,11 @@ def _dedupe_targets_by_entry_path(targets: list[dict[str, Any]]) -> list[dict[st
         )
         if not code:
             continue
-        maker = _normalize_fc2_maker(str(t.get("maker") or ""), rid)
+        maker = _sync_maker(str(t.get("maker") or ""))
         label = scrape_naming.KIND_LABELS.get(
             scrape_naming.resolve_kind(region=rid, code=code), ""
         ) or maker_fs.REGION_META.get(rid, {}).get("label") or rid
+        kind_id = scrape_naming.resolve_kind(region=rid, code=code)
         meta = {
             "code": code,
             "prefix": prefix,
@@ -713,13 +847,14 @@ def _dedupe_targets_by_entry_path(targets: list[dict[str, Any]]) -> list[dict[st
             "actors": t.get("forumActors") if isinstance(t.get("forumActors"), list) else [],
         }
         try:
-            d = scrape_naming.resolve_entry_dir(
+            d = _resolve_index_strm_path(
                 library,
                 naming,
                 code=code,
                 meta=meta,
                 target={**t, "maker": maker, "prefix": prefix, "code": code},
                 category=str(label),
+                kind=kind_id,
             )
             key = _path_key(d)
         except Exception:
@@ -789,6 +924,7 @@ def materialize_library(
         raise RuntimeError("本地片库同步正在进行中")
     try:
         region_key = (region or "").strip() or ""
+        migrate_library_layout()
         # 立刻刷新状态，避免收集索引时 UI 长时间停在 queued / 0
         _set_state(
             running=True,
@@ -809,7 +945,7 @@ def materialize_library(
         if not targets:
             raise ValueError("没有可同步的番号，请先增量/全量扫库生成本地索引")
 
-        library = _library_root()
+        library = library_index_root()
         library.mkdir(parents=True, exist_ok=True)
         cfg = scrape_export.scrape_settings()
         naming = scrape_naming.fixed_naming()
@@ -932,7 +1068,11 @@ def materialize_library(
                     )
 
             pruned = prune_library_to_index(
-                library, naming, targets, on_progress=_prune_prog
+                library,
+                naming,
+                targets,
+                region=region_key or None,
+                on_progress=_prune_prog,
             )
             removed = int(pruned.get("removed") or 0)
         except Exception as e:
@@ -950,21 +1090,6 @@ def materialize_library(
             errors=errors,
             currentCode="",
         )
-        try:
-            _write_catalogs_from_targets(targets)
-            # 同步刷新标签/系列分类索引（失败不影响物化成功）
-            try:
-                seen_rids = {
-                    str(t.get("region") or "").strip()
-                    for t in targets
-                    if str(t.get("region") or "").strip()
-                }
-                for rid in seen_rids:
-                    sync_region_facets(rid, force=False)
-            except Exception:
-                log.warning("facets rebuild after materialize failed", exc_info=True)
-        except Exception as e:
-            log.warning("catalog cache after materialize: %s", e)
         return materialize_status()
     except Exception as e:
         _set_state(
@@ -1119,11 +1244,302 @@ def _count_dirs_fast(path: Path) -> int:
     return n
 
 
+def _xml_text(el: ET.Element | None) -> str:
+    if el is None:
+        return ""
+    return str(el.text or "").strip()
+
+
+# mdc-ng 常把片商/系列/女优再写进 <genre>/<tag>，例如「发行: S1 NO.1 STYLE」
+_TAG_META_KEYS = frozenset(
+    x.casefold()
+    for x in (
+        "系列",
+        "片商",
+        "发行",
+        "發行",
+        "发行商",
+        "發行商",
+        "发行日期",
+        "發行日期",
+        "女优",
+        "女優",
+        "女优名",
+        "女優名",
+        "演员",
+        "演員",
+        "制作",
+        "製作",
+        "导演",
+        "導演",
+        "出品",
+        "工作室",
+        "厂商",
+        "廠商",
+        "studio",
+        "maker",
+        "publisher",
+        "label",
+        "series",
+        "set",
+        "actress",
+        "actor",
+        "director",
+        "番号",
+        "id",
+        "num",
+    )
+)
+_SERIES_META_KEYS = frozenset({"系列", "series", "set"})
+_TAG_META_SPLIT_RE = re.compile(r"^(.{1,16}?)[:：]\s*(.+)$")
+_HIRA_RE = re.compile(r"[\u3040-\u309f]")
+_FACET_PUNCT_RE = re.compile(r"[・·‧･•∙⋅\s　…]+")
+
+
+def _fold_facet_name(s: str) -> str:
+    """比较用：统一中点/空白，避免系列名「·」和「・」对不上。"""
+    t = unicodedata.normalize("NFKC", str(s or "").strip()).casefold()
+    t = _FACET_PUNCT_RE.sub("", t)
+    return t
+
+
+def _split_tag_meta_field(raw: str) -> tuple[str, str] | None:
+    """「系列: 新人NO.1 STYLE」→ ('系列', '新人NO.1 STYLE')；普通标签返回 None。"""
+    s = str(raw or "").strip()
+    if not s:
+        return None
+    m = _TAG_META_SPLIT_RE.match(s)
+    if not m:
+        return None
+    key = m.group(1).strip().casefold()
+    val = m.group(2).strip()
+    if not val or key not in _TAG_META_KEYS:
+        return None
+    return key, val
+
+
+def _sanitize_genre_tags(
+    tags: list[str] | None,
+    *,
+    actors: list[str] | None = None,
+    series: list[str] | None = None,
+    studio: str = "",
+    code: str = "",
+    prefix: str = "",
+) -> tuple[list[str], list[str]]:
+    """去掉混进标签的系列、女优、片商、前缀。返回 (干净标签, 从「系列:」拆出的系列)。"""
+    actor_cf = {_fold_facet_name(a) for a in (actors or []) if str(a).strip()}
+    actor_cf.discard("")
+    series_cf = {_fold_facet_name(s) for s in (series or []) if str(s).strip()}
+    series_cf.discard("")
+    studio_cf = _fold_facet_name(studio)
+    code_u = str(code or "").strip().upper().replace("_", "-")
+    prefix_cf = _fold_facet_name(prefix)
+    if not prefix_cf and code_u:
+        prefix_cf = _fold_facet_name(
+            code_u.split("-", 1)[0] if "-" in code_u else code_u
+        )
+
+    extra_series: list[str] = []
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in tags or []:
+        t = str(raw or "").strip()
+        if not t:
+            continue
+        split = _split_tag_meta_field(t)
+        if split is not None:
+            key, val = split
+            if key in _SERIES_META_KEYS:
+                extra_series.append(val)
+            continue
+        folded = _fold_facet_name(t)
+        if not folded or folded in seen:
+            continue
+        if folded in actor_cf or folded in series_cf:
+            continue
+        if studio_cf and folded == studio_cf:
+            continue
+        if prefix_cf and folded == prefix_cf:
+            continue
+        if code_u and t.upper().replace("_", "-") == code_u:
+            continue
+        # 平假名长句基本是系列名被写进 genre，不是标签
+        if len(folded) >= 10 and _HIRA_RE.search(t):
+            extra_series.append(t)
+            continue
+        seen.add(folded)
+        out.append(t)
+    return out, extra_series
+
+
+def _normalize_plot_text(raw: str) -> str:
+    """mdc-ng 简介常含 <br>。"""
+    s = str(raw or "").strip()
+    if not s:
+        return ""
+    s = re.sub(r"<br\s*/?>", " ", s, flags=re.I)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
+def _find_nfo_file(entry_dir: Path) -> Path | None:
+    direct = entry_dir / f"{entry_dir.name}.nfo"
+    if direct.is_file():
+        return direct
+    try:
+        for p in entry_dir.iterdir():
+            if p.is_file() and p.suffix.lower() == ".nfo":
+                return p
+    except OSError:
+        return None
+    return None
+
+
+def _read_nfo(entry_dir: Path) -> dict[str, Any]:
+    """解析 mdc-ng / Kodi NFO。"""
+    path = _find_nfo_file(entry_dir)
+    if path is None:
+        return {}
+    try:
+        text = path.read_bytes().decode("utf-8-sig")
+        root = ET.fromstring(text)
+    except Exception:
+        return {}
+    actors: list[str] = []
+    for node in root.findall("actor"):
+        name = _xml_text(node.find("name"))
+        if name:
+            actors.append(name)
+    raw_genres = [_xml_text(g) for g in root.findall("genre") if _xml_text(g)]
+    raw_tags = [_xml_text(t) for t in root.findall("tag") if _xml_text(t)]
+    merged: list[str] = []
+    seen_g: set[str] = set()
+    for t in raw_genres + raw_tags:
+        cf = t.casefold()
+        if cf in seen_g:
+            continue
+        seen_g.add(cf)
+        merged.append(t)
+    studio = (
+        _xml_text(root.find("studio"))
+        or _xml_text(root.find("maker"))
+        or _xml_text(root.find("publisher"))
+        or _xml_text(root.find("label"))
+    )
+    title = _xml_text(root.find("title"))
+    original = _xml_text(root.find("originaltitle"))
+    series = _xml_text(root.find("set/name")) or _xml_text(root.find("set"))
+    plot = _normalize_plot_text(
+        _xml_text(root.find("plot"))
+        or _xml_text(root.find("outline"))
+        or _xml_text(root.find("originalplot"))
+    )
+    code = _xml_text(root.find("num")) or entry_dir.name
+    genres, extra_series = _sanitize_genre_tags(
+        merged,
+        actors=actors,
+        series=[series] if series else [],
+        studio=studio,
+        code=code,
+    )
+    if extra_series and not series:
+        series = extra_series[0]
+    return {
+        "code": code,
+        "title": title,
+        "originalTitle": original,
+        "studio": studio,
+        "actors": actors,
+        "genres": genres,
+        "series": series,
+        "plot": plot,
+        "cover": _xml_text(root.find("cover")),
+    }
+
+
+def _is_code_entry_dir(path: Path) -> bool:
+    """番号目录：含 poster / nfo / strm（mdc-ng 落盘）。"""
+    if not path.is_dir() or path.name.startswith("."):
+        return False
+    try:
+        with os.scandir(path) as it:
+            for e in it:
+                if not e.is_file(follow_symlinks=False):
+                    continue
+                name = e.name.lower()
+                if name in _POSTER_NAMES or name.startswith("poster."):
+                    return True
+                if name.endswith(".nfo") or name.endswith(".strm"):
+                    return True
+                if name in {"thumb.jpg", "fanart.jpg"}:
+                    return True
+    except OSError:
+        return False
+    return False
+
+
+def _list_code_entry_dirs(root: Path) -> list[str]:
+    if not root.is_dir():
+        return []
+    out: list[str] = []
+    try:
+        with os.scandir(root) as it:
+            for e in it:
+                if e.name.startswith("."):
+                    continue
+                try:
+                    if e.is_dir(follow_symlinks=False) and _is_code_entry_dir(
+                        Path(e.path)
+                    ):
+                        out.append(e.name)
+                except OSError:
+                    continue
+        out.sort(key=str.lower)
+    except OSError:
+        return []
+    return out
+
+
+def _studio_from_prefix_folder(prefix_dir: Path) -> str:
+    for name in _list_code_entry_dirs(prefix_dir)[:8]:
+        studio = str(_read_nfo(prefix_dir / name).get("studio") or "").strip()
+        if studio:
+            return studio
+    return prefix_dir.name
+
+
+def _resolve_prefix_dir(
+    region_root: Path,
+    studio: str,
+    prefix: str,
+) -> Path | None:
+    """兼容 分区/厂牌/前缀/番号 与 mdc-ng 分区/前缀/番号。"""
+    st = str(studio or "").strip()
+    pref = str(prefix or "").strip()
+    cands: list[Path] = []
+    if st and pref:
+        cands.append(region_root / st / pref)
+    if pref:
+        cands.append(region_root / pref)
+    if st:
+        cands.append(region_root / st)
+    seen: set[str] = set()
+    for cand in cands:
+        key = str(cand)
+        if key in seen:
+            continue
+        seen.add(key)
+        if cand.is_dir() and _list_code_entry_dirs(cand):
+            return cand
+    return None
+
+
 _CATALOG_NAME = ".catalog.json"
 
 
 def _region_catalog_path(label: str) -> Path:
-    return _library_root() / label / _CATALOG_NAME
+    return _makers_root_for_browse() / label / _CATALOG_NAME
 
 
 def _sort_prefixes_nav(prefixes: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1142,9 +1558,10 @@ def _sort_prefixes_nav(prefixes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     )
 
 
-_CATALOG_SEARCH_VERSION = 2
+_CATALOG_SEARCH_VERSION = 3
 _MAX_PREFIX_ACTORS = 80
 _MAX_PREFIX_TAGS = 80
+_MAX_PREFIX_SERIES = 80
 
 
 def _uniq_cap(items: list[str] | set[str], limit: int) -> list[str]:
@@ -1154,7 +1571,7 @@ def _uniq_cap(items: list[str] | set[str], limit: int) -> list[str]:
         s = str(raw or "").strip()
         if not s:
             continue
-        key = s.casefold()
+        key = _fold_facet_name(s) or s.casefold()
         if key in seen:
             continue
         seen.add(key)
@@ -1164,8 +1581,9 @@ def _uniq_cap(items: list[str] | set[str], limit: int) -> list[str]:
     return out
 
 
-def _entry_search_bits(entry_dir: Path) -> tuple[list[str], list[str]]:
-    """从 meta.json / scrape.json 抽女优与刮削标签（刮削优先）。"""
+def _entry_search_bits(entry_dir: Path) -> tuple[list[str], list[str], list[str]]:
+    """从 nfo / scrape.json / meta.json 抽女优、标签、系列。"""
+    nfo = _read_nfo(entry_dir)
     scrape = _read_json_dict(entry_dir / SCRAPE_META_FILE)
     index = _read_json_dict(entry_dir / INDEX_META_FILE)
     if not scrape and index and _meta_looks_scraped(index):
@@ -1184,25 +1602,46 @@ def _entry_search_bits(entry_dir: Path) -> tuple[list[str], list[str]]:
             raw = src.get("tags") if isinstance(src.get("tags"), list) else None
         return [str(t).strip() for t in (raw or []) if str(t).strip()]
 
-    actors = _actors(scrape) or _actors(index)
-    tags = _tags(scrape) or _tags(index)
-    return actors, tags
+    def _series(src: dict[str, Any]) -> list[str]:
+        s = str(src.get("series") or src.get("set") or "").strip()
+        return [s] if s else []
+
+    actors = _actors(nfo) or _actors(scrape) or _actors(index)
+    tags = _tags(nfo) or _tags(scrape) or _tags(index)
+    series = _series(nfo) or _series(scrape) or _series(index)
+    studio = (
+        str(nfo.get("studio") or "").strip()
+        or str(scrape.get("studio") or scrape.get("maker") or "").strip()
+        or str(index.get("studio") or "").strip()
+    )
+    code = str(nfo.get("code") or scrape.get("code") or entry_dir.name).strip()
+    tags, extra_s = _sanitize_genre_tags(
+        tags,
+        actors=actors,
+        series=series,
+        studio=studio,
+        code=code,
+    )
+    series = _uniq_cap([*series, *extra_s], _MAX_PREFIX_SERIES)
+    return actors, tags, series
 
 
 def _prefix_search_from_disk(
     root: Path,
     maker: str,
     prefix: str,
-) -> tuple[list[str], list[str]]:
-    path = root / maker / prefix
-    if not path.is_dir():
-        return [], []
+) -> tuple[list[str], list[str], list[str]]:
+    path = _resolve_prefix_dir(root, maker, prefix)
+    if path is None:
+        return [], [], []
     actors: list[str] = []
     tags: list[str] = []
+    series: list[str] = []
     seen_a: set[str] = set()
     seen_t: set[str] = set()
-    for name in _safe_list_dirs(path):
-        a_list, t_list = _entry_search_bits(path / name)
+    seen_s: set[str] = set()
+    for name in _list_code_entry_dirs(path):
+        a_list, t_list, s_list = _entry_search_bits(path / name)
         for a in a_list:
             k = a.casefold()
             if k in seen_a:
@@ -1215,9 +1654,23 @@ def _prefix_search_from_disk(
                 continue
             seen_t.add(k)
             tags.append(t)
-        if len(actors) >= _MAX_PREFIX_ACTORS and len(tags) >= _MAX_PREFIX_TAGS:
+        for s in s_list:
+            k = s.casefold()
+            if k in seen_s:
+                continue
+            seen_s.add(k)
+            series.append(s)
+        if (
+            len(actors) >= _MAX_PREFIX_ACTORS
+            and len(tags) >= _MAX_PREFIX_TAGS
+            and len(series) >= _MAX_PREFIX_SERIES
+        ):
             break
-    return actors[:_MAX_PREFIX_ACTORS], tags[:_MAX_PREFIX_TAGS]
+    return (
+        actors[:_MAX_PREFIX_ACTORS],
+        tags[:_MAX_PREFIX_TAGS],
+        series[:_MAX_PREFIX_SERIES],
+    )
 
 
 def _attach_prefix_search_fields(
@@ -1225,10 +1678,11 @@ def _attach_prefix_search_fields(
     *,
     actors_map: dict[tuple[str, str], list[str]] | None = None,
     tags_map: dict[tuple[str, str], list[str]] | None = None,
+    series_map: dict[tuple[str, str], list[str]] | None = None,
     library_root: Path | None = None,
     region_label: str | None = None,
 ) -> list[dict[str, Any]]:
-    """给前缀挂 actors / tags，供片商本页筛选女优与刮削标签。"""
+    """给前缀挂 actors / tags / series，供片商本页筛选与索引。"""
     out: list[dict[str, Any]] = []
     root = None
     if library_root is not None and region_label:
@@ -1242,14 +1696,35 @@ def _attach_prefix_search_fields(
         key = (maker, pref)
         actors = list((actors_map or {}).get(key) or [])
         tags = list((tags_map or {}).get(key) or [])
-        if (not actors or not tags) and root and pref:
-            disk_a, disk_t = _prefix_search_from_disk(root, maker, pref)
+        series = list((series_map or {}).get(key) or p.get("series") or [])
+        if (not actors or not tags or not series) and root and pref:
+            disk_a, disk_t, disk_s = _prefix_search_from_disk(root, maker, pref)
             if not actors:
                 actors = disk_a
             if not tags:
                 tags = disk_t
+            if not series:
+                series = disk_s
+        tags, extra_s = _sanitize_genre_tags(
+            tags,
+            actors=actors,
+            series=series,
+            studio=maker,
+            prefix=pref,
+        )
+        series = _uniq_cap([*series, *extra_s], _MAX_PREFIX_SERIES)
         p["actors"] = _uniq_cap(actors, _MAX_PREFIX_ACTORS)
         p["tags"] = _uniq_cap(tags, _MAX_PREFIX_TAGS)
+        p["series"] = series
+        if (
+            not str(p.get("posterLocal") or "").strip()
+            and not str(p.get("coverUrl") or "").strip()
+            and root
+            and pref
+        ):
+            path = _resolve_prefix_dir(root, maker, pref)
+            if path is not None:
+                p.update(_prefix_cover_from_disk(path))
         out.append(p)
     return out
 
@@ -1314,6 +1789,8 @@ def write_region_catalog_cache(
             json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
             encoding="utf-8",
         )
+        with _catalog_mem_lock:
+            _catalog_mem.pop(rid, None)
     except OSError as e:
         log.warning("write catalog cache %s: %s", rid, e)
     return payload
@@ -1338,12 +1815,66 @@ def _catalog_payload_same(a: dict[str, Any], b: dict[str, Any]) -> bool:
     return True
 
 
+_catalog_mem: dict[str, tuple[int, dict[str, Any]]] = {}
+_catalog_mem_lock = threading.Lock()
+
+
+def read_region_catalog_cache(region_id: str) -> dict[str, Any] | None:
+    """读分区 .catalog.json；有效则免扫盘（片商各级页首屏）。"""
+    rid = maker_fs.resolve_fs_region(region_id) or str(region_id or "").strip()
+    if rid not in scrape_naming.KIND_LABELS:
+        return None
+    label = scrape_naming.KIND_LABELS[rid]
+    path = _region_catalog_path(label)
+    if not path.is_file():
+        return None
+    try:
+        mtime_ns = int(path.stat().st_mtime_ns)
+    except OSError:
+        return None
+    with _catalog_mem_lock:
+        hit = _catalog_mem.get(rid)
+        if hit and hit[0] == mtime_ns:
+            return dict(hit[1])
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    if int(data.get("version") or 0) < _CATALOG_SEARCH_VERSION:
+        return None
+    if not _catalog_has_search_fields(data):
+        return None
+    with _catalog_mem_lock:
+        _catalog_mem[rid] = (mtime_ns, data)
+    return data
+
+
+def _region_summary_from_catalog(
+    kid: str,
+    label: str,
+    cached: dict[str, Any],
+) -> dict[str, Any]:
+    meta = maker_fs.REGION_META.get(kid) or {}
+    return {
+        "id": kid,
+        "label": label,
+        "dbRegion": cached.get("dbRegion") or meta.get("db_region") or kid,
+        "navPath": cached.get("navPath") or meta.get("navPath") or label,
+        "prefixCount": int(cached.get("prefixCount") or 0),
+        "makerCount": int(cached.get("makerCount") or 0),
+        "codeCount": int(cached.get("codeCount") or 0),
+    }
+
+
 def _write_catalogs_from_targets(targets: list[dict[str, Any]]) -> None:
     """按物化目标聚合各区 prefix 计数并落盘。"""
     buckets: dict[str, dict[tuple[str, str], int]] = {}
     actors_bags: dict[str, dict[tuple[str, str], list[str]]] = {}
     tags_bags: dict[str, dict[tuple[str, str], list[str]]] = {}
-    lib = _library_root()
+    series_bags: dict[str, dict[tuple[str, str], list[str]]] = {}
+    lib = _makers_root_for_browse()
     naming = scrape_naming.fixed_naming()
     for t in targets:
         rid = str(t.get("region") or "").strip()
@@ -1382,9 +1913,11 @@ def _write_catalogs_from_targets(targets: list[dict[str, Any]]) -> None:
                     category=label,
                     kind=kind_id,
                 )
-                _, tags = _entry_search_bits(entry)
+                _, tags, series = _entry_search_bits(entry)
                 if tags:
                     tags_bags.setdefault(rid, {}).setdefault(key, []).extend(tags)
+                if series:
+                    series_bags.setdefault(rid, {}).setdefault(key, []).extend(series)
         except Exception:
             pass
 
@@ -1410,6 +1943,10 @@ def _write_catalogs_from_targets(targets: list[dict[str, Any]]) -> None:
                 k: _uniq_cap(v, _MAX_PREFIX_TAGS)
                 for k, v in (tags_bags.get(rid) or {}).items()
             },
+            series_map={
+                k: _uniq_cap(v, _MAX_PREFIX_SERIES)
+                for k, v in (series_bags.get(rid) or {}).items()
+            },
             library_root=lib,
             region_label=label,
         )
@@ -1417,55 +1954,62 @@ def _write_catalogs_from_targets(targets: list[dict[str, Any]]) -> None:
 
 
 def _scan_region_prefixes(root: Path, label: str) -> list[dict[str, Any]]:
+    """扫描片商目录：分区/前缀/番号 或 分区/厂牌/前缀/番号。"""
     prefixes: list[dict[str, Any]] = []
-    for studio in _safe_list_dirs(root):
-        for pref in _safe_list_dirs(root / studio):
+    if not root.is_dir():
+        return prefixes
+    for l2 in _safe_list_dirs(root):
+        p2 = root / l2
+        codes2 = _list_code_entry_dirs(p2)
+        if codes2:
+            studio = _studio_from_prefix_folder(p2)
             prefixes.append(
                 {
-                    "prefix": pref,
-                    "name": f"{studio} · {pref}",
+                    "prefix": l2,
+                    "name": f"{studio} · {l2}",
                     "board_name": studio,
-                    "codeCount": _count_dirs_fast(root / studio / pref),
-                    "path": [label, studio, pref],
+                    "codeCount": len(codes2),
+                    "path": [label, l2],
+                    **_prefix_cover_from_disk(p2, codes2),
+                }
+            )
+            continue
+        for l3 in _safe_list_dirs(p2):
+            p3 = p2 / l3
+            codes3 = _list_code_entry_dirs(p3)
+            if not codes3:
+                continue
+            prefixes.append(
+                {
+                    "prefix": l3,
+                    "name": f"{l2} · {l3}",
+                    "board_name": l2,
+                    "codeCount": len(codes3),
+                    "path": [label, l2, l3],
+                    **_prefix_cover_from_disk(p3, codes3),
                 }
             )
     return prefixes
 
 
 def browse_regions() -> dict[str, Any]:
-    lib = _library_root()
+    try:
+        migrate_library_layout()
+    except Exception:
+        log.debug("browse migrate_library_layout failed", exc_info=True)
+    lib = _makers_root_for_browse()
     regions: list[dict[str, Any]] = []
     for kid in scrape_naming.KIND_ORDER:
         label = scrape_naming.KIND_LABELS[kid]
+        cached = read_region_catalog_cache(kid)
+        if cached:
+            regions.append(_region_summary_from_catalog(kid, label, cached))
+            continue
         root = lib / label
-        cache_path = root / _CATALOG_NAME
-        if cache_path.is_file():
-            try:
-                cached = json.loads(cache_path.read_text(encoding="utf-8"))
-                if isinstance(cached, dict) and cached.get("id"):
-                    regions.append(
-                        {
-                            "id": kid,
-                            "label": label,
-                            "dbRegion": cached.get("dbRegion") or kid,
-                            "navPath": cached.get("navPath") or label,
-                            "prefixCount": int(cached.get("prefixCount") or 0),
-                            "makerCount": int(cached.get("makerCount") or 0),
-                            "codeCount": int(cached.get("codeCount") or 0),
-                        }
-                    )
-                    continue
-            except Exception:
-                pass
-        studios = _safe_list_dirs(root) if root.is_dir() else []
-        maker_count = len(studios)
-        prefix_count = 0
-        code_count = 0
-        for st in studios:
-            prefs = _safe_list_dirs(root / st)
-            prefix_count += len(prefs)
-            for pf in prefs:
-                code_count += _count_dirs_fast(root / st / pf)
+        scanned = _scan_region_prefixes(root, label) if root.is_dir() else []
+        maker_count = len({str(p.get("board_name") or "") for p in scanned})
+        prefix_count = len(scanned)
+        code_count = sum(int(p.get("codeCount") or 0) for p in scanned)
         meta = maker_fs.REGION_META.get(kid) or {}
         regions.append(
             {
@@ -1482,7 +2026,9 @@ def browse_regions() -> dict[str, Any]:
     return {
         "version": 1,
         "ready": ready,
-        "libraryRoot": str(lib),
+        "libraryRoot": str(library_base()),
+        "indexRoot": str(library_index_root()),
+        "makersRoot": str(makers_library_root()),
         "regionCount": len(regions),
         "regions": regions,
         "updatedAt": _now_iso(),
@@ -1493,25 +2039,12 @@ def browse_region(region_id: str) -> dict[str, Any] | None:
     rid = maker_fs.resolve_fs_region(region_id) or str(region_id or "").strip()
     if rid not in scrape_naming.KIND_LABELS:
         return None
+    cached = read_region_catalog_cache(rid)
+    if cached:
+        return cached
     label = scrape_naming.KIND_LABELS[rid]
-    lib = _library_root()
+    lib = _makers_root_for_browse()
     root = lib / label
-    cache_path = root / _CATALOG_NAME
-    if cache_path.is_file():
-        try:
-            cached = json.loads(cache_path.read_text(encoding="utf-8"))
-            if isinstance(cached, dict) and isinstance(cached.get("prefixes"), list):
-                if _catalog_has_search_fields(cached):
-                    return cached
-                # 旧缓存无女优/标签：补齐后写回，供片商本页筛选
-                enriched = _attach_prefix_search_fields(
-                    [p for p in cached["prefixes"] if isinstance(p, dict)],
-                    library_root=lib,
-                    region_label=label,
-                )
-                return write_region_catalog_cache(rid, enriched)
-        except Exception:
-            pass
     prefixes = _scan_region_prefixes(root, label) if root.is_dir() else []
     prefixes = _attach_prefix_search_fields(
         prefixes,
@@ -1541,6 +2074,65 @@ def _parse_cover_url_file(path: Path) -> str:
     return ""
 
 
+def _poster_name_in_entry(entry_dir: Path, code_name: str) -> str | None:
+    for cand in (*_POSTER_NAMES, f"{code_name}-poster.jpg"):
+        try:
+            if (entry_dir / cand).is_file():
+                return cand
+        except OSError:
+            continue
+    return None
+
+
+def _prefix_cover_from_disk(
+    prefix_dir: Path,
+    names: list[str] | None = None,
+) -> dict[str, Any]:
+    """取前缀下最新/最大番号的本地海报，供厂牌/前缀卡片。"""
+    if not prefix_dir.is_dir():
+        return {}
+    try:
+        lib = _makers_root_for_browse().resolve()
+    except OSError:
+        return {}
+    ordered = sorted(names or _list_code_entry_dirs(prefix_dir), key=_dir_name_sort_key)
+    pending_url: dict[str, Any] = {}
+    for name in ordered[:32]:
+        entry = prefix_dir / name
+        poster_name = _poster_name_in_entry(entry, name)
+        cover_url = _parse_cover_url_file(entry / COVER_URL_NAME)
+        if not poster_name:
+            if cover_url and not pending_url:
+                pending_url = {
+                    "coverCode": str(name).strip().upper(),
+                    "coverUrl": cover_url,
+                    "coverUrls": [cover_url],
+                }
+            continue
+        poster_path = entry / poster_name
+        try:
+            rel = entry.resolve().relative_to(lib).as_posix()
+            poster_local = f"{rel}/{poster_name}"
+        except Exception:
+            continue
+        poster_rev = ""
+        try:
+            st = poster_path.stat()
+            poster_rev = f"{int(st.st_mtime_ns)}-{int(st.st_size)}"
+        except OSError:
+            poster_rev = ""
+        out: dict[str, Any] = {
+            "coverCode": str(name).strip().upper(),
+            "posterLocal": poster_local,
+            "posterRev": poster_rev or None,
+        }
+        if cover_url:
+            out["coverUrl"] = cover_url
+            out["coverUrls"] = [cover_url]
+        return out
+    return pending_url
+
+
 def _read_json_dict(path: Path) -> dict[str, Any]:
     if not path.is_file():
         return {}
@@ -1556,33 +2148,27 @@ def _meta_looks_scraped(meta: dict[str, Any]) -> bool:
 
 
 def _read_meta_summary(entry_dir: Path) -> dict[str, Any] | None:
-    """片库条目摘要：有刮削数据优先用刮削，没有再用索引物化。
-
-    - scrape.json 存在 → 刮削为主
-    - 旧版刮削写在 meta.json → 仍当刮削读
-    - 否则用索引 meta.json / 封面.url
-    字段级：标题/女优/封面刮削有值用刮削，缺了回退索引（不合并写盘）。
-    """
+    """片库条目摘要：nfo + poster 优先（mdc-ng），其次 scrape.json / meta.json。"""
     scrape_path = entry_dir / SCRAPE_META_FILE
     meta_path = entry_dir / INDEX_META_FILE
     url_path = entry_dir / COVER_URL_NAME
     shortcut = _parse_cover_url_file(url_path)
+    nfo = _read_nfo(entry_dir)
 
     index_data = _read_json_dict(meta_path)
     scrape_data = _read_json_dict(scrape_path)
     if not scrape_data and index_data and _meta_looks_scraped(index_data):
-        # 旧目录：刮削还在 meta.json，索引种子尚未拆分
         scrape_data = index_data
         index_data = {}
 
+    has_poster = any((entry_dir / cand).is_file() for cand in _POSTER_NAMES)
     if (
-        not scrape_data
+        not nfo
+        and not scrape_data
         and not index_data
         and not shortcut
-        and not any(
-            (entry_dir / cand).is_file()
-            for cand in ("poster.jpg", "poster.jpeg", "poster.png", "poster.webp")
-        )
+        and not has_poster
+        and not _find_nfo_file(entry_dir)
     ):
         return None
 
@@ -1593,8 +2179,8 @@ def _read_meta_summary(entry_dir: Path) -> dict[str, Any] | None:
                 return s
         return None
 
-    def _pick_actors(primary: dict[str, Any], fallback: dict[str, Any]) -> list[str] | None:
-        for src in (primary, fallback):
+    def _pick_actors(*srcs: dict[str, Any]) -> list[str] | None:
+        for src in srcs:
             raw = src.get("actors") if isinstance(src.get("actors"), list) else None
             if not raw:
                 raw = src.get("actress") if isinstance(src.get("actress"), list) else None
@@ -1603,8 +2189,8 @@ def _read_meta_summary(entry_dir: Path) -> dict[str, Any] | None:
                 return cleaned
         return None
 
-    def _pick_tags(primary: dict[str, Any], fallback: dict[str, Any]) -> list[str] | None:
-        for src in (primary, fallback):
+    def _pick_tags(*srcs: dict[str, Any]) -> list[str] | None:
+        for src in srcs:
             raw = src.get("genres") if isinstance(src.get("genres"), list) else None
             if not raw:
                 raw = src.get("tags") if isinstance(src.get("tags"), list) else None
@@ -1614,6 +2200,7 @@ def _read_meta_summary(entry_dir: Path) -> dict[str, Any] | None:
         return None
 
     code = _pick_str(
+        nfo.get("code"),
         scrape_data.get("code"),
         index_data.get("code"),
         entry_dir.name,
@@ -1621,15 +2208,57 @@ def _read_meta_summary(entry_dir: Path) -> dict[str, Any] | None:
     code = str(code or entry_dir.name).strip().upper()
 
     title = _pick_str(
+        nfo.get("title"),
         scrape_data.get("titleZh"),
         scrape_data.get("title"),
         index_data.get("titleZh"),
         index_data.get("title"),
     )
-    actors = _pick_actors(scrape_data, index_data)
-    tags = _pick_tags(scrape_data, index_data)
+    original_title = _pick_str(
+        nfo.get("originalTitle"),
+        scrape_data.get("originalTitle"),
+        index_data.get("originalTitle"),
+    )
+    actors = _pick_actors(nfo, scrape_data, index_data)
+    tags = _pick_tags(nfo, scrape_data, index_data) or []
+    series = _pick_str(
+        nfo.get("series"),
+        scrape_data.get("series"),
+        index_data.get("series"),
+        scrape_data.get("set"),
+    )
+    studio = _pick_str(
+        nfo.get("studio"),
+        scrape_data.get("studio"),
+        index_data.get("studio"),
+        scrape_data.get("maker"),
+    )
+    tags, extra_s = _sanitize_genre_tags(
+        tags,
+        actors=actors or [],
+        series=[series] if series else [],
+        studio=studio or "",
+        code=code,
+    )
+    if extra_s and not series:
+        series = extra_s[0]
+    plot = _normalize_plot_text(
+        _pick_str(
+            nfo.get("plot"),
+            scrape_data.get("plot"),
+            scrape_data.get("outline"),
+            index_data.get("plot"),
+            index_data.get("outline"),
+            scrape_data.get("originalplot"),
+            scrape_data.get("originalPlot"),
+            index_data.get("originalplot"),
+            index_data.get("originalPlot"),
+        )
+        or ""
+    )
 
     cover = _pick_str(
+        nfo.get("cover"),
         scrape_data.get("coverUrl"),
         scrape_data.get("poster"),
         index_data.get("coverUrl"),
@@ -1663,7 +2292,7 @@ def _read_meta_summary(entry_dir: Path) -> dict[str, Any] | None:
     if poster_name:
         poster_path = entry_dir / poster_name
         try:
-            lib = _library_root().resolve()
+            lib = _makers_root_for_browse().resolve()
             rel = entry_dir.resolve().relative_to(lib).as_posix()
             poster_local = f"{rel}/{poster_name}"
         except Exception:
@@ -1674,15 +2303,19 @@ def _read_meta_summary(entry_dir: Path) -> dict[str, Any] | None:
         except OSError:
             poster_rev = ""
 
-    scraped = bool(scrape_path.is_file()) or bool(scrape_data)
+    scraped = bool(_find_nfo_file(entry_dir)) or bool(scrape_path.is_file()) or bool(scrape_data)
 
     return {
         "code": code,
         "coverUrl": cover,
         "coverUrls": urls[:8],
         "forumTitle": title,
+        "originalTitle": original_title,
         "forumActors": actors,
         "genres": tags,
+        "series": series,
+        "studio": studio,
+        "plot": plot,
         "posterFile": poster_name,
         "posterLocal": poster_local or None,
         "posterRev": poster_rev or None,
@@ -1820,26 +2453,19 @@ _browse_names_lock = threading.Lock()
 
 
 def _list_prefix_entry_names(root: Path) -> list[str]:
-    """列出前缀下可展示的子目录（跳过无封面/无标题的空壳）。"""
+    """列出前缀下番号子目录（分区/厂牌/前缀/番号），不按空壳过滤。"""
     key = str(root.resolve())
     try:
         st = root.stat()
         sig = float(st.st_mtime)
         nlink = int(getattr(st, "st_nlink", 0) or 0)
     except OSError:
-        raw = _safe_list_dirs(root)
-        return [n for n in raw if _entry_looks_listable(root / n)]
+        return _list_code_entry_dirs(root)
     with _browse_names_lock:
         hit = _browse_names_cache.get(key)
         if hit and hit[0] == sig and hit[1] == nlink:
             return list(hit[2])
-    raw = _safe_list_dirs(root)
-    if raw:
-        with ThreadPoolExecutor(max_workers=min(8, len(raw))) as pool:
-            flags = list(pool.map(lambda n: (n, _entry_looks_listable(root / n)), raw))
-        names = [n for n, ok in flags if ok]
-    else:
-        names = []
+    names = _list_code_entry_dirs(root)
     with _browse_names_lock:
         _browse_names_cache[key] = (sig, nlink, list(names))
         if len(_browse_names_cache) > 64:
@@ -1865,8 +2491,9 @@ def browse_codes(
     pref = str(prefix or "").strip()
     if not st or not pref:
         return None
-    root = _library_root() / label / st / pref
-    if not root.is_dir():
+    region_root = _makers_root_for_browse() / label
+    root = _resolve_prefix_dir(region_root, st, pref)
+    if root is None:
         return {
             "prefix": pref,
             "region": rid,
@@ -1878,18 +2505,7 @@ def browse_codes(
             "source": "library",
         }
     needle = str(q or "").strip().upper()
-    # 未分类：同番号若已有作者目录则跳过（片商优先读非未分类）
-    skip_codes: set[str] = set()
-    if rid == "fc2" and st == "未分类":
-        skip_codes = _fc2_codes_outside_uncategorized(root.parent.parent, pref)
-
     names = _list_prefix_entry_names(root)
-    if skip_codes:
-        names = [
-            n
-            for n in names
-            if (_norm_entry_code(n) or n.strip().upper()) not in skip_codes
-        ]
 
     off = max(0, int(offset or 0))
     lim = max(1, min(500, int(limit or 100)))
@@ -1908,7 +2524,7 @@ def browse_codes(
                         page_names,
                     )
                 )
-            items = [s for s in raw_items if _summary_is_listable(s)]
+            items = list(raw_items)
         return {
             "prefix": pref,
             "region": rid,
@@ -1943,7 +2559,8 @@ def browse_codes(
             blob = (
                 f"{summary.get('code')} {summary.get('forumTitle') or ''} "
                 f"{' '.join(summary.get('forumActors') or [])} "
-                f"{' '.join(summary.get('genres') or [])}"
+                f"{' '.join(summary.get('genres') or [])} "
+                f"{summary.get('series') or ''}"
             )
             if needle in blob.upper():
                 return (n, summary)
@@ -1976,9 +2593,7 @@ def browse_codes(
             ):
                 by_name[n] = s
     for n in page_names:
-        s = by_name.get(n) or _empty_code_summary(n)
-        if _summary_is_listable(s):
-            items.append(s)
+        items.append(by_name.get(n) or _empty_code_summary(n))
 
     return {
         "prefix": pref,
@@ -2004,7 +2619,7 @@ _facets_locks: dict[str, threading.Lock] = {}
 
 
 def _region_facets_path(label: str) -> Path:
-    return _library_root() / label / _FACETS_NAME
+    return _makers_root_for_browse() / label / _FACETS_NAME
 
 
 def _facets_lock_for(rid: str) -> threading.Lock:
@@ -2052,6 +2667,20 @@ def _entry_facet_bits(entry_dir: Path) -> tuple[list[str], str] | None:
         raw = scrape.get("tags") if isinstance(scrape.get("tags"), list) else None
     tags = [str(t).strip() for t in (raw or []) if str(t).strip()]
     series = str(scrape.get("series") or "").strip()
+    actors = scrape.get("actors") if isinstance(scrape.get("actors"), list) else None
+    if not actors:
+        actors = scrape.get("actress") if isinstance(scrape.get("actress"), list) else None
+    studio = str(scrape.get("studio") or scrape.get("maker") or "").strip()
+    code = str(scrape.get("code") or entry_dir.name).strip()
+    tags, extra_s = _sanitize_genre_tags(
+        tags,
+        actors=[str(a).strip() for a in (actors or []) if str(a).strip()],
+        series=[series] if series else [],
+        studio=studio,
+        code=code,
+    )
+    if extra_s and not series:
+        series = extra_s[0]
     if not tags and not series:
         return None
     return tags, series
@@ -2119,9 +2748,19 @@ def _aggregates_from_facet_entries(
         if not studio or not pref or not code:
             continue
         ref = {"studio": studio, "prefix": pref, "code": code}
-        for t in ent.get("tags") or []:
-            _facet_bucket_add(tag_bag, str(t), ref)
+        raw_tags = [str(t).strip() for t in (ent.get("tags") or []) if str(t).strip()]
         series = str(ent.get("series") or "").strip()
+        tags, extra_s = _sanitize_genre_tags(
+            raw_tags,
+            series=[series] if series else [],
+            studio=studio,
+            code=code,
+            prefix=pref,
+        )
+        for t in tags:
+            _facet_bucket_add(tag_bag, t, ref)
+        if extra_s and not series:
+            series = extra_s[0]
         if series:
             _facet_bucket_add(series_bag, series, ref)
     tags, tag_index = _finalize_facet_bag(tag_bag)
@@ -2212,7 +2851,7 @@ def sync_region_facets(
     if rid not in scrape_naming.KIND_LABELS:
         return None
     label = scrape_naming.KIND_LABELS[rid]
-    root = _library_root() / label
+    root = _makers_root_for_browse() / label
     lock = _facets_lock_for(rid)
     with lock:
         prev = None if force else _load_facets_payload(label)
@@ -2325,7 +2964,7 @@ def upsert_region_facet_entry(
 
     if not rid or not st or not pref:
         try:
-            lib = _library_root().resolve()
+            lib = _makers_root_for_browse().resolve()
             rel = path.resolve().relative_to(lib)
             parts = rel.parts
             if len(parts) >= 4:
@@ -2405,61 +3044,178 @@ def upsert_region_facet_entry(
         return True
 
 
+def _aggregate_catalog_facets(
+    prefixes: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """从片商目录 catalog 聚合标签 / 系列。"""
+    tag_bag: dict[str, int] = {}
+    series_bag: dict[str, int] = {}
+    series_fold: dict[str, str] = {}
+    for raw in prefixes or []:
+        if not isinstance(raw, dict):
+            continue
+        n = max(1, int(raw.get("codeCount") or 0))
+        actors = [str(a).strip() for a in (raw.get("actors") or []) if str(a).strip()]
+        studio = str(raw.get("board_name") or "").strip()
+        pref = str(raw.get("prefix") or "").strip()
+        series_list = [str(s).strip() for s in (raw.get("series") or []) if str(s).strip()]
+        tags, extra_s = _sanitize_genre_tags(
+            [str(t) for t in (raw.get("tags") or [])],
+            actors=actors,
+            series=series_list,
+            studio=studio,
+            prefix=pref,
+        )
+        for t in tags:
+            name = str(t or "").strip()
+            if name:
+                tag_bag[name] = tag_bag.get(name, 0) + n
+        for s in [*series_list, *extra_s]:
+            name = str(s or "").strip()
+            if not name:
+                continue
+            folded = _fold_facet_name(name)
+            if not folded:
+                continue
+            display = series_fold.setdefault(folded, name)
+            series_bag[display] = series_bag.get(display, 0) + n
+
+    def _rows(bag: dict[str, int]) -> list[dict[str, Any]]:
+        return sorted(
+            [{"name": k, "count": v} for k, v in bag.items() if v > 0],
+            key=lambda x: (-int(x["count"]), str(x["name"])),
+        )[:_MAX_FACET_ITEMS]
+
+    return _rows(tag_bag), _rows(series_bag)
+
+
+def _catalog_prefix_refs_for_facet(
+    prefixes: list[dict[str, Any]],
+    kind: str,
+    value: str,
+) -> list[tuple[str, str]]:
+    """catalog 中含该标签/系列的前缀列表。"""
+    want_cf = _fold_facet_name(value)
+    if not want_cf:
+        return []
+    key = "series" if kind == "series" else "tags"
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for raw in prefixes or []:
+        if not isinstance(raw, dict):
+            continue
+        items = raw.get(key) or []
+        if not any(_fold_facet_name(str(x or "")) == want_cf for x in items):
+            continue
+        studio = str(raw.get("board_name") or "").strip()
+        pref = str(raw.get("prefix") or "").strip()
+        if not studio or not pref:
+            continue
+        sig = f"{studio}|{pref}"
+        if sig in seen:
+            continue
+        seen.add(sig)
+        out.append((studio, pref))
+    return out
+
+
+def _browse_catalog_facet_codes(
+    *,
+    rid: str,
+    kind: str,
+    value: str,
+    offset: int,
+    limit: int,
+) -> dict[str, Any] | None:
+    cat = browse_region(rid)
+    if not cat:
+        return None
+    refs = _catalog_prefix_refs_for_facet(cat.get("prefixes") or [], kind, value)
+    want = str(value or "").strip()
+    if not want:
+        return {
+            "region": rid,
+            "kind": kind,
+            "value": want,
+            "total": 0,
+            "offset": 0,
+            "limit": limit,
+            "items": [],
+            "source": "catalog",
+        }
+
+    all_items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for studio, pref in refs[:64]:
+        chunk = browse_codes(
+            region=rid,
+            studio=studio,
+            prefix=pref,
+            q=want,
+            offset=0,
+            limit=500,
+        )
+        if not chunk:
+            continue
+        for it in chunk.get("items") or []:
+            if not isinstance(it, dict):
+                continue
+            code = str(it.get("code") or "").strip().upper()
+            if not code:
+                continue
+            dedupe = f"{studio}|{pref}|{code}"
+            if dedupe in seen:
+                continue
+            seen.add(dedupe)
+            row = {**it, "studio": studio, "prefix": pref}
+            if _summary_is_listable(row):
+                all_items.append(row)
+
+    all_items.sort(key=_code_sort_key)
+    off = max(0, int(offset or 0))
+    lim = max(1, min(500, int(limit or 100)))
+    page = all_items[off : off + lim]
+    return {
+        "region": rid,
+        "kind": kind,
+        "value": want,
+        "total": len(all_items),
+        "offset": off,
+        "limit": lim,
+        "items": page,
+        "updatedAt": _now_iso(),
+        "source": "catalog",
+    }
+
+
 def browse_region_facets(
     region_id: str,
     *,
     rebuild: bool = False,
     sync: bool = False,
 ) -> dict[str, Any] | None:
-    """读标签/系列落库。
-
-    默认只读 .facets.json（快）；sync/rebuild 时才扫盘更新。
-    """
+    """读分区标签 / 系列索引（来自片商目录 catalog）。"""
     rid = maker_fs.resolve_fs_region(region_id) or str(region_id or "").strip()
     if rid not in scrape_naming.KIND_LABELS:
         return None
     label = scrape_naming.KIND_LABELS[rid]
-
-    built: dict[str, Any] | None = None
-    if rebuild or sync:
-        built = sync_region_facets(rid, force=rebuild)
-    else:
-        raw = _load_facets_payload(label)
-        if (
-            isinstance(raw, dict)
-            and int(raw.get("version") or 0) >= _FACETS_VERSION
-            and isinstance(raw.get("tags"), list)
-            and isinstance(raw.get("series"), list)
-        ):
-            built = raw
-
-    if not built:
-        return {
-            "id": rid,
-            "label": label,
-            "updatedAt": None,
-            "scanned": 0,
-            "reused": 0,
-            "updated": 0,
-            "tags": [],
-            "series": [],
-            "source": "scrape",
-            "stale": True,
-            "empty": True,
-        }
-
+    cat = browse_region(rid)
+    if not cat:
+        return None
+    prefixes = cat.get("prefixes") or []
+    tags, series = _aggregate_catalog_facets(prefixes)
     return {
         "id": rid,
         "label": label,
-        "updatedAt": built.get("updatedAt"),
-        "scanned": int(built.get("scanned") or 0),
-        "reused": int(built.get("reused") or 0),
-        "updated": int(built.get("updated") or 0),
-        "tags": built.get("tags") or [],
-        "series": built.get("series") or [],
-        "source": "scrape",
+        "updatedAt": cat.get("updatedAt"),
+        "scanned": len(prefixes),
+        "reused": 0,
+        "updated": 0,
+        "tags": tags,
+        "series": series,
+        "source": "catalog",
         "stale": False,
-        "empty": not (built.get("tags") or built.get("series")),
+        "empty": not (tags or series),
     }
 
 
@@ -2485,92 +3241,22 @@ def browse_facet_codes(
     offset: int = 0,
     limit: int = 100,
 ) -> dict[str, Any] | None:
-    """按标签 / 系列取番号列表（含封面摘要）。"""
+    """按标签 / 系列取番号列表（catalog 索引 + 片商目录检索）。"""
     rid = maker_fs.resolve_fs_region(region) or str(region or "").strip()
     if rid not in scrape_naming.KIND_LABELS:
         return None
-    label = scrape_naming.KIND_LABELS[rid]
     k = str(kind or "").strip().lower()
-    if k in {"tag", "tags", "genre", "genres"}:
-        index_key = "tagIndex"
+    if k in {"tag", "tags", "genre", "genres", "标签"}:
         kind_out = "tag"
-    elif k in {"series", "series_name"}:
-        index_key = "seriesIndex"
+    elif k in {"series", "series_name", "系列"}:
         kind_out = "series"
     else:
         return None
-    want = str(value or "").strip()
-    if not want:
-        return {
-            "region": rid,
-            "kind": kind_out,
-            "value": want,
-            "total": 0,
-            "offset": 0,
-            "limit": limit,
-            "items": [],
-            "source": "library",
-        }
 
-    payload = _load_region_facet_index(rid) or {}
-    index = payload.get(index_key) if isinstance(payload.get(index_key), dict) else {}
-    refs = list(index.get(want) or [])
-    if not refs:
-        # 大小写不敏感兜底
-        want_cf = want.casefold()
-        for name, rows in index.items():
-            if str(name).casefold() == want_cf:
-                refs = list(rows or [])
-                want = str(name)
-                break
-
-    total = len(refs)
-    # 若索引截断，尽量用 facets 列表里的 count
-    facet_rows = payload.get("tags" if kind_out == "tag" else "series") or []
-    for row in facet_rows:
-        if isinstance(row, dict) and str(row.get("name") or "") == want:
-            total = max(total, int(row.get("count") or total))
-            break
-
-    off = max(0, int(offset or 0))
-    lim = max(1, min(500, int(limit or 100)))
-    page_refs = refs[off : off + lim]
-    root = _library_root() / label
-    items: list[dict[str, Any]] = []
-    for ref in page_refs:
-        studio = str(ref.get("studio") or "").strip()
-        pref = str(ref.get("prefix") or "").strip()
-        code = str(ref.get("code") or "").strip().upper()
-        if not studio or not pref or not code:
-            continue
-        summary = _read_meta_summary(root / studio / pref / code)
-        if not summary:
-            summary = {
-                "code": code,
-                "coverUrl": None,
-                "coverUrls": [],
-                "forumTitle": None,
-                "forumActors": None,
-                "genres": None,
-                "posterLocal": None,
-                "scraped": False,
-            }
-        summary = {
-            **summary,
-            "studio": studio,
-            "prefix": pref,
-        }
-        if _summary_is_listable(summary):
-            items.append(summary)
-
-    return {
-        "region": rid,
-        "kind": kind_out,
-        "value": want,
-        "total": total,
-        "offset": off,
-        "limit": lim,
-        "items": items,
-        "updatedAt": _now_iso(),
-        "source": "library",
-    }
+    return _browse_catalog_facet_codes(
+        rid=rid,
+        kind=kind_out,
+        value=value,
+        offset=offset,
+        limit=limit,
+    )

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AppPush } from '@/components/ui/AppPush';
 import { SEARCH_PAGE_SIZE } from '@/config/search';
 import { ResourceCard } from '@/features/home/ResourceCard';
@@ -15,21 +15,40 @@ import { filterByBrowsePrefs } from '@/lib/browsePreferFilter';
 import type { ResourceItem } from '@/types/resource';
 import { MakerCodeMetaCard } from './MakerCodeMetaCard';
 
-const POOL_PAGE_SIZE = 40;
-const MAX_POOL_PAGES = 5;
+const MAX_POOL_PAGES = 1;
+const SEARCH_TIMEOUT_MS = 20_000;
+/** 番号精确匹配首屏条数；与首页一致，减轻 enrich */
+const CODE_SEARCH_PAGE_SIZE = SEARCH_PAGE_SIZE;
+
+function searchSignal(parent: AbortSignal, ms = SEARCH_TIMEOUT_MS): AbortSignal {
+  const ac = new AbortController();
+  const timer = window.setTimeout(() => ac.abort(), ms);
+  const stop = () => window.clearTimeout(timer);
+  parent.addEventListener('abort', () => {
+    stop();
+    ac.abort();
+  }, { once: true });
+  ac.signal.addEventListener('abort', stop, { once: true });
+  return ac.signal;
+}
+
+function isAbortError(e: unknown): boolean {
+  return (
+    e instanceof DOMException && e.name === 'AbortError'
+  ) || (e instanceof Error && e.name === 'AbortError');
+}
 
 /**
  * 片商番号：色花 + Bitmagnet 并行搜索，分 Tab 切换展示（对齐首页双库列表）。
  */
 export function MakerCodeSearchBody({
   code,
-  region,
   cropRegion,
   prefsTick = 0,
   applyBrowsePrefs = false,
 }: {
   code: string;
-  region?: string;
+  /** 封面裁剪分区（片商 UI 区 id） */
   cropRegion?: string;
   prefsTick?: number;
   applyBrowsePrefs?: boolean;
@@ -79,7 +98,17 @@ export function MakerCodeSearchBody({
     poolRef.current = [];
     setDetailHash(null);
     setMagnetDetailHash(null);
-  }, [code, region, prefsTick, applyBrowsePrefs]);
+    setLoading(true);
+    setMagnetLoading(true);
+  }, [code, prefsTick, applyBrowsePrefs]);
+
+  // 进入番号页从顶开始；返回上一页时不碰外层 scroll（由列表组件恢复）
+  useLayoutEffect(() => {
+    const body = scrollRef.current?.closest('.app-push__body');
+    if (body instanceof HTMLElement) {
+      body.scrollTop = 0;
+    }
+  }, [code]);
 
   useEffect(() => {
     const id = ++reqId.current;
@@ -89,53 +118,38 @@ export function MakerCodeSearchBody({
     void (async () => {
       setLoading(true);
       try {
-        async function pullPool(useRegion: string | undefined) {
-          const pool: ResourceItem[] = [];
-          const seen = new Set<string>();
-          let kws: string[] = [];
-          for (let p = 1; p <= MAX_POOL_PAGES; p += 1) {
-            const data = await fetchSearch({
-              keyword: code,
-              page: p,
-              pageSize: POOL_PAGE_SIZE,
-              matchMode: 'exact',
-              sortType: 'default',
-              filterTime: 'all',
-              filterSize: 'all',
-              withTotalCount: false,
-              preferChinese: false,
-              preferCrack: false,
-              region: useRegion,
-              signal: ac.signal,
-            });
-            if (id !== reqId.current) return null;
-            if (data.keywords?.length) kws = data.keywords;
-            for (const item of data.resources || []) {
-              const h = String(item.hash || '');
-              if (h && seen.has(h)) continue;
-              if (h) seen.add(h);
-              pool.push(item);
-            }
-            if (!data.has_more) break;
-            if (pool.length >= SEARCH_PAGE_SIZE * 2) break;
+        const pool: ResourceItem[] = [];
+        const seen = new Set<string>();
+        let kws: string[] = [];
+        for (let p = 1; p <= MAX_POOL_PAGES; p += 1) {
+          const data = await fetchSearch({
+            keyword: code,
+            page: p,
+            pageSize: CODE_SEARCH_PAGE_SIZE,
+            matchMode: 'exact',
+            sortType: 'default',
+            filterTime: 'all',
+            filterSize: 'all',
+            withTotalCount: false,
+            preferChinese: false,
+            preferCrack: false,
+            signal: searchSignal(ac.signal),
+          });
+          if (id !== reqId.current) return;
+          if (data.keywords?.length) kws = data.keywords;
+          let added = 0;
+          for (const item of data.resources || []) {
+            const h = String(item.hash || '');
+            if (h && seen.has(h)) continue;
+            if (h) seen.add(h);
+            pool.push(item);
+            added += 1;
           }
-          return { pool, kws };
+          if (!data.has_more || added === 0) break;
+          if (pool.length >= CODE_SEARCH_PAGE_SIZE * 2) break;
         }
 
-        let useRegion = region || undefined;
-        let pulled = await pullPool(useRegion);
-        if (!pulled) return;
-
-        if (pulled.pool.length === 0 && useRegion) {
-          useRegion = undefined;
-          pulled = await pullPool(undefined);
-          if (!pulled) return;
-          if (pulled.pool.length > 0) {
-            setHint('本分区无帖，已扩大到全库精确匹配');
-          }
-        }
-
-        let list = pulled.pool;
+        let list = pool;
         let prefsNote = '';
         if (applyBrowsePrefs) {
           const prefs = getBrowsePreferences();
@@ -151,7 +165,7 @@ export function MakerCodeSearchBody({
 
         if (id !== reqId.current) return;
         poolRef.current = list;
-        setKeywords(pulled.kws.length ? pulled.kws : [code]);
+        setKeywords(kws.length ? kws : [code]);
         setTotal(list.length);
         setCostMs(Math.round(performance.now() - t0));
         if (prefsNote) setHint((h) => (h ? `${h}；${prefsNote}` : prefsNote));
@@ -160,11 +174,13 @@ export function MakerCodeSearchBody({
         setHasMore(slice.length < list.length);
         setPage(1);
       } catch (e) {
-        if (
-          ac.signal.aborted ||
-          id !== reqId.current ||
-          (e instanceof DOMException && e.name === 'AbortError')
-        ) {
+        if (ac.signal.aborted || id !== reqId.current || isAbortError(e)) {
+          if (id === reqId.current && !ac.signal.aborted && isAbortError(e)) {
+            setItems([]);
+            setTotal(0);
+            setError('色花搜索超时，请稍后重试或切换 Bt');
+            setHasMore(false);
+          }
           return;
         }
         setItems([]);
@@ -180,7 +196,7 @@ export function MakerCodeSearchBody({
     })();
 
     return () => ac.abort();
-  }, [code, region, prefsTick, applyBrowsePrefs]);
+  }, [code, prefsTick, applyBrowsePrefs]);
 
   useEffect(() => {
     const id = ++magnetReqId.current;
@@ -201,7 +217,7 @@ export function MakerCodeSearchBody({
           sortType: 'default',
           filterTime: 'all',
           filterSize: 'all',
-          signal: ac.signal,
+          signal: searchSignal(ac.signal),
         });
         if (id !== magnetReqId.current) return;
         const batch = data.items || [];
@@ -220,12 +236,12 @@ export function MakerCodeSearchBody({
         }
         setMagnetError('');
       } catch (e) {
-        if (
-          ac.signal.aborted ||
-          id !== magnetReqId.current ||
-          (e instanceof DOMException && e.name === 'AbortError') ||
-          (e instanceof Error && e.name === 'AbortError')
-        ) {
+        if (ac.signal.aborted || id !== magnetReqId.current || isAbortError(e)) {
+          if (id === magnetReqId.current && !ac.signal.aborted && isAbortError(e) && !append) {
+            setMagnetItems([]);
+            setMagnetTotal(0);
+            setMagnetError('Bt 搜索超时');
+          }
           return;
         }
         if (!append) {
@@ -332,7 +348,7 @@ export function MakerCodeSearchBody({
   return (
     <>
       <div className="mk-code-search" ref={scrollRef}>
-        <MakerCodeMetaCard code={code} region={cropRegion || region} />
+        <MakerCodeMetaCard code={code} region={cropRegion} />
 
         <div className="mk-dual-tabs" role="tablist" aria-label="搜索来源">
           <button
@@ -391,7 +407,7 @@ export function MakerCodeSearchBody({
                       key={item.hash}
                       item={item}
                       keywords={resultKeywords}
-                      cropRegion={cropRegion || region}
+                      cropRegion={cropRegion}
                       onOpen={setDetailHash}
                     />
                   ))

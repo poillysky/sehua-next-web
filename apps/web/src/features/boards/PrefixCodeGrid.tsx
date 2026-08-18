@@ -293,6 +293,7 @@ export function PrefixCodeGrid({
   const pageRef = useRef(page);
   const skipScrollReset = useRef(true);
   const pinToTop = useRef(false);
+  const pendingScrollY = useRef<number | null>(null);
   const display = resolveCoverDisplay(prefix);
   const prevNeedle = useRef(needle);
   const [cropTick, setCropTick] = useState(0);
@@ -325,10 +326,43 @@ export function PrefixCodeGrid({
   })();
   const gridCols = usePortraitFrame ? '3' : '2';
 
+  function scrollCache() {
+    return getCache(prefix, region, needle, studioKey);
+  }
+
+  function saveListScroll() {
+    const el = listScrollRef.current;
+    if (!el) return;
+    const c = scrollCache();
+    c.scrollTop = el.scrollTop;
+    c.page = pageRef.current;
+  }
+
+  /** 内容高度不足时不强行清 pending，等 ResizeObserver 再试 */
+  function tryRestoreListScroll(): boolean {
+    const el = listScrollRef.current;
+    if (!el || pendingScrollY.current == null) return true;
+    const y = pendingScrollY.current;
+    if (y <= 0) {
+      pendingScrollY.current = null;
+      return true;
+    }
+    const max = el.scrollHeight - el.clientHeight;
+    if (max <= 0) return false;
+    const target = Math.min(y, max);
+    el.scrollTop = target;
+    if (Math.abs(el.scrollTop - target) <= 2) {
+      pendingScrollY.current = null;
+      return true;
+    }
+    return false;
+  }
+
   function scrollListToTop() {
     const el = listScrollRef.current;
     if (!el) return;
     el.scrollTop = 0;
+    saveListScroll();
   }
 
   function goPage(next: number) {
@@ -455,41 +489,61 @@ export function PrefixCodeGrid({
     return () => ac.abort();
   }, [prefix, region, studioKey, page, needle]);
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     const el = listScrollRef.current;
     if (!el) return;
+    const onScroll = () => saveListScroll();
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      saveListScroll();
+      el.removeEventListener('scroll', onScroll);
+    };
+  }, [prefix, region, needle, studioKey]);
+
+  useLayoutEffect(() => {
     if (skipScrollReset.current) {
-      el.scrollTop = getCache(prefix, region, needle, studioKey).scrollTop;
+      pendingScrollY.current = scrollCache().scrollTop;
       skipScrollReset.current = false;
       return;
     }
     if (pinToTop.current) {
-      el.scrollTop = 0;
+      scrollListToTop();
     }
   }, [page, prefix, region, studioKey, needle]);
 
-  // 翻页后数据到位再顶一次，避免旧页高度把滚动位置顶偏
   useLayoutEffect(() => {
-    if (!pinToTop.current || loading) return;
-    scrollListToTop();
-    pinToTop.current = false;
+    if (loading) return;
+    if (pinToTop.current) {
+      scrollListToTop();
+      pinToTop.current = false;
+      return;
+    }
+    tryRestoreListScroll();
   }, [items, loading, page]);
 
   useEffect(() => {
+    if (pendingScrollY.current == null) return;
+    const el = listScrollRef.current;
+    if (!el) return;
+    const attempt = () => tryRestoreListScroll();
+    attempt();
+    const ro = new ResizeObserver(attempt);
+    ro.observe(el);
+    const raf = requestAnimationFrame(attempt);
+    const t1 = window.setTimeout(attempt, 60);
+    const t2 = window.setTimeout(attempt, 200);
     return () => {
-      const c = getCache(prefix, region, needle, studioKey);
-      c.page = pageRef.current;
-      if (listScrollRef.current) {
-        c.scrollTop = listScrollRef.current.scrollTop;
-      }
+      ro.disconnect();
+      cancelAnimationFrame(raf);
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
     };
-  }, [prefix, region, needle, studioKey]);
+  }, [items, loading, page, prefix, region, needle, studioKey]);
 
   const statusCbRef = useRef(onStatusChange);
   statusCbRef.current = onStatusChange;
   useEffect(() => {
     statusCbRef.current?.({ total, loading });
-    return () => statusCbRef.current?.(null);
   }, [total, loading, prefix]);
 
   const totalPages = Math.max(1, Math.ceil(total / PREFIX_CODE_PAGE_SIZE));
@@ -579,7 +633,10 @@ export function PrefixCodeGrid({
                     key={it.code}
                     type="button"
                     className="prefix-tile"
-                    onClick={() => onOpenCode(it.code)}
+                    onClick={() => {
+                      saveListScroll();
+                      onOpenCode(it.code);
+                    }}
                   >
                     {tile}
                   </button>

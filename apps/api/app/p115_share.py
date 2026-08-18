@@ -231,7 +231,9 @@ def receive_115_shares(
     received = 0
     seen: set[str] = set()
 
-    with httpx.Client(timeout=30.0, follow_redirects=True) as client:
+    with httpx.Client(
+        timeout=30.0, follow_redirects=True, trust_env=False
+    ) as client:
         for raw in urls:
             share = parse_115_share_url(raw, fallback_password)
             if not share:
