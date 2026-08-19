@@ -113,6 +113,21 @@ export function AiSearchChatPanel({ onBack }: { onBack: () => void }) {
     el.scrollTop = el.scrollHeight;
   }, [msgs, busy]);
 
+  useEffect(() => {
+    const input = inputRef.current;
+    const list = listRef.current;
+    if (!input || !list) return;
+
+    const scrollEnd = () => {
+      list.scrollTop = list.scrollHeight;
+    };
+
+    input.addEventListener('focus', scrollEnd);
+    return () => {
+      input.removeEventListener('focus', scrollEnd);
+    };
+  }, []);
+
   async function send(textRaw?: string) {
     const text = (textRaw ?? draft).trim();
     if (!text || busy) return;

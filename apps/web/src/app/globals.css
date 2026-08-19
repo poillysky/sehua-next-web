@@ -133,6 +133,7 @@
     /* iOS PWA：禁单独 height:100%，否则会静默退出 cover，底栏露出白缝 */
     --app-height: 100vh;
     --keyboard-inset: 0px;
+    --chat-keyboard-inset: 0px;
     --vv-height: 100vh;
     --vv-offset-top: 0px;
     height: var(--app-height, 100vh);
@@ -252,6 +253,30 @@ html[data-page-lock='1'] .settings-push__body {
   overscroll-behavior: none !important;
   touch-action: none !important;
   -webkit-overflow-scrolling: auto;
+}
+
+/* 含表单的 Push / 主页搜索 / 登录：键盘期允许内滚（PWA 全屏） */
+html[data-page-lock='1'] .app-push__body:has(input, textarea, select):not(.ai-chat-push),
+html[data-keyboard='1'] .app-push__body:has(input, textarea, select):not(.ai-chat-push),
+html[data-page-lock='1'] .settings-push__body:has(input, textarea, select),
+html[data-keyboard='1'] .settings-push__body:has(input, textarea, select),
+html[data-page-lock='1'] .home-search-body,
+html[data-keyboard='1'] .home-search-body,
+html[data-page-lock='1'] .home-search-screen,
+html[data-keyboard='1'] .home-search-screen,
+html[data-page-lock='1'] .login-screen,
+html[data-keyboard='1'] .login-screen,
+html[data-page-lock='1'] .auth-viewport,
+html[data-keyboard='1'] .auth-viewport {
+  overflow: auto !important;
+  overscroll-behavior: auto !important;
+  touch-action: auto !important;
+  -webkit-overflow-scrolling: touch;
+}
+
+html[data-chat-keyboard='1'] .app-push__body.ai-chat-push {
+  overflow: hidden !important;
+  touch-action: auto !important;
 }
 
 /* 全站隐藏滚动条（仍可触摸/滚轮滚动） */

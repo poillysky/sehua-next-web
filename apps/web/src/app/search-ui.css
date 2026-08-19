@@ -2757,6 +2757,14 @@
   background: var(--app-bg);
 }
 
+html[data-chat-keyboard='1'] .ai-chat__composer {
+  transform: translate3d(0, calc(-1 * var(--chat-keyboard-inset, 0px)), 0);
+}
+
+html[data-chat-keyboard='1'] .ai-chat__msgs {
+  touch-action: pan-y;
+}
+
 .ai-chat__field {
   display: flex;
   align-items: center;

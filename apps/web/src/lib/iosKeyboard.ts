@@ -32,6 +32,100 @@ export function isEditableElement(el: EventTarget | null): el is HTMLElement {
   return el.isContentEditable;
 }
 
+export function isAiChatFocused(): boolean {
+  if (typeof document === 'undefined') return false;
+  const a = document.activeElement;
+  return a instanceof Element && Boolean(a.closest('.ai-chat-push'));
+}
+
+let lastChatInsetPx = -1;
+let lastChatKeyboardOn = false;
+
+/** 对话搜输入条：键盘高度减去底栏，贴到键盘上沿 */
+export function measureChatKeyboardInset(gap: number): number {
+  if (gap <= 0 || typeof document === 'undefined') return 0;
+  const tabBar = document.querySelector('.app-tabbar') as HTMLElement | null;
+  const tabH = tabBar?.getBoundingClientRect().height ?? 58;
+  return Math.max(0, Math.round(gap - tabH));
+}
+
+export function applyChatKeyboardInset(gap: number) {
+  if (typeof document === 'undefined') return;
+  const root = document.documentElement;
+  const aiChat = isAiChatFocused();
+  const inset = aiChat ? measureChatKeyboardInset(gap) : 0;
+  const on = aiChat && inset > 0;
+  if (on === lastChatKeyboardOn && Math.abs(inset - lastChatInsetPx) < 12) return;
+  lastChatInsetPx = inset;
+  lastChatKeyboardOn = on;
+  root.dataset.chatKeyboard = on ? '1' : '0';
+  root.style.setProperty('--chat-keyboard-inset', `${inset}px`);
+}
+
+export function clearChatKeyboardInset() {
+  if (typeof document === 'undefined') return;
+  const root = document.documentElement;
+  lastChatInsetPx = -1;
+  lastChatKeyboardOn = false;
+  delete root.dataset.chatKeyboard;
+  root.style.setProperty('--chat-keyboard-inset', '0px');
+}
+
+export function isAiChatTyping(): boolean {
+  if (!isAiChatFocused()) return false;
+  const a = document.activeElement;
+  if (!(a instanceof HTMLElement)) return false;
+  return a.classList.contains('ai-chat__input');
+}
+
+/** 钉页表单输入中（搜索 / 登录 / Push 设置等）：vv 微抖勿反复开关键盘 / 锁页 */
+export function isPinnedFormTyping(): boolean {
+  if (typeof document === 'undefined') return false;
+  const a = document.activeElement;
+  return isEditableElement(a) && isPinnedFocusSurface(a);
+}
+
+/** @deprecated 用 isPinnedFormTyping */
+export function isPushFormTyping(): boolean {
+  return isPinnedFormTyping();
+}
+
+/** PWA 键盘期勿跟 visualViewport 对打（Push / 主页搜索 / 登录等） */
+export function shouldSkipViewportFight(): boolean {
+  if (typeof document === 'undefined') return false;
+  const a = document.activeElement;
+  if (!(a instanceof Element)) return false;
+  if (
+    a.closest('.app-push, .settings-push, .p115-paste-page')
+  ) {
+    return true;
+  }
+  return isPinnedFormTyping();
+}
+
+const FORM_SCROLL_SEL =
+  '.app-push__body, .settings-push__body, .home-search-body, .home-search-screen, .login-screen, .auth-viewport, .modal-card, .sheet-panel, .ai-chat__msgs, .ai-chat__composer, .ai-chat__field';
+
+function pushBodyKeepsScroll(el: HTMLElement): boolean {
+  if (el.classList.contains('ai-chat-push')) return true;
+  return Boolean(
+    el.querySelector(
+      'input:not([type=button]):not([type=submit]):not([type=checkbox]):not([type=radio]), textarea, select',
+    ),
+  );
+}
+
+function scrollerKeepsInnerScroll(el: HTMLElement): boolean {
+  if (
+    el.matches(
+      '.home-search-screen, .home-search-body, .login-screen, .auth-viewport',
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
+
 /** Surfaces where the whole page must stay pinned (search / login / push 表单) */
 export function isPinnedFocusSurface(el: EventTarget | null): boolean {
   return (
@@ -80,10 +174,18 @@ export function pinMainLayout() {
   if (typeof document === 'undefined') return;
   pinDocumentScroll();
 
-  const pushFocused = Boolean(
-    document.activeElement instanceof Element &&
-      document.activeElement.closest('.app-push, .settings-push, .p115-paste-page'),
-  );
+  if (shouldSkipViewportFight()) {
+    document
+      .querySelectorAll<HTMLElement>(
+        '.app-shell, .app-body, .auth-viewport, .login-screen, .device-content, .home-landing, .app-stack-root',
+      )
+      .forEach((el) => {
+        if (scrollerKeepsInnerScroll(el)) return;
+        if (el.classList.contains('home-search-body')) return;
+        if (el.scrollTop !== 0) el.scrollTop = 0;
+      });
+    return;
+  }
 
   document
     .querySelectorAll<HTMLElement>(
@@ -92,9 +194,6 @@ export function pinMainLayout() {
     .forEach((el) => {
       if (el.scrollTop !== 0) el.scrollTop = 0;
     });
-
-  // push 聚焦：只钉 document，不跟 visualViewport.offsetTop 对打
-  if (pushFocused) return;
 
   try {
     const vv = window.visualViewport;
@@ -112,8 +211,15 @@ function attachTouchLock() {
   const allowScroll = (t: EventTarget | null) => {
     if (!(t instanceof Element)) return false;
     if (t.closest('.toast-stack, .toast')) return true;
-    // 弹层无键盘时可滚；键盘期整壳钉死
-    if (document.documentElement.dataset.keyboard === '1') return false;
+    if (document.documentElement.dataset.chatKeyboard === '1') {
+      return Boolean(
+        t.closest('.ai-chat__msgs, .ai-chat__composer, .ai-chat__field, .ai-chat__input'),
+      );
+    }
+    // 键盘期：允许钉页表单区、Push body、登录/搜索内滚
+    if (document.documentElement.dataset.keyboard === '1') {
+      return Boolean(t.closest(FORM_SCROLL_SEL));
+    }
     if (document.documentElement.dataset.pageLock === '1') {
       return false;
     }
@@ -172,6 +278,7 @@ export function lockUnderlyingScroll() {
   document.documentElement.dataset.scrollLock = '1';
 
   document.querySelectorAll<HTMLElement>(SCROLLER_SEL).forEach((el) => {
+    if (scrollerKeepsInnerScroll(el)) return;
     if (el.dataset.appSavedScroll != null) return;
     el.dataset.appSavedScroll = String(el.scrollTop);
     el.dataset.appSavedOverflow = el.style.overflow;
@@ -181,10 +288,11 @@ export function lockUnderlyingScroll() {
     el.scrollTop = 0;
   });
 
-  // push 内 scroller 一并钉死，避免键盘期滚动
+  // push 内 scroller 一并钉死，避免键盘期滚动（对话搜 msgs 除外）
   document
     .querySelectorAll<HTMLElement>('.app-push__body, .settings-push__body')
     .forEach((el) => {
+      if (pushBodyKeepsScroll(el)) return;
       if (el.dataset.appSavedScroll != null) return;
       el.dataset.appSavedScroll = String(el.scrollTop);
       el.dataset.appSavedOverflow = el.style.overflow;

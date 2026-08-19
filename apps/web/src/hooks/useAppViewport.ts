@@ -2,10 +2,14 @@
 
 import { useEffect, useLayoutEffect, useState } from 'react';
 import {
+  applyChatKeyboardInset,
+  clearChatKeyboardInset,
+  isPinnedFormTyping,
   lockPinnedPage,
   pinDocumentScroll,
   pinMainLayout,
   pinUnderlyingScrollers,
+  shouldSkipViewportFight,
   unlockPinnedPage,
 } from '@/lib/iosKeyboard';
 import { isStandalone, shouldUseNativeShell } from '@/lib/standalone';
@@ -61,6 +65,7 @@ export function useAppViewport() {
     const commitKeyboard = (open: boolean, inset: number) => {
       root.dataset.keyboard = open ? '1' : '0';
       root.style.setProperty('--keyboard-inset', `${open ? inset : 0}px`);
+      if (!open) clearChatKeyboardInset();
     };
 
     const applyLayoutHeight = () => {
@@ -97,23 +102,37 @@ export function useAppViewport() {
     const onViewportSignal = () => {
       applyVisualHeight();
       const gap = measureGap();
-      const pushFocused = Boolean(
-        document.activeElement instanceof Element &&
-          document.activeElement.closest(
-            '.app-push, .settings-push, .p115-paste-page',
-          ),
-      );
+      const pinnedFormTyping = isPinnedFormTyping();
+
+      // 钉页表单输入：vv 随联想栏微抖，勿反复开关键盘 / 锁页
+      if (pinnedFormTyping && gap > 24) {
+        if (root.dataset.keyboard !== '1') {
+          root.dataset.keyboard = '1';
+          root.style.setProperty('--keyboard-inset', '0px');
+          lockPinnedPage();
+        }
+        applyChatKeyboardInset(gap);
+        pinDocumentScroll();
+        return;
+      }
+
+      const skipViewportFight = shouldSkipViewportFight();
 
       if (gap <= KEYBOARD_THRESHOLD) {
+        if (pinnedFormTyping) {
+          applyChatKeyboardInset(gap);
+          return;
+        }
         if (stabilityTimer) {
           window.clearTimeout(stabilityTimer);
           stabilityTimer = null;
         }
         commitKeyboard(false, 0);
+        clearChatKeyboardInset();
         const stillPinned = Boolean(
           document.activeElement &&
             (document.activeElement as HTMLElement).closest?.(
-              '.app-search, .app-search-row, .login-screen, .auth-viewport, .app-push, .settings-push, .p115-paste-page',
+              '.app-search, .app-search-row, .login-screen, .auth-viewport, .home-search, .app-push, .settings-push, .p115-paste-page',
             ),
         );
         if (!stillPinned) unlockPinnedPage();
@@ -127,19 +146,18 @@ export function useAppViewport() {
           ? bezel.clientHeight
           : layoutH;
       pendingInset = Math.min(gap, capH * 0.55);
+      applyChatKeyboardInset(gap);
 
-      // 首次判定键盘打开：只写 flag；inset 等稳定后再提交（push 页不消费 inset）
+      // 首次判定键盘打开：只写 flag；inset 等稳定后再提交（钉页表单不消费 inset）
       if (root.dataset.keyboard !== '1') {
         root.dataset.keyboard = '1';
-        // push 聚焦：inset 固定 0，避免任何布局消费导致跳动
         root.style.setProperty(
           '--keyboard-inset',
-          pushFocused ? '0px' : `${pendingInset}px`,
+          skipViewportFight ? '0px' : `${pendingInset}px`,
         );
       }
       lockPinnedPage();
-      // push：只钉 document，不对打 VV
-      if (pushFocused) {
+      if (skipViewportFight) {
         pinDocumentScroll();
       } else {
         pinMainLayout();
@@ -147,16 +165,12 @@ export function useAppViewport() {
       if (stabilityTimer) window.clearTimeout(stabilityTimer);
       stabilityTimer = window.setTimeout(() => {
         stabilityTimer = null;
-        const stillPush = Boolean(
-          document.activeElement instanceof Element &&
-            document.activeElement.closest(
-              '.app-push, .settings-push, .p115-paste-page',
-            ),
-        );
-        commitKeyboard(true, stillPush ? 0 : pendingInset);
+        const stillSkipInset = shouldSkipViewportFight();
+        commitKeyboard(true, stillSkipInset ? 0 : pendingInset);
+        applyChatKeyboardInset(measureGap());
         pinDocumentScroll();
         pinUnderlyingScrollers();
-        if (!stillPush) pinMainLayout();
+        if (!stillSkipInset) pinMainLayout();
       }, STABILITY_MS);
     };
 
@@ -206,14 +220,14 @@ export function useAppViewport() {
     window.visualViewport?.addEventListener('scroll', () => {
       applyVisualHeight();
       if (root.dataset.keyboard !== '1') return;
-      const pushFocused = Boolean(
-        document.activeElement instanceof Element &&
-          document.activeElement.closest(
-            '.app-push, .settings-push, .p115-paste-page',
-          ),
-      );
-      // push 表单：绝不跟 VV scroll 对打，否则全屏 PWA 必抖
-      if (pushFocused) {
+      const gap = measureGap();
+      if (isPinnedFormTyping()) {
+        applyChatKeyboardInset(gap);
+        pinDocumentScroll();
+        return;
+      }
+      applyChatKeyboardInset(gap);
+      if (shouldSkipViewportFight()) {
         pinDocumentScroll();
         return;
       }
