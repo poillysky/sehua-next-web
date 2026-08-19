@@ -3,22 +3,22 @@
 import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ChevronRight, Search, Tags } from 'lucide-react';
 import {
-  fetchLibraryRegion,
-  fetchLibraryRegions,
+  fetchMakerFsRegion,
+  fetchMakerFsRegions,
   type MakerFsRegionCatalog,
   type MakerFsRegionSummary,
 } from '@/lib/api';
 import {
   formatMakerFsCount,
-  groupMakerFsByMaker,
+  groupMakersForBrowse,
   indexesMakerFsActors,
   makerFsGroupNoun,
   makerFsPrefixMatchesQuery,
-  pickMakerGroupCover,
   clearLibraryBrowseCaches,
   getLibraryCatalogCache,
   getLibraryRegionsCache,
   LIBRARY_SYNCED,
+  MAKER_FS_CATALOGS_SYNCED,
   MAKER_FS_FALLBACK_REGIONS,
   prefetchLibraryRegion,
   setLibraryCatalogCache,
@@ -94,6 +94,20 @@ function regionMeta(id: string) {
   return REGION_META[id] || { mark: '片' };
 }
 
+function emptyRegionCatalog(region: MakerFsRegionSummary): MakerFsRegionCatalog {
+  return {
+    version: 1,
+    id: region.id,
+    label: region.label,
+    dbRegion: region.dbRegion,
+    navPath: region.navPath,
+    prefixCount: 0,
+    makerCount: 0,
+    codeCount: 0,
+    prefixes: [],
+  };
+}
+
 function regionRowMeta(r: MakerFsRegionSummary): string {
   const noun = makerFsGroupNoun(r.id);
   const makers = formatMakerFsCount(r.makerCount);
@@ -135,10 +149,16 @@ function prefixStackKey(
  */
 export function MakersScreen() {
   const tabCtx = useTabNavigation();
-  const [regions, setRegions] = useState<MakerFsRegionSummary[]>(MAKER_FS_FALLBACK_REGIONS);
-  const [ready, setReady] = useState(false);
-  const [loadingHub, setLoadingHub] = useState(true);
-  const [opening, setOpening] = useState(false);
+  const cachedHub = getLibraryRegionsCache();
+  const [regions, setRegions] = useState<MakerFsRegionSummary[]>(
+    cachedHub?.regions?.length ? cachedHub.regions : MAKER_FS_FALLBACK_REGIONS,
+  );
+  const [ready, setReady] = useState(() =>
+    Boolean(
+      cachedHub?.ready || cachedHub?.regions?.some((r) => (r.codeCount || 0) > 0),
+    ),
+  );
+  const [loadingHub, setLoadingHub] = useState(() => !cachedHub?.regions?.length);
   const [stack, setStack] = useState<Stack>({ kind: 'hub' });
   const [q, setQ] = useState('');
   const [prefixTotal, setPrefixTotal] = useState<number | null>(null);
@@ -221,16 +241,18 @@ export function MakersScreen() {
   }, [stack]);
 
   const refreshHub = useCallback(async () => {
-    setLoadingHub(true);
+    const cached = getLibraryRegionsCache();
+    if (cached?.regions?.length) {
+      setRegions(cached.regions);
+      setReady(
+        Boolean(cached.ready || cached.regions.some((r) => (r.codeCount || 0) > 0)),
+      );
+      setLoadingHub(false);
+    } else {
+      setLoadingHub(true);
+    }
     try {
-      const cached = getLibraryRegionsCache();
-      if (cached?.regions?.length) {
-        setRegions(cached.regions);
-        setReady(
-          Boolean(cached.ready || cached.regions.some((r) => (r.codeCount || 0) > 0)),
-        );
-      }
-      const overview = await fetchLibraryRegions().catch(() => null);
+      const overview = await fetchMakerFsRegions().catch(() => null);
       const list =
         overview?.regions && overview.regions.length > 0
           ? overview.regions
@@ -240,12 +262,13 @@ export function MakersScreen() {
       setReady(
         Boolean(overview?.ready || overview?.regions?.some((r) => (r.codeCount || 0) > 0)),
       );
+      for (const r of list) prefetchLibraryRegion(r.id);
     } finally {
       setLoadingHub(false);
     }
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     void refreshHub();
   }, [refreshHub]);
 
@@ -258,7 +281,11 @@ export function MakersScreen() {
       void refreshHub();
     };
     window.addEventListener(LIBRARY_SYNCED, onSynced);
-    return () => window.removeEventListener(LIBRARY_SYNCED, onSynced);
+    window.addEventListener(MAKER_FS_CATALOGS_SYNCED, onSynced);
+    return () => {
+      window.removeEventListener(LIBRARY_SYNCED, onSynced);
+      window.removeEventListener(MAKER_FS_CATALOGS_SYNCED, onSynced);
+    };
   }, [refreshHub]);
 
   useEffect(() => {
@@ -273,7 +300,7 @@ export function MakersScreen() {
 
   const makers = useMemo((): MakerFsMakerGroup[] => {
     if (stack.kind !== 'region' && stack.kind !== 'maker') return [];
-    const list = groupMakerFsByMaker(stack.catalog.prefixes, stack.region.id);
+    const list = groupMakersForBrowse(stack.catalog.prefixes, stack.region.id);
     if (stack.kind === 'maker') return list;
     const key = q.trim().toLowerCase();
     if (!key) return list;
@@ -294,40 +321,27 @@ export function MakersScreen() {
       .filter((m): m is MakerFsMakerGroup => m != null);
   }, [stack, q]);
 
-  async function openRegion(region: MakerFsRegionSummary) {
+  function openRegion(region: MakerFsRegionSummary) {
     const cached = getLibraryCatalogCache(region.id);
-    if (cached) {
-      setQ('');
-      setPrefixTotal(null);
-      startTransition(() => {
-        setStack({ kind: 'region', region, catalog: cached });
+    setQ('');
+    setPrefixTotal(null);
+    startTransition(() => {
+      setStack({
+        kind: 'region',
+        region,
+        catalog: cached || emptyRegionCatalog(region),
       });
-      void fetchLibraryRegion(region.id)
-        .then((catalog) => {
-          setLibraryCatalogCache(region.id, catalog);
-          setStack((s) =>
-            s.kind === 'region' && s.region.id === region.id
-              ? { ...s, catalog }
-              : s,
-          );
-        })
-        .catch(() => undefined);
-      return;
-    }
-    setOpening(true);
-    try {
-      const catalog = await fetchLibraryRegion(region.id);
-      setLibraryCatalogCache(region.id, catalog);
-      setQ('');
-      setPrefixTotal(null);
-      startTransition(() => {
-        setStack({ kind: 'region', region, catalog });
-      });
-    } catch {
-      setStack({ kind: 'hub' });
-    } finally {
-      setOpening(false);
-    }
+    });
+    void fetchMakerFsRegion(region.id)
+      .then((catalog) => {
+        setLibraryCatalogCache(region.id, catalog);
+        setStack((s) =>
+          s.kind === 'region' && s.region.id === region.id
+            ? { ...s, catalog }
+            : s,
+        );
+      })
+      .catch(() => undefined);
   }
 
   function openMaker(
@@ -409,9 +423,8 @@ export function MakersScreen() {
                 type="button"
                 className="mk-zone-row"
                 data-zone={i % 4}
-                disabled={opening || loadingHub}
                 onPointerDown={() => prefetchLibraryRegion(r.id)}
-                onClick={() => void openRegion(r)}
+                onClick={() => openRegion(r)}
               >
                 <span className="mk-zone-row__mark" aria-hidden>
                   {meta.mark}
@@ -483,7 +496,7 @@ export function MakersScreen() {
         </div>
         {makers.length === 0 ? (
           <p className="app-empty">
-            {ready ? '无匹配' : `暂无${noun}，请先同步本地片库`}
+            {q.trim() ? '无匹配' : `暂无${noun}`}
           </p>
         ) : (
           <MakerPosterGrid
@@ -491,16 +504,12 @@ export function MakersScreen() {
             overlay="center"
             items={makers.map((g) => {
               const desc = makerDescription(g.maker);
-              const cover = pickMakerGroupCover(g);
               return {
                 key: g.maker,
                 label: g.maker,
                 title: desc || undefined,
-                posterLocal: cover.posterLocal,
-                posterRev: cover.posterRev,
-                coverUrl: cover.coverUrl,
-                coverUrls: cover.coverUrls,
-                coverCode: cover.coverCode,
+                coverStudio: g.maker,
+                coverPrefixes: g.prefixes.map((p) => p.prefix).filter(Boolean),
                 onClick: () => openMaker(stack.region, stack.catalog, g),
               };
             })}
@@ -596,7 +605,7 @@ export function MakersScreen() {
           </div>
         </div>
         {prefixes.length === 0 ? (
-          <p className="app-empty">无匹配</p>
+          <p className="app-empty">{q.trim() ? '无匹配' : '索引中暂无此前缀'}</p>
         ) : (
           <MakerPosterGrid
             regionId={stack.region.id}
@@ -607,11 +616,8 @@ export function MakersScreen() {
                 key: p.prefix,
                 label: p.prefix,
                 title: note || undefined,
-                posterLocal: p.posterLocal,
-                posterRev: p.posterRev,
-                coverUrl: p.coverUrl,
-                coverUrls: p.coverUrls,
-                coverCode: p.coverCode,
+                coverStudio: g.maker,
+                coverPrefix: p.prefix,
                 onClick: () =>
                   openPrefix(stack.region, stack.catalog, g.maker, p.prefix),
               };
@@ -644,7 +650,7 @@ export function MakersScreen() {
       <AppPush
         title={stack.prefix}
         onBack={() => {
-          const list = groupMakerFsByMaker(stack.catalog.prefixes, stack.region.id);
+          const list = groupMakersForBrowse(stack.catalog.prefixes, stack.region.id);
           const group = list.find((m) => m.maker === stack.maker);
           if (group) {
             setStack({

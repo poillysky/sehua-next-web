@@ -1,10 +1,11 @@
 """从 maker-fs 索引物化到 library，并提供片商目录浏览。
 
-library 根下两层：
+library 根下三层：
   本地索引/  — 「同步本地片库」写入；每番号仅 {番号}.strm
   片商目录/  — mdc-ng 刮削落盘；片商页读此层
-    分区/前缀/番号/{poster.jpg, 番号.nfo, 番号.strm}
-    或 分区/厂牌/前缀/番号/
+  封面库/    — 片商/前缀卡片用，每目录固定 1 张最新海报
+    {区}/prefixes/{厂牌}/{前缀}/  — 前缀卡（新番号入盘则同步）
+    {区}/makers/{厂牌}/           — 厂牌卡（最新前缀的最新番号）
 
 路径模板与刮削命名一致：{category}/{studio}/{series_name}/{number}
   本地索引：…/{number}.strm（文件，非目录）
@@ -25,7 +26,7 @@ import shutil
 import threading
 import unicodedata
 import xml.etree.ElementTree as ET
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -39,12 +40,26 @@ log = logging.getLogger("nextweb.library")
 
 LIBRARY_INDEX_DIR = "本地索引"
 LIBRARY_MAKERS_DIR = "片商目录"
+LIBRARY_COVERS_DIR = "封面库"
 INDEX_STRM_EXT = ".strm"
 COVER_URL_NAME = "封面.url"
 INDEX_META_FILE = "meta.json"
 SCRAPE_META_FILE = "scrape.json"
 FC2_KEEP_FILE = ".fc2-keep.json"
-_LIBRARY_RESERVED_TOP = frozenset({LIBRARY_INDEX_DIR, LIBRARY_MAKERS_DIR})
+_LIBRARY_RESERVED_TOP = frozenset(
+    {LIBRARY_INDEX_DIR, LIBRARY_MAKERS_DIR, LIBRARY_COVERS_DIR}
+)
+_TILE_COVER_N = 1
+_TILE_PACK_TTL_S = 24 * 3600
+_TILE_PACK_EMPTY_TTL_S = 2 * 60
+_TILE_PACK_SERIES_CAP = 4
+_TILE_PACK_PROBE_CAP = 80
+_TILE_PACK_VERSION = 2
+_TILE_THUMB_MAX = 420
+_pack_locks_guard = threading.Lock()
+_pack_locks: dict[str, threading.Lock] = {}
+_pack_mem_lock = threading.Lock()
+_pack_mem: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 _POSTER_NAMES = ("poster.jpg", "poster.jpeg", "poster.png", "poster.webp")
 # 本地小文件写入：并行度（IO 为主）
 _DEFAULT_MAT_WORKERS = max(4, min(12, (os.cpu_count() or 4) * 2))
@@ -164,7 +179,7 @@ def _merge_dir_tree(src: Path, dst: Path) -> None:
 
 
 def migrate_library_layout() -> dict[str, Any]:
-    """整理 library 布局：根下仅「本地索引 / 片商目录」，片商目录下保证七区一级目录。"""
+    """整理 library 布局：根下仅「本地索引 / 片商目录 / 封面库」，片商目录下保证七区一级目录。"""
     base = library_base()
     makers = makers_library_root()
     index = library_index_root()
@@ -2114,6 +2129,541 @@ def _poster_name_in_entry(entry_dir: Path, code_name: str) -> str | None:
         except OSError:
             continue
     return None
+
+
+def covers_library_root() -> Path:
+    root = library_base() / LIBRARY_COVERS_DIR
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _pack_lock_for(key: str) -> threading.Lock:
+    with _pack_locks_guard:
+        lock = _pack_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _pack_locks[key] = lock
+        return lock
+
+
+def _safe_pack_seg(raw: str) -> str:
+    t = re.sub(r'[<>:"/\\|?*]', "_", str(raw or "").strip())
+    t = t.strip(" .")
+    return t[:80] or "_"
+
+
+def _tile_pack_dir(region_id: str, studio: str, prefix: str) -> Path:
+    rid = _safe_pack_seg(region_id)
+    st = _safe_pack_seg(studio)
+    pref = _safe_pack_seg(prefix) if prefix else ""
+    root = covers_library_root() / rid
+    if pref:
+        return root / "prefixes" / st / pref
+    return root / "makers" / st
+
+
+def _list_child_dir_names(root: Path) -> list[str]:
+    if not root.is_dir():
+        return []
+    names: list[str] = []
+    try:
+        with os.scandir(root) as it:
+            for e in it:
+                if e.name.startswith("."):
+                    continue
+                try:
+                    if e.is_dir(follow_symlinks=False):
+                        names.append(e.name)
+                except OSError:
+                    continue
+    except OSError:
+        return []
+    return names
+
+
+def _child_dirs_newest_first(root: Path) -> list[Path]:
+    rows: list[tuple[int, str, Path]] = []
+    try:
+        with os.scandir(root) as it:
+            for e in it:
+                if e.name.startswith("."):
+                    continue
+                try:
+                    if not e.is_dir(follow_symlinks=False):
+                        continue
+                    mtime = int(e.stat(follow_symlinks=False).st_mtime_ns)
+                except OSError:
+                    continue
+                rows.append((mtime, e.name, Path(e.path)))
+    except OSError:
+        return []
+    rows.sort(key=lambda r: (r[0], r[1]), reverse=True)
+    return [p for _m, _n, p in rows]
+
+
+def _collect_latest_posters(code_parent: Path, need: int) -> list[tuple[Path, str]]:
+    """只扫一层子目录名，按番号从新到旧取 need 张 poster，不递归全盘。"""
+    if need <= 0 or not code_parent.is_dir():
+        return []
+    names = _list_child_dir_names(code_parent)
+    names.sort(key=_dir_name_sort_key)
+    found: list[tuple[Path, str]] = []
+    probes = 0
+    for name in names:
+        if len(found) >= need:
+            break
+        probes += 1
+        if probes > _TILE_PACK_PROBE_CAP:
+            break
+        poster = _poster_name_in_entry(code_parent / name, name)
+        if not poster:
+            continue
+        found.append((code_parent / name / poster, name))
+    return found
+
+
+def _looks_like_code_parent(root: Path) -> bool:
+    try:
+        with os.scandir(root) as it:
+            n = 0
+            for e in it:
+                if e.name.startswith(".") or not e.is_dir(follow_symlinks=False):
+                    continue
+                if _poster_name_in_entry(Path(e.path), e.name):
+                    return True
+                n += 1
+                if n >= 8:
+                    break
+    except OSError:
+        return False
+    return False
+
+
+def _resolve_prefix_folder(
+    region_root: Path,
+    studio: str,
+    prefix: str,
+) -> Path | None:
+    st = str(studio or "").strip()
+    pref = str(prefix or "").strip()
+    if not pref:
+        return None
+    if st:
+        cand = region_root / st / pref
+        if cand.is_dir():
+            return cand
+    cand = region_root / pref
+    if cand.is_dir():
+        return cand
+    return None
+
+
+def _folder_mtime(path: Path | None) -> float:
+    if path is None:
+        return 0.0
+    try:
+        return float(path.stat().st_mtime)
+    except OSError:
+        return 0.0
+
+
+def _parse_prefix_list(raw: Any) -> list[str]:
+    if isinstance(raw, (list, tuple)):
+        parts = [str(x) for x in raw]
+    else:
+        parts = str(raw or "").replace(";", ",").split(",")
+    out: list[str] = []
+    seen: set[str] = set()
+    for p in parts:
+        s = str(p or "").strip().upper().replace("_", "-")
+        if not s or s in seen:
+            continue
+        seen.add(s)
+        out.append(s)
+    return out[:40]
+
+
+def _write_pack_thumb(src: Path, dst_webp: Path) -> bool:
+    """封面库只存小图 webp，列表加载比原版 DMM 大海报快得多。"""
+    try:
+        from PIL import Image
+
+        dst_webp.parent.mkdir(parents=True, exist_ok=True)
+        with Image.open(src) as im:
+            im = im.convert("RGB")
+            im.thumbnail((_TILE_THUMB_MAX, _TILE_THUMB_MAX), Image.Resampling.LANCZOS)
+            im.save(dst_webp, format="WEBP", quality=72, method=3)
+        return dst_webp.is_file()
+    except Exception:
+        return False
+
+
+def _link_or_copy_poster(src: Path, dst: Path) -> bool:
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if dst.exists():
+        try:
+            dst.unlink()
+        except OSError:
+            return False
+    try:
+        os.link(src, dst)
+        return True
+    except OSError:
+        pass
+    try:
+        shutil.copy2(src, dst)
+        return True
+    except OSError:
+        return False
+
+
+def _pack_items_from_dir(pack_dir: Path) -> list[dict[str, Any]]:
+    """只返回封面库里的本地文件，不用索引外链。"""
+    meta = _read_json_dict(pack_dir / "pack.json")
+    files = meta.get("files") if isinstance(meta.get("files"), list) else []
+    codes = meta.get("codes") if isinstance(meta.get("codes"), list) else []
+    if not files:
+        return []
+    try:
+        base = library_base().resolve()
+        pack_rel = pack_dir.resolve().relative_to(base).as_posix()
+    except Exception:
+        return []
+    items: list[dict[str, Any]] = []
+    for i, name in enumerate(files):
+        fn = str(name or "").strip()
+        if not fn or "/" in fn or "\\" in fn:
+            continue
+        path = pack_dir / fn
+        if not path.is_file():
+            continue
+        rev = ""
+        try:
+            st = path.stat()
+            rev = f"{int(st.st_mtime_ns)}-{int(st.st_size)}"
+        except OSError:
+            continue
+        code = ""
+        if i < len(codes):
+            code = str(codes[i] or "").strip()
+        items.append(
+            {
+                "coverCode": code or None,
+                "posterLocal": f"{pack_rel}/{fn}",
+                "posterRev": rev,
+            }
+        )
+    return items
+
+
+def _pack_items_cached(pack_dir: Path) -> list[dict[str, Any]]:
+    try:
+        mtime = (pack_dir / "pack.json").stat().st_mtime
+    except OSError:
+        return []
+    key = str(pack_dir)
+    with _pack_mem_lock:
+        hit = _pack_mem.get(key)
+        if hit and hit[0] == mtime:
+            return hit[1]
+    items = _pack_items_from_dir(pack_dir)
+    with _pack_mem_lock:
+        _pack_mem[key] = (mtime, items)
+        if len(_pack_mem) > 400:
+            extra = list(_pack_mem.keys())[:80]
+            for k in extra:
+                _pack_mem.pop(k, None)
+    return items
+
+
+def _pack_mtime(pack_dir: Path) -> float:
+    try:
+        return float((pack_dir / "pack.json").stat().st_mtime)
+    except OSError:
+        return 0.0
+
+
+def _pack_is_fresh(pack_dir: Path) -> bool:
+    meta = _read_json_dict(pack_dir / "pack.json")
+    if not meta:
+        return False
+    if meta.get("urls"):
+        return False
+    if int(meta.get("version") or 0) < _TILE_PACK_VERSION:
+        return False
+    files = meta.get("files") if isinstance(meta.get("files"), list) else []
+    try:
+        updated = str(meta.get("updatedAt") or "")
+        dt = datetime.fromisoformat(updated.replace("Z", "+00:00"))
+        age = (datetime.now(timezone.utc) - dt).total_seconds()
+    except Exception:
+        return False
+    if not files:
+        return age <= _TILE_PACK_EMPTY_TTL_S
+    if age > _TILE_PACK_TTL_S:
+        return False
+    for name in files:
+        fn = str(name or "").strip()
+        if not fn or not (pack_dir / fn).is_file():
+            return False
+    return True
+
+
+def _pack_files_ok(pack_dir: Path) -> tuple[dict[str, Any], list[str]] | None:
+    meta = _read_json_dict(pack_dir / "pack.json")
+    if not meta or meta.get("urls"):
+        return None
+    if int(meta.get("version") or 0) < _TILE_PACK_VERSION:
+        return None
+    files = meta.get("files") if isinstance(meta.get("files"), list) else []
+    names: list[str] = []
+    for name in files:
+        fn = str(name or "").strip()
+        if not fn or not (pack_dir / fn).is_file():
+            return None
+        names.append(fn)
+    return meta, names
+
+
+def _prefix_pack_is_current(pack_dir: Path, folder: Path | None) -> bool:
+    """前缀目录 mtime 未新于封面包 → 不必重建。"""
+    got = _pack_files_ok(pack_dir)
+    if not got:
+        return False
+    _meta, files = got
+    if folder is None or not folder.is_dir():
+        return not files and _pack_is_fresh(pack_dir)
+    if not files:
+        return _pack_is_fresh(pack_dir) and _folder_mtime(folder) <= _pack_mtime(pack_dir)
+    return _folder_mtime(folder) <= _pack_mtime(pack_dir)
+
+
+def _rebuild_tile_pack(
+    pack_dir: Path,
+    sources: list[tuple[Path, str]],
+    extra: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    pack_dir.mkdir(parents=True, exist_ok=True)
+    for old in pack_dir.iterdir():
+        if old.name.startswith(".") or old.name == "pack.json":
+            continue
+        if old.is_file():
+            try:
+                old.unlink()
+            except OSError:
+                pass
+    files: list[str] = []
+    codes: list[str] = []
+    for src, code in sources[:_TILE_COVER_N]:
+        name = f"{len(files):02d}.webp"
+        dest = pack_dir / name
+        placed = False
+        if src.suffix.lower() == ".webp":
+            placed = _link_or_copy_poster(src, dest)
+        if not placed:
+            placed = _write_pack_thumb(src, dest)
+        if not placed:
+            fallback = pack_dir / f"{len(files):02d}{src.suffix.lower() or '.jpg'}"
+            if not _link_or_copy_poster(src, fallback):
+                continue
+            name = fallback.name
+        files.append(name)
+        codes.append(str(code or "").strip().upper())
+    payload: dict[str, Any] = {
+        "version": _TILE_PACK_VERSION,
+        "updatedAt": _now_iso(),
+        "files": files,
+        "codes": codes,
+    }
+    if extra:
+        payload.update(extra)
+    try:
+        (pack_dir / "pack.json").write_text(
+            json.dumps(payload, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+    with _pack_mem_lock:
+        _pack_mem.pop(str(pack_dir), None)
+    return _pack_items_from_dir(pack_dir)
+
+
+def ensure_tile_cover_pack(
+    region_id: str,
+    studio: str,
+    prefix: str = "",
+) -> list[dict[str, Any]]:
+    """前缀封面库固定 1 张最新番号；目录有新番号才重建。"""
+    rid = str(region_id or "").strip()
+    st = str(studio or "").strip()
+    pref = str(prefix or "").strip()
+    if not rid or not pref:
+        return []
+    if not st:
+        st = pref
+    pack_dir = _tile_pack_dir(rid, st, pref)
+    key = str(pack_dir)
+    with _pack_lock_for(key):
+        label = scrape_naming.KIND_LABELS.get(rid) or ""
+        region_root = _makers_root_for_browse() / label
+        folder = _resolve_prefix_folder(region_root, st, pref)
+        if _prefix_pack_is_current(pack_dir, folder):
+            return _pack_items_cached(pack_dir)
+        sources = _collect_latest_posters(folder, 1) if folder else []
+        return _rebuild_tile_pack(pack_dir, sources)
+
+
+def _prefix_pack_sources(pack_dir: Path, limit: int) -> list[tuple[Path, str]]:
+    """从前缀封面包抽出本地文件，供厂牌包硬链，不再二次压缩。"""
+    if limit <= 0:
+        return []
+    meta = _read_json_dict(pack_dir / "pack.json")
+    files = meta.get("files") if isinstance(meta.get("files"), list) else []
+    codes = meta.get("codes") if isinstance(meta.get("codes"), list) else []
+    out: list[tuple[Path, str]] = []
+    for i, name in enumerate(files):
+        if len(out) >= limit:
+            break
+        fn = str(name or "").strip()
+        if not fn or "/" in fn or "\\" in fn:
+            continue
+        path = pack_dir / fn
+        if not path.is_file():
+            continue
+        code = str(codes[i] or "").strip() if i < len(codes) else ""
+        out.append((path, code))
+    return out
+
+
+def _norm_prefix_keys(prefixes: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for p in prefixes:
+        s = str(p or "").strip().upper().replace("_", "-")
+        if not s or s in seen:
+            continue
+        seen.add(s)
+        out.append(s)
+    return out
+
+
+def _pick_latest_prefix_folder(
+    region_root: Path,
+    studio: str,
+    prefixes: list[str],
+) -> tuple[str, Path] | None:
+    """目录 mtime 最新的前缀 = 最近入盘的前缀。"""
+    best_m = -1.0
+    best: tuple[str, Path] | None = None
+    for pref in prefixes:
+        folder = _resolve_prefix_folder(region_root, studio, pref)
+        if folder is None:
+            continue
+        mt = _folder_mtime(folder)
+        if best is None or mt > best_m:
+            best_m = mt
+            best = (pref, folder)
+    return best
+
+
+def ensure_maker_cover_pack(
+    region_id: str,
+    studio: str,
+    prefixes: list[str],
+) -> list[dict[str, Any]]:
+    """厂牌封面库固定 1 张：最新前缀的最新番号，硬链已有 webp。"""
+    rid = str(region_id or "").strip()
+    st = str(studio or "").strip()
+    prefs = _norm_prefix_keys(prefixes)
+    if not rid or not st or not prefs:
+        return []
+    pack_dir = _tile_pack_dir(rid, st, "")
+    key = str(pack_dir)
+    with _pack_lock_for(key):
+        label = scrape_naming.KIND_LABELS.get(rid) or ""
+        region_root = _makers_root_for_browse() / label
+        picked = _pick_latest_prefix_folder(region_root, st, prefs)
+        got = _pack_files_ok(pack_dir)
+        if got:
+            _meta, files = got
+            if picked:
+                _pref, folder = picked
+                if files and _folder_mtime(folder) <= _pack_mtime(pack_dir):
+                    return _pack_items_cached(pack_dir)
+            elif not files and _pack_is_fresh(pack_dir):
+                return _pack_items_cached(pack_dir)
+        extra: dict[str, Any] = {"kind": "maker", "prefixes": prefs, "sourcePrefix": ""}
+        if not picked:
+            return _rebuild_tile_pack(pack_dir, [], extra=extra)
+        pref, folder = picked
+        ensure_tile_cover_pack(rid, st, pref)
+        sources = _prefix_pack_sources(_tile_pack_dir(rid, st, pref), 1)
+        if not sources:
+            sources = _collect_latest_posters(folder, 1)
+        extra["sourcePrefix"] = pref
+        extra["sourceCode"] = sources[0][1] if sources else ""
+        return _rebuild_tile_pack(pack_dir, sources, extra=extra)
+
+
+def browse_tile_covers(
+    *,
+    region: str,
+    studio: str,
+    prefix: str = "",
+    prefixes: str | list[str] | None = None,
+) -> dict[str, Any]:
+    """前缀卡读 prefixes/ 最新 1 张；厂牌卡读 makers/ 最新前缀最新番号。"""
+    rid = maker_fs.resolve_fs_region(region) or str(region or "").strip()
+    st = str(studio or "").strip()
+    pref = str(prefix or "").strip()
+    if rid not in scrape_naming.KIND_LABELS:
+        return {"items": [], "region": rid, "studio": st, "prefix": pref}
+    if pref:
+        items = ensure_tile_cover_pack(rid, st or pref, pref)
+    else:
+        plist = _parse_prefix_list(prefixes)
+        items = ensure_maker_cover_pack(rid, st, plist) if st and plist else []
+    return {
+        "items": items,
+        "region": rid,
+        "studio": st,
+        "prefix": pref,
+    }
+
+
+def browse_tile_covers_batch(
+    *,
+    region: str,
+    queries: list[Any],
+) -> dict[str, Any]:
+    """一次返回整页格子封面，避免每张卡单独打接口。"""
+    qlist = [q for q in (queries or []) if isinstance(q, dict)][:80]
+    packs: list[list[dict[str, Any]]] = [[] for _ in qlist]
+
+    def one(i: int, q: dict[str, Any]) -> tuple[int, list[dict[str, Any]]]:
+        data = browse_tile_covers(
+            region=region,
+            studio=str(q.get("studio") or ""),
+            prefix=str(q.get("prefix") or ""),
+            prefixes=q.get("prefixes") or "",
+        )
+        return i, list(data.get("items") or [])
+
+    if not qlist:
+        return {"packs": []}
+    workers = min(4, len(qlist))
+    if workers <= 1:
+        for i, q in enumerate(qlist):
+            _i, items = one(i, q)
+            packs[i] = items
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futs = [ex.submit(one, i, q) for i, q in enumerate(qlist)]
+            for fut in as_completed(futs):
+                i, items = fut.result()
+                packs[i] = items
+    return {"packs": packs}
 
 
 def _prefix_cover_from_disk(

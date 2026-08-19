@@ -1,12 +1,12 @@
 {
   "name": "nextweb",
-  "version": "1.0.16",
+  "version": "1.0.17",
   "private": true,
   "description": "NextWeb monorepo: web + api (MDC-ng 外部刮削)",
   "scripts": {
     "dev": "npm run dev --prefix apps/web",
     "dev:web": "npm run dev --prefix apps/web",
-    "dev:api": "cd apps/api && .venv\\Scripts\\python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8020",
+    "dev:api": "cd apps/api && .venv\\Scripts\\python.exe dev_server.py",
     "dev:all": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File ./start-dev.ps1",
     "stop:all": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File ./stop-dev.ps1",
     "build": "npm run build --prefix apps/web",

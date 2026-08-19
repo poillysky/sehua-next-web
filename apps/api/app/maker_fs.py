@@ -607,12 +607,13 @@ def _supplement_covers_from_bitmagnet(
     to_n: int,
     max_covers: int,
 ) -> tuple[dict[str, Any], int, list[str]]:
-    """用 bitmagnet 独立资源库补 sehua 缺失番号。
+    """用 bitmagnet 独立资源库补色花缺失番号。
 
     规则：
-    - sehua 已有：绝不覆盖
-    - sehua 没有：bitmagnet 命中则补一个“真实存在”的空封面条目
+    - 色花已有：绝不覆盖
+    - 色花没有：bitmagnet 命中则补一个“真实存在”的空封面条目
     - 仅保证“至少一个库有资源”，不强行为 BT 生成论坛标题/封面
+    全量 / 增量补漏共用。
     """
     try:
         from . import bitmagnet_pg
@@ -732,6 +733,117 @@ def _supplement_covers_from_bitmagnet(
             if len(out) >= max_covers:
                 break
 
+    return out, added, added_codes
+
+
+def _cover_hit_from_sehua_item(
+    it: dict[str, Any],
+    *,
+    code: str,
+    fs_region: str,
+) -> dict[str, Any]:
+    """把色花 prefix 扫库条目收成索引 covers 项。"""
+    urls = [u for u in (it.get("coverUrls") or []) if u][:6]
+    cover_url = urls[0] if urls else it.get("coverUrl")
+    hit: dict[str, Any] = {
+        "coverUrl": cover_url or None,
+        "coverUrls": urls[:2],
+        "file": None,
+        "source": "sehua",
+    }
+    title = str(it.get("forumTitle") or "").strip()
+    if title:
+        from .scrape_forum_title import clean_forum_zh_title
+
+        title = clean_forum_zh_title(title, code) or title
+    actors = it.get("forumActors")
+    want_actors = indexes_forum_actors(fs_region)
+    if want_actors:
+        if isinstance(actors, list) and actors:
+            cleaned = _normalize_forum_actors_field(actors)
+            if cleaned:
+                hit["forumActors"] = cleaned
+        if title:
+            from .forum_seed import (
+                _looks_like_bare_actor_title,
+                _title_is_actor_echo,
+            )
+            from .scrape_forum_title import is_indexable_forum_title
+
+            actor_list = hit.get("forumActors") or []
+            if _title_is_actor_echo(title, actor_list) or _looks_like_bare_actor_title(
+                title
+            ):
+                pass
+            elif is_indexable_forum_title(title, code, assume_not_fake=True):
+                hit["forumTitle"] = title
+    elif title:
+        from .scrape_forum_title import is_indexable_forum_title
+
+        if is_indexable_forum_title(title, code, assume_not_fake=True):
+            hit["forumTitle"] = title
+    return hit
+
+
+def _is_bitmagnet_cover_hit(hit: Any) -> bool:
+    if not isinstance(hit, dict):
+        return False
+    return str(hit.get("source") or "").strip().lower() in {"bitmagnet", "bit"}
+
+
+def _supplement_covers_from_sehua(
+    *,
+    prefix: str,
+    covers: dict[str, Any],
+    pad: int,
+    from_n: int,
+    to_n: int,
+    max_covers: int,
+    fs_region: str,
+    db_region: str,
+    bust: bool = True,
+) -> tuple[dict[str, Any], int, list[str]]:
+    """用色花主库补漏：已有 sehua 条目不覆盖，只补空；Bit 占位可升级。"""
+    from . import prefix_service
+
+    indexed = prefix_service._load_cached(  # noqa: SLF001
+        prefix,
+        bust=bust,
+        region=db_region or None,
+    )
+    added = 0
+    added_codes: list[str] = []
+    out = dict(covers)
+    for it in indexed.get("items") or []:
+        if not isinstance(it, dict):
+            continue
+        code = _index_code_key(
+            str(it.get("code") or ""),
+            pad=pad,
+            prefix=prefix,
+            from_n=from_n,
+            to_n=to_n,
+        )
+        if not code:
+            continue
+        hit = _cover_hit_from_sehua_item(it, code=code, fs_region=fs_region)
+        prev = out.get(code)
+        if not isinstance(prev, dict):
+            if len(out) >= max_covers:
+                continue
+            out[code] = hit
+            added += 1
+            added_codes.append(code)
+            continue
+        merged = _merge_cover_hit(prev, hit)
+        if _is_bitmagnet_cover_hit(prev) and (
+            hit.get("coverUrl") or hit.get("forumTitle") or hit.get("forumActors")
+        ):
+            merged["source"] = "sehua"
+        if merged != prev:
+            out[code] = merged
+            added += 1
+            added_codes.append(code)
     return out, added, added_codes
 
 
@@ -1813,28 +1925,18 @@ def range_for_prefix_local(
     }
 
 
-def _parse_iso_utc(raw: str) -> datetime | None:
-    s = str(raw or "").strip()
-    if not s:
-        return None
-    try:
-        if s.endswith("Z"):
-            s = s[:-1] + "+00:00"
-        dt = datetime.fromisoformat(s)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
-    except Exception:
-        return None
-
-
 def _try_reuse_fresh_index(
     prefix: str,
     fs_region: str,
     *,
     skip_fresh_hours: float,
 ) -> dict[str, Any] | None:
-    """未过期的本地索引直接复用，跳过扫库。"""
+    """增量：本地索引已有数据则跳过整段重建（不看时间）。
+
+    skip_fresh_hours <= 0 表示强制重扫（全量 / 单前缀）。
+    空索引、coverCount=0、上次触顶截断，一律不跳过。
+    跳过时仍用色花主库 + Bit 补漏番号。
+    """
     if skip_fresh_hours <= 0:
         return None
     path = prefix_index_path(prefix, fs_region or None)
@@ -1848,14 +1950,8 @@ def _try_reuse_fresh_index(
     count = int(idx.get("coverCount") or len(covers) or 0)
     if count <= 0:
         return None
-    # 上次触顶未扫全：不可当新鲜复用
+    # 上次触顶未扫全：不可当已有数据跳过
     if bool(idx.get("truncated")):
-        return None
-    updated = _parse_iso_utc(str(idx.get("updatedAt") or ""))
-    if not updated:
-        return None
-    age_h = (datetime.now(timezone.utc) - updated).total_seconds() / 3600.0
-    if age_h > skip_fresh_hours:
         return None
     idx = {**idx, "skipped": True, "coverCount": count}
     return idx
@@ -1923,6 +2019,26 @@ def _export_prefix_index(
             from_n=from_reuse,
             to_n=to_reuse,
         )
+        sh_added = 0
+        try:
+            covers_norm, sh_added, _sh_codes = _supplement_covers_from_sehua(
+                prefix=prefix,
+                covers=covers_norm,
+                pad=pad_reuse,
+                from_n=from_reuse,
+                to_n=to_reuse,
+                max_covers=max_covers,
+                fs_region=fs_region,
+                db_region=db_region,
+                bust=True,
+            )
+        except Exception:
+            log.warning(
+                "maker-fs sehua supplement %s crashed (reuse)",
+                prefix,
+                exc_info=True,
+            )
+            sh_added = 0
         bm_added = 0
         bm_added_codes: list[str] = []
         try:
@@ -1948,7 +2064,7 @@ def _export_prefix_index(
         range_total = (
             _filled_range_total(d_from, d_to) if fill else len(covers_norm)
         )
-        dirty = bm_added > 0
+        dirty = sh_added > 0 or bm_added > 0
         if (
             set(covers0.keys()) != set(covers_norm.keys())
             or len(covers0) != len(covers_norm)
@@ -1960,6 +2076,7 @@ def _export_prefix_index(
             or int(reused.get("fillFrom") or 0) != (d_from if fill else 0)
             or int(reused.get("fillTo") or 0) != (d_to if fill else 0)
             or bm_added > 0
+            or sh_added > 0
         ):
             reused["covers"] = covers_norm
             reused["hitCount"] = len(covers_norm)
@@ -2045,52 +2162,9 @@ def _export_prefix_index(
                 )
                 if not code:
                     continue
-                urls = [u for u in (it.get("coverUrls") or []) if u][:6]
-                cover_url = urls[0] if urls else it.get("coverUrl")
-                # 全员写入封面字段（可空）；有码/写真写女优，其余写标题
-                hit: dict[str, Any] = {
-                    "coverUrl": cover_url or None,
-                    "coverUrls": urls[:2],
-                    "file": None,
-                }
-                title = str(it.get("forumTitle") or "").strip()
-                if title:
-                    # 旧缓存可能残留 `) (20230104)…`；写入前再洗一轮
-                    from .scrape_forum_title import clean_forum_zh_title
-
-                    title = clean_forum_zh_title(title, code) or title
-                actors = it.get("forumActors")
-                want_actors = indexes_forum_actors(fs_region)
-                if want_actors:
-                    if isinstance(actors, list) and actors:
-                        cleaned = _normalize_forum_actors_field(actors)
-                        if cleaned:
-                            hit["forumActors"] = cleaned
-                    # 影片标题仍保留供刮削种子；女优名不当标题
-                    if title:
-                        from .forum_seed import (
-                            _looks_like_bare_actor_title,
-                            _title_is_actor_echo,
-                        )
-                        from .scrape_forum_title import is_indexable_forum_title
-
-                        actor_list = hit.get("forumActors") or []
-                        if _title_is_actor_echo(
-                            title, actor_list
-                        ) or _looks_like_bare_actor_title(title):
-                            pass
-                        elif is_indexable_forum_title(
-                            title, code, assume_not_fake=True
-                        ):
-                            hit["forumTitle"] = title
-                else:
-                    if title:
-                        from .scrape_forum_title import is_indexable_forum_title
-
-                        if is_indexable_forum_title(
-                            title, code, assume_not_fake=True
-                        ):
-                            hit["forumTitle"] = title
+                hit = _cover_hit_from_sehua_item(
+                    it, code=code, fs_region=fs_region
+                )
                 if code in covers and isinstance(covers[code], dict):
                     covers[code] = _merge_cover_hit(covers[code], hit)
                 else:
@@ -2354,7 +2428,7 @@ def build_maker_fs(
     """生成七区细表 +（可选）从库导出各前缀封面索引。
 
     - workers: 并行扫库线程数（默认 3，MAKER_FS_WORKERS 可覆盖）
-    - skip_fresh_hours: 跳过 N 小时内已导出的前缀（0=强制全量）
+    - skip_fresh_hours: >0 增量（索引已有数据则跳过扫库）；0=强制全量
     - region: 仅扫描指定分区（如 japan_censored）；空=全部
     - only_prefix: 仅扫描单个前缀（强制重扫该前缀）
     - from_claim: 后台任务已 claim_build，跳过 running 互斥检查

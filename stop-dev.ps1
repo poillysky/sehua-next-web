@@ -11,12 +11,46 @@ $ports = @($WebPort, $ApiPort)
 $scriptTitles = @("NextWeb API", "NextWeb Web")
 $scriptNames = @("dev:api", "dev:web")
 
+$script:ProtectedNames = @(
+  'Idle', 'System', 'Registry', 'smss', 'csrss', 'wininit', 'winlogon',
+  'services', 'lsass', 'svchost', 'fontdrvhost', 'dwm', 'explorer',
+  'Memory Compression', 'Secure System', 'LsaIso',
+  'Cursor', 'Cursor Helper', 'Code', 'CodeSetup'
+)
+$script:KillableNames = @(
+  'node', 'python', 'pythonw', 'cmd', 'powershell', 'pwsh', 'conhost'
+)
+
+function Get-ProcessNameSafe([int]$ProcId) {
+  try {
+    $p = Get-Process -Id $ProcId -ErrorAction Stop
+    return $p.ProcessName
+  } catch {
+    return $null
+  }
+}
+
+function Test-KillablePid([int]$ProcId) {
+  if ($ProcId -le 8) { return $false }
+  if ($ProcId -eq $PID) { return $false }
+  $name = Get-ProcessNameSafe $ProcId
+  if (-not $name) { return $false }
+  foreach ($n in $script:ProtectedNames) {
+    if ($name -eq $n) { return $false }
+  }
+  foreach ($n in $script:KillableNames) {
+    if ($name -eq $n) { return $true }
+  }
+  return $false
+}
+
 function Get-ListenPids([int]$Port) {
   $listenPids = [System.Collections.Generic.HashSet[int]]::new()
   try {
     $conns = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
     foreach ($c in @($conns)) {
-      if ($c.OwningProcess -and $c.OwningProcess -ne 0) { [void]$listenPids.Add([int]$c.OwningProcess) }
+      $procId = [int]$c.OwningProcess
+      if ($procId -gt 0) { [void]$listenPids.Add($procId) }
     }
   } catch { }
 
@@ -36,8 +70,14 @@ function Get-ListenPids([int]$Port) {
 }
 
 function Stop-ProcessTree([int]$ProcId, [string]$Why) {
-  if ($ProcId -le 0) { return $false }
-  Write-Host "[NextWeb] Killing PID $ProcId (tree) — $Why"
+  if (-not (Test-KillablePid $ProcId)) {
+    $name = Get-ProcessNameSafe $ProcId
+    if (-not $name) { $name = '?' }
+    Write-Host "[NextWeb] Skip kill PID $ProcId ($name) — $Why"
+    return $false
+  }
+  $name = Get-ProcessNameSafe $ProcId
+  Write-Host "[NextWeb] Killing PID $ProcId ($name) — $Why"
   & taskkill.exe /F /T /PID $ProcId 2>$null | Out-Null
   return $true
 }

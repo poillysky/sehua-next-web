@@ -2034,6 +2034,64 @@ export async function fetchLibraryRegion(
   return ((await res.json()) as Envelope<MakerFsRegionCatalog>).data;
 }
 
+export type LibraryTileCoverItem = {
+  coverCode?: string | null;
+  posterLocal?: string | null;
+  posterRev?: string | null;
+  coverUrl?: string | null;
+  coverUrls?: string[];
+};
+
+export type LibraryTileCoversResult = {
+  items: LibraryTileCoverItem[];
+  region?: string;
+  studio?: string;
+  prefix?: string;
+};
+
+export async function fetchLibraryTileCovers(opts: {
+  region: string;
+  studio: string;
+  prefix?: string;
+  prefixes?: string[];
+  signal?: AbortSignal;
+}): Promise<LibraryTileCoversResult> {
+  const q = new URLSearchParams();
+  q.set('region', opts.region);
+  q.set('studio', opts.studio);
+  if (opts.prefix) q.set('prefix', opts.prefix);
+  if (opts.prefixes && opts.prefixes.length) {
+    q.set('prefixes', opts.prefixes.filter(Boolean).join(','));
+  }
+  const res = await apiFetch(`/scrape/library/tile-covers?${q}`, {
+    signal: opts.signal,
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<LibraryTileCoversResult>).data;
+}
+
+export async function fetchLibraryTileCoversBatch(opts: {
+  region: string;
+  queries: Array<{
+    studio?: string;
+    prefix?: string;
+    prefixes?: string[];
+  }>;
+  signal?: AbortSignal;
+}): Promise<LibraryTileCoverItem[][]> {
+  const res = await apiFetch('/scrape/library/tile-covers/batch', {
+    method: 'POST',
+    body: JSON.stringify({
+      region: opts.region,
+      queries: opts.queries,
+    }),
+    signal: opts.signal,
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  const data = ((await res.json()) as Envelope<{ packs?: LibraryTileCoverItem[][] }>).data;
+  return Array.isArray(data?.packs) ? data.packs : [];
+}
+
 export async function fetchLibraryCodes(opts: {
   region: string;
   studio: string;

@@ -43,6 +43,9 @@ apps/api/__pycache__/
 *.tsbuildinfo
 apps/web/next-env.d.ts
 
+# never let Next/Tailwind watch a local library mount
+/library/
+
 # data (keep folder, ignore runtime DBs & heavy caches)
 /data/*.sqlite
 /data/*.sqlite-*

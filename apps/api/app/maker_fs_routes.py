@@ -105,9 +105,12 @@ def list_regions(enrich: int = Query(0, ge=0, le=1)) -> dict[str, Any]:
 
 
 @router.get("/maker-fs/regions/{region_id}")
-def get_region(region_id: str) -> dict[str, Any]:
+def get_region(
+    region_id: str,
+    enrich: int = Query(0, ge=0, le=1),
+) -> dict[str, Any]:
     rid = maker_fs.resolve_fs_region(region_id) or str(region_id or "").strip()
-    idx = maker_fs.read_region_index(rid)
+    idx = maker_fs.read_region_index(rid, enrich=bool(enrich))
     if idx:
         return _wrap(idx)
     # 构建中该区尚未写出：仍返回空壳，避免前端「进不去」
@@ -337,7 +340,7 @@ def start_build(
         maker_fs.DEFAULT_SKIP_FRESH_HOURS,
         ge=0,
         le=720,
-        description="跳过 N 小时内已导出的前缀；0=强制全量",
+        description=">0 增量：索引已有数据则跳过；0=强制全量",
     ),
     force: int = Query(0, description="1=强制全量（忽略 skipFreshHours）"),
     region: str = Query(

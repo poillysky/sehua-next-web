@@ -795,13 +795,13 @@ export function MakerFsPanel({
             className="settings-nav"
             disabled={busy || running}
             onClick={() =>
-              void runBuild({ skipFreshHours: 0, label: '增量扫库' })
+              void runBuild({ skipFreshHours: 24, label: '增量扫库' })
             }
           >
             <span className="mfs-action-dot mfs-action-dot--incr" aria-hidden />
             <span className="settings-nav__main">
               <span className="settings-nav__title">增量扫库</span>
-              <span className="settings-nav__desc">重扫全部前缀，补全 sehua / bit 缺失番号</span>
+              <span className="settings-nav__desc">已有索引只补漏（色花主、Bit 补），空缺才全扫</span>
             </span>
             <ChevronRight className="settings-nav__chev" size={16} strokeWidth={2.25} />
           </button>
@@ -816,7 +816,7 @@ export function MakerFsPanel({
             <span className="mfs-action-dot mfs-action-dot--full" aria-hidden />
             <span className="settings-nav__main">
               <span className="settings-nav__title">全量重扫</span>
-              <span className="settings-nav__desc">强制重建全部七区</span>
+              <span className="settings-nav__desc">强制重建全部七区（色花主、Bit 补）</span>
             </span>
             <ChevronRight className="settings-nav__chev" size={16} strokeWidth={2.25} />
           </button>

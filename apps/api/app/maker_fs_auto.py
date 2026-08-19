@@ -63,7 +63,7 @@ def _seconds_until_next_midnight() -> float:
 
 
 def run_daily_sync(*, reason: str = "scheduled") -> dict[str, Any]:
-    """增量索引（跳过 24h 内新鲜前缀）+ 同步本地片库。"""
+    """增量索引（已有数据只补漏：色花主、Bit 补）+ 同步本地片库。"""
     global _running
     cfg = get_config()
     if not cfg.get("enabled"):

@@ -5,7 +5,7 @@ import type {
   MakerFsRegionsOverview,
 } from '@/lib/api';
 import { makerCodeFormatMeta } from '@/lib/makerCode';
-import { prefixNote } from '@/config/av-makers';
+import { avMakersForFsRegion, prefixNote } from '@/config/av-makers';
 
 export const MAKER_FS_FALLBACK_REGIONS: MakerFsRegionSummary[] = [
   { id: 'japan_censored', label: '日本有码', prefixCount: 0, makerCount: 0, codeCount: 0 },
@@ -378,6 +378,77 @@ export function groupMakerFsByMaker(
     return [...map.values()].sort((a, b) => a.order - b.order);
 }
 
+type CatalogPrefix = MakerFsRegionCatalog['prefixes'][number];
+
+function catalogPrefixKey(prefix: string): string {
+  return String(prefix || '')
+    .trim()
+    .toUpperCase()
+    .replace(/_/g, '-');
+}
+
+/**
+ * 片商页：厂牌名单来自 av-makers（写死）；前缀只跟 maker-fs 索引走，不造本地空目录。
+ * 索引里没有的 JSON 前缀不展示。素人 / FC2 仍按索引 catalog 分组。
+ */
+export function groupMakersForBrowse(
+  prefixes: MakerFsRegionCatalog['prefixes'] | undefined,
+  regionId?: string | null,
+): MakerFsMakerGroup[] {
+  const fixed = avMakersForFsRegion(regionId);
+  if (!fixed || fixed.length === 0) {
+    return groupMakerFsByMaker(prefixes, regionId);
+  }
+
+  const byMakerPrefix = new Map<string, CatalogPrefix>();
+  const byPrefix = new Map<string, CatalogPrefix>();
+  const indexList = prefixes || [];
+  for (const p of indexList) {
+    const pref = catalogPrefixKey(p.prefix);
+    if (!pref) continue;
+    const maker = makerFsGroupLabel(regionId, p).toLowerCase();
+    byMakerPrefix.set(`${maker}|${pref}`, p);
+    if (!byPrefix.has(pref)) byPrefix.set(pref, p);
+  }
+
+  return fixed.map((entry) => {
+    const maker = String(entry.maker || '').trim();
+    const makerKey = maker.toLowerCase();
+    const jsonKeys = new Set(
+      (entry.prefixes || []).map((raw) => catalogPrefixKey(String(raw || ''))).filter(Boolean),
+    );
+    const used = new Set<string>();
+    const list: CatalogPrefix[] = [];
+
+    for (const raw of entry.prefixes || []) {
+      const pref = String(raw || '').trim();
+      const key = catalogPrefixKey(pref);
+      if (!key) continue;
+      const hit =
+        byMakerPrefix.get(`${makerKey}|${key}`) ||
+        (jsonKeys.has(key) ? byPrefix.get(key) : undefined);
+      if (!hit || used.has(key)) continue;
+      used.add(key);
+      list.push({ ...hit, board_name: maker, prefix: hit.prefix || pref });
+    }
+
+    for (const p of indexList) {
+      const key = catalogPrefixKey(p.prefix);
+      if (!key || used.has(key)) continue;
+      if (makerFsGroupLabel(regionId, p).toLowerCase() !== makerKey) continue;
+      used.add(key);
+      list.push({ ...p, board_name: maker });
+    }
+
+    return {
+      maker,
+      prefixes: list,
+      prefixCount: list.length,
+      codeCount: list.reduce((n, p) => n + (p.codeCount || 0), 0),
+    };
+  });
+}
+
 export type CatalogFacetItem = {
   name: string;
   count: number;
@@ -512,6 +583,22 @@ export const LIBRARY_SYNCED = 'nextweb:library-synced';
 
 const libraryCatalogCache = new Map<string, MakerFsRegionCatalog>();
 let libraryRegionsCache: MakerFsRegionsOverview | null = null;
+const REGIONS_LS_KEY = 'mk-regions-overview';
+
+function readRegionsFromStorage(): MakerFsRegionsOverview | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(REGIONS_LS_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw) as MakerFsRegionsOverview;
+    if (!data || !Array.isArray(data.regions) || data.regions.length === 0) {
+      return null;
+    }
+    return data;
+  } catch {
+    return null;
+  }
+}
 
 export function getLibraryCatalogCache(
   regionId: string,
@@ -529,23 +616,37 @@ export function setLibraryCatalogCache(
 }
 
 export function getLibraryRegionsCache(): MakerFsRegionsOverview | null {
+  if (libraryRegionsCache) return libraryRegionsCache;
+  libraryRegionsCache = readRegionsFromStorage();
   return libraryRegionsCache;
 }
 
 export function setLibraryRegionsCache(data: MakerFsRegionsOverview) {
   libraryRegionsCache = data;
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(REGIONS_LS_KEY, JSON.stringify(data));
+  } catch {
+    /* ignore */
+  }
 }
 
 export function clearLibraryBrowseCaches() {
   libraryCatalogCache.clear();
   libraryRegionsCache = null;
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(REGIONS_LS_KEY);
+  } catch {
+    /* ignore */
+  }
 }
 
 export function prefetchLibraryRegion(regionId: string) {
   const id = String(regionId || '').trim();
   if (!id || libraryCatalogCache.has(id)) return;
-  void import('@/lib/api').then(({ fetchLibraryRegion }) =>
-    fetchLibraryRegion(id)
+  void import('@/lib/api').then(({ fetchMakerFsRegion }) =>
+    fetchMakerFsRegion(id)
       .then((catalog) => setLibraryCatalogCache(id, catalog))
       .catch(() => undefined),
   );

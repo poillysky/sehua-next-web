@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 import threading
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, Response
 
 from .auth_routes import get_optional_user, require_user
@@ -21,8 +21,13 @@ _EXPORT_MEDIA_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 
 def _file_cache_headers(path: Path) -> dict[str, str]:
     st = path.stat()
+    long_cache = library_materialize.LIBRARY_COVERS_DIR in path.parts
     return {
-        "Cache-Control": "public, max-age=0, must-revalidate",
+        "Cache-Control": (
+            "public, max-age=604800, immutable"
+            if long_cache
+            else "public, max-age=0, must-revalidate"
+        ),
         "ETag": f'"{int(st.st_mtime_ns)}-{int(st.st_size)}"',
         "Last-Modified": formatdate(st.st_mtime, usegmt=True),
     }
@@ -227,6 +232,43 @@ def library_facet_codes(
     if data is None:
         raise HTTPException(status_code=404, detail="未知分区或分类")
     return _wrap(data)
+
+
+@router.get("/scrape/library/tile-covers")
+def library_tile_covers(
+    region: str = Query(..., min_length=1),
+    studio: str = Query(..., min_length=1),
+    prefix: str = Query(""),
+    prefixes: str = Query(""),
+    _user: dict[str, Any] | None = Depends(get_optional_user),
+) -> dict[str, Any]:
+    """前缀卡：最新 1 张；厂牌卡：最新前缀的最新番号 1 张。"""
+    return _wrap(
+        library_materialize.browse_tile_covers(
+            region=region,
+            studio=studio,
+            prefix=prefix or "",
+            prefixes=prefixes or "",
+        )
+    )
+
+
+@router.post("/scrape/library/tile-covers/batch")
+def library_tile_covers_batch(
+    payload: dict[str, Any] = Body(...),
+    _user: dict[str, Any] | None = Depends(get_optional_user),
+) -> dict[str, Any]:
+    """片商/前缀格子一次取齐封面库路径。"""
+    region = str((payload or {}).get("region") or "")
+    queries = (payload or {}).get("queries")
+    if not isinstance(queries, list):
+        queries = []
+    return _wrap(
+        library_materialize.browse_tile_covers_batch(
+            region=region,
+            queries=queries,
+        )
+    )
 
 
 @router.get("/scrape/library/codes")

@@ -27,6 +27,8 @@ type Props = {
   /** 无图时的文案（否则空 span） */
   emptyLabel?: string;
   loading?: 'lazy' | 'eager';
+  fetchPriority?: 'high' | 'low' | 'auto';
+  sizes?: string;
   referrerPolicy?: React.HTMLAttributeReferrerPolicy;
   decoding?: 'async' | 'auto' | 'sync';
   style?: React.CSSProperties;
@@ -51,6 +53,8 @@ export function CroppedCoverImg({
   emptyClassName,
   emptyLabel,
   loading = 'lazy',
+  fetchPriority,
+  sizes,
   referrerPolicy = 'no-referrer',
   decoding = 'async',
   style,
@@ -136,6 +140,8 @@ export function CroppedCoverImg({
       src={active}
       alt={alt}
       loading={loading}
+      fetchPriority={fetchPriority}
+      sizes={sizes}
       decoding={decoding}
       referrerPolicy={referrerPolicy}
       style={{ objectPosition, objectFit, ...style }}

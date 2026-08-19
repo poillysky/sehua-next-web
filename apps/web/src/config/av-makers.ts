@@ -53,6 +53,27 @@ for (const m of AV_MAKERS_ALL) {
   }
 }
 
+/** 片商 Tab 分区 → 配置表 kind；素人 / FC2 无固定厂牌表。 */
+const FS_REGION_KIND: Record<string, AvMakerKind> = {
+  japan_censored: '有码',
+  japan_gravure: '写真',
+  japan_uncensored: '无码',
+  china: '国产',
+  western: '欧美',
+};
+
+export function avMakersForFsRegion(regionId: string | undefined | null): AvMakerEntry[] | null {
+  const kind = FS_REGION_KIND[String(regionId || '').trim()];
+  if (!kind) return null;
+  const pool =
+    kind === '国产'
+      ? AV_MAKERS_CHINA
+      : kind === '欧美'
+        ? AV_MAKERS_WESTERN
+        : AV_MAKERS_JAPAN;
+  return pool.filter((m) => m.kind === kind);
+}
+
 export function findMakerMeta(maker: string): AvMakerEntry | undefined {
   const key = (maker || '').trim().toLowerCase();
   if (!key) return undefined;

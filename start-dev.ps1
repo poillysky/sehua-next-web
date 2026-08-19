@@ -27,12 +27,66 @@ function Write-Err([string]$msg) {
   Write-Host "[ERROR] $msg" -ForegroundColor Red
 }
 
+# Never taskkill these. Docker/HTTP.sys often report port owner as PID 4 (System);
+# /F /T on that PID can freeze or crash Windows.
+$script:ProtectedNames = @(
+  'Idle', 'System', 'Registry', 'smss', 'csrss', 'wininit', 'winlogon',
+  'services', 'lsass', 'svchost', 'fontdrvhost', 'dwm', 'explorer',
+  'Memory Compression', 'Secure System', 'LsaIso', 'csrss',
+  'Cursor', 'Cursor Helper', 'Code', 'CodeSetup'
+)
+$script:KillableNames = @(
+  'node', 'python', 'pythonw', 'cmd', 'powershell', 'pwsh', 'conhost'
+)
+
+function Pause-IfInteractive {
+  if ([Console]::IsInputRedirected) { return }
+  try { Read-Host "Press Enter to exit" | Out-Null } catch { }
+}
+
+function Get-ProcessNameSafe([int]$ProcId) {
+  try {
+    $p = Get-Process -Id $ProcId -ErrorAction Stop
+    return $p.ProcessName
+  } catch {
+    return $null
+  }
+}
+
+function Test-KillablePid([int]$ProcId) {
+  if ($ProcId -le 8) { return $false }
+  if ($ProcId -eq $PID) { return $false }
+  $name = Get-ProcessNameSafe $ProcId
+  if (-not $name) { return $false }
+  foreach ($n in $script:ProtectedNames) {
+    if ($name -eq $n) { return $false }
+  }
+  foreach ($n in $script:KillableNames) {
+    if ($name -eq $n) { return $true }
+  }
+  return $false
+}
+
+function Stop-ProcessTreeSafe([int]$ProcId, [string]$Why) {
+  if (-not (Test-KillablePid $ProcId)) {
+    $name = Get-ProcessNameSafe $ProcId
+    if (-not $name) { $name = '?' }
+    Write-Step "Skip kill PID $ProcId ($name) — $Why"
+    return $false
+  }
+  $name = Get-ProcessNameSafe $ProcId
+  Write-Step "Killing PID $ProcId ($name) — $Why"
+  & taskkill.exe /F /T /PID $ProcId 2>$null | Out-Null
+  return $true
+}
+
 function Get-ListenPids([int]$Port) {
   $listenPids = [System.Collections.Generic.HashSet[int]]::new()
   try {
     $conns = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
     foreach ($c in @($conns)) {
-      if ($c.OwningProcess -and $c.OwningProcess -ne 0) { [void]$listenPids.Add([int]$c.OwningProcess) }
+      $procId = [int]$c.OwningProcess
+      if ($procId -gt 0) { [void]$listenPids.Add($procId) }
     }
   } catch { }
 
@@ -55,8 +109,7 @@ function Stop-PortListeners([int]$Port) {
   $listenPids = Get-ListenPids $Port
   if (-not $listenPids -or $listenPids.Count -eq 0) { return }
   foreach ($procId in $listenPids) {
-    Write-Step "Port $Port in use, killing PID $procId (tree)"
-    & taskkill.exe /F /T /PID $procId 2>$null | Out-Null
+    [void](Stop-ProcessTreeSafe $procId "port $Port")
   }
 }
 
@@ -66,8 +119,7 @@ function Stop-NextWebCmdWindows {
     if (-not $title) { continue }
     foreach ($prefix in @("NextWeb API", "NextWeb Web")) {
       if ($title.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-        Write-Step "Closing cmd window: $title (PID $($p.Id))"
-        & taskkill.exe /F /T /PID $p.Id 2>$null | Out-Null
+        [void](Stop-ProcessTreeSafe $p.Id "cmd window: $title")
         break
       }
     }
@@ -122,14 +174,14 @@ $python = Join-Path $Root "apps\api\.venv\Scripts\python.exe"
 if (-not (Test-Path $python)) {
   Write-Err "Missing $python"
   Write-Host "        Create venv / install deps for apps\api first."
-  Read-Host "Press Enter to exit"
+  Pause-IfInteractive
   exit 1
 }
 
 $npm = Resolve-NpmCmd
 if (-not $npm) {
   Write-Err "npm.cmd not found in PATH"
-  Read-Host "Press Enter to exit"
+  Pause-IfInteractive
   exit 1
 }
 Write-Step "npm: $npm"
@@ -138,7 +190,7 @@ $webMods = Join-Path $Root "apps\web\node_modules"
 if (-not (Test-Path $webMods)) {
   Write-Err "Missing apps\web\node_modules"
   Write-Host "        Run: npm install --prefix apps/web"
-  Read-Host "Press Enter to exit"
+  Pause-IfInteractive
   exit 1
 }
 
@@ -157,8 +209,8 @@ if (-not $NoKill) {
     if (-not (Test-PortFree $p)) { $busy += $p }
   }
   if ($busy.Count -gt 0) {
-    Write-Err ("Ports still busy: " + ($busy -join ", "))
-    Read-Host "Press Enter to exit"
+    Write-Err ("Ports still busy: " + ($busy -join ", ") + " (held by a protected process, not killed)")
+    Pause-IfInteractive
     exit 1
   }
 }
