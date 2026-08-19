@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ClipboardPaste, Sparkles } from 'lucide-react';
+import { ClipboardPaste, MessageCircle, Sparkles } from 'lucide-react';
 import {
   DEFAULT_MATCH_MODE,
   DEFAULT_SORT_TYPE,
@@ -31,6 +31,7 @@ import { AppMsg } from '@/components/ui/AppMsg';
 import { useTabNavigation } from '@/shell';
 import { HomeSearchField } from './HomeSearchField';
 import { P115PastePanel } from './P115PastePanel';
+import { AiSearchChatPanel } from './AiSearchChatPanel';
 import { ResourceDetailBody } from './ResourceDetailBody';
 import { ResourceCard } from './ResourceCard';
 import { SearchFilters } from './SearchFilters';
@@ -137,6 +138,7 @@ export function HomeScreen() {
   const [magnetLoadingMore, setMagnetLoadingMore] = useState(false);
   const [msg, setMsg] = useState('');
   const [pasteOpen, setPasteOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const [detailHash, setDetailHash] = useState<string | null>(null);
   const [detailSource, setDetailSource] = useState<FeedSource>('sehua');
   const [reloadToken, setReloadToken] = useState(0);
@@ -681,6 +683,12 @@ export function HomeScreen() {
               </span>
               <span className="home-landing__chip-txt">最新</span>
             </button>
+            <button type="button" className="home-landing__chip" onClick={() => setChatOpen(true)}>
+              <span className="home-landing__chip-ico" aria-hidden>
+                <MessageCircle size={13} strokeWidth={2.4} />
+              </span>
+              <span className="home-landing__chip-txt">对话</span>
+            </button>
             <button
               type="button"
               className="home-landing__chip"
@@ -844,6 +852,7 @@ export function HomeScreen() {
       ) : null}
 
       {pasteOpen ? <P115PastePanel onBack={() => setPasteOpen(false)} /> : null}
+      {chatOpen ? <AiSearchChatPanel onBack={() => setChatOpen(false)} /> : null}
     </div>
   );
 }

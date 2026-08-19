@@ -47,6 +47,8 @@ from .bitmagnet_pg import close_pool as close_bitmagnet_pool
 
 from .resource_routes import router as resource_router
 from .conn_settings_routes import router as conn_settings_router
+from .ai_settings_routes import router as ai_settings_router
+from .ai_chat_routes import router as ai_chat_router
 from .magnet_routes import router as magnet_router
 from .translate_routes import router as translate_router
 from .zone_folder_routes import router as zone_folder_router
@@ -206,6 +208,8 @@ app.include_router(auth_router)
 app.include_router(resource_router)
 
 app.include_router(conn_settings_router)
+app.include_router(ai_settings_router)
+app.include_router(ai_chat_router)
 
 app.include_router(magnet_router)
 

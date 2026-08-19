@@ -15,6 +15,34 @@
       "proxyUrl": "http://192.168.2.88:7893",
       "origin": "http://127.0.0.1:9210",
       "enabled": true
+    },
+    "ai.llm": {
+      "enabled": true,
+      "chatCompletionSource": "openai",
+      "apiMode": "chat",
+      "baseUrl": "https://api.openai.com/v1",
+      "model": "gpt-4o-mini",
+      "apiKey": "",
+      "promptPostProcessing": "",
+      "customIncludeHeaders": "",
+      "timeoutSec": 30,
+      "sampling": {
+        "temperature": 0.7,
+        "topP": 1,
+        "maxTokens": 2048
+      }
+    },
+    "ai.embed": {
+      "enabled": true,
+      "provider": "local",
+      "useMainLlm": false,
+      "baseUrl": "",
+      "model": "BAAI/bge-small-zh-v1.5",
+      "apiKey": "",
+      "dim": 512,
+      "topK": 8,
+      "minScore": 0.35,
+      "chunkSize": 500
     }
   }
 }

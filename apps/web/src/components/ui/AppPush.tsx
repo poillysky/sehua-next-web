@@ -9,11 +9,13 @@ export function AppPush({
   onBack,
   children,
   right,
+  bodyClassName,
 }: {
   title: string;
   onBack: () => void;
   children: ReactNode;
   right?: ReactNode;
+  bodyClassName?: string;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -42,7 +44,9 @@ export function AppPush({
         <h1 className="app-push__title">{title}</h1>
         <div className="app-push__right">{right ?? <span className="app-push__spacer" aria-hidden />}</div>
       </header>
-      <div className="app-push__body">{children}</div>
+      <div className={bodyClassName ? `app-push__body ${bodyClassName}` : 'app-push__body'}>
+        {children}
+      </div>
     </div>
   );
 }

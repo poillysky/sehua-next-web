@@ -10,6 +10,7 @@ import {
   FolderTree,
   MessagesSquare,
   Network,
+  Sparkles,
   UserRound,
   type LucideProps,
 } from 'lucide-react';
@@ -23,6 +24,8 @@ import {
   getBitmagnetDb,
   getScrape,
   getTmdb,
+  getAiLlm,
+  getAiEmbed,
 } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { UserManagePanel } from './UserManagePanel';
@@ -34,6 +37,7 @@ import { TmdbPanel } from './TmdbPanel';
 import { FlareSolverrPanel } from './FlareSolverrPanel';
 import { CoverCropPanel } from './CoverCropPanel';
 import { ForumManagePanel } from './ForumManagePanel';
+import { AiModelsPanel, aiModelsHubStatus } from './AiModelsPanel';
 
 type Panel =
   | 'hub'
@@ -45,7 +49,8 @@ type Panel =
   | 'tmdb'
   | 'flare'
   | 'covercrop'
-  | 'forum';
+  | 'forum'
+  | 'ai';
 type Tone = 'ok' | 'warn' | 'mute';
 type Accent = 'violet' | 'blue' | 'orange' | 'teal';
 
@@ -115,6 +120,13 @@ const ENTRIES: Entry[] = [
     accent: 'violet',
   },
   {
+    id: 'ai',
+    title: 'AI 模型',
+    desc: '聊天 LLM · 向量嵌入',
+    Icon: Sparkles,
+    accent: 'violet',
+  },
+  {
     id: 'forum',
     title: '论坛管理',
     desc: '色花堂 · 板块地区',
@@ -132,6 +144,7 @@ const emptyMeta: Record<Exclude<Panel, 'hub'>, { text: string; tone: Tone }> = {
   covercrop: { text: '…', tone: 'mute' },
   tmdb: { text: '…', tone: 'mute' },
   flare: { text: '…', tone: 'mute' },
+  ai: { text: '…', tone: 'mute' },
   forum: { text: '…', tone: 'mute' },
 };
 
@@ -230,6 +243,16 @@ export function SettingsScreen() {
         } catch (e) {
           const f = failStatus(e);
           setEntryStatus('tmdb', f.text, f.tone);
+        }
+      })(),
+      (async () => {
+        try {
+          const [llm, embed] = await withTimeout(Promise.all([getAiLlm(), getAiEmbed()]), 12000);
+          const text = aiModelsHubStatus(llm, embed);
+          setEntryStatus('ai', text, text === '未配置' ? 'warn' : 'ok');
+        } catch (e) {
+          const f = failStatus(e);
+          setEntryStatus('ai', f.text, f.tone);
         }
       })(),
       (async () => {
@@ -359,6 +382,12 @@ export function SettingsScreen() {
         <ForumManagePanel
           onBack={() => setPanel('hub')}
           onStatus={(text, tone) => setEntryStatus('forum', text, tone)}
+        />
+      ) : null}
+      {panel === 'ai' ? (
+        <AiModelsPanel
+          onBack={() => setPanel('hub')}
+          onStatus={(text, tone) => setEntryStatus('ai', text, tone)}
         />
       ) : null}
     </div>

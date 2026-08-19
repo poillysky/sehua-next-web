@@ -440,6 +440,253 @@ export async function testTmdb(body: {
   return { ok: Boolean(json.data?.ok), message: json.message || '' };
 }
 
+export type AiSamplingConfig = {
+  temperature?: number | null;
+  topP?: number | null;
+  maxTokens?: number | null;
+  frequencyPenalty?: number | null;
+  presencePenalty?: number | null;
+};
+
+export type AiLlmConfig = {
+  enabled?: boolean;
+  chatCompletionSource?: string;
+  apiMode?: string;
+  baseUrl?: string;
+  model?: string;
+  promptPostProcessing?: string;
+  customIncludeHeaders?: string;
+  customIncludeBody?: string;
+  customExcludeBody?: string;
+  proxyUrl?: string;
+  timeoutSec?: number;
+  sampling?: AiSamplingConfig;
+  configured?: boolean;
+  fromEnv?: boolean;
+  fromEnvKey?: boolean;
+  apiKeyHint?: string;
+  updated_at?: string;
+};
+
+export type AiEmbedConfig = {
+  enabled?: boolean;
+  provider?: 'local' | 'openai';
+  useMainLlm?: boolean;
+  baseUrl?: string;
+  model?: string;
+  dim?: number;
+  topK?: number;
+  minScore?: number;
+  chunkSize?: number;
+  configured?: boolean;
+  fromEnv?: boolean;
+  apiKeyHint?: string;
+  updated_at?: string;
+};
+
+export type AiPresetOption = { value: string; label: string; baseUrl?: string; dim?: string };
+
+export type AiPresets = {
+  chatSources: AiPresetOption[];
+  localEmbedModels: AiPresetOption[];
+  openaiEmbedModels: AiPresetOption[];
+  promptPostProcessing: AiPresetOption[];
+};
+
+export async function getAiPresets(): Promise<AiPresets> {
+  const res = await apiFetch('/settings/ai/presets');
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<AiPresets>).data;
+}
+
+export async function getAiLlm(): Promise<AiLlmConfig> {
+  const res = await apiFetch('/settings/ai/llm');
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<AiLlmConfig>).data;
+}
+
+export async function putAiLlm(body: {
+  enabled?: boolean;
+  chatCompletionSource?: string;
+  apiMode?: string;
+  baseUrl?: string;
+  model?: string;
+  apiKey?: string;
+  promptPostProcessing?: string;
+  customIncludeHeaders?: string;
+  customIncludeBody?: string;
+  customExcludeBody?: string;
+  proxyUrl?: string;
+  timeoutSec?: number;
+  sampling?: AiSamplingConfig;
+}): Promise<AiLlmConfig> {
+  const res = await apiFetch('/settings/ai/llm', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<AiLlmConfig>).data;
+}
+
+export async function connectAiLlm(body: {
+  baseUrl?: string;
+  apiKey?: string;
+  customIncludeHeaders?: string;
+  listModels?: boolean;
+}): Promise<{ ok: boolean; models: string[]; modelCount: number; message: string }> {
+  const res = await apiFetch('/settings/ai/llm/connect', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  const json = (await res.json()) as Envelope<{
+    ok: boolean;
+    models?: string[];
+    modelCount?: number;
+  }> & { message: string };
+  return {
+    ok: Boolean(json.data?.ok),
+    models: json.data?.models || [],
+    modelCount: json.data?.modelCount ?? 0,
+    message: json.message || '',
+  };
+}
+
+export async function testAiLlm(body: {
+  enabled?: boolean;
+  chatCompletionSource?: string;
+  apiMode?: string;
+  baseUrl?: string;
+  model?: string;
+  apiKey?: string;
+  promptPostProcessing?: string;
+  customIncludeHeaders?: string;
+  customIncludeBody?: string;
+  customExcludeBody?: string;
+  proxyUrl?: string;
+  timeoutSec?: number;
+  sampling?: AiSamplingConfig;
+}): Promise<{ ok: boolean; message: string }> {
+  const res = await apiFetch('/settings/ai/llm/test', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  const json = (await res.json()) as Envelope<{ ok: boolean }> & { message: string };
+  return { ok: Boolean(json.data?.ok), message: json.message || '' };
+}
+
+export async function getAiEmbed(): Promise<AiEmbedConfig> {
+  const res = await apiFetch('/settings/ai/embed');
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<AiEmbedConfig>).data;
+}
+
+export async function putAiEmbed(body: {
+  enabled?: boolean;
+  provider?: 'local' | 'openai';
+  useMainLlm?: boolean;
+  baseUrl?: string;
+  model?: string;
+  apiKey?: string;
+  dim?: number;
+  topK?: number;
+  minScore?: number;
+  chunkSize?: number;
+}): Promise<AiEmbedConfig> {
+  const res = await apiFetch('/settings/ai/embed', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<AiEmbedConfig>).data;
+}
+
+export async function connectAiEmbed(body: {
+  provider?: 'local' | 'openai';
+  useMainLlm?: boolean;
+  baseUrl?: string;
+  apiKey?: string;
+  listModels?: boolean;
+}): Promise<{
+  ok: boolean;
+  models: string[];
+  modelCount: number;
+  totalModelCount?: number;
+  embedMatchCount?: number;
+  message: string;
+}> {
+  const res = await apiFetch('/settings/ai/embed/connect', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  const json = (await res.json()) as Envelope<{
+    ok: boolean;
+    models?: string[];
+    modelCount?: number;
+    totalModelCount?: number;
+    embedMatchCount?: number;
+  }> & { message: string };
+  return {
+    ok: Boolean(json.data?.ok),
+    models: json.data?.models || [],
+    modelCount: json.data?.modelCount ?? 0,
+    totalModelCount: json.data?.totalModelCount,
+    embedMatchCount: json.data?.embedMatchCount,
+    message: json.message || '',
+  };
+}
+
+export async function testAiEmbed(body: {
+  enabled?: boolean;
+  provider?: 'local' | 'openai';
+  useMainLlm?: boolean;
+  baseUrl?: string;
+  model?: string;
+  apiKey?: string;
+  dim?: number;
+  topK?: number;
+  minScore?: number;
+  chunkSize?: number;
+}): Promise<{ ok: boolean; message: string; dim?: number }> {
+  const res = await apiFetch('/settings/ai/embed/test', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  const json = (await res.json()) as Envelope<{ ok: boolean; dim?: number }> & { message: string };
+  return {
+    ok: Boolean(json.data?.ok),
+    message: json.message || '',
+    dim: typeof json.data?.dim === 'number' ? json.data.dim : undefined,
+  };
+}
+
+export type AiChatSearchResult = {
+  reply: string;
+  keyword: string;
+  usedLlm?: boolean;
+  searchMode?: 'semantic' | 'keyword';
+  resources: ResourceItem[];
+  total_count: number;
+};
+
+export async function aiChatSearch(opts: {
+  message: string;
+  history?: Array<{ role: 'user' | 'assistant'; content: string }>;
+}): Promise<AiChatSearchResult> {
+  const res = await apiFetch('/ai/chat-search', {
+    method: 'POST',
+    body: JSON.stringify({
+      message: opts.message,
+      history: opts.history || [],
+    }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<AiChatSearchResult>).data;
+}
+
 export type P115Config = {
   enabled: boolean;
   folderCid: string;

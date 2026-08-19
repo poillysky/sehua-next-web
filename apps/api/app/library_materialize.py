@@ -2082,13 +2082,11 @@ def browse_regions() -> dict[str, Any]:
     }
 
 
-def browse_region(region_id: str) -> dict[str, Any] | None:
+def refresh_region_catalog(region_id: str) -> dict[str, Any] | None:
+    """强制重扫片商目录并写 catalog（含 tags / series）。"""
     rid = maker_fs.resolve_fs_region(region_id) or str(region_id or "").strip()
     if rid not in scrape_naming.KIND_LABELS:
         return None
-    cached = read_region_catalog_cache(rid)
-    if cached:
-        return cached
     label = scrape_naming.KIND_LABELS[rid]
     lib = _makers_root_for_browse()
     root = lib / label
@@ -2098,7 +2096,19 @@ def browse_region(region_id: str) -> dict[str, Any] | None:
         library_root=lib,
         region_label=label,
     )
+    with _catalog_mem_lock:
+        _catalog_mem.pop(rid, None)
     return write_region_catalog_cache(rid, prefixes)
+
+
+def browse_region(region_id: str) -> dict[str, Any] | None:
+    rid = maker_fs.resolve_fs_region(region_id) or str(region_id or "").strip()
+    if rid not in scrape_naming.KIND_LABELS:
+        return None
+    cached = read_region_catalog_cache(rid)
+    if cached:
+        return cached
+    return refresh_region_catalog(rid)
 
 
 def _parse_cover_url_file(path: Path) -> str:
@@ -3781,7 +3791,20 @@ def browse_region_facets(
     if rid not in scrape_naming.KIND_LABELS:
         return None
     label = scrape_naming.KIND_LABELS[rid]
-    cat = browse_region(rid)
+    facet_payload: dict[str, Any] | None = None
+    if rebuild:
+        facet_payload = build_region_facets(rid)
+    elif sync:
+        facet_payload = sync_region_facets(rid, force=False)
+
+    stale = False
+    if sync or rebuild:
+        cat = refresh_region_catalog(rid)
+    else:
+        cat = browse_region(rid)
+        if cat and not _catalog_has_search_fields(cat):
+            stale = True
+            cat = refresh_region_catalog(rid)
     if not cat:
         return None
     prefixes = cat.get("prefixes") or []
@@ -3791,12 +3814,13 @@ def browse_region_facets(
         "label": label,
         "updatedAt": cat.get("updatedAt"),
         "scanned": len(prefixes),
-        "reused": 0,
-        "updated": 0,
+        "reused": int((facet_payload or {}).get("reused") or 0),
+        "updated": int((facet_payload or {}).get("updated") or 0),
+        "removed": int((facet_payload or {}).get("removed") or 0),
         "tags": tags,
         "series": series,
         "source": "catalog",
-        "stale": False,
+        "stale": stale,
         "empty": not (tags or series),
     }
 

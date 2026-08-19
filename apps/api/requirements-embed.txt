@@ -1,0 +1,2 @@
+# Optional: sehua vector ingest job only. Do not add to Docker image.
+fastembed>=0.4.0

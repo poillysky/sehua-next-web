@@ -12,6 +12,8 @@ SCRAPE_KEY = "scrape"
 P115_KEY = "p115"
 TMDB_KEY = "tmdb"
 FORUM_SEHUATANG_KEY = "forum.sehuatang"
+AI_LLM_KEY = "ai.llm"
+AI_EMBED_KEY = "ai.embed"
 
 
 def get_setting(key: str) -> Any | None:

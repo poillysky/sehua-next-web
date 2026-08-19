@@ -369,6 +369,15 @@ export function MakersScreen() {
     });
   }
 
+  function refreshRegionCatalog(catalog: MakerFsRegionCatalog) {
+    setLibraryCatalogCache(catalog.id, catalog);
+    setStack((s) => {
+      if (s.kind === 'hub') return s;
+      if (s.region.id !== catalog.id) return s;
+      return { ...s, catalog };
+    });
+  }
+
   /** 仅番号卡片：片商内精确库搜（不跳首页） */
   function searchCode(code: string) {
     if (stack.kind !== 'prefix') return;
@@ -532,6 +541,7 @@ export function MakersScreen() {
         <MakerFacetBrowseBody
           regionId={stack.region.id}
           catalog={stack.catalog}
+          onCatalogRefresh={refreshRegionCatalog}
           onOpenFacet={(facetKind, facetValue, facetCount) => {
             startTransition(() => {
               setStack({

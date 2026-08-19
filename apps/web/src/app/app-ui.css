@@ -3651,6 +3651,20 @@ textarea {
 
 
 
+.mk-facet-sync-hint {
+
+  margin: 0 0 8px 12px;
+
+  font-size: 12px;
+
+  line-height: 1.35;
+
+  color: var(--mute);
+
+}
+
+
+
 .mk-facet-sync-btn__spin {
 
   animation: mk-facet-spin 0.8s linear infinite;
@@ -14717,4 +14731,202 @@ a.scrape-src-card__url:active {
   .media-poster-skel {
     animation: none;
   }
+}
+
+/* AI 模型设置 */
+.ai-models-panel .app-seg {
+  margin-bottom: 12px;
+}
+
+.ai-models-panel .settings-group-label {
+  margin-left: 4px;
+}
+
+.ai-models-panel .settings-group {
+  margin-bottom: 12px;
+}
+
+.ai-models-panel .settings-kv .settings-kv__val,
+.ai-models-panel .settings-kv .settings-nav__status {
+  max-width: 62%;
+}
+
+.ai-models-panel .ai-card {
+  margin: 0 0 12px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 0.5px solid var(--hairline);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.ai-models-panel .ai-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 6px 12px;
+  border-bottom: 0.5px solid var(--hairline);
+}
+
+.ai-models-panel .ai-row:last-child {
+  border-bottom: 0;
+}
+
+.ai-models-panel .ai-row__label {
+  flex: 0 0 88px;
+  width: 88px;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--ink);
+  line-height: 1.25;
+}
+
+.ai-models-panel .ai-row__control {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.ai-models-panel .ai-input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  padding: 6px 0;
+  font-size: 15px;
+  line-height: 1.3;
+  color: var(--ink);
+  font-family: inherit;
+  text-align: left;
+}
+
+.ai-models-panel .ai-input::placeholder {
+  color: #aeaeb2;
+}
+
+.ai-models-panel .ai-input:disabled {
+  opacity: 0.45;
+}
+
+.ai-models-panel .ai-input--select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 20px;
+  padding-left: 0;
+  text-align: left;
+  direction: ltr;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238e8e93' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 2px center;
+  background-size: 12px;
+  cursor: pointer;
+}
+
+.ai-models-panel .ai-input--select option {
+  direction: ltr;
+  text-align: left;
+}
+
+.ai-models-panel .ai-key-saved {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ai-models-panel .ai-key-saved span {
+  flex: 1 1 0;
+  min-width: 0;
+  font-size: 14px;
+  color: var(--mute);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.ai-models-panel .ai-row--stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  min-height: 0;
+  padding-top: 10px;
+  padding-bottom: 12px;
+}
+
+.ai-models-panel .ai-row--stack .ai-row__label {
+  flex: none;
+  width: auto;
+}
+
+.ai-models-panel .ai-row--stack .ai-row__control {
+  justify-content: stretch;
+}
+
+.ai-models-panel .ai-textarea {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  border: 0;
+  outline: none;
+  background: rgba(118, 118, 128, 0.08);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--ink);
+  font-family: inherit;
+  text-align: left;
+}
+
+.ai-models-panel .ai-row--action {
+  border-bottom: 0;
+  padding: 10px 12px 12px;
+}
+
+.ai-models-panel .ai-row__btn {
+  width: 100%;
+  min-height: 40px;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.ai-models-panel .ai-models-hint {
+  margin: -4px 4px 12px;
+  padding: 0 8px;
+  font-size: 13px;
+  color: var(--mute);
+  line-height: 1.4;
+  text-align: center;
+}
+
+.ai-models-panel .ai-models-hint--ok {
+  color: #34c759;
+}
+
+.ai-models-panel .ai-models-hint--err {
+  color: #ff3b30;
+}
+
+.ai-models-panel .app-actions {
+  margin-top: 4px;
+  gap: 10px;
+}
+
+.dark .ai-models-panel .ai-card {
+  background: rgba(28, 28, 30, 0.92);
+}
+
+.dark .ai-models-panel .ai-textarea {
+  background: rgba(118, 118, 128, 0.16);
+}
+
+.dark .ai-models-panel .ai-input--select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23aeaeb2' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 }
