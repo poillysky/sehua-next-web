@@ -159,7 +159,7 @@ function coverFromItem(it: LibraryTileCoverItem): MakerFsPrefixCover {
   return {
     posterLocal,
     posterRev: it.posterRev,
-    coverCode: it.coverCode,
+    coverCode: it.coverCode || undefined,
   };
 }
 

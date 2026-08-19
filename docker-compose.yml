@@ -21,7 +21,7 @@ name: sehua-next-web
 
 services:
   app:
-    image: poillysky/sehua-next-web:1.0.17
+    image: poillysky/sehua-next-web:1.0.18
     container_name: sehua-next-web
     restart: always
     mem_limit: 1g
