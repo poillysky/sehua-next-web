@@ -41,7 +41,7 @@ function BoardCard({
   onClick,
 }: {
   name: string;
-  meta: string;
+  meta?: string;
   tone?: number;
   onClick: () => void;
 }) {
@@ -56,16 +56,18 @@ function BoardCard({
         {name.slice(0, 1)}
       </span>
       <span className="sht-board-card__title">{name}</span>
-      <span className="sht-board-card__meta">{meta}</span>
+      {meta ? <span className="sht-board-card__meta">{meta}</span> : null}
     </button>
   );
 }
 
 /**
  * 色花堂：Hub（两大分区 · 14 板）→ 子分类 → 最新资源列表
+ * @param onClose 从仓库首页「板块」打开时传入，Hub 以 Push 展示并可返回
  */
-export function BoardsScreen() {
+export function BoardsScreen({ onClose }: { onClose?: () => void } = {}) {
   const tabCtx = useTabNavigation();
+  const embedded = typeof onClose === 'function';
   const [view, setView] = useState<View>({ kind: 'hub' });
   const [detailHash, setDetailHash] = useState<string | null>(null);
 
@@ -82,6 +84,7 @@ export function BoardsScreen() {
   const listKeyRef = useRef('');
 
   useEffect(() => {
+    if (embedded) return;
     if (!tabCtx || tabCtx.activeTab !== '/boards') return;
     if (tabCtx.tabReselect > 0) {
       setView({ kind: 'hub' });
@@ -90,7 +93,15 @@ export function BoardsScreen() {
       setBoardQuery('');
       setListHint('');
     }
-  }, [tabCtx?.tabReselect, tabCtx?.activeTab]);
+  }, [embedded, tabCtx?.tabReselect, tabCtx?.activeTab]);
+
+  function resetToHub() {
+    setView({ kind: 'hub' });
+    setDetailHash(null);
+    setBoardDraft('');
+    setBoardQuery('');
+    setListHint('');
+  }
 
   const openBoard = useCallback((category: ShtForumCategory, board: ShtForumBoard) => {
     setBoardDraft('');
@@ -229,43 +240,44 @@ export function BoardsScreen() {
     return () => io.disconnect();
   }, [view, detailHash, loadMore, items.length]);
 
-  return (
-    <div className="app-stack-root">
-      <div className="app-hub" aria-hidden={view.kind !== 'hub'}>
-        <div className="app-hub__scroll sht-hub">
-          <h1 className="app-hub__title">色花堂</h1>
+  const hubBody = (
+    <div className={embedded ? 'sht-hub sht-hub--push' : 'app-hub__scroll sht-hub'}>
+      {!embedded ? <h1 className="app-hub__title">色花堂</h1> : null}
 
-          {SEHUATANG_FORUM.map((cat, catIdx) => (
-            <section key={cat.category} className="sht-section">
-              <p className="sht-section__label">
-                {cat.category}
-                <span className="sht-section__count">{cat.boards.length}</span>
-              </p>
-              <div className="sht-board-grid">
-                {cat.boards.map((b, i) => (
-                  <BoardCard
-                    key={b.fid}
-                    name={b.name}
-                    meta={b.types.length ? `${b.types.length} 子板` : '最新'}
-                    tone={catIdx * 3 + i}
-                    onClick={() => openBoard(cat, b)}
-                  />
-                ))}
-              </div>
-            </section>
-          ))}
-        </div>
-      </div>
+      {SEHUATANG_FORUM.map((cat, catIdx) => (
+        <section key={cat.category} className="sht-section">
+          <p className="sht-section__label">
+            {cat.category}
+            <span className="sht-section__count">{cat.boards.length}</span>
+          </p>
+          <div className="sht-board-grid">
+            {cat.boards.map((b, i) => (
+              <BoardCard
+                key={b.fid}
+                name={b.name}
+                meta={b.types.length ? `${b.types.length} 子板` : '最新'}
+                tone={catIdx * 3 + i}
+                onClick={() => openBoard(cat, b)}
+              />
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
 
+  const pushes = (
+    <>
       {view.kind === 'board' ? (
         <AppPush
           title={view.board.name}
+          scrollKey={`boards-board-${view.board.fid}`}
           onBack={() => setView({ kind: 'hub' })}
+          skipEnterAnimation={embedded}
         >
           <div className="sht-board-grid sht-board-grid--push">
             <BoardCard
               name="全部最新"
-              meta="整板"
               tone={0}
               onClick={() =>
                 openList({
@@ -280,7 +292,6 @@ export function BoardsScreen() {
               <BoardCard
                 key={t.key}
                 name={t.type_name}
-                meta={t.board_name}
                 tone={i + 1}
                 onClick={() =>
                   openList({
@@ -299,6 +310,7 @@ export function BoardsScreen() {
       {view.kind === 'list' ? (
         <AppPush
           title={view.title}
+          scrollKey={`boards-list-${view.boardFid}`}
           onBack={() => {
             setBoardDraft('');
             setBoardQuery('');
@@ -306,6 +318,7 @@ export function BoardsScreen() {
             if (view.returnTo === 'hub') setView({ kind: 'hub' });
             else setView(view.returnTo);
           }}
+          skipEnterAnimation={embedded}
         >
           <div aria-hidden={detailHash != null}>
             <div className="sht-list-search">
@@ -359,7 +372,9 @@ export function BoardsScreen() {
                   </button>
                 </div>
               </div>
-              {listHint ? <p className="sht-list-search__hint">{listHint}</p> : null}
+              {listHint ? (
+                <p className="sht-list-search__hint">{listHint}</p>
+              ) : null}
               {boardQuery ? (
                 <p className="sht-list-search__hint sht-list-search__hint--ok">
                   筛选：{boardQuery}
@@ -386,8 +401,14 @@ export function BoardsScreen() {
                   />
                 ))}
                 <div className="home-infinite">
-                  <div ref={sentinelRef} className="home-infinite__sentinel" aria-hidden />
-                  {loadingMore ? <p className="app-loading">加载更多…</p> : null}
+                  <div
+                    ref={sentinelRef}
+                    className="home-infinite__sentinel"
+                    aria-hidden
+                  />
+                  {loadingMore ? (
+                    <p className="app-loading">加载更多…</p>
+                  ) : null}
                   {!hasMore && items.length > 0 ? (
                     <p className="home-infinite__end">已全部加载</p>
                   ) : null}
@@ -399,10 +420,45 @@ export function BoardsScreen() {
       ) : null}
 
       {detailHash ? (
-        <AppPush title="详情" onBack={() => setDetailHash(null)}>
+        <AppPush
+          title="详情"
+          scrollKey={`boards-detail-${detailHash}`}
+          scrollMode="top"
+          onBack={() => setDetailHash(null)}
+          skipEnterAnimation={embedded}
+        >
           <ResourceDetailBody hash={detailHash} />
         </AppPush>
       ) : null}
+    </>
+  );
+
+  // 嵌入仓库：直接输出 AppPush，勿再套 app-stack-root（会被挤出可视区）
+  if (embedded) {
+    return (
+      <>
+        <AppPush
+          title="板块"
+          scrollKey="home-boards-hub"
+          onBack={() => {
+            resetToHub();
+            onClose?.();
+          }}
+          skipEnterAnimation
+        >
+          {hubBody}
+        </AppPush>
+        {pushes}
+      </>
+    );
+  }
+
+  return (
+    <div className="app-stack-root">
+      <div className="app-hub" aria-hidden={view.kind !== 'hub'}>
+        {hubBody}
+      </div>
+      {pushes}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-"""封面取景：代理原图 + 粗略人脸/肤色重心（供显示侧 object-position）。"""
+"""封面图同源代理（搜索卡片防盗链）+ 列表缩略图缓存。"""
 
 from __future__ import annotations
 
@@ -6,7 +6,8 @@ import hashlib
 import io
 import logging
 import re
-import time
+import threading
+from collections import OrderedDict
 from typing import Any
 from urllib.parse import urlparse
 
@@ -15,57 +16,33 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 
 from .auth_routes import require_user
+from .db import data_dir
 from .outbound_http import httpx_client
 
 log = logging.getLogger(__name__)
 
-router = APIRouter(tags=["cover-focus"])
+router = APIRouter(tags=["cover-proxy"])
 
-_FOCUS_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
-_FOCUS_TTL = 3600.0
-_FOCUS_MAX = 400
-
-_ALLOWED_HOST_SUFFIX = (
-    ".la",
-    ".com",
-    ".net",
-    ".org",
-    ".cc",
-    ".io",
-    ".top",
-    ".xyz",
-)
-
-# 色花论坛图床：防盗链认 sehuatang Referer
 _FORUM_IMG_HOST_RE = re.compile(
     r"(?:^|\.)("
     r"ewrewej\.la|ymawv\.la|ldkms\.la|picdcd\.com|adipcd\.com|"
     r"pkapic\.cc|imgccc\.com|11img\.com|yichkp\.com|qpic\.ws|"
     r"gdvdvb\.com|img906\.com|microsoftsa\.com|xunse\.pics|"
-    r"023pic3\.cc|pic26077\.cc|pic2607a\.cc|pic505hz\.cc|pid505st\.cc"
+    r"023pic3\.cc|pic26077\.cc|pic2607a\.cc|pic505hz\.cc|pid505st\.cc|"
+    r"djhdhs\.us"
     r")(?:$|:)",
     re.I,
 )
 
-_COVER_FETCH_TIMEOUT = httpx.Timeout(12.0, connect=4.0)
+_COVER_FETCH_TIMEOUT = httpx.Timeout(6.0, connect=2.5)
+_COVER_FETCH_SLOTS = threading.Semaphore(4)
+_MEM_CACHE_MAX = 96
+_MEM_CACHE_MAX_BYTES = 24 * 1024 * 1024
+_DISK_MAX_BYTES = 256 * 1024 * 1024
 
-
-def _cache_get(key: str) -> dict[str, Any] | None:
-    hit = _FOCUS_CACHE.get(key)
-    if not hit:
-        return None
-    ts, data = hit
-    if time.time() - ts > _FOCUS_TTL:
-        _FOCUS_CACHE.pop(key, None)
-        return None
-    return data
-
-
-def _cache_put(key: str, data: dict[str, Any]) -> None:
-    if len(_FOCUS_CACHE) >= _FOCUS_MAX:
-        oldest = min(_FOCUS_CACHE.items(), key=lambda kv: kv[1][0])[0]
-        _FOCUS_CACHE.pop(oldest, None)
-    _FOCUS_CACHE[key] = (time.time(), data)
+_mem_lock = threading.Lock()
+_mem_cache: OrderedDict[str, tuple[bytes, str]] = OrderedDict()
+_mem_bytes = 0
 
 
 def _safe_image_url(raw: str) -> str:
@@ -78,7 +55,6 @@ def _safe_image_url(raw: str) -> str:
     host = p.hostname or ""
     if host in ("localhost", "127.0.0.1", "0.0.0.0") or host.startswith("192.168."):
         raise HTTPException(status_code=400, detail="禁止内网地址")
-    # 豆瓣 img9 等常返回防盗链挑战页；img3 较稳
     if host.endswith("doubanio.com"):
         u = re.sub(
             r"https?://img\d+\.doubanio\.com",
@@ -101,6 +77,19 @@ def _image_headers(url: str, *, referer: str | None) -> dict[str, str]:
     }
     if referer:
         headers["Referer"] = referer
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except Exception:
+        host = ""
+    if "javbus" in host or "seejav" in host:
+        try:
+            from .makers_settings import javbus_cookie
+
+            cookie = javbus_cookie()
+            if cookie:
+                headers["Cookie"] = cookie
+        except Exception:
+            pass
     return headers
 
 
@@ -110,7 +99,6 @@ def _looks_like_image(data: bytes, ctype: str) -> bool:
         return True
     if not data or len(data) < 4:
         return False
-    # JPEG / PNG / GIF / WEBP
     if data[:3] == b"\xff\xd8\xff":
         return True
     if data[:8] == b"\x89PNG\r\n\x1a\n":
@@ -138,6 +126,14 @@ def _referers_for_host(host: str, scheme: str) -> list[str | None]:
         )
     if "netcdn.space" in host or host.endswith("dmm.co.jp") or "dmm.co.jp" in host:
         referers.append("https://www.dmm.co.jp/")
+    if "javbus" in host or "seejav" in host:
+        referers.extend(
+            [
+                "https://www.javbus.com/",
+                "https://www.seejav.me/",
+                "https://www.seejav.bid/",
+            ]
+        )
     if _is_forum_image_host(host):
         referers.extend(
             [
@@ -166,105 +162,271 @@ def _referers_for_host(host: str, scheme: str) -> list[str | None]:
 
 
 def _fetch_bytes(url: str) -> tuple[bytes, str]:
+    # 限制并发：列表页几十张图同时拉会打满线程池，整站像卡死
+    if not _COVER_FETCH_SLOTS.acquire(timeout=8.0):
+        raise HTTPException(status_code=503, detail="封面队列繁忙")
+    try:
+        return _fetch_bytes_unlocked(url)
+    finally:
+        _COVER_FETCH_SLOTS.release()
+
+
+def _fetch_bytes_unlocked(url: str) -> tuple[bytes, str]:
     parsed = urlparse(url)
     host = (parsed.hostname or "").lower()
     scheme = parsed.scheme or "https"
     uniq_refs = _referers_for_host(host, scheme)
 
+    from .outbound_http import resolve_scrape_proxy_url
+
+    proxy = resolve_scrape_proxy_url()
+    client_opts: list[dict[str, Any]] = []
+    if proxy:
+        client_opts.append({"proxy": proxy, "verify": False})
+    client_opts.append({"verify": False})
+
     last_status = 0
     last_err: Exception | None = None
-    # 走设置里的 proxyUrl，否则浏览器直连 CDN 会 ERR_CONNECTION_CLOSED
-    with httpx_client(timeout=_COVER_FETCH_TIMEOUT) as client:
-        for ref in uniq_refs:
-            try:
-                headers = _image_headers(url, referer=ref)
-                if host.endswith("doubanio.com"):
-                    headers["User-Agent"] = (
-                        "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) "
-                        "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 "
-                        "Mobile/15E148 Safari/604.1"
+    transport_fails = 0
+    for copts in client_opts:
+        try:
+            with httpx.Client(
+                timeout=_COVER_FETCH_TIMEOUT,
+                trust_env=False,
+                follow_redirects=True,
+                **copts,
+            ) as client:
+                for ref in uniq_refs[:4]:
+                    try:
+                        headers = _image_headers(url, referer=ref)
+                        if host.endswith("doubanio.com"):
+                            headers["User-Agent"] = (
+                                "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) "
+                                "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 "
+                                "Mobile/15E148 Safari/604.1"
+                            )
+                        r = client.get(url, headers=headers)
+                    except Exception as e:
+                        last_err = e
+                        transport_fails += 1
+                        log.warning("cover fetch transport error ref=%s: %s", ref, e)
+                        if transport_fails >= 3:
+                            break
+                        continue
+                    last_status = r.status_code
+                    if r.status_code in {403, 404, 418}:
+                        continue
+                    if r.status_code >= 400:
+                        continue
+                    ctype = (
+                        (r.headers.get("content-type") or "image/jpeg")
+                        .split(";")[0]
+                        .strip()
                     )
-                r = client.get(url, headers=headers)
-            except Exception as e:
-                last_err = e
-                log.warning("cover fetch transport error ref=%s: %s", ref, e)
-                continue
-            last_status = r.status_code
-            if r.status_code in {403, 404, 418}:
-                continue
-            if r.status_code >= 400:
-                raise HTTPException(
-                    status_code=502, detail=f"拉图失败 {r.status_code}"
-                )
-            ctype = (r.headers.get("content-type") or "image/jpeg").split(";")[0].strip()
-            data = r.content
-            if not data or len(data) > 12 * 1024 * 1024:
-                raise HTTPException(status_code=413, detail="图片过大或空")
-            if not _looks_like_image(data, ctype):
-                # 豆瓣挑战页等：换 Referer 再试
-                continue
-            return data, ctype if "image/" in ctype.lower() else "image/jpeg"
+                    data = r.content
+                    if not data or len(data) > 12 * 1024 * 1024:
+                        continue
+                    if not _looks_like_image(data, ctype):
+                        continue
+                    return data, ctype if "image/" in ctype.lower() else "image/jpeg"
+        except Exception as e:
+            last_err = e
+            log.warning("cover client opts=%s: %s", copts, e)
+            continue
+        if transport_fails >= 3:
+            break
     if last_err is not None and last_status == 0:
         raise HTTPException(status_code=502, detail=f"拉图失败: {last_err}") from last_err
     raise HTTPException(status_code=502, detail=f"拉图失败 {last_status or 403}")
 
 
-def _skin_focus_xy(data: bytes) -> tuple[float, float] | None:
-    """YCbCr 肤色质心，偏上半幅；失败返回 None。"""
+def _cache_key(url: str, w: int | None) -> str:
+    raw = f"{url}|w={w or 0}".encode("utf-8")
+    return hashlib.sha1(raw).hexdigest()
+
+
+def _cover_cache_dir():
+    d = data_dir() / "cover-cache"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _mem_get(key: str) -> tuple[bytes, str] | None:
+    global _mem_bytes
+    with _mem_lock:
+        hit = _mem_cache.get(key)
+        if hit is None:
+            return None
+        _mem_cache.move_to_end(key)
+        return hit
+
+
+def _mem_put(key: str, data: bytes, ctype: str) -> None:
+    global _mem_bytes
+    if len(data) > 2 * 1024 * 1024:
+        return
+    with _mem_lock:
+        old = _mem_cache.pop(key, None)
+        if old is not None:
+            _mem_bytes -= len(old[0])
+        while (
+            _mem_cache
+            and (
+                len(_mem_cache) >= _MEM_CACHE_MAX
+                or _mem_bytes + len(data) > _MEM_CACHE_MAX_BYTES
+            )
+        ):
+            _, evicted = _mem_cache.popitem(last=False)
+            _mem_bytes -= len(evicted[0])
+        _mem_cache[key] = (data, ctype)
+        _mem_bytes += len(data)
+
+
+def _disk_paths(key: str):
+    base = _cover_cache_dir() / key
+    return base.with_suffix(".bin"), base.with_suffix(".ct")
+
+
+def _disk_get(key: str) -> tuple[bytes, str] | None:
+    bin_p, ct_p = _disk_paths(key)
     try:
-        from PIL import Image
-    except Exception:
+        if not bin_p.is_file() or not ct_p.is_file():
+            return None
+        data = bin_p.read_bytes()
+        ctype = ct_p.read_text(encoding="utf-8").strip() or "image/jpeg"
+        if not data:
+            return None
+        return data, ctype
+    except OSError:
         return None
+
+
+def _disk_put(key: str, data: bytes, ctype: str) -> None:
+    if len(data) > 4 * 1024 * 1024:
+        return
+    bin_p, ct_p = _disk_paths(key)
     try:
-        im = Image.open(io.BytesIO(data)).convert("RGB")
-    except Exception:
-        return None
-    # 缩小加速
-    im.thumbnail((160, 240))
+        bin_p.write_bytes(data)
+        ct_p.write_text(ctype or "image/jpeg", encoding="utf-8")
+        _maybe_trim_disk()
+    except OSError as e:
+        log.debug("cover disk cache write failed: %s", e)
+
+
+def _maybe_trim_disk() -> None:
+    try:
+        root = _cover_cache_dir()
+        files = sorted(
+            (p for p in root.glob("*.bin") if p.is_file()),
+            key=lambda p: p.stat().st_mtime,
+        )
+        total = sum(p.stat().st_size for p in files)
+        while files and total > _DISK_MAX_BYTES:
+            oldest = files.pop(0)
+            total -= oldest.stat().st_size
+            oldest.unlink(missing_ok=True)
+            oldest.with_suffix(".ct").unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _crop_right_portrait(im):
+    """有码 thumb/fanart 横图：裁右侧竖幅（约 2:3），对齐 poster 区域。"""
     w, h = im.size
-    if w < 16 or h < 16:
-        return None
-    px = im.load()
-    sx = sy = 0.0
-    n = 0
-    y_limit = int(h * 0.85)
-    for y in range(0, y_limit):
-        for x in range(w):
-            r, g, b = px[x, y]
-            # RGB → 近似 YCbCr
-            cb = 128 + (-0.168736 * r - 0.331264 * g + 0.5 * b)
-            cr = 128 + (0.5 * r - 0.418688 * g - 0.081312 * b)
-            if 77 <= cb <= 127 and 133 <= cr <= 173:
-                # 权重：越靠上权重越大（人脸常在上半）
-                weight = 1.0 + (y_limit - y) / max(1, y_limit)
-                sx += x * weight
-                sy += y * weight
-                n += weight
-    if n < max(40.0, w * h * 0.01):
-        return None
-    return sx / n / w, sy / n / h
+    if w <= h:
+        return im
+    crop_w = max(1, min(w, int(round(h * 2 / 3))))
+    if crop_w >= w:
+        return im
+    left = w - crop_w
+    return im.crop((left, 0, w, h))
 
 
-def _focus_for_bytes(data: bytes) -> dict[str, Any]:
-    xy = _skin_focus_xy(data)
-    if xy:
-        x, y = xy
-        # 略上移，避免下巴顶满
-        y = max(0.08, min(0.72, y * 0.92))
-        x = max(0.12, min(0.88, x))
-        return {"x": round(x, 4), "y": round(y, 4), "source": "skin"}
-    return {"x": 0.5, "y": 0.28, "source": "fallback"}
+def _resize_cover(
+    data: bytes,
+    max_w: int,
+    *,
+    right_portrait: bool = False,
+) -> tuple[bytes, str] | None:
+    """列表缩略：最长边缩到 max_w，输出 JPEG。失败则返回 None（用原图）。"""
+    if max_w <= 0 or len(data) < 32:
+        return None
+    try:
+        from PIL import Image, ImageOps
+
+        im = Image.open(io.BytesIO(data))
+        im = ImageOps.exif_transpose(im)
+        before = im.size
+        if right_portrait:
+            im = _crop_right_portrait(im)
+        cropped = im.size != before
+
+        if im.width > max_w or im.height > max_w:
+            im.thumbnail((max_w, max_w), Image.Resampling.LANCZOS)
+        elif not cropped:
+            return None
+
+        if im.mode not in ("RGB", "L"):
+            im = im.convert("RGB")
+        elif im.mode == "L":
+            im = im.convert("RGB")
+        buf = io.BytesIO()
+        im.save(buf, format="JPEG", quality=72, optimize=True)
+        out = buf.getvalue()
+        if not out:
+            return None
+        if not cropped and len(out) >= len(data):
+            return None
+        return out, "image/jpeg"
+    except Exception as e:
+        log.debug("cover resize skipped: %s", e)
+        return None
+
+
+def _get_cover(url: str, w: int | None) -> tuple[bytes, str]:
+    key = _cache_key(url, w)
+    hit = _mem_get(key)
+    if hit is not None:
+        return hit
+    hit = _disk_get(key)
+    if hit is not None:
+        _mem_put(key, hit[0], hit[1])
+        return hit
+
+    # 原图缓存可复用再缩略
+    full_key = _cache_key(url, None)
+    full = _mem_get(full_key) or _disk_get(full_key)
+    if full is None:
+        full = _fetch_bytes(url)
+        _mem_put(full_key, full[0], full[1])
+        _disk_put(full_key, full[0], full[1])
+
+    data, ctype = full
+    if w and w > 0:
+        resized = _resize_cover(data, w)
+        if resized is not None:
+            data, ctype = resized
+
+    _mem_put(key, data, ctype)
+    _disk_put(key, data, ctype)
+    return data, ctype
 
 
 @router.get("/cover-proxy")
 def cover_proxy(
     url: str = Query(..., min_length=8),
+    w: int | None = Query(
+        None,
+        ge=32,
+        le=1280,
+        description="列表缩略最长边像素；省略则原图",
+    ),
     _user: dict[str, Any] = Depends(require_user),
 ) -> Response:
-    """同源代理封面图，供浏览器 FaceDetector 读像素。"""
+    """同源代理封面图（防盗链）；可选 w 输出列表缩略。"""
     safe = _safe_image_url(url)
     try:
-        data, ctype = _fetch_bytes(safe)
+        data, ctype = _get_cover(safe, w)
     except HTTPException:
         raise
     except Exception as e:
@@ -274,32 +436,7 @@ def cover_proxy(
         content=data,
         media_type=ctype,
         headers={
-            "Cache-Control": "private, max-age=86400",
+            "Cache-Control": "private, max-age=604800",
             "X-Content-Type-Options": "nosniff",
         },
     )
-
-
-@router.get("/cover-focus")
-def cover_focus(
-    url: str = Query(..., min_length=8),
-    _user: dict[str, Any] = Depends(require_user),
-) -> dict[str, Any]:
-    """返回归一化取景点 {x,y}∈[0,1]，用于 object-position。"""
-    safe = _safe_image_url(url)
-    key = hashlib.sha1(safe.encode("utf-8")).hexdigest()
-    cached = _cache_get(key)
-    if cached:
-        return {"data": cached, "message": "ok", "status": 200}
-
-    try:
-        data, _ctype = _fetch_bytes(safe)
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.warning("cover-focus fetch failed: %s", e)
-        raise HTTPException(status_code=502, detail="拉图失败") from e
-
-    focus = _focus_for_bytes(data)
-    _cache_put(key, focus)
-    return {"data": focus, "message": "ok", "status": 200}

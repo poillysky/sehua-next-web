@@ -3,7 +3,6 @@
  */
 import type {
   AuthUser,
-  BoardNavCategory,
   BrowseResult,
   FilterSize,
   FilterTime,
@@ -23,9 +22,21 @@ type Envelope<T> = { data: T; message: string; status: number };
 
 async function parseError(res: Response): Promise<string> {
   try {
-    const j = (await res.json()) as { detail?: string | { msg?: string }[] };
+    const j = (await res.json()) as {
+      detail?: string | Array<{ msg?: string; loc?: unknown[] }>;
+    };
     if (typeof j.detail === 'string') return j.detail;
-    if (Array.isArray(j.detail) && j.detail[0]?.msg) return j.detail[0].msg;
+    if (Array.isArray(j.detail) && j.detail[0]) {
+      const first = j.detail[0];
+      const msg = String(first.msg || '').trim();
+      if (/field required/i.test(msg)) {
+        const loc = Array.isArray(first.loc) ? first.loc : [];
+        const field = String(loc[loc.length - 1] || '').trim();
+        if (field === 'apiKey' || field === 'api_key') return '请填写 API Key';
+        return field ? `请填写 ${field}` : '请填写必填项';
+      }
+      if (msg) return msg;
+    }
   } catch {
     /* ignore */
   }
@@ -34,8 +45,13 @@ async function parseError(res: Response): Promise<string> {
 
 export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers);
-  if (init.body && !headers.has('Content-Type')) {
+  const isForm =
+    typeof FormData !== 'undefined' && init.body instanceof FormData;
+  if (init.body && !headers.has('Content-Type') && !isForm) {
     headers.set('Content-Type', 'application/json');
+  }
+  if (isForm && headers.has('Content-Type')) {
+    headers.delete('Content-Type');
   }
   return fetch(`${API_BASE}${path}`, { ...init, headers, credentials: 'include' });
 }
@@ -303,12 +319,6 @@ export async function fetchMagnetPreview(
   return ((await res.json()) as Envelope<MagnetPreview>).data;
 }
 
-export async function fetchBoards(): Promise<BoardNavCategory[]> {
-  const res = await apiFetch('/boards');
-  if (!res.ok) throw new Error(await parseError(res));
-  return ((await res.json()) as Envelope<BoardNavCategory[]>).data;
-}
-
 export async function getResourceDb(): Promise<ResourceDbConfig> {
   const res = await apiFetch('/settings/resource-db');
   if (!res.ok) throw new Error(await parseError(res));
@@ -336,6 +346,245 @@ export async function testResourceDb(dsn: string): Promise<{ ok: boolean; messag
   if (!res.ok) throw new Error(await parseError(res));
   const json = (await res.json()) as Envelope<{ ok: boolean }> & { message: string };
   return { ok: Boolean(json.data?.ok), message: json.message || '' };
+}
+
+export type ResourceDbBackupItem = {
+  filename: string;
+  relPath: string;
+  bytes: number;
+  mtime: string;
+};
+
+export type ResourceDbBackupExportResult = {
+  filename: string;
+  relPath: string;
+  bytes: number;
+  elapsedMs: number;
+  createdAt: string;
+  tables: Array<{ name: string; rows: number; bytes: number; elapsedMs: number }>;
+};
+
+export async function listResourceDbBackups(): Promise<ResourceDbBackupItem[]> {
+  const res = await apiFetch('/settings/resource-db/backups');
+  if (!res.ok) throw new Error(await parseError(res));
+  const data = ((await res.json()) as Envelope<{ items: ResourceDbBackupItem[] }>).data;
+  return data?.items || [];
+}
+
+export async function exportResourceDbBackup(): Promise<ResourceDbBackupExportResult> {
+  const res = await apiFetch('/settings/resource-db/backups/export', { method: 'POST' });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<ResourceDbBackupExportResult>).data;
+}
+
+export async function importResourceDbBackup(
+  filename: string,
+): Promise<{ filename: string; elapsedMs: number; tables: Array<{ name: string; rows: number }> }> {
+  const res = await apiFetch('/settings/resource-db/backups/import', {
+    method: 'POST',
+    body: JSON.stringify({ filename }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return (
+    (await res.json()) as Envelope<{
+      filename: string;
+      elapsedMs: number;
+      tables: Array<{ name: string; rows: number }>;
+    }>
+  ).data;
+}
+
+export async function uploadImportResourceDbBackup(
+  file: File,
+): Promise<{
+  filename: string;
+  bytes: number;
+  elapsedMs: number;
+  tables: Array<{ name: string; rows: number }>;
+}> {
+  const body = new FormData();
+  body.append('file', file);
+  const res = await apiFetch('/settings/resource-db/backups/upload-import', {
+    method: 'POST',
+    body,
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return (
+    (await res.json()) as Envelope<{
+      filename: string;
+      bytes: number;
+      elapsedMs: number;
+      tables: Array<{ name: string; rows: number }>;
+    }>
+  ).data;
+}
+
+export type ResourceDbEmbedStats = {
+  ok?: boolean;
+  resources?: number;
+  embedded?: number;
+  pending?: number;
+  hasHnsw?: boolean;
+  indexes?: string[];
+  model?: string;
+  dim?: number;
+  error?: string;
+  vectorExt?: string;
+};
+
+export type ResourceDbEmbedJobStatus = {
+  running: boolean;
+  phase?: string;
+  progress?: {
+    stage?: string;
+    done?: number;
+    total?: number | null;
+    percent?: number | null;
+    label?: string;
+  } | null;
+  log?: string[];
+  result?: Record<string, unknown> | null;
+  error?: string | null;
+};
+
+export async function getResourceDbEmbedStats(): Promise<ResourceDbEmbedStats> {
+  const res = await apiFetch('/settings/resource-db/embed/stats');
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<ResourceDbEmbedStats>).data;
+}
+
+export async function getResourceDbEmbedStatus(): Promise<ResourceDbEmbedJobStatus> {
+  const res = await apiFetch('/settings/resource-db/embed/status');
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<ResourceDbEmbedJobStatus>).data;
+}
+
+export async function startResourceDbEmbed(body?: {
+  force?: boolean;
+}): Promise<{ started: boolean }> {
+  const res = await apiFetch('/settings/resource-db/embed/start', {
+    method: 'POST',
+    body: JSON.stringify(body || {}),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<{ started: boolean }>).data;
+}
+
+export async function stopResourceDbEmbed(): Promise<{ ok?: boolean; pausing?: boolean }> {
+  const res = await apiFetch('/settings/resource-db/embed/stop', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<{ ok?: boolean; pausing?: boolean }>).data;
+}
+
+export async function createResourceDbEmbedIndex(): Promise<{ ok?: boolean; index?: string }> {
+  const res = await apiFetch('/settings/resource-db/embed/create-index', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<{ ok?: boolean; index?: string }>).data;
+}
+
+export async function listBitmagnetDbBackups(): Promise<ResourceDbBackupItem[]> {
+  const res = await apiFetch('/settings/bitmagnet-db/backups');
+  if (!res.ok) throw new Error(await parseError(res));
+  const data = ((await res.json()) as Envelope<{ items: ResourceDbBackupItem[] }>).data;
+  return data?.items || [];
+}
+
+export async function exportBitmagnetDbBackup(): Promise<ResourceDbBackupExportResult> {
+  const res = await apiFetch('/settings/bitmagnet-db/backups/export', { method: 'POST' });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<ResourceDbBackupExportResult>).data;
+}
+
+export async function importBitmagnetDbBackup(
+  filename: string,
+): Promise<{ filename: string; elapsedMs: number; tables: Array<{ name: string; rows: number }> }> {
+  const res = await apiFetch('/settings/bitmagnet-db/backups/import', {
+    method: 'POST',
+    body: JSON.stringify({ filename }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return (
+    (await res.json()) as Envelope<{
+      filename: string;
+      elapsedMs: number;
+      tables: Array<{ name: string; rows: number }>;
+    }>
+  ).data;
+}
+
+export async function uploadImportBitmagnetDbBackup(
+  file: File,
+): Promise<{
+  filename: string;
+  bytes: number;
+  elapsedMs: number;
+  tables: Array<{ name: string; rows: number }>;
+}> {
+  const body = new FormData();
+  body.append('file', file);
+  const res = await apiFetch('/settings/bitmagnet-db/backups/upload-import', {
+    method: 'POST',
+    body,
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return (
+    (await res.json()) as Envelope<{
+      filename: string;
+      bytes: number;
+      elapsedMs: number;
+      tables: Array<{ name: string; rows: number }>;
+    }>
+  ).data;
+}
+
+export async function getBitmagnetDbEmbedStats(): Promise<ResourceDbEmbedStats> {
+  const res = await apiFetch('/settings/bitmagnet-db/embed/stats');
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<ResourceDbEmbedStats>).data;
+}
+
+export async function getBitmagnetDbEmbedStatus(): Promise<ResourceDbEmbedJobStatus> {
+  const res = await apiFetch('/settings/bitmagnet-db/embed/status');
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<ResourceDbEmbedJobStatus>).data;
+}
+
+export async function startBitmagnetDbEmbed(body?: {
+  force?: boolean;
+}): Promise<{ started: boolean }> {
+  const res = await apiFetch('/settings/bitmagnet-db/embed/start', {
+    method: 'POST',
+    body: JSON.stringify(body || {}),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<{ started: boolean }>).data;
+}
+
+export async function stopBitmagnetDbEmbed(): Promise<{ ok?: boolean; pausing?: boolean }> {
+  const res = await apiFetch('/settings/bitmagnet-db/embed/stop', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<{ ok?: boolean; pausing?: boolean }>).data;
+}
+
+export async function createBitmagnetDbEmbedIndex(): Promise<{
+  ok?: boolean;
+  index?: string;
+}> {
+  const res = await apiFetch('/settings/bitmagnet-db/embed/create-index', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<{ ok?: boolean; index?: string }>).data;
 }
 
 export type BitmagnetDbConfig = ResourceDbConfig;
@@ -371,7 +620,7 @@ export async function testBitmagnetDb(
   return { ok: Boolean(json.data?.ok), message: json.message || '' };
 }
 
-/* —— Settings: TMDB / 115 / scrape / maker-fs / forum —— */
+/* —— Settings: TMDB / 115 / forum —— */
 
 export type ForumRegionId = 'japan' | 'china' | 'western' | 'mixed' | 'other';
 
@@ -440,12 +689,89 @@ export async function testTmdb(body: {
   return { ok: Boolean(json.data?.ok), message: json.message || '' };
 }
 
+export type NetworkConfig = {
+  proxyUrl?: string;
+  proxyEnabled?: boolean;
+  configured?: boolean;
+  fromEnv?: boolean;
+  effectiveProxyUrl?: string;
+  flareSolverrUrl?: string;
+  flareSolverrEnabled?: boolean;
+  flareSolverrConfigured?: boolean;
+  effectiveFlareSolverrUrl?: string;
+  updated_at?: string;
+};
+
+export async function getNetwork(): Promise<NetworkConfig> {
+  const res = await apiFetch('/settings/network');
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<NetworkConfig>).data;
+}
+
+export async function putNetwork(body: {
+  proxyUrl: string;
+  proxyEnabled?: boolean;
+  flareSolverrUrl?: string;
+  flareSolverrEnabled?: boolean;
+}): Promise<NetworkConfig> {
+  const res = await apiFetch('/settings/network', {
+    method: 'PUT',
+    body: JSON.stringify({
+      proxyUrl: body.proxyUrl,
+      proxyEnabled: body.proxyEnabled,
+      flareSolverrUrl: body.flareSolverrUrl,
+      flareSolverrEnabled: body.flareSolverrEnabled,
+    }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<NetworkConfig>).data;
+}
+
+export async function testNetwork(body: {
+  proxyUrl?: string;
+}): Promise<{ ok: boolean; message: string }> {
+  const res = await apiFetch('/settings/network/test', {
+    method: 'POST',
+    body: JSON.stringify({ proxyUrl: body.proxyUrl || '' }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  const json = (await res.json()) as Envelope<{ ok: boolean }> & {
+    message: string;
+  };
+  return { ok: Boolean(json.data?.ok), message: json.message || '' };
+}
+
+export async function testFlareSolverr(body: {
+  flareSolverrUrl?: string;
+}): Promise<{ ok: boolean; message: string }> {
+  const res = await apiFetch('/settings/network/flare-test', {
+    method: 'POST',
+    body: JSON.stringify({ flareSolverrUrl: body.flareSolverrUrl || '' }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  const json = (await res.json()) as Envelope<{ ok: boolean }> & {
+    message: string;
+  };
+  return { ok: Boolean(json.data?.ok), message: json.message || '' };
+}
+
 export type AiSamplingConfig = {
   temperature?: number | null;
   topP?: number | null;
   maxTokens?: number | null;
+  maxContext?: number | null;
   frequencyPenalty?: number | null;
   presencePenalty?: number | null;
+  topK?: number | null;
+  minP?: number | null;
+  repetitionPenalty?: number | null;
+  seed?: number | null;
+  n?: number | null;
+  streamOpenai?: boolean | null;
+  maxContextUnlocked?: boolean | null;
+  continuePrefill?: boolean | null;
+  squashSystemMessages?: boolean | null;
+  showThoughts?: boolean | null;
 };
 
 export type AiLlmConfig = {
@@ -468,6 +794,15 @@ export type AiLlmConfig = {
   updated_at?: string;
 };
 
+export type AiEmbedDevice = 'cpu' | 'cuda' | 'directml';
+
+export type AiEmbedDeviceOption = {
+  value: AiEmbedDevice | string;
+  label: string;
+  hint?: string;
+  available?: boolean;
+};
+
 export type AiEmbedConfig = {
   enabled?: boolean;
   provider?: 'local' | 'openai';
@@ -475,6 +810,8 @@ export type AiEmbedConfig = {
   baseUrl?: string;
   model?: string;
   dim?: number;
+  device?: AiEmbedDevice | string;
+  devices?: AiEmbedDeviceOption[];
   topK?: number;
   minScore?: number;
   chunkSize?: number;
@@ -489,8 +826,10 @@ export type AiPresetOption = { value: string; label: string; baseUrl?: string; d
 export type AiPresets = {
   chatSources: AiPresetOption[];
   localEmbedModels: AiPresetOption[];
+  localEmbedDevices?: AiEmbedDeviceOption[];
   openaiEmbedModels: AiPresetOption[];
   promptPostProcessing: AiPresetOption[];
+  webSearchProviders?: AiPresetOption[];
 };
 
 export async function getAiPresets(): Promise<AiPresets> {
@@ -590,6 +929,7 @@ export async function putAiEmbed(body: {
   model?: string;
   apiKey?: string;
   dim?: number;
+  device?: AiEmbedDevice | string;
   topK?: number;
   minScore?: number;
   chunkSize?: number;
@@ -614,6 +954,8 @@ export async function connectAiEmbed(body: {
   modelCount: number;
   totalModelCount?: number;
   embedMatchCount?: number;
+  devices?: AiEmbedDeviceOption[];
+  device?: string;
   message: string;
 }> {
   const res = await apiFetch('/settings/ai/embed/connect', {
@@ -627,6 +969,8 @@ export async function connectAiEmbed(body: {
     modelCount?: number;
     totalModelCount?: number;
     embedMatchCount?: number;
+    devices?: AiEmbedDeviceOption[];
+    device?: string;
   }> & { message: string };
   return {
     ok: Boolean(json.data?.ok),
@@ -634,6 +978,8 @@ export async function connectAiEmbed(body: {
     modelCount: json.data?.modelCount ?? 0,
     totalModelCount: json.data?.totalModelCount,
     embedMatchCount: json.data?.embedMatchCount,
+    devices: json.data?.devices,
+    device: json.data?.device,
     message: json.message || '',
   };
 }
@@ -646,6 +992,7 @@ export async function testAiEmbed(body: {
   model?: string;
   apiKey?: string;
   dim?: number;
+  device?: AiEmbedDevice | string;
   topK?: number;
   minScore?: number;
   chunkSize?: number;
@@ -661,6 +1008,302 @@ export async function testAiEmbed(body: {
     message: json.message || '',
     dim: typeof json.data?.dim === 'number' ? json.data.dim : undefined,
   };
+}
+
+export async function downloadAiEmbed(body: {
+  provider?: 'local' | 'openai';
+  model?: string;
+  device?: AiEmbedDevice | string;
+  dim?: number;
+}): Promise<{
+  ok: boolean;
+  skipped?: boolean;
+  downloaded?: boolean;
+  model?: string;
+  message: string;
+}> {
+  const res = await apiFetch('/settings/ai/embed/download', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  const json = (await res.json()) as Envelope<{
+    ok?: boolean;
+    skipped?: boolean;
+    downloaded?: boolean;
+    model?: string;
+    message?: string;
+  }> & { message: string };
+  return {
+    ok: Boolean(json.data?.ok ?? true),
+    skipped: json.data?.skipped,
+    downloaded: json.data?.downloaded,
+    model: json.data?.model,
+    message: json.message || json.data?.message || '',
+  };
+}
+
+export type ScrapLibraryEmbedSettings = {
+  root: string;
+  resolved?: string;
+  default_root?: string;
+  meta_db?: string;
+  table?: string;
+  updated_at?: string | null;
+};
+
+export type ScrapLibraryEmbedStats = {
+  meta_db?: string;
+  table?: string;
+  embedded?: number;
+  nfo_files?: number;
+  root?: string;
+  indexes?: string[];
+};
+
+export type ScrapLibraryEmbedJobStatus = {
+  running: boolean;
+  phase?: string;
+  progress?: PrefixCatalogLocalIndexProgress | null;
+  log?: string[];
+  result?: {
+    written?: number;
+    skipped?: number;
+    total?: number;
+    meta_db?: string;
+  } | null;
+  error?: string | null;
+};
+
+export async function getScrapLibraryEmbedSettings(): Promise<ScrapLibraryEmbedSettings> {
+  const res = await apiFetch('/scrap-library/embed');
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<ScrapLibraryEmbedSettings>).data;
+}
+
+export async function putScrapLibraryEmbedSettings(
+  root: string,
+): Promise<ScrapLibraryEmbedSettings> {
+  const res = await apiFetch('/scrap-library/embed', {
+    method: 'PUT',
+    body: JSON.stringify({ root }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<ScrapLibraryEmbedSettings>).data;
+}
+
+export async function getScrapLibraryEmbedStats(): Promise<ScrapLibraryEmbedStats> {
+  const res = await apiFetch('/scrap-library/embed/stats');
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<ScrapLibraryEmbedStats>).data;
+}
+
+export async function getScrapLibraryEmbedStatus(): Promise<ScrapLibraryEmbedJobStatus> {
+  const res = await apiFetch('/scrap-library/embed/status');
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<ScrapLibraryEmbedJobStatus>).data;
+}
+
+export async function startScrapLibraryEmbed(body?: {
+  root?: string;
+  force?: boolean;
+}): Promise<{ started: boolean }> {
+  const res = await apiFetch('/scrap-library/embed/start', {
+    method: 'POST',
+    body: JSON.stringify(body || {}),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<{ started: boolean }>).data;
+}
+
+export type ScrapLibraryEmbedItem = {
+  itemId?: string;
+  region?: string;
+  prefix?: string;
+  code?: string;
+  title?: string;
+  sourceText?: string;
+  posterPath?: string;
+  thumbPath?: string;
+  fanartPath?: string;
+  coverUrl?: string;
+  posterApi?: string;
+  thumbApi?: string;
+  fanartApi?: string;
+  score?: number;
+};
+
+export type ScrapLibraryEmbedRegion = {
+  id: string;
+  label: string;
+  count: number;
+};
+
+export type ScrapLibraryEmbedPrefix = {
+  prefix: string;
+  count: number;
+  posterPath?: string;
+  posterApi?: string;
+  posterApis?: string[];
+};
+
+export type ScrapLibraryEmbedFacet = {
+  name: string;
+  count: number;
+  kind: 'genre' | 'tag' | 'studio' | string;
+  posterPath?: string;
+  posterApi?: string;
+  posterApis?: string[];
+};
+
+export type ScrapLibraryEmbedRecommend = {
+  latest: ScrapLibraryEmbedItem[];
+  genres: ScrapLibraryEmbedFacet[];
+  collections: ScrapLibraryEmbedFacet[];
+  folders: ScrapLibraryEmbedPrefix[];
+  total: number;
+};
+
+export type ScrapLibraryEmbedItemsPage = {
+  total: number;
+  offset: number;
+  limit: number;
+  items: ScrapLibraryEmbedItem[];
+};
+
+export async function listScrapLibraryEmbedRegions(): Promise<
+  ScrapLibraryEmbedRegion[]
+> {
+  const res = await apiFetch('/scrap-library/embed/regions');
+  if (!res.ok) throw new Error(await parseError(res));
+  return (
+    ((await res.json()) as Envelope<{ regions: ScrapLibraryEmbedRegion[] }>).data
+      .regions || []
+  );
+}
+
+export async function listScrapLibraryEmbedPrefixes(
+  region = '',
+): Promise<ScrapLibraryEmbedPrefix[]> {
+  const q = new URLSearchParams();
+  if (region) q.set('region', region);
+  const res = await apiFetch(
+    `/scrap-library/embed/prefixes${q.toString() ? `?${q}` : ''}`,
+  );
+  if (!res.ok) throw new Error(await parseError(res));
+  return (
+    ((await res.json()) as Envelope<{ prefixes: ScrapLibraryEmbedPrefix[] }>)
+      .data.prefixes || []
+  );
+}
+
+export async function listScrapLibraryEmbedItems(opts?: {
+  region?: string;
+  prefix?: string;
+  q?: string;
+  genre?: string;
+  tag?: string;
+  studio?: string;
+  sort?: 'code' | 'recent' | 'name' | 'year' | 'studio' | 'prefix' | 'actress' | 'random' | string;
+  order?: 'asc' | 'desc' | string;
+  offset?: number;
+  limit?: number;
+}): Promise<ScrapLibraryEmbedItemsPage> {
+  const q = new URLSearchParams();
+  if (opts?.region) q.set('region', opts.region);
+  if (opts?.prefix) q.set('prefix', opts.prefix);
+  if (opts?.q) q.set('q', opts.q);
+  if (opts?.genre) q.set('genre', opts.genre);
+  if (opts?.tag) q.set('tag', opts.tag);
+  if (opts?.studio) q.set('studio', opts.studio);
+  if (opts?.sort) q.set('sort', opts.sort);
+  if (opts?.order) q.set('order', opts.order);
+  if (opts?.offset != null) q.set('offset', String(opts.offset));
+  if (opts?.limit != null) q.set('limit', String(opts.limit));
+  const res = await apiFetch(
+    `/scrap-library/embed/items${q.toString() ? `?${q}` : ''}`,
+  );
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<ScrapLibraryEmbedItemsPage>).data;
+}
+
+export async function listScrapLibraryEmbedFacets(opts?: {
+  region?: string;
+  kind?: 'genre' | 'tag' | 'studio' | string;
+}): Promise<ScrapLibraryEmbedFacet[]> {
+  const q = new URLSearchParams();
+  if (opts?.region) q.set('region', opts.region);
+  if (opts?.kind) q.set('kind', opts.kind);
+  const res = await apiFetch(
+    `/scrap-library/embed/facets${q.toString() ? `?${q}` : ''}`,
+  );
+  if (!res.ok) throw new Error(await parseError(res));
+  return (
+    ((await res.json()) as Envelope<{ facets: ScrapLibraryEmbedFacet[] }>).data
+      .facets || []
+  );
+}
+
+export async function listScrapLibraryEmbedRecommend(
+  region = '',
+): Promise<ScrapLibraryEmbedRecommend> {
+  const q = new URLSearchParams();
+  if (region) q.set('region', region);
+  const res = await apiFetch(
+    `/scrap-library/embed/recommend${q.toString() ? `?${q}` : ''}`,
+  );
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<ScrapLibraryEmbedRecommend>).data;
+}
+
+export async function searchScrapLibraryEmbed(opts: {
+  query: string;
+  limit?: number;
+  region?: string;
+}): Promise<ScrapLibraryEmbedItem[]> {
+  const res = await apiFetch('/scrap-library/embed/search', {
+    method: 'POST',
+    body: JSON.stringify({
+      query: opts.query,
+      limit: opts.limit ?? 24,
+      region: opts.region || '',
+    }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return (
+    ((await res.json()) as Envelope<{ hits: ScrapLibraryEmbedItem[] }>).data
+      .hits || []
+  );
+}
+
+/** 列表卡片预览最长边；详情/大图不传 w / prefer poster */
+export const COVER_LIST_THUMB_W = 360;
+
+/** 刮削库本地封面 → 可请求的 /api URL（列表优先竖版 poster，横 thumb 由服务端裁右侧） */
+export function scrapLibraryCoverUrl(
+  item: Pick<ScrapLibraryEmbedItem, 'posterApi' | 'thumbApi' | 'coverUrl'>,
+  opts?: { w?: number; prefer?: 'thumb' | 'poster'; rp?: boolean },
+): string {
+  const preferThumb = opts?.prefer === 'thumb';
+  const local = String(
+    preferThumb
+      ? item.thumbApi || item.posterApi || ''
+      : item.posterApi || item.thumbApi || '',
+  ).trim();
+  const w =
+    typeof opts?.w === 'number'
+      ? opts.w
+      : COVER_LIST_THUMB_W;
+  if (local) {
+    const via = proxiedCoverUrl(local, { w, rp: opts?.rp });
+    if (via) return via;
+    let url = local.startsWith('/api/') ? local : `${API_BASE}${local}`;
+    if (typeof opts?.rp === 'boolean' && w > 0 && !/[?&]rp=/.test(url)) {
+      url = `${url}${url.includes('?') ? '&' : '?'}rp=${opts.rp ? 1 : 0}`;
+    }
+    return url;
+  }
+  return proxiedCoverUrl(item.coverUrl, { w }) || '';
 }
 
 export type AiChatSearchResult = {
@@ -687,11 +1330,403 @@ export async function aiChatSearch(opts: {
   return ((await res.json()) as Envelope<AiChatSearchResult>).data;
 }
 
+export type AssistantSource = 'sehua' | 'magnet' | 'scrap' | 'media' | 'web';
+
+export type AssistantCard = {
+  id: string;
+  source: AssistantSource | string;
+  title: string;
+  subtitle?: string;
+  meta?: string;
+  cover?: string;
+  score?: number;
+  open: {
+    kind: 'sehua' | 'magnet' | 'scrap' | 'media' | 'url' | string;
+    hash?: string;
+    url?: string;
+    title?: string;
+    item?: ScrapLibraryEmbedItem | MediaItem | Record<string, unknown>;
+  };
+};
+
+export type AssistantStep = {
+  tool?: string;
+  label?: string;
+  query?: string;
+  status?: string;
+  ok?: boolean;
+  summary?: string;
+};
+
+export type AssistantChatResult = {
+  reply: string;
+  cards: AssistantCard[];
+  steps?: AssistantStep[];
+  usedLlm?: boolean;
+  usedTools?: string[];
+  toolSummary?: string;
+};
+
+export type AssistantMeta = {
+  suggestChips: string[];
+  webSearchEnabled?: boolean;
+  sources?: string[];
+};
+
+export type AiWebSearchConfig = {
+  enabled?: boolean;
+  provider?: 'serper' | 'brave' | 'searxng' | string;
+  baseUrl?: string;
+  configured?: boolean;
+  fromEnv?: boolean;
+  apiKeyHint?: string;
+  updated_at?: string;
+};
+
+export type AiAssistantToolMeta = {
+  id: string;
+  group: string;
+  label: string;
+  desc: string;
+};
+
+export type AiAssistantSkillGroup = {
+  id: string;
+  label: string;
+  desc: string;
+};
+
+export type AiAssistantConfig = {
+  systemPrompt?: string;
+  suggestChips?: string[];
+  tools?: Record<string, boolean>;
+  toolMeta?: AiAssistantToolMeta[];
+  skillGroups?: AiAssistantSkillGroup[];
+  updated_at?: string;
+};
+
+export async function getAssistantMeta(): Promise<AssistantMeta> {
+  const res = await apiFetch('/ai/assistant/meta');
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<AssistantMeta>).data;
+}
+
+export async function assistantChat(opts: {
+  message: string;
+  history?: Array<{ role: 'user' | 'assistant'; content: string; summary?: string }>;
+  preferSources?: string[];
+}): Promise<AssistantChatResult> {
+  const res = await apiFetch('/ai/assistant/chat', {
+    method: 'POST',
+    body: JSON.stringify({
+      message: opts.message,
+      history: opts.history || [],
+      preferSources: opts.preferSources || [],
+    }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<AssistantChatResult>).data;
+}
+
+export async function assistantChatStream(
+  opts: {
+    message: string;
+    history?: Array<{ role: 'user' | 'assistant'; content: string; summary?: string }>;
+    preferSources?: string[];
+  },
+  handlers: {
+    onStatus?: (text: string, tool?: string) => void;
+    onStep?: (step: AssistantStep) => void;
+    onCardsPartial?: (cards: AssistantCard[]) => void;
+    onDone?: (data: AssistantChatResult) => void;
+    onError?: (message: string) => void;
+  },
+  signal?: AbortSignal,
+): Promise<AssistantChatResult> {
+  const res = await apiFetch('/ai/assistant/chat/stream', {
+    method: 'POST',
+    body: JSON.stringify({
+      message: opts.message,
+      history: opts.history || [],
+      preferSources: opts.preferSources || [],
+    }),
+    signal,
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  if (!res.body) throw new Error('无流式响应');
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let finalResult: AssistantChatResult | null = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const chunks = buffer.split('\n\n');
+    buffer = chunks.pop() || '';
+    for (const chunk of chunks) {
+      const line = chunk
+        .split('\n')
+        .map((l) => l.trim())
+        .find((l) => l.startsWith('data:'));
+      if (!line) continue;
+      const raw = line.replace(/^data:\s*/, '');
+      try {
+        const evt = JSON.parse(raw) as {
+          event?: string;
+          data?: Record<string, unknown>;
+        };
+        const data = (evt.data || {}) as Record<string, unknown>;
+        if (evt.event === 'status') {
+          handlers.onStatus?.(String(data.text || ''), data.tool ? String(data.tool) : undefined);
+        } else if (evt.event === 'step') {
+          handlers.onStep?.(data as AssistantStep);
+        } else if (evt.event === 'cards_partial') {
+          handlers.onCardsPartial?.((data.cards as AssistantCard[]) || []);
+        } else if (evt.event === 'error') {
+          handlers.onError?.(String(data.message || '失败'));
+        } else if (evt.event === 'done') {
+          finalResult = data as unknown as AssistantChatResult;
+          handlers.onDone?.(finalResult);
+        }
+      } catch {
+        /* ignore bad chunk */
+      }
+    }
+  }
+
+  if (!finalResult) throw new Error('流式结束但无结果');
+  return finalResult;
+}
+
+export async function getAiWebSearch(): Promise<AiWebSearchConfig> {
+  const res = await apiFetch('/settings/ai/web-search');
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<AiWebSearchConfig>).data;
+}
+
+export async function putAiWebSearch(body: {
+  enabled?: boolean;
+  provider?: string;
+  apiKey?: string;
+  baseUrl?: string;
+}): Promise<AiWebSearchConfig> {
+  const res = await apiFetch('/settings/ai/web-search', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<AiWebSearchConfig>).data;
+}
+
+export async function getAiAssistant(): Promise<AiAssistantConfig> {
+  const res = await apiFetch('/settings/ai/assistant');
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<AiAssistantConfig>).data;
+}
+
+export async function putAiAssistant(body: {
+  suggestChips?: string[];
+  systemPrompt?: string;
+  tools?: Record<string, boolean>;
+}): Promise<AiAssistantConfig> {
+  const res = await apiFetch('/settings/ai/assistant', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<AiAssistantConfig>).data;
+}
+
+export type ChatPresetListItem = {
+  id: string;
+  name: string;
+  updatedAt?: string;
+  promptCount?: number;
+  kind?: string;
+};
+
+export type ChatPresetPrompt = {
+  identifier: string;
+  name: string;
+  role: string;
+  enabled: boolean;
+  marker?: boolean;
+  content?: string;
+  injection_position?: number | null;
+  injection_depth?: number | null;
+  injection_order?: number | null;
+  forbid_overrides?: boolean;
+};
+
+export type ChatPresetDetail = {
+  id: string;
+  name: string;
+  updatedAt?: string;
+  sampling: AiSamplingConfig;
+  prompts: ChatPresetPrompt[];
+  regexScripts?: Array<{
+    id: string;
+    scriptName: string;
+    disabled?: boolean;
+    findRegex?: string;
+  }>;
+  active?: boolean;
+};
+
+export async function listChatPresets(): Promise<{
+  presets: ChatPresetListItem[];
+  activeId: string | null;
+}> {
+  const res = await apiFetch('/settings/ai/chat-presets');
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<{
+    presets: ChatPresetListItem[];
+    activeId: string | null;
+  }>).data;
+}
+
+export async function getChatPreset(id: string): Promise<ChatPresetDetail> {
+  const res = await apiFetch(`/settings/ai/chat-presets/${encodeURIComponent(id)}`);
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<ChatPresetDetail>).data;
+}
+
+export async function importChatPreset(file: File): Promise<ChatPresetListItem> {
+  const text = await file.text();
+  let data: Record<string, unknown>;
+  try {
+    data = JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    throw new Error('JSON 解析失败');
+  }
+  const res = await apiFetch('/settings/ai/chat-presets/import', {
+    method: 'POST',
+    body: JSON.stringify({ name: file.name, data }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<ChatPresetListItem>).data;
+}
+
+export async function activateChatPreset(
+  id: string | null,
+): Promise<{ presets: ChatPresetListItem[]; activeId: string | null }> {
+  const res = await apiFetch('/settings/ai/chat-presets/activate', {
+    method: 'POST',
+    body: JSON.stringify({ id }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<{
+    presets: ChatPresetListItem[];
+    activeId: string | null;
+  }>).data;
+}
+
+export async function deleteChatPreset(
+  id: string,
+): Promise<{ presets: ChatPresetListItem[]; activeId: string | null }> {
+  const res = await apiFetch(`/settings/ai/chat-presets/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<{
+    presets: ChatPresetListItem[];
+    activeId: string | null;
+  }>).data;
+}
+
+export async function saveChatPresetParams(
+  id: string,
+  sampling: AiSamplingConfig,
+): Promise<ChatPresetDetail> {
+  const res = await apiFetch(
+    `/settings/ai/chat-presets/${encodeURIComponent(id)}/params`,
+    {
+      method: 'PUT',
+      body: JSON.stringify(sampling),
+    },
+  );
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<ChatPresetDetail>).data;
+}
+
+export async function enableChatPresetPrompt(
+  id: string,
+  identifier: string,
+  enabled: boolean,
+): Promise<ChatPresetPrompt[]> {
+  const res = await apiFetch(
+    `/settings/ai/chat-presets/${encodeURIComponent(id)}/prompts/enable`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ identifier, enabled }),
+    },
+  );
+  if (!res.ok) throw new Error(await parseError(res));
+  return (
+    ((await res.json()) as Envelope<{ prompts: ChatPresetPrompt[] }>).data.prompts || []
+  );
+}
+
+export async function saveChatPresetPrompt(
+  id: string,
+  body: {
+    identifier: string;
+    name?: string;
+    role?: string;
+    content?: string;
+    enabled?: boolean;
+  },
+): Promise<ChatPresetPrompt[]> {
+  const res = await apiFetch(
+    `/settings/ai/chat-presets/${encodeURIComponent(id)}/prompts`,
+    {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    },
+  );
+  if (!res.ok) throw new Error(await parseError(res));
+  return (
+    ((await res.json()) as Envelope<{ prompts: ChatPresetPrompt[] }>).data.prompts || []
+  );
+}
+
+export async function addChatPresetPrompt(
+  id: string,
+  body?: { name?: string; role?: string; content?: string },
+): Promise<ChatPresetPrompt[]> {
+  const res = await apiFetch(
+    `/settings/ai/chat-presets/${encodeURIComponent(id)}/prompts`,
+    {
+      method: 'POST',
+      body: JSON.stringify(body || {}),
+    },
+  );
+  if (!res.ok) throw new Error(await parseError(res));
+  return (
+    ((await res.json()) as Envelope<{ prompts: ChatPresetPrompt[] }>).data.prompts || []
+  );
+}
+
+export function chatPresetExportUrl(id: string): string {
+  return `${API_BASE}/settings/ai/chat-presets/${encodeURIComponent(id)}/export`;
+}
+
+export type P115SaveSource = 'warehouse' | 'movie' | 'tv' | 'makers';
+
+export type P115TargetFolder = {
+  folderCid: string;
+  folderName: string;
+};
+
 export type P115Config = {
   enabled: boolean;
   folderCid: string;
   folderName: string;
   label: string;
+  targets?: Partial<Record<P115SaveSource | 'media', P115TargetFolder>>;
   hasCookie: boolean;
   cookieHint: string;
   configured?: boolean;
@@ -732,18 +1767,21 @@ export async function getP115Status(): Promise<P115Config> {
 
 export async function putP115(body: {
   cookie?: string;
-  folderCid: string;
-  folderName: string;
-  label: string;
+  folderCid?: string;
+  folderName?: string;
+  label?: string;
+  targets?: Partial<Record<P115SaveSource | 'media', P115TargetFolder>>;
   validate?: boolean;
 }): Promise<P115Config & { message?: string }> {
+  const warehouse = body.targets?.warehouse;
   const res = await apiFetch('/settings/p115', {
     method: 'PUT',
     body: JSON.stringify({
       cookie: body.cookie,
-      folderCid: body.folderCid,
-      folderName: body.folderName,
-      label: body.label,
+      folderCid: body.folderCid ?? warehouse?.folderCid ?? '0',
+      folderName: body.folderName ?? warehouse?.folderName ?? '',
+      label: body.label ?? '',
+      targets: body.targets,
       validate: body.validate ?? true,
       enabled: true,
     }),
@@ -822,1625 +1860,178 @@ export async function validateP115(body: {
   };
 }
 
-export type PosterCropMode = 'right' | 'none' | 'face';
-export type PosterCropRatioId = 'full' | 'emby';
-
-export type PosterCropConfig = {
-  byKind: Record<string, PosterCropMode>;
-  ratio: PosterCropRatioId;
-  cropDownloadedPoster: boolean;
-  preferCropIfBetter: boolean;
-  kindHints?: Record<string, string>;
+export type P115Task = {
+  name: string;
+  status: number;
+  statusLabel: string;
+  percent: number;
+  error?: string;
+  infoHash?: string;
+  size?: number | null;
+  addTime?: number | null;
+  updateTime?: number | null;
+  fileId?: string | null;
 };
 
-export const DEFAULT_POSTER_CROP: PosterCropConfig = {
-  byKind: {
-    japan_censored: 'right',
-    japan_gravure: 'right',
-    japan_uncensored: 'none',
-    japan_amateur: 'face',
-    fc2: 'face',
-    china: 'none',
-    western: 'none',
-  },
-  ratio: 'full',
-  cropDownloadedPoster: false,
-  preferCropIfBetter: false,
-  kindHints: {
-    japan_censored: '碟片封面海报多在右侧，显示时右侧取景',
-    japan_gravure: '写真横图较多，显示时可用右侧取景',
-    japan_uncensored: '无码作品可以保留原图，也可以进行人脸识别，推荐不裁剪',
-    japan_amateur: '素人图片尺寸不规则，建议使用人脸识别',
-    fc2: 'FC2图片尺寸不规则，建议使用人脸识别',
-    china: '国产作品一般有完整封面，建议不裁剪保留原样',
-    western: '欧美作品封面多为完整竖图或宽图，建议不裁剪保留原样',
-  },
+export type P115TasksResult = {
+  tasks: P115Task[];
+  page?: number | null;
+  pageCount?: number | null;
+  count?: number | null;
+  quota?: number | null;
+  quotaTotal?: number | null;
 };
 
-function normalizePosterCropClient(raw: unknown): PosterCropConfig {
-  const src = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
-  const byRaw =
-    src.byKind && typeof src.byKind === 'object'
-      ? (src.byKind as Record<string, unknown>)
-      : {};
-  const byKind = { ...DEFAULT_POSTER_CROP.byKind };
-  for (const id of Object.keys(byKind)) {
-    const v = String(byRaw[id] || byKind[id]).trim().toLowerCase();
-    if (v === 'right' || v === 'none' || v === 'face') byKind[id] = v;
-  }
-  const ratio = src.ratio === 'emby' ? 'emby' : 'full';
-  const hints =
-    src.kindHints && typeof src.kindHints === 'object'
-      ? {
-          ...DEFAULT_POSTER_CROP.kindHints,
-          ...(src.kindHints as Record<string, string>),
-        }
-      : DEFAULT_POSTER_CROP.kindHints;
-  return {
-    byKind,
-    ratio,
-    cropDownloadedPoster: Boolean(src.cropDownloadedPoster),
-    preferCropIfBetter: Boolean(src.preferCropIfBetter),
-    kindHints: hints,
-  };
-}
+export type P115ClearMode = 'done' | 'failed' | 'all';
 
-export async function getPosterCrop(): Promise<PosterCropConfig> {
-  const res = await apiFetch('/settings/scrape/poster-crop');
+export async function listP115Tasks(page = 1): Promise<P115TasksResult> {
+  const res = await apiFetch(`/settings/p115/tasks?page=${Math.max(1, page)}`);
   if (!res.ok) throw new Error(await parseError(res));
-  const data = ((await res.json()) as Envelope<unknown>).data;
-  return normalizePosterCropClient(data);
+  return ((await res.json()) as Envelope<P115TasksResult>).data;
 }
 
-export async function putPosterCrop(
-  posterCrop: PosterCropConfig,
-): Promise<PosterCropConfig> {
-  const res = await apiFetch('/settings/scrape/poster-crop', {
-    method: 'PUT',
-    body: JSON.stringify({ posterCrop }),
+export async function clearP115Tasks(
+  mode: P115ClearMode,
+): Promise<P115TasksResult & { ok?: boolean; mode?: string; message?: string }> {
+  const res = await apiFetch('/settings/p115/tasks/clear', {
+    method: 'POST',
+    body: JSON.stringify({ mode }),
   });
   if (!res.ok) throw new Error(await parseError(res));
-  const data = ((await res.json()) as Envelope<unknown>).data;
-  return normalizePosterCropClient(data);
+  const json = (await res.json()) as Envelope<
+    P115TasksResult & { ok?: boolean; mode?: string; message?: string }
+  > & { message: string };
+  return { ...json.data, message: json.message };
 }
 
-export type ScrapeSourceAccess = 'direct' | 'proxy' | 'proxy_flare';
-
-export type ScrapeSourceDef = {
-  id: string;
-  name: string;
-  group: string;
-  defaultUrl?: string;
-  access?: ScrapeSourceAccess | string;
+export type P115QrStart = {
+  uid: string;
+  time: string | number;
+  sign: string;
+  qrImage?: string | null;
+  qrcode?: string | null;
+  app: string;
 };
 
-export type ScrapeSourceCard = {
-  id: string;
-  name: string;
-  group: string;
-  /** 直连 / 代理直连 / 代理过盾 */
-  access?: ScrapeSourceAccess | string;
-  enabled: boolean;
-  baseUrl: string;
-  cookie?: string;
-  status: 'ok' | 'error' | 'unknown' | string;
-  lastCheckedAt?: string | null;
-  lastError?: string | null;
-  /** 上次探测实际通道：direct / curl / flare */
-  lastProbeVia?: 'direct' | 'curl' | 'flare' | string | null;
-  retry?: number;
-  cooldownUntil?: string | null;
-  cooldownRemainingSec?: number;
+export type P115QrStatus = {
+  status: number | null;
+  statusLabel: string;
+  done: boolean;
+  expired: boolean;
 };
 
-export type ScrapeRegionProfile = {
-  libraryRoot: string;
-  writeTree: boolean | null;
-  writeEmby: boolean | null;
-  metaSources: string[];
-  coverSources: string[];
-  /** 四字段源优先级（schema≥3 以本区为准） */
-  fieldPriority?: ScrapeFieldPriority;
-};
-
-/** 字段优先级：封面 / 中文标题 / 简介 / 制片方 / 女优 / 标签 / 系列 */
-export type ScrapeFieldPriority = {
-  cover: string[];
-  titleZh: string[];
-  outline: string[];
-  studio: string[];
-  actors: string[];
-  tags: string[];
-  series: string[];
-};
-
-export type ScrapeLibraryOption = { value: string; label: string };
-
-export type ScrapeLibraryDirEntry = {
-  name: string;
-  path: string;
-  absPath: string;
-};
-
-export type ScrapeLibraryBrowse = {
-  path: string;
-  absPath: string;
-  parent: string | null;
-  crumbs: Array<{ name: string; path: string }>;
-  entries: ScrapeLibraryDirEntry[];
-  selectable: boolean;
-};
-
-export type ScrapeTaskField =
-  | 'cover'
-  | 'titleZh'
-  | 'outline'
-  | 'studio'
-  | 'actors'
-  | 'tags'
-  | 'series';
-
-export type ScrapeTask = {
-  id: string;
-  name: string;
-  regions: string[];
-  maker?: string;
-  prefix?: string;
-  code?: string;
-  mode: 'incremental' | 'force';
-  fields: ScrapeTaskField[];
-  /** 从索引物化复用的字段（仅勾选的才读取；不含封面） */
-  localFields?: ScrapeTaskField[];
-  /** maker-fs 监控：开启后须手动开始并跑完一轮才自动增量 */
-  watchEnabled?: boolean;
-  /** 后端：手动跑完后武装，暂停/取消解除 */
-  watchArmed?: boolean;
-  lastStatus?: string;
-  updatedAt?: string;
-  /** 最近一次导出统计（与进度卡一致） */
-  done?: number;
-  empty?: number;
-  skipped?: number;
-  /** 字段不全（黄）；暂停续跑不重试 */
-  incomplete?: number;
-  /** 网络/连不上等真正失败（红）；暂停续跑只重试此项 */
-  failed?: number;
-  total?: number;
-  /** 各结果番号明细（点击统计框查看） */
-  doneCodes?: string[];
-  emptyCodes?: string[];
-  skippedCodes?: string[];
-  incompleteCodes?: string[];
-  failedCodes?: string[];
-};
-
-export type CoverDownloadStrategy = 'priority' | 'size';
-
-export type MetadataOptimizeLang = 'zh-CN' | 'zh-TW' | 'ja' | 'en';
-
-export type MetadataOptimizeConfig = {
-  /** 番号匹配时优先用色花堂中文标题 */
-  useForumZhTitle: boolean;
-  /** 用内置表规范化演员名、补充 javdb 链接 */
-  enableActorMapping: boolean;
-  /** 用内置表规范化标签 */
-  enableTagMapping: boolean;
-  /** 简介连续空行压成单行换行 */
-  compactOutlineNewlines: boolean;
-  /** 演员/标签映射语言 */
-  mappingLanguage: MetadataOptimizeLang;
-};
-
-export const DEFAULT_METADATA_OPTIMIZE: MetadataOptimizeConfig = {
-  useForumZhTitle: true,
-  enableActorMapping: true,
-  enableTagMapping: true,
-  compactOutlineNewlines: true,
-  mappingLanguage: 'zh-CN',
-};
-
-export type ScrapeConfig = {
-  enabled: boolean;
-  origin: string;
-  /** 容器内相对路径，如 data/library */
-  libraryRoot?: string;
-  /** 项目内绝对路径（展示用） */
-  libraryAbs?: string;
-  libraryOptions?: ScrapeLibraryOption[];
-  /** FlareSolverr /v1，如 http://192.168.2.38:8181/v1 */
-  flareSolverrUrl?: string;
-  /** HTTP(S) 代理，如 http://127.0.0.1:7890 */
-  proxyUrl?: string;
-  /** 缩略图下载策略：priority=按源优先级；size=全候选比文件大小 */
-  coverDownloadStrategy?: CoverDownloadStrategy;
-  /** @deprecated 兼容旧字段；等于 max(快源, 慢源) */
-  exportConcurrency?: number;
-  /** 快源通道并发（不过盾），1–8，默认 4 */
-  exportFastConcurrency?: number;
-  /** 慢源通道并发（任务可并行，过盾排队单飞），1–8，默认 4 */
-  exportSlowConcurrency?: number;
-  /** 海报剪裁（七区模板 + 比例 + 增强开关） */
-  posterCrop?: PosterCropConfig;
-  /** 刮削后元数据优化 */
-  metadataOptimize?: MetadataOptimizeConfig;
-  writeTree?: boolean;
-  writeEmby?: boolean;
-  configured?: boolean;
-  /** API 探测 origin/health 是否可达 */
-  online?: boolean;
-  updated_at?: string;
-  sourceCatalog?: ScrapeSourceDef[];
-  sources?: ScrapeSourceCard[];
-  fieldPriority?: ScrapeFieldPriority;
-  retry?: { defaultRetry?: number };
-  /** 刮削方案标签：七区（有码/写真/无码/素人/FC2/国产/欧美） */
-  kindLabels?: Record<string, string>;
-  kindProfiles?: Record<string, ScrapeRegionProfile>;
-  /** Emby 式刮削任务 */
-  scrapeTasks?: ScrapeTask[];
-  /** 数据源自动连通性探测时间（每天一次，串行） */
-  sourcesLastAutoTestAt?: string | null;
-  /** @deprecated 同 kind* */
-  regionLabels?: Record<string, string>;
-  regionProfiles?: Record<string, ScrapeRegionProfile>;
-};
-
-export type ScrapeExportEvent = {
-  ts: string;
-  phase: string;
-  level?: 'info' | 'ok' | 'warn' | 'error' | string;
-  text: string;
-  code?: string;
-  source?: string;
-  ms?: number;
-};
-
-export type ScrapeExportDetail = {
-  code?: string;
-  kind?: string;
-  region?: string;
-  regionLabel?: string;
-  path?: string;
-  phase?: string;
-  title?: string;
-  titleZh?: string;
-  originalTitle?: string;
-  plot?: string;
-  actors?: string[];
-  genres?: string[];
-  studio?: string;
-  publisher?: string;
-  premiered?: string;
-  runtime?: number | string | null;
-  director?: string;
-  series?: string;
-  userRating?: number | string | null;
-  productId?: string;
-  poster?: string;
-  posterLocal?: string;
-  coverLocal?: string;
-  mosaic?: string;
-  message?: string;
-  sourceRuns?: Array<{
-    id: string;
-    ok: boolean;
-    ms: number;
-    mode?: string;
-    error?: string;
-  }>;
-  fieldSources?: Record<string, string>;
-  /** 字段最终来源 + 实测耗时 */
-  fieldTimings?: Record<
-    string,
-    { id: string; ms: number; ok: boolean; mode?: string }
-  >;
-  exportFields?: string[];
-  /** 该番号过程日志（成功队列点进时带上） */
-  events?: ScrapeExportEvent[];
-};
-
-/** 进度页预览 library 内封面；rev=文件 mtime 破坏 iOS/PWA 图片缓存 */
-export function scrapeExportFileUrl(
-  rel: string,
-  rev?: string | number | null,
-): string {
-  const q = new URLSearchParams({ rel });
-  const v = String(rev ?? '').trim();
-  if (v) q.set('v', v);
-  return `${API_BASE}/scrape/export/file?${q}`;
+export async function startP115Qrcode(app = 'alipaymini'): Promise<P115QrStart> {
+  const res = await apiFetch('/settings/p115/qrcode/start', {
+    method: 'POST',
+    body: JSON.stringify({ app }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<P115QrStart>).data;
 }
 
-/** 进度页封面：本地库 / 外链代理。无 rel 且无 url 时返回空（勿只传 code）。 */
-export function scrapeExportImageUrl(opts: {
-  code?: string;
-  url?: string;
-  rel?: string;
-  rev?: string | number | null;
-}): string {
-  if (opts.rel) return scrapeExportFileUrl(opts.rel, opts.rev);
-  const remote = String(opts.url || '').trim();
-  if (!remote) return '';
-  const q = new URLSearchParams();
-  if (opts.code) q.set('code', opts.code);
-  q.set('u', remote);
-  return `${API_BASE}/scrape/export/img?${q}`;
+export async function pollP115Qrcode(body: {
+  uid: string;
+  time: string | number;
+  sign: string;
+}): Promise<P115QrStatus> {
+  const res = await apiFetch('/settings/p115/qrcode/status', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<P115QrStatus>).data;
+}
+
+export async function completeP115Qrcode(body: {
+  uid: string;
+  app?: string;
+  save?: boolean;
+}): Promise<P115Config & { cookie?: string; saved?: boolean; message?: string }> {
+  const res = await apiFetch('/settings/p115/qrcode/complete', {
+    method: 'POST',
+    body: JSON.stringify({
+      uid: body.uid,
+      app: body.app || 'alipaymini',
+      save: body.save !== false,
+    }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  const json = (await res.json()) as Envelope<
+    P115Config & { cookie?: string; saved?: boolean }
+  > & { message: string };
+  return { ...json.data, message: json.message };
 }
 
 /**
  * 外链封面 → 同源 /cover-proxy（服务端走 settings.proxyUrl）。
  * 已是 /api、相对路径或已代理的地址原样返回。
+ * @param opts.w 列表缩略最长边（服务端 JPEG 压缩）
  */
-export function proxiedCoverUrl(url: string | null | undefined): string {
-  const s = String(url || '').trim();
-  if (!s) return '';
+export function proxiedCoverUrl(
+  url: string | null | undefined,
+  opts?: { w?: number; rp?: boolean },
+): string {
+  let s = String(url || "").trim();
+  if (!s) return "";
+  // 协议相对地址
+  if (s.startsWith("//")) s = `https:${s}`;
+  const w =
+    typeof opts?.w === "number" && opts.w >= 32 && opts.w <= 1280
+      ? Math.round(opts.w)
+      : 0;
+  const appendParams = (base: string) => {
+    let out = base;
+    if (w && !/[?&]w=\d+/.test(out)) {
+      out = out.includes("?") ? `${out}&w=${w}` : `${out}?w=${w}`;
+    }
+    if (
+      typeof opts?.rp === "boolean" &&
+      w > 0 &&
+      !/[?&]rp=/.test(out)
+    ) {
+      out = `${out}${out.includes("?") ? "&" : "?"}rp=${opts.rp ? 1 : 0}`;
+    }
+    return out;
+  };
   if (
     s.startsWith(`${API_BASE}/cover-proxy?`) ||
-    s.startsWith(`${API_BASE}/scrape/export/img?`) ||
-    s.includes('/cover-proxy?') ||
-    s.includes('/scrape/export/img?')
+    s.includes("/cover-proxy?")
   ) {
-    return s;
+    return appendParams(s);
   }
-  // 本站相对路径：补上 API_BASE（如 /maker-fs/file/...）
-  if (s.startsWith('/')) {
-    if (s.startsWith(`${API_BASE}/`) || s === API_BASE) return s;
-    return `${API_BASE}${s}`;
+  // 外站相对路径不应拼到 /api；仅本站 /api|/covers 等保留
+  if (s.startsWith("/")) {
+    if (s.startsWith(`${API_BASE}/`) || s === API_BASE) {
+      return appendParams(s);
+    }
+    // /pics/... 这类外站相对路径无法代理
+    if (
+      s.startsWith("/api/") ||
+      s.startsWith("/covers/") ||
+      s.startsWith("/brand/") ||
+      s.startsWith("/scrap-library/")
+    ) {
+      const joined = `${API_BASE}${s.startsWith("/api/") ? s.slice(4) : s}`;
+      return appendParams(joined);
+    }
+    return "";
   }
   if (!/^https?:\/\//i.test(s)) return s;
-  return `${API_BASE}/cover-proxy?url=${encodeURIComponent(s)}`;
+  const base = `${API_BASE}/cover-proxy?url=${encodeURIComponent(s)}`;
+  return w ? `${base}&w=${w}` : base;
 }
 
-export type ScrapeExportQueueItem = {
-  taskId?: string;
-  name?: string;
-};
 
-export type ScrapeExportStatus = {
-  running: boolean;
-  paused?: boolean;
-  startedAt?: string;
-  finishedAt?: string;
-  message?: string;
-  total?: number;
-  done?: number;
-  failed?: number;
-  incomplete?: number;
-  skipped?: number;
-  /** 空目录 / 空号种子（无详情可刮） */
-  empty?: number;
-  /** 真正进入并发线程、正在刮削的数量（排队未开始的不算） */
-  active?: number;
-  /** 各结果番号明细（轮询可能截断；全量走 /scrape/export/codes） */
-  doneCodes?: string[];
-  emptyCodes?: string[];
-  skippedCodes?: string[];
-  incompleteCodes?: string[];
-  failedCodes?: string[];
-  /** 轮询未带全量番号列表 */
-  codesTruncated?: boolean;
-  activeCodes?: string[];
-  /** 快源通道正在刮削的番号 */
-  activeFastCodes?: string[];
-  /** 慢源通道正在刮削的番号 */
-  activeSlowCodes?: string[];
-  /** 快源通道排队未开始 */
-  pendingFast?: number;
-  /** 慢源通道排队未开始 */
-  pendingSlow?: number;
-  fastSlots?: number;
-  slowSlots?: number;
-  current?: string;
-  region?: string;
-  /** 本次导出范围（以后端状态为准，勿仅信任务卡片缓存） */
-  maker?: string;
-  prefix?: string;
-  codeFilter?: string;
-  /** 当前正在跑的任务 id */
-  taskId?: string;
-  taskName?: string;
-  /** 本次实际刮削模式（以后端为准） */
-  force?: boolean;
-  mode?: 'incremental' | 'force' | string;
-  /** 等待依次执行的后续任务 */
-  queue?: ScrapeExportQueueItem[];
-  events?: ScrapeExportEvent[];
-  currentDetail?: ScrapeExportDetail | null;
-  exportFields?: string[];
-  /** 服务重启后可断点续跑 */
-  resumable?: boolean;
-  /** 上次是暂停态落盘 */
-  pauseSaved?: boolean;
-  watchHold?: boolean;
-};
+/* —— Media (TMDB / 豆瓣 / Bangumi / AniList) —— */
 
-export type ScrapeExportPreview = {
-  count: number;
-  sample: Array<{
-    code: string;
-    prefix: string;
-    maker: string;
-    region: string;
-    coverUrl?: string | null;
-  }>;
-  libraryRoot: string;
-};
-
-export async function getScrape(): Promise<ScrapeConfig> {
-  const res = await apiFetch('/settings/scrape');
-  if (!res.ok) throw new Error(await parseError(res));
-  const json = (await res.json()) as Envelope<ScrapeConfig>;
-  const data = json.data;
-  return {
-    ...data,
-    posterCrop: normalizePosterCropClient(data?.posterCrop),
-  };
-}
-
-/** 浏览项目 data/ 下真实目录（默认库路径） */
-export async function browseScrapeLibraryDirs(
-  path = 'data',
-): Promise<ScrapeLibraryBrowse> {
-  const q = new URLSearchParams({ path });
-  const res = await apiFetch(`/settings/scrape/library-dirs?${q}`);
-  if (!res.ok) throw new Error(await parseError(res));
-  const json = (await res.json()) as Envelope<ScrapeLibraryBrowse>;
-  return json.data;
-}
-
-export async function putScrape(
-  body: Partial<
-    Pick<
-      ScrapeConfig,
-      | 'enabled'
-      | 'origin'
-      | 'libraryRoot'
-      | 'flareSolverrUrl'
-      | 'proxyUrl'
-      | 'coverDownloadStrategy'
-      | 'exportConcurrency'
-      | 'exportFastConcurrency'
-      | 'exportSlowConcurrency'
-      | 'posterCrop'
-      | 'metadataOptimize'
-      | 'writeTree'
-      | 'writeEmby'
-      | 'kindProfiles'
-      | 'regionProfiles'
-      | 'sources'
-      | 'fieldPriority'
-      | 'retry'
-      | 'scrapeTasks'
-    >
-  >,
-): Promise<ScrapeConfig> {
-  const res = await apiFetch('/settings/scrape', {
-    method: 'PUT',
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(await parseError(res));
-  const json = (await res.json()) as Envelope<ScrapeConfig>;
-  const data = json.data;
-  return {
-    ...data,
-    posterCrop: normalizePosterCropClient(data?.posterCrop),
-  };
-}
-
-export async function testScrapeSources(ids?: string[]): Promise<{
-  data: ScrapeConfig;
-  message: string;
-}> {
-  const res = await apiFetch('/settings/scrape/sources/test', {
-    method: 'POST',
-    body: JSON.stringify({ ids: ids || null }),
-  });
-  if (!res.ok) throw new Error(await parseError(res));
-  const json = (await res.json()) as Envelope<ScrapeConfig> & {
-    message: string;
-  };
-  return { data: json.data, message: json.message };
-}
-
-export async function patchScrapeSource(
-  id: string,
-  patch: { enabled?: boolean; baseUrl?: string; retry?: number },
-): Promise<ScrapeConfig> {
-  const res = await apiFetch(`/settings/scrape/sources/${encodeURIComponent(id)}`, {
-    method: 'PATCH',
-    body: JSON.stringify(patch),
-  });
-  if (!res.ok) throw new Error(await parseError(res));
-  const json = (await res.json()) as Envelope<ScrapeConfig>;
-  return json.data;
-}
-
-export async function testScrape(
-  body?: { enabled?: boolean; origin?: string },
-): Promise<{ ok: boolean; message: string }> {
-  const res = await apiFetch('/settings/scrape/test', {
-    method: 'POST',
-    body: JSON.stringify({
-      enabled: body?.enabled ?? true,
-      origin: body?.origin || '127.0.0.1:9210',
-    }),
-  });
-  if (!res.ok) throw new Error(await parseError(res));
-  const json = (await res.json()) as Envelope<{ ok: boolean }> & {
-    message: string;
-  };
-  return { ok: Boolean(json.data?.ok), message: json.message };
-}
-
-export async function testScrapeFlareSolverr(body?: {
-  origin?: string;
-  flareSolverrUrl?: string;
-  proxyUrl?: string;
-  sampleUrl?: string;
-}): Promise<{
-  ok: boolean;
-  sampleOk?: boolean | null;
-  message: string;
-}> {
-  const res = await apiFetch('/settings/scrape/flaresolverr/test', {
-    method: 'POST',
-    body: JSON.stringify(body || {}),
-  });
-  if (!res.ok) throw new Error(await parseError(res));
-  const json = (await res.json()) as Envelope<{
-    ok?: boolean;
-    sampleOk?: boolean | null;
-  }> & { message: string };
-  return {
-    ok: Boolean(json.data?.ok),
-    sampleOk: json.data?.sampleOk,
-    message: json.message,
-  };
-}
-
-export type FlareMonitorSnapshot = {
-  ok: boolean;
-  flareSolverrUrl: string;
-  reachable: boolean;
-  sessions: number;
-  ownedSession: string | null;
-  orphanSessions: number;
-  latencyAvgMs: number;
-  latencyP95Ms: number;
-  errorRate: number;
-  trafficSample: number;
-  cpuPercent: number | null;
-  memPercent: number | null;
-  memUsedMb: number | null;
-  statsSource: string;
-  level: 'ok' | 'warn' | 'critical' | 'down';
-  reasons: string[];
-  lastAction: string | null;
-  lastActionAt: string | null;
-  lastActionDetail: string | null;
-  restartConfigured: boolean;
-  autoEnabled: boolean;
-  checkedAt: string;
-};
-
-export async function getFlareMonitor(): Promise<FlareMonitorSnapshot> {
-  const res = await apiFetch('/settings/scrape/flaresolverr/monitor');
-  if (!res.ok) throw new Error(await parseError(res));
-  const json = (await res.json()) as Envelope<FlareMonitorSnapshot>;
-  return json.data as FlareMonitorSnapshot;
-}
-
-export async function recycleFlareSolverr(): Promise<{
-  message: string;
-  data: FlareMonitorSnapshot & { destroyed?: number };
-}> {
-  const res = await apiFetch('/settings/scrape/flaresolverr/recycle', {
-    method: 'POST',
-    body: '{}',
-  });
-  if (!res.ok) throw new Error(await parseError(res));
-  const json = (await res.json()) as Envelope<
-    FlareMonitorSnapshot & { destroyed?: number }
-  > & { message: string };
-  return { message: json.message, data: json.data as FlareMonitorSnapshot };
-}
-
-export async function restartFlareSolverr(): Promise<{
-  message: string;
-  data: FlareMonitorSnapshot & { restartCmd?: string };
-}> {
-  const res = await apiFetch('/settings/scrape/flaresolverr/restart', {
-    method: 'POST',
-    body: '{}',
-  });
-  if (!res.ok) throw new Error(await parseError(res));
-  const json = (await res.json()) as Envelope<
-    FlareMonitorSnapshot & { restartCmd?: string }
-  > & { message: string };
-  return { message: json.message, data: json.data as FlareMonitorSnapshot };
-}
-
-export async function testScrapeProxy(body?: {
-  origin?: string;
-  proxyUrl?: string;
-}): Promise<{ ok: boolean; message: string }> {
-  const res = await apiFetch('/settings/scrape/proxy/test', {
-    method: 'POST',
-    body: JSON.stringify(body || {}),
-  });
-  if (!res.ok) throw new Error(await parseError(res));
-  const json = (await res.json()) as Envelope<{ ok?: boolean }> & {
-    message: string;
-  };
-  return { ok: Boolean(json.data?.ok), message: json.message || '' };
-}
-
-export async function fetchScrapeExportStatus(
-  signal?: AbortSignal,
-): Promise<ScrapeExportStatus> {
-  // 默认不下发完整番号列表，避免数万级任务拖死轮询
-  const res = await apiFetch('/scrape/export/status?codes=0', { signal });
-  if (!res.ok) throw new Error(await parseError(res));
-  const json = (await res.json()) as Envelope<ScrapeExportStatus>;
-  return json.data;
-}
-
-export async function fetchScrapeExportCodes(opts: {
-  taskId?: string;
-  bucket: 'done' | 'empty' | 'skipped' | 'failed' | 'incomplete' | 'active' | 'total';
-  limit?: number;
-  offset?: number;
-  signal?: AbortSignal;
-}): Promise<{ taskId: string; bucket: string; codes: string[]; total: number }> {
-  const q = new URLSearchParams({
-    bucket: opts.bucket === 'total' ? 'failed' : opts.bucket,
-    limit: String(opts.limit ?? 50000),
-    offset: String(opts.offset ?? 0),
-  });
-  if (opts.taskId) q.set('taskId', opts.taskId);
-  const res = await apiFetch(`/scrape/export/codes?${q}`, {
-    signal: opts.signal,
-  });
-  if (!res.ok) throw new Error(await parseError(res));
-  const json = (await res.json()) as Envelope<{
-    taskId?: string;
-    bucket?: string;
-    codes?: string[];
-    total?: number;
-  }>;
-  return {
-    taskId: String(json.data?.taskId || opts.taskId || ''),
-    bucket: String(json.data?.bucket || opts.bucket),
-    codes: Array.isArray(json.data?.codes) ? json.data.codes : [],
-    total: Number(json.data?.total || 0),
-  };
-}
-
-export async function fetchScrapeExportDetail(
-  code: string,
-  signal?: AbortSignal,
-): Promise<ScrapeExportDetail> {
-  const q = new URLSearchParams({ code: String(code || '').trim() });
-  const res = await apiFetch(`/scrape/export/detail?${q}`, { signal });
-  if (!res.ok) throw new Error(await parseError(res));
-  const json = (await res.json()) as Envelope<ScrapeExportDetail>;
-  return json.data;
-}
-
-export async function fetchScrapeExportEvents(
-  code: string,
-  signal?: AbortSignal,
-): Promise<ScrapeExportEvent[]> {
-  const q = new URLSearchParams({ code: String(code || '').trim() });
-  const res = await apiFetch(`/scrape/export/events?${q}`, { signal });
-  if (!res.ok) throw new Error(await parseError(res));
-  const json = (await res.json()) as Envelope<{
-    code?: string;
-    events?: ScrapeExportEvent[];
-  }>;
-  return Array.isArray(json.data?.events) ? json.data.events : [];
-}
-
-export async function startScrapeExport(body: {
-  taskId?: string;
-  name?: string;
-  region?: string;
-  regions?: string[];
-  maker?: string;
-  prefix?: string;
-  code?: string;
-  /** 多番号强制重刮（与 code 合并） */
-  codes?: string[];
-  force?: boolean;
-  mode?: 'incremental' | 'force';
-  /** 失败重试：后端清失败队列并只强制重刮失败番号 */
-  retryFailed?: boolean;
-  fields?: ScrapeTaskField[];
-  localFields?: ScrapeTaskField[];
-  signal?: AbortSignal;
-}): Promise<ScrapeExportStatus> {
-  const { signal, ...payload } = body;
-  const res = await apiFetch('/scrape/export', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-    signal,
-  });
-  if (!res.ok) throw new Error(await parseError(res));
-  const json = (await res.json()) as Envelope<ScrapeExportStatus>;
-  return json.data;
-}
-
-export async function pauseScrapeExport(): Promise<ScrapeExportStatus> {
-  const res = await apiFetch('/scrape/export/pause', { method: 'POST' });
-  if (!res.ok) throw new Error(await parseError(res));
-  const json = (await res.json()) as Envelope<ScrapeExportStatus>;
-  return json.data;
-}
-
-export async function resumeScrapeExport(): Promise<ScrapeExportStatus> {
-  const res = await apiFetch('/scrape/export/resume', { method: 'POST' });
-  if (!res.ok) throw new Error(await parseError(res));
-  const json = (await res.json()) as Envelope<ScrapeExportStatus>;
-  return json.data;
-}
-
-export async function clearScrapeExport(opts?: {
-  taskId?: string;
-}): Promise<ScrapeExportStatus> {
-  const q = new URLSearchParams();
-  const tid = String(opts?.taskId || '').trim();
-  if (tid) q.set('taskId', tid);
-  const qs = q.toString();
-  const res = await apiFetch(`/scrape/export${qs ? `?${qs}` : ''}`, {
-    method: 'DELETE',
-  });
-  if (!res.ok) throw new Error(await parseError(res));
-  const json = (await res.json()) as Envelope<ScrapeExportStatus>;
-  return json.data;
-}
-
-/** 重置任务卡：清该任务断点续跑，避免再次开始只刮残留几条 */
-export async function resetScrapeExportCheckpoint(
-  taskId: string,
-): Promise<ScrapeExportStatus> {
-  const tid = String(taskId || '').trim();
-  if (!tid) throw new Error('缺少 taskId');
-  const q = new URLSearchParams({ taskId: tid });
-  const res = await apiFetch(`/scrape/export/reset-checkpoint?${q}`, {
-    method: 'POST',
-  });
-  if (!res.ok) throw new Error(await parseError(res));
-  const json = (await res.json()) as Envelope<ScrapeExportStatus>;
-  return json.data;
-}
-
-/** 删除任务卡：清理该任务 SQLite 过程日志与结果番号 */
-export async function purgeScrapeTaskLogs(
-  taskId: string,
-): Promise<{ taskId: string; events: number; codes: number }> {
-  const tid = String(taskId || '').trim();
-  if (!tid) throw new Error('缺少 taskId');
-  const q = new URLSearchParams({ taskId: tid });
-  const res = await apiFetch(`/scrape/export/purge-task?${q}`, {
-    method: 'POST',
-  });
-  if (!res.ok) throw new Error(await parseError(res));
-  const json = (await res.json()) as Envelope<{
-    taskId?: string;
-    events?: number;
-    codes?: number;
-  }>;
-  return {
-    taskId: String(json.data?.taskId || tid),
-    events: Number(json.data?.events || 0),
-    codes: Number(json.data?.codes || 0),
-  };
-}
-
-export async function cancelScrapeExportTask(
-  taskId: string,
-): Promise<ScrapeExportStatus> {
-  const tid = String(taskId || '').trim();
-  if (!tid) throw new Error('缺少 taskId');
-  const q = new URLSearchParams({ taskId: tid });
-  const res = await apiFetch(`/scrape/export/cancel?${q}`, { method: 'POST' });
-  if (!res.ok) throw new Error(await parseError(res));
-  const json = (await res.json()) as Envelope<ScrapeExportStatus>;
-  return json.data;
-}
-
-export async function waitScrapeExport(opts?: {
-  signal?: AbortSignal;
-  intervalMs?: number;
-  onTick?: (st: ScrapeExportStatus) => void;
-}): Promise<ScrapeExportStatus> {
-  const interval = Math.max(400, opts?.intervalMs ?? 900);
-  const okIdle = new Set([
-    'ok',
-    'building',
-    'queued',
-    'scraping',
-    'paused',
-    'cancelling',
-    'cancelled',
-    'interrupted',
-    '',
-  ]);
-  for (;;) {
-    if (opts?.signal?.aborted) {
-      throw new DOMException('Aborted', 'AbortError');
-    }
-    const st = await fetchScrapeExportStatus(opts?.signal);
-    opts?.onTick?.(st);
-    if (!st.running) {
-      const msg = String(st.message || 'ok');
-      if (msg && !okIdle.has(msg) && !msg.includes('无待刮削')) {
-        throw new Error(msg);
-      }
-      return st;
-    }
-    await new Promise((r) => setTimeout(r, interval));
-  }
-}
-
-export async function previewScrapeExport(opts?: {
-  region?: string;
-  regions?: string[];
-  maker?: string;
-  prefix?: string;
-  code?: string;
-  signal?: AbortSignal;
-}): Promise<ScrapeExportPreview> {
-  const q = new URLSearchParams();
-  if (opts?.region) q.set('region', opts.region);
-  for (const r of opts?.regions || []) {
-    if (r) q.append('regions', r);
-  }
-  if (opts?.maker) q.set('maker', opts.maker);
-  if (opts?.prefix) q.set('prefix', opts.prefix);
-  if (opts?.code) q.set('code', opts.code);
-  const qs = q.toString();
-  const res = await apiFetch(
-    `/scrape/export/preview${qs ? `?${qs}` : ''}`,
-    { signal: opts?.signal },
-  );
-  if (!res.ok) throw new Error(await parseError(res));
-  const json = (await res.json()) as Envelope<ScrapeExportPreview>;
-  return json.data;
-}
-
-export const testFlareSolverr = testScrapeFlareSolverr;
-
-
-export type MakerFsRegionSummary = {
-  id: string;
-  label: string;
-  dbRegion?: string;
-  navPath?: string;
-  prefixCount: number;
-  makerCount?: number;
-  codeCount?: number;
-  dir?: string;
-};
-
-export type MakerFsManifest = {
-  version: number;
-  ready: boolean;
-  updatedAt?: string;
-  prefixCount?: number;
-  coverCount?: number;
-  root?: string;
-  source?: string;
-  scope?: string;
-  regions?: MakerFsRegionSummary[];
-};
-
-export type MakerFsRegionsOverview = {
-  version: number;
-  updatedAt?: string;
-  regionCount: number;
-  regions: MakerFsRegionSummary[];
-  ready?: boolean;
-};
-
-export type MakerFsRegionCatalog = {
-  version: number;
-  id: string;
-  label: string;
-  dbRegion?: string;
-  navPath?: string;
-  updatedAt?: string;
-  prefixCount: number;
-  makerCount?: number;
-  codeCount?: number;
-  prefixes: Array<{
-    prefix: string;
-    name?: string;
-    type_name?: string;
-    board_name?: string;
-    path?: string[];
-    codeCount?: number;
-    custom?: boolean;
-    /** 规范数字位数（抽码截断；欧美区不用） */
-    pad?: number;
-    padLocked?: boolean;
-    /** digit_pad | western_date | fc2 | fc2ppv | date6 | alnum_id | fixed_std */
-    codeFormat?: string;
-    /** 后端按前缀配置检测；仅 digit_pad 可改位数 */
-    padEditable?: boolean;
-    shape?: string;
-    /** 例：EBWH-001 / BLACKED.2026.01.15 / FC2-PPV-1234567 / CARIB-260115-001 */
-    codeSample?: string;
-    /** 片库聚合：女优（索引/刮削） */
-    actors?: string[];
-    /** 片库聚合：刮削标签 */
-    tags?: string[];
-    /** 片库聚合：系列 */
-    series?: string[];
-    /** 前缀代表作番号（卡片封面来源） */
-    coverCode?: string;
-    coverUrl?: string | null;
-    coverUrls?: string[];
-    posterLocal?: string | null;
-    posterRev?: string | null;
-  }>;
-};
-
-export type MakerFsRegionBuildProgress = {
-  done?: number;
-  total?: number;
-  covers?: number;
-  currentPrefix?: string;
-  updatedAt?: string;
-};
-
-export type MakerFsAutoDailyConfig = {
-  enabled: boolean;
-  lastRunDate?: string;
-  lastRunAt?: string;
-  lastError?: string;
-  starting?: boolean;
-  lastResult?: {
-    build?: { prefixes?: number; covers?: number; skipped?: number };
-    materialize?: {
-      written?: number;
-      updated?: number;
-      skipped?: number;
-      total?: number;
-    };
-  } | null;
-};
-
-export type MakerFsBuildStatus = {
-  running: boolean;
-  startedAt?: string;
-  finishedAt?: string;
-  message?: string;
-  phase?: string;
-  prefixes?: number;
-  prefixTotal?: number;
-  covers?: number;
-  skipped?: number;
-  workers?: number;
-  region?: string;
-  currentPrefix?: string;
-  updatedAt?: string;
-  error?: string | null;
-  ready?: boolean;
-  regionProgress?: Record<string, MakerFsRegionBuildProgress>;
-  autoDaily?: MakerFsAutoDailyConfig;
-};
-
-export type MakerFsPrefixCodeItem = {
-  code: string;
-  coverUrl?: string | null;
-  coverUrls?: string[] | null;
-  forumTitle?: string | null;
-  forumActors?: string[] | null;
-  source?: 'sehua' | 'bit';
-  /** 刮削标签 */
-  genres?: string[] | null;
-  /** library 内刮削海报相对路径（优先展示） */
-  posterLocal?: string | null;
-  /** poster 文件版本（mtime-size），用于缓存破坏 */
-  posterRev?: string | null;
-  scraped?: boolean;
-};
-
-export type MakerFsPrefixCodesResult = {
-  prefix: string;
-  region?: string;
-  total: number;
-  offset: number;
-  limit: number;
-  items: MakerFsPrefixCodeItem[];
-  /** 规范位数（digit_pad） */
-  pad?: number;
-  /** 样例：PREFIX-001 */
-  codeSample?: string;
-  updatedAt?: string;
-  source?: string;
-};
-
-export async function fetchMakerFsManifest(
-  signal?: AbortSignal,
-): Promise<MakerFsManifest> {
-  const res = await apiFetch('/maker-fs/manifest', { signal });
-  if (!res.ok) throw new Error(await parseError(res));
-  return ((await res.json()) as Envelope<MakerFsManifest>).data;
-}
-
-export async function fetchMakerFsStatus(
-  signal?: AbortSignal,
-): Promise<MakerFsBuildStatus> {
-  const res = await apiFetch('/maker-fs/status', { signal });
-  if (!res.ok) throw new Error(await parseError(res));
-  return ((await res.json()) as Envelope<MakerFsBuildStatus>).data;
-}
-
-export async function fetchMakerFsAutoDaily(
-  signal?: AbortSignal,
-): Promise<MakerFsAutoDailyConfig> {
-  const res = await apiFetch('/maker-fs/auto-daily', { signal });
-  if (!res.ok) throw new Error(await parseError(res));
-  return ((await res.json()) as Envelope<MakerFsAutoDailyConfig>).data;
-}
-
-export async function putMakerFsAutoDaily(
-  enabled: boolean,
-  signal?: AbortSignal,
-): Promise<MakerFsAutoDailyConfig> {
-  const res = await apiFetch('/maker-fs/auto-daily', {
-    method: 'PUT',
-    body: JSON.stringify({ enabled }),
-    signal,
-  });
-  if (!res.ok) throw new Error(await parseError(res));
-  return ((await res.json()) as Envelope<MakerFsAutoDailyConfig>).data;
-}
-
-export async function waitMakerFsBuild(opts?: {
-  signal?: AbortSignal;
-  intervalMs?: number;
-  onTick?: (st: MakerFsBuildStatus) => void;
-}): Promise<MakerFsBuildStatus> {
-  const interval = Math.max(400, opts?.intervalMs ?? 900);
-  for (;;) {
-    if (opts?.signal?.aborted) {
-      throw new DOMException('Aborted', 'AbortError');
-    }
-    const st = await fetchMakerFsStatus(opts?.signal);
-    opts?.onTick?.(st);
-    if (!st.running) {
-      const msg = String(st.message || 'ok');
-      // 整单失败才抛；「完成但有失败/触顶」仍返回给 UI 展示
-      if (
-        msg &&
-        msg !== 'ok' &&
-        msg !== 'building' &&
-        msg !== 'queued' &&
-        msg !== 'cancelling' &&
-        !msg.startsWith('完成') &&
-        !msg.startsWith('已取消')
-      ) {
-        throw new Error(msg);
-      }
-      return st;
-    }
-    await new Promise((r) => setTimeout(r, interval));
-  }
-}
-
-export async function fetchMakerFsRegions(
-  signal?: AbortSignal,
-): Promise<MakerFsRegionsOverview> {
-  const res = await apiFetch('/maker-fs/regions', { signal });
-  if (!res.ok) throw new Error(await parseError(res));
-  return ((await res.json()) as Envelope<MakerFsRegionsOverview>).data;
-}
-
-export async function fetchMakerFsRegion(
-  regionId: string,
-  signal?: AbortSignal,
-): Promise<MakerFsRegionCatalog> {
-  const res = await apiFetch(`/maker-fs/regions/${encodeURIComponent(regionId)}`, {
-    signal,
-  });
-  if (!res.ok) throw new Error(await parseError(res));
-  return ((await res.json()) as Envelope<MakerFsRegionCatalog>).data;
-}
-
-export async function addMakerFsRegionPrefix(opts: {
-  regionId: string;
-  prefix: string;
-  boardName?: string;
-  name?: string;
-  signal?: AbortSignal;
-}): Promise<MakerFsRegionCatalog> {
-  const res = await apiFetch(
-    `/maker-fs/regions/${encodeURIComponent(opts.regionId)}/prefixes`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        prefix: opts.prefix,
-        board_name: opts.boardName || '',
-        name: opts.name || '',
-      }),
-      signal: opts.signal,
-    },
-  );
-  if (!res.ok) throw new Error(await parseError(res));
-  return ((await res.json()) as Envelope<MakerFsRegionCatalog>).data;
-}
-
-export async function removeMakerFsRegionPrefix(opts: {
-  regionId: string;
-  prefix: string;
-  signal?: AbortSignal;
-}): Promise<MakerFsRegionCatalog> {
-  const res = await apiFetch(
-    `/maker-fs/regions/${encodeURIComponent(opts.regionId)}/prefixes/${encodeURIComponent(opts.prefix)}`,
-    { method: 'DELETE', signal: opts.signal },
-  );
-  if (!res.ok) throw new Error(await parseError(res));
-  return ((await res.json()) as Envelope<MakerFsRegionCatalog>).data;
-}
-
-export async function resetMakerFsRegionPrefixes(
-  regionId: string,
-  signal?: AbortSignal,
-): Promise<MakerFsRegionCatalog> {
-  const res = await apiFetch(
-    `/maker-fs/regions/${encodeURIComponent(regionId)}/prefixes/reset`,
-    { method: 'POST', signal },
-  );
-  if (!res.ok) throw new Error(await parseError(res));
-  return ((await res.json()) as Envelope<MakerFsRegionCatalog>).data;
-}
-
-export async function fetchMakerFsPrefixCodes(opts: {
-  prefix: string;
-  region?: string;
-  offset?: number;
-  limit?: number;
-  q?: string;
-  signal?: AbortSignal;
-}): Promise<MakerFsPrefixCodesResult | null> {
-  const q = new URLSearchParams();
-  if (opts.region) q.set('region', opts.region);
-  q.set('offset', String(opts.offset ?? 0));
-  q.set('limit', String(opts.limit ?? 100));
-  const needle = String(opts.q || '').trim();
-  if (needle) q.set('q', needle);
-  const res = await apiFetch(
-    `/maker-fs/prefixes/${encodeURIComponent(opts.prefix)}/codes?${q}`,
-    { signal: opts.signal },
-  );
-  if (res.status === 404) return null;
-  if (!res.ok) throw new Error(await parseError(res));
-  return ((await res.json()) as Envelope<MakerFsPrefixCodesResult>).data;
-}
-
-export type PrefixResourceHit = {
-  code: string;
-  coverUrl: string | null;
-  coverUrls: string[];
-};
-
-export type PrefixRangeResult = {
-  prefix: string;
-  from: number;
-  to: number;
-  pad: number;
-  total: number;
-  db_max?: number | null;
-  source?: string;
-  updated?: string;
-  skip?: boolean;
-  padLocked?: boolean;
-  /** 规范样例，如 SONE-001 */
-  sample?: string;
-};
-
-export type PrefixCoversResult = {
-  prefix: string;
-  items: PrefixResourceHit[];
-};
-
-export type MakerFsPrefixRange = PrefixRangeResult & {
-  region?: string;
-  updatedAt?: string;
-};
-
-export async function fetchPrefixRange(opts: {
-  prefix: string;
-  signal?: AbortSignal;
-}): Promise<PrefixRangeResult> {
-  const q = new URLSearchParams();
-  q.set('prefix', opts.prefix);
-  const res = await apiFetch(`/prefix-range?${q}`, { signal: opts.signal });
-  if (!res.ok) throw new Error(await parseError(res));
-  return ((await res.json()) as Envelope<PrefixRangeResult>).data;
-}
-
-export async function fetchPrefixCovers(opts: {
-  prefix: string;
-  codes: string[];
-  region?: string;
-  signal?: AbortSignal;
-}): Promise<PrefixCoversResult> {
-  const q = new URLSearchParams();
-  q.set('prefix', opts.prefix);
-  q.set('codes', opts.codes.join(','));
-  if (opts.region) q.set('region', opts.region);
-  const res = await apiFetch(`/prefix-covers?${q}`, { signal: opts.signal });
-  if (!res.ok) throw new Error(await parseError(res));
-  return ((await res.json()) as Envelope<PrefixCoversResult>).data;
-}
-
-export async function fetchMakerFsPrefixRange(opts: {
-  prefix: string;
-  region?: string;
-  signal?: AbortSignal;
-}): Promise<MakerFsPrefixRange | null> {
-  const q = new URLSearchParams();
-  if (opts.region) q.set('region', opts.region);
-  const qs = q.toString();
-  const res = await apiFetch(
-    `/maker-fs/prefixes/${encodeURIComponent(opts.prefix)}/range${qs ? `?${qs}` : ''}`,
-    { signal: opts.signal },
-  );
-  if (res.status === 404) return null;
-  if (!res.ok) throw new Error(await parseError(res));
-  return ((await res.json()) as Envelope<MakerFsPrefixRange>).data;
-}
-
-export async function putMakerFsPrefixRange(opts: {
-  prefix: string;
-  pad: number;
-  lock?: boolean;
-  region?: string;
-  signal?: AbortSignal;
-}): Promise<MakerFsPrefixRange> {
-  const q = new URLSearchParams();
-  q.set('pad', String(opts.pad));
-  q.set('lock', opts.lock === false ? '0' : '1');
-  if (opts.region) q.set('region', opts.region);
-  const res = await apiFetch(
-    `/maker-fs/prefixes/${encodeURIComponent(opts.prefix)}/range?${q}`,
-    { method: 'PUT', signal: opts.signal },
-  );
-  if (!res.ok) throw new Error(await parseError(res));
-  return ((await res.json()) as Envelope<MakerFsPrefixRange>).data;
-}
-
-export async function fetchMakerFsPrefixCovers(opts: {
-  prefix: string;
-  codes: string[];
-  region?: string;
-  signal?: AbortSignal;
-}): Promise<PrefixCoversResult | null> {
-  const q = new URLSearchParams();
-  q.set('codes', opts.codes.join(','));
-  if (opts.region) q.set('region', opts.region);
-  const res = await apiFetch(
-    `/maker-fs/prefixes/${encodeURIComponent(opts.prefix)}/covers?${q}`,
-    { signal: opts.signal },
-  );
-  if (res.status === 404) return null;
-  if (!res.ok) throw new Error(await parseError(res));
-  return ((await res.json()) as Envelope<PrefixCoversResult>).data;
-}
-
-/** 触发本地索引构建（后台）；sync=true 同步跑完（调试） */
-export async function buildMakerFs(opts?: {
-  limit?: number;
-  maxCovers?: number;
-  sync?: boolean;
-  catalogsOnly?: boolean;
-  workers?: number;
-  skipFreshHours?: number;
-  force?: boolean;
-  region?: string;
-  /** 单前缀强制重扫（须同时传 region） */
-  prefix?: string;
-  signal?: AbortSignal;
-}): Promise<unknown> {
-  const q = new URLSearchParams();
-  if (opts?.limit) q.set('limit', String(opts.limit));
-  if (opts?.maxCovers) q.set('maxCovers', String(opts.maxCovers));
-  if (opts?.sync) q.set('sync', '1');
-  if (opts?.catalogsOnly) q.set('catalogsOnly', '1');
-  if (opts?.workers) q.set('workers', String(opts.workers));
-  if (opts?.skipFreshHours != null) {
-    q.set('skipFreshHours', String(opts.skipFreshHours));
-  }
-  if (opts?.force) q.set('force', '1');
-  if (opts?.region) q.set('region', opts.region);
-  if (opts?.prefix) q.set('prefix', opts.prefix);
-  const res = await apiFetch(`/maker-fs/build?${q}`, {
-    method: 'POST',
-    signal: opts?.signal,
-  });
-  if (!res.ok) throw new Error(await parseError(res));
-  return ((await res.json()) as Envelope<unknown>).data;
-}
-
-/** 本地片库同步状态 */
-export type LibraryMaterializeStatus = {
-  running: boolean;
-  startedAt?: string;
-  finishedAt?: string;
-  message?: string;
-  region?: string;
-  total?: number;
-  done?: number;
-  written?: number;
-  skipped?: number;
-  updated?: number;
-  removed?: number;
-  errors?: number;
-  currentCode?: string;
-  updatedAt?: string;
-};
-
-export async function fetchLibraryMaterializeStatus(
-  signal?: AbortSignal,
-): Promise<LibraryMaterializeStatus> {
-  // 防缓存：否则第二次同步会读到上一次 running:false / ok，误判完成或立刻抛错
-  const q = `?_=${Date.now()}`;
-  const res = await apiFetch(`/scrape/library/status${q}`, {
-    signal,
-    cache: 'no-store',
-  });
-  if (!res.ok) throw new Error(await parseError(res));
-  return ((await res.json()) as Envelope<LibraryMaterializeStatus>).data;
-}
-
-export async function materializeLibrary(opts?: {
-  region?: string;
-  sync?: boolean;
-  /** 强制抢占僵死的同步任务 */
-  force?: boolean;
-  signal?: AbortSignal;
-}): Promise<LibraryMaterializeStatus> {
-  const q = new URLSearchParams();
-  if (opts?.region) q.set('region', opts.region);
-  if (opts?.sync) q.set('sync', '1');
-  if (opts?.force) q.set('force', '1');
-  const res = await apiFetch(`/scrape/library/materialize?${q}`, {
-    method: 'POST',
-    signal: opts?.signal,
-    cache: 'no-store',
-  });
-  if (!res.ok) throw new Error(await parseError(res));
-  return ((await res.json()) as Envelope<LibraryMaterializeStatus>).data;
-}
-
-export async function waitLibraryMaterialize(opts?: {
-  signal?: AbortSignal;
-  intervalMs?: number;
-  /** 本次任务 claim 返回的 startedAt；避免误用上一次的 ok 状态 */
-  expectStartedAt?: string;
-  onTick?: (st: LibraryMaterializeStatus) => void;
-}): Promise<LibraryMaterializeStatus> {
-  const interval = Math.max(400, opts?.intervalMs ?? 900);
-  const expect = String(opts?.expectStartedAt || '').trim();
-  let sawRunning = false;
-  for (;;) {
-    if (opts?.signal?.aborted) {
-      throw new DOMException('Aborted', 'AbortError');
-    }
-    const st = await fetchLibraryMaterializeStatus(opts?.signal);
-    opts?.onTick?.(st);
-    if (st.running) {
-      sawRunning = true;
-    } else {
-      const started = String(st.startedAt || '').trim();
-      const finished = String(st.finishedAt || '').trim();
-      const msg = String(st.message || 'ok');
-      // 还在等本轮任务登记/跑完：startedAt 对不上时继续轮询
-      if (expect && started && started !== expect) {
-        await new Promise((r) => setTimeout(r, interval));
-        continue;
-      }
-      if (expect && !sawRunning && !finished) {
-        await new Promise((r) => setTimeout(r, interval));
-        continue;
-      }
-      // queued 已改为「收集索引…」；兼容旧文案
-      if (msg === 'queued' || msg === '收集索引…') {
-        throw new Error(msg === 'queued' ? '收集索引超时，请重试' : `${msg}超时，请重试`);
-      }
-      if (msg !== 'ok') {
-        throw new Error(msg);
-      }
-      return st;
-    }
-    await new Promise((r) => setTimeout(r, interval));
-  }
-}
-
-export async function fetchLibraryRegions(
-  signal?: AbortSignal,
-): Promise<MakerFsRegionsOverview> {
-  const res = await apiFetch('/scrape/library/regions', { signal });
-  if (!res.ok) throw new Error(await parseError(res));
-  return ((await res.json()) as Envelope<MakerFsRegionsOverview>).data;
-}
-
-export async function fetchLibraryRegion(
-  regionId: string,
-  signal?: AbortSignal,
-): Promise<MakerFsRegionCatalog> {
-  const res = await apiFetch(
-    `/scrape/library/regions/${encodeURIComponent(regionId)}`,
-    { signal },
-  );
-  if (!res.ok) throw new Error(await parseError(res));
-  return ((await res.json()) as Envelope<MakerFsRegionCatalog>).data;
-}
-
-export type LibraryTileCoverItem = {
-  coverCode?: string | null;
-  posterLocal?: string | null;
-  posterRev?: string | null;
-  coverUrl?: string | null;
-  coverUrls?: string[];
-};
-
-export type LibraryTileCoversResult = {
-  items: LibraryTileCoverItem[];
-  region?: string;
-  studio?: string;
-  prefix?: string;
-};
-
-export async function fetchLibraryTileCovers(opts: {
-  region: string;
-  studio: string;
-  prefix?: string;
-  prefixes?: string[];
-  signal?: AbortSignal;
-}): Promise<LibraryTileCoversResult> {
-  const q = new URLSearchParams();
-  q.set('region', opts.region);
-  q.set('studio', opts.studio);
-  if (opts.prefix) q.set('prefix', opts.prefix);
-  if (opts.prefixes && opts.prefixes.length) {
-    q.set('prefixes', opts.prefixes.filter(Boolean).join(','));
-  }
-  const res = await apiFetch(`/scrape/library/tile-covers?${q}`, {
-    signal: opts.signal,
-  });
-  if (!res.ok) throw new Error(await parseError(res));
-  return ((await res.json()) as Envelope<LibraryTileCoversResult>).data;
-}
-
-export async function fetchLibraryTileCoversBatch(opts: {
-  region: string;
-  queries: Array<{
-    studio?: string;
-    prefix?: string;
-    prefixes?: string[];
-  }>;
-  signal?: AbortSignal;
-}): Promise<LibraryTileCoverItem[][]> {
-  const res = await apiFetch('/scrape/library/tile-covers/batch', {
-    method: 'POST',
-    body: JSON.stringify({
-      region: opts.region,
-      queries: opts.queries,
-    }),
-    signal: opts.signal,
-  });
-  if (!res.ok) throw new Error(await parseError(res));
-  const data = ((await res.json()) as Envelope<{ packs?: LibraryTileCoverItem[][] }>).data;
-  return Array.isArray(data?.packs) ? data.packs : [];
-}
-
-export async function fetchLibraryCodes(opts: {
-  region: string;
-  studio: string;
-  prefix: string;
-  offset?: number;
-  limit?: number;
-  q?: string;
-  signal?: AbortSignal;
-}): Promise<MakerFsPrefixCodesResult> {
-  const q = new URLSearchParams();
-  q.set('region', opts.region);
-  q.set('studio', opts.studio);
-  q.set('prefix', opts.prefix);
-  if (opts.offset != null) q.set('offset', String(opts.offset));
-  if (opts.limit != null) q.set('limit', String(opts.limit));
-  if (opts.q) q.set('q', opts.q);
-  const res = await apiFetch(`/scrape/library/codes?${q}`, {
-    signal: opts.signal,
-  });
-  if (!res.ok) throw new Error(await parseError(res));
-  return ((await res.json()) as Envelope<MakerFsPrefixCodesResult>).data;
-}
-
-export type LibraryFacetItem = {
-  name: string;
-  count: number;
-};
-
-export type LibraryRegionFacets = {
-  id: string;
-  label: string;
-  updatedAt?: string | null;
-  scanned?: number;
-  reused?: number;
-  updated?: number;
-  /** 片商目录 catalog 聚合女优 */
-  actors?: LibraryFacetItem[];
-  tags: LibraryFacetItem[];
-  series: LibraryFacetItem[];
-  source?: string;
-  empty?: boolean;
-  stale?: boolean;
-};
-
-export type LibraryFacetCodeItem = MakerFsPrefixCodeItem & {
-  studio?: string;
-  prefix?: string;
-};
-
-export type LibraryFacetCodesResult = {
-  region: string;
-  kind: 'tag' | 'series' | string;
-  value: string;
-  total: number;
-  offset: number;
-  limit: number;
-  items: LibraryFacetCodeItem[];
-  updatedAt?: string;
-  source?: string;
-};
-
-export async function fetchLibraryRegionFacets(
-  regionId: string,
-  opts?: { rebuild?: boolean; sync?: boolean; signal?: AbortSignal },
-): Promise<LibraryRegionFacets> {
-  const q = new URLSearchParams();
-  if (opts?.rebuild) q.set('rebuild', '1');
-  if (opts?.sync) q.set('sync', '1');
-  const suffix = q.toString() ? `?${q}` : '';
-  const res = await apiFetch(
-    `/scrape/library/regions/${encodeURIComponent(regionId)}/facets${suffix}`,
-    { signal: opts?.signal },
-  );
-  if (!res.ok) throw new Error(await parseError(res));
-  return ((await res.json()) as Envelope<LibraryRegionFacets>).data;
-}
-
-export async function fetchLibraryFacetCodes(opts: {
-  region: string;
-  kind: 'tag' | 'series' | string;
-  value: string;
-  offset?: number;
-  limit?: number;
-  signal?: AbortSignal;
-}): Promise<LibraryFacetCodesResult> {
-  const q = new URLSearchParams();
-  q.set('region', opts.region);
-  q.set('kind', opts.kind);
-  q.set('value', opts.value);
-  if (opts.offset != null) q.set('offset', String(opts.offset));
-  if (opts.limit != null) q.set('limit', String(opts.limit));
-  const res = await apiFetch(`/scrape/library/facet-codes?${q}`, {
-    signal: opts.signal,
-  });
-  if (!res.ok) throw new Error(await parseError(res));
-  return ((await res.json()) as Envelope<LibraryFacetCodesResult>).data;
-}
-
-/* —— Media (TMDB / 豆瓣) —— */
-
-export type MediaSourceId = 'tmdb' | 'douban';
+export type MediaSourceId = 'tmdb' | 'douban' | 'bangumi' | 'anilist';
 export type MediaCategoryId = 'movie' | 'tv' | 'anime' | 'variety';
+
+export type MediaCastPerson = {
+  id?: string | null;
+  name: string;
+  avatarUrl?: string | null;
+};
 
 export type MediaItem = {
   source: MediaSourceId;
@@ -2453,7 +2044,7 @@ export type MediaItem = {
   year?: string | null;
   rating?: number | null;
   overview?: string | null;
-  cast?: string[];
+  cast?: MediaCastPerson[];
   genres?: string[];
   runtime?: number | null;
   countries?: string[];
@@ -2513,10 +2104,66 @@ export async function fetchMediaCharts(opts: {
   const path =
     opts.source === 'douban'
       ? `/media/douban/charts?${q}`
-      : `/media/tmdb/charts?${q}`;
+      : opts.source === 'bangumi'
+        ? `/media/bangumi/charts?${q}`
+        : opts.source === 'anilist'
+          ? `/media/anilist/charts?${q}`
+          : `/media/tmdb/charts?${q}`;
   const res = await apiFetch(path, { signal: opts.signal });
   if (!res.ok) throw new Error(await parseError(res));
   return ((await res.json()) as Envelope<MediaChartResult>).data;
+}
+
+export type MediaGenre = { id: number; name: string };
+
+export type MediaDiscoverSort =
+  | 'popularity.desc'
+  | 'vote_average.desc'
+  | 'primary_release_date.desc'
+  | 'first_air_date.desc'
+  | 'revenue.desc'
+  | 'vote_count.desc';
+
+export type MediaDiscoverResult = {
+  source: 'tmdb';
+  mediaType: 'movie' | 'tv';
+  genre?: string | null;
+  sortBy: string;
+  year?: string | null;
+  page: number;
+  totalPages: number;
+  totalResults?: number;
+  items: MediaItem[];
+};
+
+export async function fetchMediaGenres(opts: {
+  mediaType: 'movie' | 'tv';
+  signal?: AbortSignal;
+}): Promise<MediaGenre[]> {
+  const q = new URLSearchParams({ media_type: opts.mediaType });
+  const res = await apiFetch(`/media/tmdb/genres?${q}`, { signal: opts.signal });
+  if (!res.ok) throw new Error(await parseError(res));
+  const data = ((await res.json()) as Envelope<{ genres?: MediaGenre[] }>).data;
+  return data.genres || [];
+}
+
+export async function fetchMediaDiscover(opts: {
+  mediaType: 'movie' | 'tv';
+  genre?: string;
+  sortBy?: string;
+  year?: string;
+  page?: number;
+  signal?: AbortSignal;
+}): Promise<MediaDiscoverResult> {
+  const q = new URLSearchParams();
+  q.set('media_type', opts.mediaType);
+  if (opts.genre) q.set('genre', opts.genre);
+  if (opts.sortBy) q.set('sortBy', opts.sortBy);
+  if (opts.year) q.set('year', opts.year);
+  if (opts.page != null) q.set('page', String(opts.page));
+  const res = await apiFetch(`/media/tmdb/discover?${q}`, { signal: opts.signal });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<MediaDiscoverResult>).data;
 }
 
 export async function fetchMediaSearch(opts: {
@@ -2543,19 +2190,635 @@ export async function fetchMediaDetail(opts: {
   const path =
     opts.source === 'douban'
       ? `/media/douban/subject/${encodeURIComponent(opts.id)}`
-      : `/media/tmdb/${encodeURIComponent(opts.mediaType || 'movie')}/${encodeURIComponent(opts.id)}`;
+      : opts.source === 'bangumi'
+        ? `/media/bangumi/subject/${encodeURIComponent(opts.id)}`
+        : opts.source === 'anilist'
+          ? `/media/anilist/${encodeURIComponent(opts.id)}`
+          : `/media/tmdb/${encodeURIComponent(opts.mediaType || 'movie')}/${encodeURIComponent(opts.id)}`;
   const res = await apiFetch(path, { signal: opts.signal });
   if (!res.ok) throw new Error(await parseError(res));
   return ((await res.json()) as Envelope<MediaItem>).data;
 }
 
 export async function fetchMediaRelated(opts: {
+  source: MediaSourceId;
   mediaType: 'movie' | 'tv';
   id: string;
   signal?: AbortSignal;
 }): Promise<MediaRelatedResult> {
-  const path = `/media/tmdb/${encodeURIComponent(opts.mediaType)}/${encodeURIComponent(opts.id)}/related`;
+  const path =
+    opts.source === 'douban'
+      ? `/media/douban/subject/${encodeURIComponent(opts.id)}/related`
+      : opts.source === 'bangumi'
+        ? `/media/bangumi/subject/${encodeURIComponent(opts.id)}/related`
+        : opts.source === 'anilist'
+          ? `/media/anilist/${encodeURIComponent(opts.id)}/related`
+          : `/media/tmdb/${encodeURIComponent(opts.mediaType)}/${encodeURIComponent(opts.id)}/related`;
   const res = await apiFetch(path, { signal: opts.signal });
   if (!res.ok) throw new Error(await parseError(res));
   return ((await res.json()) as Envelope<MediaRelatedResult>).data;
+}
+
+export type MediaPersonWorksResult = {
+  source: MediaSourceId;
+  personId: string;
+  name: string;
+  items: MediaItem[];
+};
+
+export async function fetchMediaPersonWorks(opts: {
+  source: MediaSourceId;
+  q: string;
+  personId?: string;
+  signal?: AbortSignal;
+}): Promise<MediaPersonWorksResult> {
+  const params = new URLSearchParams();
+  params.set('source', opts.source);
+  if (opts.q) params.set('q', opts.q);
+  if (opts.personId) params.set('person_id', opts.personId);
+  const res = await apiFetch(`/media/person/works?${params}`, {
+    signal: opts.signal,
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<MediaPersonWorksResult>).data;
+}
+
+/* —— 片商目录（七区） —— */
+
+export type MakerCatalogSourceId =
+  | 'japan_censored'
+  | 'japan_uncensored'
+  | 'japan_amateur'
+  | 'japan_gravure'
+  | 'fc2'
+  | 'china'
+  | 'western'
+  | 'javbus'
+  | 'iqqtv';
+
+export type MakerCatalogItem = {
+  source: MakerCatalogSourceId;
+  kind?: string | null;
+  provider?: string | null;
+  id: string;
+  code?: string | null;
+  title: string;
+  originalTitle?: string | null;
+  posterUrl?: string | null;
+  year?: string | null;
+  date?: string | null;
+  studio?: string | null;
+  maker?: string | null;
+  publisher?: string | null;
+  director?: string | null;
+  series?: string | null;
+  runtime?: number | null;
+  actors?: string[];
+  cast?: Array<{ name: string; id?: string | null; avatarUrl?: string | null }>;
+  tags?: string[];
+  samples?: string[];
+  overview?: string | null;
+};
+
+export type MakerCatalogMeta = {
+  kinds?: Array<{
+    id: MakerCatalogSourceId;
+    label: string;
+    charts: Array<{ id: string; label: string }>;
+  }>;
+  sources: Array<{
+    id: MakerCatalogSourceId;
+    label: string;
+    charts: Array<{ id: string; label: string }>;
+  }>;
+};
+
+export type MakerCatalogChartResult = {
+  source: MakerCatalogSourceId;
+  chart: string;
+  page: number;
+  totalPages: number;
+  items: MakerCatalogItem[];
+};
+
+export type MakerCatalogSearchResult = {
+  source: MakerCatalogSourceId;
+  query: string;
+  page: number;
+  totalPages: number;
+  items: MakerCatalogItem[];
+};
+
+export async function fetchMakerCatalogMeta(
+  signal?: AbortSignal,
+): Promise<MakerCatalogMeta> {
+  const res = await apiFetch('/makers/meta', { signal });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<MakerCatalogMeta>).data;
+}
+
+export async function fetchMakerCatalogCharts(opts: {
+  source: MakerCatalogSourceId;
+  chart: string;
+  page?: number;
+  signal?: AbortSignal;
+}): Promise<MakerCatalogChartResult> {
+  const q = new URLSearchParams();
+  q.set('chart', opts.chart);
+  if (opts.page != null) q.set('page', String(opts.page));
+  const res = await apiFetch(`/makers/${opts.source}/charts?${q}`, {
+    signal: opts.signal,
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<MakerCatalogChartResult>).data;
+}
+
+export async function fetchMakerCatalogSearch(opts: {
+  source: MakerCatalogSourceId;
+  q: string;
+  page?: number;
+  signal?: AbortSignal;
+}): Promise<MakerCatalogSearchResult> {
+  const q = new URLSearchParams();
+  q.set('q', opts.q);
+  if (opts.page != null) q.set('page', String(opts.page));
+  const res = await apiFetch(`/makers/${opts.source}/search?${q}`, {
+    signal: opts.signal,
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<MakerCatalogSearchResult>).data;
+}
+
+export async function fetchMakerCatalogDetail(opts: {
+  source: MakerCatalogSourceId;
+  id: string;
+  signal?: AbortSignal;
+}): Promise<MakerCatalogItem> {
+  const q = new URLSearchParams();
+  q.set('id', opts.id);
+  const res = await apiFetch(`/makers/${opts.source}/detail?${q}`, {
+    signal: opts.signal,
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<MakerCatalogItem>).data;
+}
+
+export async function fetchMakerCatalogStar(opts: {
+  source: MakerCatalogSourceId;
+  id?: string | null;
+  q?: string | null;
+  page?: number;
+  signal?: AbortSignal;
+}): Promise<MakerCatalogSearchResult> {
+  const q = new URLSearchParams();
+  if (opts.id) q.set('id', opts.id);
+  if (opts.q) q.set('q', opts.q);
+  if (opts.page != null) q.set('page', String(opts.page));
+  const res = await apiFetch(`/makers/${opts.source}/star?${q}`, {
+    signal: opts.signal,
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<MakerCatalogSearchResult>).data;
+}
+
+export type MakersCatalogConfig = {
+  configured?: boolean;
+  hubStatus?: string;
+  sourceOrder?: Array<'javbus' | 'iqqtv' | 'missav' | '7mmtv' | 'madou' | string>;
+  javbus?: {
+    enabled?: boolean;
+    bases?: string[];
+    cookie?: string;
+    activeBase?: string;
+  };
+  iqqtv?: {
+    enabled?: boolean;
+    seeds?: string[];
+    activeBase?: string;
+  };
+  missav?: {
+    enabled?: boolean;
+    seeds?: string[];
+    activeBase?: string;
+  };
+  '7mmtv'?: {
+    enabled?: boolean;
+    seeds?: string[];
+    activeBase?: string;
+  };
+  madou?: {
+    enabled?: boolean;
+    seeds?: string[];
+    activeBase?: string;
+  };
+  live?: Record<
+    string,
+    { activeBase?: string; cached?: boolean; updatedAt?: string }
+  >;
+  refresh?: Record<
+    string,
+    { ok?: boolean; activeBase?: string; ms?: number; error?: string }
+  >;
+  sources?: Array<{
+    id: string;
+    label: string;
+    notes?: string;
+    enabled?: boolean;
+    activeBase?: string;
+  }>;
+  updatedAt?: string;
+};
+
+export async function getMakersCatalog(): Promise<MakersCatalogConfig> {
+  const res = await apiFetch('/settings/makers');
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<MakersCatalogConfig>).data;
+}
+
+export async function refreshMakersMirrors(): Promise<MakersCatalogConfig> {
+  const res = await apiFetch('/settings/makers/refresh', { method: 'POST' });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<MakersCatalogConfig>).data;
+}
+
+type SeedProviderBody = {
+  enabled?: boolean;
+  seeds?: string | string[];
+  activeBase?: string;
+};
+
+export async function putMakersCatalog(body: {
+  javbus?: {
+    enabled?: boolean;
+    bases?: string | string[];
+    cookie?: string;
+    activeBase?: string;
+  };
+  iqqtv?: SeedProviderBody;
+  missav?: SeedProviderBody;
+  '7mmtv'?: SeedProviderBody;
+  madou?: SeedProviderBody;
+  sourceOrder?: string[];
+}): Promise<MakersCatalogConfig> {
+  const res = await apiFetch('/settings/makers', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<MakersCatalogConfig>).data;
+}
+
+export async function testMakersCatalog(body: {
+  source: 'javbus' | 'iqqtv' | 'missav' | '7mmtv' | 'madou';
+  persist?: boolean;
+  javbus?: { enabled?: boolean; bases?: string | string[]; cookie?: string };
+  iqqtv?: { enabled?: boolean; seeds?: string | string[] };
+  missav?: { enabled?: boolean; seeds?: string | string[] };
+  '7mmtv'?: { enabled?: boolean; seeds?: string | string[] };
+  madou?: { enabled?: boolean; seeds?: string | string[] };
+}): Promise<{ ok: boolean; message: string; data?: Record<string, unknown> }> {
+  const res = await apiFetch('/settings/makers/test', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  const json = (await res.json()) as Envelope<Record<string, unknown>> & {
+    message: string;
+  };
+  return {
+    ok: Boolean(json.data?.ok ?? true),
+    message: json.message || '',
+    data: json.data,
+  };
+}
+
+/* —— 七区前缀/番号目录 —— */
+
+export type PrefixCatalogRegionSummary = {
+  id: string;
+  label: string;
+  prefix_count: number;
+  code_count: number;
+};
+
+export type PrefixCatalogSummary = {
+  version?: number;
+  updated_at?: string;
+  principle?: string;
+  regions: PrefixCatalogRegionSummary[];
+  prefix_total: number;
+  code_total: number;
+};
+
+export type PrefixCatalogPrefixRow = {
+  prefix: string;
+  maker: string;
+  maker_zh?: string;
+  maker_ja?: string;
+  maker_en?: string;
+  sources?: string[];
+  code_count: number;
+  serial_min: number;
+  serial_max: number;
+  serial_max_hint?: number;
+  pad?: number;
+  status?: string;
+  integrity?: string;
+  verified_at?: string;
+};
+
+export type PrefixCatalogPrefixDetail = PrefixCatalogPrefixRow & {
+  serials?: number[];
+  codes?: string[];
+  codes_offset?: number;
+  codes_limit?: number;
+  format?: string;
+  dmm_digit?: string;
+  label_ja?: string;
+  notes?: string;
+  serial_max_hint?: number;
+};
+
+export async function getPrefixCatalogSummary(): Promise<PrefixCatalogSummary> {
+  const res = await apiFetch('/prefix-catalog');
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<PrefixCatalogSummary>).data;
+}
+
+export async function getPrefixCatalogRegions(): Promise<PrefixCatalogRegionSummary[]> {
+  const res = await apiFetch('/prefix-catalog/regions');
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<PrefixCatalogRegionSummary[]>).data;
+}
+
+export async function getPrefixCatalogPrefixes(
+  regionId: string,
+  q = '',
+): Promise<PrefixCatalogPrefixRow[]> {
+  const qs = q.trim() ? `?q=${encodeURIComponent(q.trim())}` : '';
+  const res = await apiFetch(
+    `/prefix-catalog/regions/${encodeURIComponent(regionId)}/prefixes${qs}`,
+  );
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<PrefixCatalogPrefixRow[]>).data;
+}
+
+export async function getPrefixCatalogPrefixDetail(
+  regionId: string,
+  prefix: string,
+  opts?: { offset?: number; limit?: number },
+): Promise<PrefixCatalogPrefixDetail> {
+  const sp = new URLSearchParams();
+  if (opts?.offset != null) sp.set('offset', String(opts.offset));
+  if (opts?.limit != null) sp.set('limit', String(opts.limit));
+  const qs = sp.toString() ? `?${sp}` : '';
+  const res = await apiFetch(
+    `/prefix-catalog/regions/${encodeURIComponent(regionId)}/prefixes/${encodeURIComponent(prefix)}${qs}`,
+  );
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<PrefixCatalogPrefixDetail>).data;
+}
+
+export type PrefixCatalogLocalIndexProgress = {
+  stage?: string;
+  done?: number | null;
+  total?: number | null;
+  percent?: number | null;
+  label?: string;
+};
+
+export type PrefixCatalogLocalIndexStatus = {
+  running: boolean;
+  phase: string;
+  progress?: PrefixCatalogLocalIndexProgress | null;
+  log: string[];
+  result: {
+    updated?: number;
+    cleared_miss?: number;
+    summary?: PrefixCatalogSummary;
+    by_region?: Record<
+      string,
+      { hit: number; codes: number; miss: number }
+    >;
+  } | null;
+  error: string | null;
+};
+
+export async function startPrefixCatalogLocalIndex(): Promise<{ started: boolean }> {
+  const res = await apiFetch('/prefix-catalog/local-index', { method: 'POST' });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<{ started: boolean }>).data;
+}
+
+export async function getPrefixCatalogLocalIndexStatus(): Promise<PrefixCatalogLocalIndexStatus> {
+  const res = await apiFetch('/prefix-catalog/local-index/status');
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<PrefixCatalogLocalIndexStatus>).data;
+}
+
+export type PrefixCatalogStrmSyncSettings = {
+  root: string;
+  resolved?: string;
+  default_root?: string;
+  structure?: string;
+  hint?: string;
+  updated_at?: string | null;
+};
+
+export type PrefixCatalogStrmBrowse = {
+  base: string;
+  path: string;
+  resolved: string;
+  crumbs: { name: string; path: string }[];
+  folders: { name: string; path: string }[];
+};
+
+export type PrefixCatalogStrmSyncStatus = {
+  running: boolean;
+  phase: string;
+  progress?: PrefixCatalogLocalIndexProgress | null;
+  log: string[];
+  result: {
+    root?: string;
+    resolved?: string;
+    total?: number;
+    written?: number;
+    skipped?: number;
+    errors?: string[];
+    by_region?: Record<string, number>;
+  } | null;
+  error: string | null;
+};
+
+export async function getPrefixCatalogStrmSyncSettings(): Promise<PrefixCatalogStrmSyncSettings> {
+  const res = await apiFetch('/prefix-catalog/strm-sync');
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<PrefixCatalogStrmSyncSettings>).data;
+}
+
+export async function putPrefixCatalogStrmSyncSettings(
+  root: string,
+): Promise<PrefixCatalogStrmSyncSettings> {
+  const res = await apiFetch('/prefix-catalog/strm-sync', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ root }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<PrefixCatalogStrmSyncSettings>).data;
+}
+
+export async function browsePrefixCatalogStrmDirs(
+  path = '',
+): Promise<PrefixCatalogStrmBrowse> {
+  const qs = path ? `?path=${encodeURIComponent(path)}` : '';
+  const res = await apiFetch(`/prefix-catalog/strm-sync/browse${qs}`);
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<PrefixCatalogStrmBrowse>).data;
+}
+
+export async function mkdirPrefixCatalogStrmDir(
+  parent: string,
+  name: string,
+): Promise<PrefixCatalogStrmBrowse> {
+  const res = await apiFetch('/prefix-catalog/strm-sync/mkdir', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ parent, name }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<PrefixCatalogStrmBrowse>).data;
+}
+
+export async function startPrefixCatalogStrmSync(
+  root?: string,
+): Promise<{ started: boolean }> {
+  const res = await apiFetch('/prefix-catalog/strm-sync', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ root: root || '' }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<{ started: boolean }>).data;
+}
+
+export async function getPrefixCatalogStrmSyncStatus(): Promise<PrefixCatalogStrmSyncStatus> {
+  const res = await apiFetch('/prefix-catalog/strm-sync/status');
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<PrefixCatalogStrmSyncStatus>).data;
+}
+
+export type ScrapeSourceLastProbe = {
+  ok: boolean;
+  ms?: number | null;
+  message?: string;
+  at?: number;
+};
+
+export type ScrapeSourceRow = {
+  id: string;
+  label: string;
+  group: string;
+  defaultUrl: string;
+  probePath?: string;
+  access?: string;
+  accessLabel?: string;
+  defaultCookie?: string;
+  notes?: string;
+  implemented?: boolean;
+  needsApiKey?: boolean;
+  seeds?: string[];
+  enabled: boolean;
+  baseUrl: string;
+  cookie: string;
+  apiKey: string;
+  activeBase: string;
+  displayUrl: string;
+  lastProbe?: ScrapeSourceLastProbe | null;
+};
+
+export type ScrapeSourceGroup = {
+  id: string;
+  label: string;
+  sources: ScrapeSourceRow[];
+};
+
+export type ScrapeSourcesCatalog = {
+  groups: ScrapeSourceGroup[];
+  sources: ScrapeSourceRow[];
+  updatedAt?: string | null;
+};
+
+export type ScrapeSourceProbeResult = {
+  ok: boolean;
+  source?: string;
+  ms?: number;
+  activeBase?: string;
+  seed?: string;
+  message?: string;
+};
+
+export type ScrapeSourceProbeStatus = {
+  running: boolean;
+  done: number;
+  total: number;
+  current: string;
+  results: ScrapeSourceProbeResult[];
+};
+
+export async function getScrapeSources(): Promise<ScrapeSourcesCatalog> {
+  const res = await apiFetch('/settings/scrape-sources');
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<ScrapeSourcesCatalog>).data;
+}
+
+export async function putScrapeSource(
+  sourceId: string,
+  body: {
+    enabled?: boolean;
+    baseUrl?: string;
+    cookie?: string;
+    apiKey?: string;
+    activeBase?: string;
+  },
+): Promise<ScrapeSourcesCatalog> {
+  const res = await apiFetch(
+    `/settings/scrape-sources/${encodeURIComponent(sourceId)}`,
+    { method: 'PUT', body: JSON.stringify(body) },
+  );
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<ScrapeSourcesCatalog>).data;
+}
+
+export async function probeScrapeSource(
+  source: string,
+  persist = true,
+): Promise<ScrapeSourceProbeResult> {
+  const res = await apiFetch('/settings/scrape-sources/probe', {
+    method: 'POST',
+    body: JSON.stringify({ source, persist, all: false }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  const json = (await res.json()) as Envelope<ScrapeSourceProbeResult> & {
+    message?: string;
+  };
+  return json.data;
+}
+
+export async function probeAllScrapeSources(
+  onlyEnabled = true,
+): Promise<{ started: boolean; total: number }> {
+  const res = await apiFetch('/settings/scrape-sources/probe', {
+    method: 'POST',
+    body: JSON.stringify({ all: true, onlyEnabled, persist: true }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<{ started: boolean; total: number }>)
+    .data;
+}
+
+export async function getScrapeSourcesProbeStatus(): Promise<ScrapeSourceProbeStatus> {
+  const res = await apiFetch('/settings/scrape-sources/probe/status');
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<ScrapeSourceProbeStatus>).data;
 }

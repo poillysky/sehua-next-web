@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { KeyRound } from 'lucide-react';
 import { getTmdb, putTmdb, testTmdb } from '@/lib/api';
 import { AppPush } from '@/components/ui/AppPush';
-import { AppFootnote, AppMsg } from '@/components/ui/AppMsg';
+import { AppMsg } from '@/components/ui/AppMsg';
 import { cn } from '@/lib/utils';
 
 export function TmdbPanel({
@@ -25,11 +25,9 @@ export function TmdbPanel({
   function applyStatus(nextConfigured: boolean, nextFromEnv: boolean) {
     setConfigured(nextConfigured);
     setFromEnv(nextFromEnv);
-    if (!nextConfigured) {
-      onStatus('未配置', 'warn');
-      return;
-    }
-    onStatus(nextFromEnv ? '环境变量' : '已就绪', 'ok');
+    // 仅认界面保存的 Key；纯环境变量不算「已配置」
+    const saved = nextConfigured && !nextFromEnv;
+    onStatus(saved ? '已配置' : '未配置', saved ? 'ok' : 'warn');
   }
 
   useEffect(() => {
@@ -62,10 +60,15 @@ export function TmdbPanel({
   }
 
   async function onSave() {
+    const key = apiKey.trim();
+    if (!key && !configured) {
+      setMsg('请填写 API Key');
+      return;
+    }
     setBusy(true);
     setMsg('');
     try {
-      const next = await putTmdb({ apiKey: apiKey.trim() });
+      const next = await putTmdb({ apiKey: key });
       setHint(next.apiKeyHint || '');
       setApiKey('');
       const ok = Boolean(next.configured);
@@ -76,7 +79,7 @@ export function TmdbPanel({
         next.fromEnv
           ? '已保存（仍以环境变量为准）'
           : next.configured
-            ? apiKey.trim()
+            ? key
               ? '已保存'
               : '未修改原有 Key'
             : '未配置',
@@ -88,12 +91,9 @@ export function TmdbPanel({
     }
   }
 
-  const statusLabel = !configured
-    ? '待配置'
-    : fromEnv
-      ? '环境变量'
-      : '已就绪';
-  const statusOk = configured;
+  const statusLabel =
+    configured && !fromEnv ? '已配置' : '未配置';
+  const statusOk = configured && !fromEnv;
 
   return (
     <AppPush title="TMDB" onBack={onBack}>
@@ -161,11 +161,6 @@ export function TmdbPanel({
               </label>
             </div>
           </section>
-          <AppFootnote>
-            {fromEnv
-              ? '当前优先使用环境变量 TMDB_API_KEY。'
-              : '用于标题翻译；已有 Key 时，只有输入新 Key 并保存才会替换。'}
-          </AppFootnote>
           {configured && !fromEnv ? (
             <button
               type="button"

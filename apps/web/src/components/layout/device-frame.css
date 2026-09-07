@@ -63,8 +63,8 @@ html[data-shell='preview'] .device-frame {
     0 0 0 11px #1a1a1a,
     0 0 0 12px #3a3a3a,
     0 24px 60px rgba(0, 0, 0, 0.35);
-  /* 与登录底色一致，避免圆角处露出近白缝 */
-  background: #f2f2f7;
+  /* 与仓库首页圆角处底色一致 */
+  background: var(--app-bg);
   justify-self: center;
 }
 
@@ -108,13 +108,13 @@ html[data-shell='native'] .device-bezel {
   border: none !important;
   border-radius: 0 !important;
   box-shadow: none !important;
-  background: #f2f2f7 !important;
+  background: var(--app-bg) !important;
 }
 
 html[data-standalone='1'] .bg-effect--static,
 html[data-shell='native'] .bg-effect--static {
-  /* 真机底色与系统灰一致，避免 Home Indicator 区出现偏白渐变尾 */
-  background: #f2f2f7 !important;
+  /* 真机同样走全局 --app-bg，与仓库首页一致 */
+  background: var(--app-bg) !important;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -126,7 +126,7 @@ html[data-shell='native'] .bg-effect--static {
   html[data-shell='native'] .device-bezel,
   html[data-standalone='1'] .bg-effect--static,
   html[data-shell='native'] .bg-effect--static {
-    background: #000000 !important;
+    background: var(--app-bg) !important;
   }
 }
 
@@ -136,7 +136,7 @@ html[data-shell='native'] .bg-effect--static {
   min-width: 0;
   height: 100%;
   overflow: hidden;
-  background: #f2f2f7;
+  background: var(--app-bg);
   display: flex;
   flex-direction: column;
   border-radius: inherit;
@@ -147,15 +147,13 @@ html[data-shell='native'] .bg-effect--static {
   inset: 0;
   z-index: 0;
   pointer-events: none !important;
-  /* 与 login-bg 同系，底部不再冒近白/异色条 */
-  background:
-    radial-gradient(ellipse 120% 70% at 50% -8%, rgba(0, 122, 255, 0.12), transparent 58%),
-    linear-gradient(180deg, #f7faff 0%, #f2f2f7 55%, #f2f2f7 100%);
+  /* 与仓库首页 / --app-bg 一致 */
+  background: var(--app-bg);
 }
 
 @media (prefers-color-scheme: dark) {
   .bg-effect--static {
-    background: linear-gradient(145deg, #1d1d1d, #0d1521);
+    background: var(--app-bg);
   }
 }
 
@@ -249,6 +247,96 @@ html[data-shell='native'] .bg-effect--static {
   height: 100%;
   background: transparent;
   border-radius: inherit;
+}
+
+/* 全局顶栏毛玻璃：全站 chrome 统一 */
+.app-tab-pane__inner {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.media-hub__top,
+.settings-hub__top,
+.makers-hub__top,
+.home-landing__top,
+.app-push__bar,
+.settings-push__bar,
+.home-results-header,
+.mk-prefix-page__top,
+.mk-facet-page__top {
+  isolation: isolate;
+  background:
+    linear-gradient(
+      180deg,
+      var(--chrome-bar-shine, rgba(255, 255, 255, 0.55)) 0%,
+      transparent 40%
+    ),
+    var(--chrome-bar-bg, rgba(247, 250, 255, 0.72));
+  -webkit-backdrop-filter: var(--chrome-bar-blur, saturate(190%) blur(22px));
+  backdrop-filter: var(--chrome-bar-blur, saturate(190%) blur(22px));
+  border-bottom: 0.5px solid var(--chrome-bar-line, rgba(60, 60, 67, 0.14));
+  box-shadow:
+    0 0.5px 0 rgba(255, 255, 255, 0.35) inset,
+    0 8px 24px rgba(15, 40, 80, 0.04);
+}
+
+.media-hub__top .app-hub__title,
+.settings-hub__title,
+.home-landing__chrome-title,
+.makers-hub__top .settings-hub__title {
+  font-size: var(--chrome-title-size, 28px);
+  font-weight: var(--chrome-title-weight, 700);
+  letter-spacing: var(--chrome-title-tracking, -0.032em);
+  line-height: 1.08;
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+}
+
+.dark .media-hub__top,
+.dark .settings-hub__top,
+.dark .makers-hub__top,
+.dark .home-landing__top,
+.dark .app-push__bar,
+.dark .settings-push__bar,
+.dark .home-results-header,
+.dark .mk-prefix-page__top,
+.dark .mk-facet-page__top {
+  box-shadow:
+    0 0.5px 0 rgba(255, 255, 255, 0.06) inset,
+    0 10px 28px rgba(0, 0, 0, 0.28);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .media-hub__top,
+  .settings-hub__top,
+  .makers-hub__top,
+  .home-landing__top,
+  .app-push__bar,
+  .settings-push__bar,
+  .home-results-header,
+  .mk-prefix-page__top,
+  .mk-facet-page__top {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background: #ffffff;
+    box-shadow: none;
+  }
+
+  .dark .media-hub__top,
+  .dark .settings-hub__top,
+  .dark .makers-hub__top,
+  .dark .home-landing__top,
+  .dark .app-push__bar,
+  .dark .settings-push__bar,
+  .dark .home-results-header,
+  .dark .mk-prefix-page__top,
+  .dark .mk-facet-page__top {
+    background: #2c2c2e;
+    box-shadow: none;
+  }
 }
 
 .app-overlay-root {

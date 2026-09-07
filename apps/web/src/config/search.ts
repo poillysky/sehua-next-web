@@ -30,6 +30,12 @@ export const DEFAULT_FILTER_TIME: FilterTime = "all";
 export const DEFAULT_FILTER_SIZE: FilterSize = "all";
 export const DEFAULT_MATCH_MODE: MatchMode = "smart";
 export const SEARCH_PAGE_SIZE = 10;
+/**
+ * 「最新」浏览每页条数（分页渲染，避免一次挂太多卡卡死滚动）。
+ */
+export const BROWSE_LATEST_PAGE_SIZE = 40;
+/** 「最新」只取时间序前 N 条，不再无限往后翻全库 */
+export const BROWSE_LATEST_MAX = 500;
 /** Bitmagnet / 色花 搜索卡片最多展示的核心文件行数 */
 export const SEARCH_DISPLAY_FILES_MAX = 3;
 export const SEARCH_KEYWORD_LENGTH_MIN = 2;

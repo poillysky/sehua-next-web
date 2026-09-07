@@ -88,7 +88,11 @@ export function ForumManagePanel({
 
   if (stack.kind === 'forum') {
     return (
-      <AppPush title="色花堂" onBack={() => setStack({ kind: 'hub' })}>
+      <AppPush
+        title="色花堂"
+        scrollKey="forum-list"
+        onBack={() => setStack({ kind: 'hub' })}
+      >
         <ul className="settings-group">
           {SEHUATANG_FORUM.map((cat) => (
             <li key={cat.category}>
@@ -116,7 +120,11 @@ export function ForumManagePanel({
   if (stack.kind === 'category') {
     const cat = stack.category;
     return (
-      <AppPush title={cat.category} onBack={() => setStack({ kind: 'forum' })}>
+      <AppPush
+        title={cat.category}
+        scrollKey={`forum-cat-${cat.category}`}
+        onBack={() => setStack({ kind: 'forum' })}
+      >
         <ul className="settings-group">
           {cat.boards.map((board) => {
             const leaves = boardLeafTypes(board);
@@ -155,6 +163,7 @@ export function ForumManagePanel({
     return (
       <AppPush
         title={board.name}
+        scrollKey={`forum-board-${board.fid}`}
         onBack={() => setStack({ kind: 'category', category })}
       >
         <ul className="settings-group">
@@ -200,6 +209,7 @@ export function ForumManagePanel({
     return (
       <AppPush
         title={leaf.type_name}
+        scrollKey={`forum-type-${leaf.key}`}
         onBack={() => setStack({ kind: 'board', category, board })}
       >
         <p className="settings-group-label">地区</p>
@@ -236,7 +246,7 @@ export function ForumManagePanel({
   }
 
   return (
-    <AppPush title="论坛管理" onBack={onBack}>
+    <AppPush title="论坛管理" scrollKey="forum-hub" onBack={onBack}>
       <ul className="settings-group">
         <li>
           <button

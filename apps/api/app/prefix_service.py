@@ -237,7 +237,7 @@ def _sort_like_search(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _sort_for_prefix_cover(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """本地索引生成：sehua 主库优先，BT 只补空缺；同源内按 created_at 新→旧。"""
+    """前缀封面排序：sehua 主库优先，BT 只补空缺；同源内按 created_at 新→旧。"""
     indexed = list(enumerate(rows))
     indexed.sort(
         key=lambda pair: (
@@ -418,7 +418,7 @@ def _rows_to_prefix_index(
 
     ordered = _sort_for_prefix_cover(rows)
     region_key = normalize_region(region)
-    from .maker_fs import indexes_forum_actors
+    from .region_meta import indexes_forum_actors
     from .pack_bleed import own_maker_codes_for_index_row
 
     want_actors = indexes_forum_actors(region_key or region)
@@ -633,7 +633,7 @@ def _apply_zh_title_boost(
 ) -> dict[str, Any]:
     """对尚无中文题的番号，用中文补扫结果重选 forumTitle。"""
     from .forum_seed import pick_forum_seed_from_posts
-    from .maker_fs import indexes_forum_actors
+    from .region_meta import indexes_forum_actors
     from .scrape_forum_title import is_fake_forum_title, is_likely_chinese
 
     if not PREFIX_ZH_BOOST_ENABLED:

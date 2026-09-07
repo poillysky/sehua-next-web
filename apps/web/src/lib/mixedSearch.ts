@@ -41,17 +41,17 @@ export function toMagnetEntries(items: MagnetHit[]): FeedEntry[] {
   });
 }
 
-/** 色花堂整段落在上方，组内按收录时间倒序；Bitmagnet 同理接在后面 */
+/** 色花堂 / Bitmagnet 分段合并；primary 决定哪边在前 */
 export function mergeFeed(
   sehua: ResourceItem[],
   magnets: MagnetHit[],
+  primary: FeedSource = 'sehua',
 ): FeedEntry[] {
   const byTime = (a: FeedEntry, b: FeedEntry) => {
     if (b.sortAt !== a.sortAt) return b.sortAt - a.sortAt;
     return a.id.localeCompare(b.id);
   };
-  return [
-    ...toSehualEntries(sehua).sort(byTime),
-    ...toMagnetEntries(magnets).sort(byTime),
-  ];
+  const left = toSehualEntries(sehua).sort(byTime);
+  const right = toMagnetEntries(magnets).sort(byTime);
+  return primary === 'bitmagnet' ? [...right, ...left] : [...left, ...right];
 }

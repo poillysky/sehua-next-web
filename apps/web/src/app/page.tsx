@@ -5,7 +5,6 @@ import { AppShell, TabProvider, TabPane } from '@/shell';
 import { HomeScreen } from '@/features/home/HomeScreen';
 import { MediaScreen } from '@/features/media/MediaScreen';
 import { MakersScreen } from '@/features/makers/MakersScreen';
-import { BoardsScreen } from '@/features/boards/BoardsScreen';
 import { SettingsScreen } from '@/features/settings/SettingsScreen';
 import { registerServiceWorker } from '@/lib/pwa';
 import { AuthGate } from '@/providers/AuthGate';
@@ -29,9 +28,6 @@ export default function HomePage() {
             </TabPane>
             <TabPane>
               <MakersScreen />
-            </TabPane>
-            <TabPane>
-              <BoardsScreen />
             </TabPane>
             <TabPane>
               <SettingsScreen />

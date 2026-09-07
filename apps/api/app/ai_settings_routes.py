@@ -12,28 +12,38 @@ from pydantic import BaseModel, Field
 from .auth_routes import get_optional_user, require_user
 from . import settings_store
 from .ai_config import (
+    AI_ASSISTANT_KEY,
     AI_EMBED_KEY,
     AI_LLM_KEY,
+    AI_WEB_SEARCH_KEY,
     DEFAULT_EMBED_DIM,
     DEFAULT_EMBED_MODEL,
     DEFAULT_EMBED_PROVIDER,
     DEFAULT_LLM_BASE,
     DEFAULT_LLM_MODEL,
+    DEFAULT_WEB_SEARCH_PROVIDER,
+    WEB_SEARCH_PROVIDERS as WEB_SEARCH_PROVIDER_VALUES,
+    assistant_public,
     chat_completions_url,
     embed_public,
     llm_public,
     llm_request_headers,
     llm_sampling_payload,
+    local_embed_devices,
     models_list_url,
+    normalize_embed_device,
     normalize_openai_base,
     resolve_embed_config,
     resolve_llm_config,
+    web_search_public,
 )
 from .ai_presets import (
     CHAT_SOURCES,
+    LOCAL_EMBED_DEVICES,
     LOCAL_EMBED_MODELS,
     OPENAI_EMBED_MODELS,
     PROMPT_POST_PROCESSING,
+    WEB_SEARCH_PROVIDERS,
 )
 from .conn_settings_routes import Envelope
 
@@ -44,8 +54,19 @@ class AiSamplingBody(BaseModel):
     temperature: float | None = None
     top_p: float | None = Field(default=None, alias="topP")
     max_tokens: int | None = Field(default=None, alias="maxTokens")
+    max_context: int | None = Field(default=None, alias="maxContext")
     frequency_penalty: float | None = Field(default=None, alias="frequencyPenalty")
     presence_penalty: float | None = Field(default=None, alias="presencePenalty")
+    top_k: int | None = Field(default=None, alias="topK")
+    min_p: float | None = Field(default=None, alias="minP")
+    repetition_penalty: float | None = Field(default=None, alias="repetitionPenalty")
+    seed: int | None = None
+    n: int | None = None
+    stream_openai: bool | None = Field(default=None, alias="streamOpenai")
+    max_context_unlocked: bool | None = Field(default=None, alias="maxContextUnlocked")
+    continue_prefill: bool | None = Field(default=None, alias="continuePrefill")
+    squash_system_messages: bool | None = Field(default=None, alias="squashSystemMessages")
+    show_thoughts: bool | None = Field(default=None, alias="showThoughts")
 
     model_config = {"populate_by_name": True}
 
@@ -76,6 +97,7 @@ class AiEmbedBody(BaseModel):
     model: str | None = None
     api_key: str | None = Field(default=None, alias="apiKey")
     dim: int | None = None
+    device: str | None = None
     top_k: int | None = Field(default=None, alias="topK")
     min_score: float | None = Field(default=None, alias="minScore")
     chunk_size: int | None = Field(default=None, alias="chunkSize")
@@ -157,10 +179,25 @@ def _merge_sampling(prev: dict[str, Any], body: AiSamplingBody | None) -> dict[s
         (body.temperature, "temperature"),
         (body.top_p, "topP"),
         (body.max_tokens, "maxTokens"),
+        (body.max_context, "maxContext"),
         (body.frequency_penalty, "frequencyPenalty"),
         (body.presence_penalty, "presencePenalty"),
+        (body.top_k, "topK"),
+        (body.min_p, "minP"),
+        (body.repetition_penalty, "repetitionPenalty"),
+        (body.seed, "seed"),
+        (body.n, "n"),
+        (body.stream_openai, "streamOpenai"),
+        (body.max_context_unlocked, "maxContextUnlocked"),
+        (body.continue_prefill, "continuePrefill"),
+        (body.squash_system_messages, "squashSystemMessages"),
+        (body.show_thoughts, "showThoughts"),
     ):
         if src is not None:
+            # topK=0 表示「不启用」，不要写入请求体用到的配置
+            if dst == "topK" and isinstance(src, (int, float)) and int(src) < 1:
+                out.pop("topK", None)
+                continue
             out[dst] = src
     return out
 
@@ -262,6 +299,11 @@ def _merge_embed_put(prev: dict[str, Any], body: AiEmbedBody) -> dict[str, Any]:
         if body.use_main_llm is None
         else bool(body.use_main_llm)
     )
+    device = normalize_embed_device(
+        body.device if body.device is not None else prev.get("device")
+    )
+    if not device:
+        device = normalize_embed_device(prev.get("device")) or "cpu"
     return {
         "enabled": bool(prev.get("enabled", True)) if body.enabled is None else bool(body.enabled),
         "provider": provider,
@@ -273,6 +315,7 @@ def _merge_embed_put(prev: dict[str, Any], body: AiEmbedBody) -> dict[str, Any]:
         "model": str(body.model or prev.get("model") or DEFAULT_EMBED_MODEL).strip() or DEFAULT_EMBED_MODEL,
         "apiKey": next_key or prev_key,
         "dim": dim,
+        "device": device,
         "topK": top_k,
         "minScore": min_score,
         "chunkSize": chunk_size,
@@ -285,11 +328,108 @@ def get_ai_presets(_user: dict[str, Any] | None = Depends(get_optional_user)) ->
         data={
             "chatSources": CHAT_SOURCES,
             "localEmbedModels": LOCAL_EMBED_MODELS,
+            "localEmbedDevices": LOCAL_EMBED_DEVICES,
             "openaiEmbedModels": OPENAI_EMBED_MODELS,
             "promptPostProcessing": PROMPT_POST_PROCESSING,
+            "webSearchProviders": WEB_SEARCH_PROVIDERS,
         },
         message="ok",
     )
+
+
+class AiWebSearchBody(BaseModel):
+    enabled: bool | None = None
+    provider: str | None = None
+    api_key: str | None = Field(default=None, alias="apiKey")
+    base_url: str | None = Field(default=None, alias="baseUrl")
+
+    model_config = {"populate_by_name": True}
+
+
+class AiAssistantBody(BaseModel):
+    suggest_chips: list[str] | None = Field(default=None, alias="suggestChips")
+    system_prompt: str | None = Field(default=None, alias="systemPrompt")
+    tools: dict[str, bool] | None = None
+
+    model_config = {"populate_by_name": True}
+
+
+@router.get("/web-search", response_model=Envelope)
+def get_ai_web_search(_user: dict[str, Any] | None = Depends(get_optional_user)) -> Envelope:
+    data = web_search_public(settings_store.get_setting(AI_WEB_SEARCH_KEY))
+    return Envelope(data=data, message="ok")
+
+
+@router.put("/web-search", response_model=Envelope)
+def put_ai_web_search(
+    body: AiWebSearchBody,
+    _user: dict[str, Any] = Depends(require_user),
+) -> Envelope:
+    prev = settings_store.get_setting(AI_WEB_SEARCH_KEY) or {}
+    if not isinstance(prev, dict):
+        prev = {}
+    prev_key = str(prev.get("apiKey") or prev.get("api_key") or "").strip()
+    next_key = str(body.api_key or "").strip()
+    prev_base = str(prev.get("baseUrl") or prev.get("base_url") or "").strip().rstrip("/")
+    if body.base_url is not None:
+        base_out = str(body.base_url or "").strip().rstrip("/")
+    else:
+        base_out = prev_base
+    provider = str(body.provider or prev.get("provider") or DEFAULT_WEB_SEARCH_PROVIDER).strip().lower()
+    if provider not in WEB_SEARCH_PROVIDER_VALUES:
+        provider = DEFAULT_WEB_SEARCH_PROVIDER
+    next_cfg = {
+        "enabled": bool(prev.get("enabled", False)) if body.enabled is None else bool(body.enabled),
+        "provider": provider,
+        "apiKey": next_key or prev_key,
+        "baseUrl": base_out,
+    }
+    saved = settings_store.put_setting(AI_WEB_SEARCH_KEY, next_cfg)
+    data = web_search_public(saved["value"])
+    data["updated_at"] = saved["updated_at"]
+    return Envelope(data=data, message="saved")
+
+
+@router.get("/assistant", response_model=Envelope)
+def get_ai_assistant(_user: dict[str, Any] | None = Depends(get_optional_user)) -> Envelope:
+    data = assistant_public(settings_store.get_setting(AI_ASSISTANT_KEY))
+    return Envelope(data=data, message="ok")
+
+
+@router.put("/assistant", response_model=Envelope)
+def put_ai_assistant(
+    body: AiAssistantBody,
+    _user: dict[str, Any] = Depends(require_user),
+) -> Envelope:
+    from .ai_config import _normalize_assistant_tools
+
+    prev = settings_store.get_setting(AI_ASSISTANT_KEY) or {}
+    if not isinstance(prev, dict):
+        prev = {}
+    chips = body.suggest_chips
+    if chips is None:
+        chips_out = prev.get("suggestChips") or prev.get("suggest_chips")
+    else:
+        chips_out = [str(x).strip() for x in chips if str(x).strip()][:12]
+    system = (
+        body.system_prompt
+        if body.system_prompt is not None
+        else prev.get("systemPrompt") or prev.get("system_prompt") or ""
+    )
+    if body.tools is not None:
+        tools_out = _normalize_assistant_tools(body.tools)
+    else:
+        tools_out = _normalize_assistant_tools(prev.get("tools") or prev.get("enabledTools"))
+    next_cfg = {
+        "suggestChips": chips_out if isinstance(chips_out, list) else [],
+        "systemPrompt": str(system or ""),
+        "tools": tools_out,
+    }
+    saved = settings_store.put_setting(AI_ASSISTANT_KEY, next_cfg)
+    data = assistant_public(saved["value"])
+    data["updated_at"] = saved["updated_at"]
+    return Envelope(data=data, message="saved")
+
 
 
 @router.get("/llm", response_model=Envelope)
@@ -422,6 +562,12 @@ def put_ai_embed(
     prev = settings_store.get_setting(AI_EMBED_KEY) or {}
     next = _merge_embed_put(prev, body)
     saved = settings_store.put_setting(AI_EMBED_KEY, next)
+    try:
+        from .ai_embed import reset_local_embed_model
+
+        reset_local_embed_model()
+    except Exception:  # noqa: BLE001
+        pass
     data = embed_public(saved["value"])
     data["updated_at"] = saved["updated_at"]
     return Envelope(data=data, message="saved")
@@ -455,6 +601,8 @@ async def connect_ai_embed(
                 "modelCount": len(models),
                 "models": models,
                 "currentModel": current,
+                "devices": local_embed_devices(),
+                "device": str(merged.get("device") or "cpu"),
             },
             message=f"本地 fastembed · {len(models)} 个模型",
         )
@@ -561,5 +709,27 @@ async def test_ai_embed(
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
     cfg = resolve_embed_config(override=override)
-    msg = f"测试成功 · {cfg['provider']} · {cfg['model']} · {result.get('dim')} 维"
+    msg = f"测试成功 · {cfg['provider']} · {cfg.get('device') or 'cpu'} · {cfg['model']} · {result.get('dim')} 维"
     return Envelope(data={"ok": True, **result}, message=msg)
+
+
+@router.post("/embed/download", response_model=Envelope)
+def download_ai_embed(
+    body: AiEmbedBody,
+    _user: dict[str, Any] = Depends(require_user),
+) -> Envelope:
+    """按当前配置下载本地向量模型；已缓存则跳过。"""
+    stored = settings_store.get_setting(AI_EMBED_KEY) or {}
+    merged = _merge_embed_put(stored, body)
+    if str(merged.get("provider") or "") != "local":
+        raise HTTPException(400, "仅本地 fastembed 可下载模型")
+    try:
+        from .ai_embed import ensure_local_model_files
+
+        result = ensure_local_model_files(
+            model_name=str(merged.get("model") or ""),
+            override=merged,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    return Envelope(data=result, message=str(result.get("message") or "ok"))

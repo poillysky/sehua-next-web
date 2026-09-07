@@ -8,12 +8,13 @@ from .db import connect
 
 RESOURCE_DB_KEY = "resource_db"
 BITMAGNET_DB_KEY = "bitmagnet_db"
-SCRAPE_KEY = "scrape"
+LIBRARY_KEY = "library"
 P115_KEY = "p115"
 TMDB_KEY = "tmdb"
 FORUM_SEHUATANG_KEY = "forum.sehuatang"
 AI_LLM_KEY = "ai.llm"
 AI_EMBED_KEY = "ai.embed"
+MAKERS_CATALOG_KEY = "makers.catalog"
 
 
 def get_setting(key: str) -> Any | None:

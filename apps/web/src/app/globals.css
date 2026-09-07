@@ -134,6 +134,8 @@
     --app-height: 100vh;
     --keyboard-inset: 0px;
     --chat-keyboard-inset: 0px;
+    --form-keyboard-inset: 0px;
+    --form-lift: 0px;
     --vv-height: 100vh;
     --vv-offset-top: 0px;
     height: var(--app-height, 100vh);
@@ -233,9 +235,27 @@ html[data-keyboard='1'] .app-tabbar {
 }
 
 /*
- * Push 子页：键盘只覆盖、不改布局。
- * 禁止用 --keyboard-inset 垫底（会整页上顶）；禁止内滚（会跟 VV 对打抖动）。
+ * Push 子页：壳不跟键盘整体硬顶（防抖）；表单用 --form-lift 顺滑上抬，
+ * --form-keyboard-inset 垫底；焦点输入再平滑滚进可见区。
  */
+@property --form-lift {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 0px;
+}
+
+@property --form-keyboard-inset {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 0px;
+}
+
+@property --chat-keyboard-inset {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 0px;
+}
+
 html[data-keyboard='1'] .app-push,
 html[data-keyboard='1'] .settings-push,
 html[data-page-lock='1'] .app-push,
@@ -262,16 +282,86 @@ html[data-page-lock='1'] .settings-push__body:has(input, textarea, select),
 html[data-keyboard='1'] .settings-push__body:has(input, textarea, select),
 html[data-page-lock='1'] .home-search-body,
 html[data-keyboard='1'] .home-search-body,
-html[data-page-lock='1'] .home-search-screen,
-html[data-keyboard='1'] .home-search-screen,
+html[data-scroll-lock='1'] .home-search-body,
 html[data-page-lock='1'] .login-screen,
 html[data-keyboard='1'] .login-screen,
+html[data-scroll-lock='1'] .login-screen,
 html[data-page-lock='1'] .auth-viewport,
-html[data-keyboard='1'] .auth-viewport {
+html[data-keyboard='1'] .auth-viewport,
+html[data-scroll-lock='1'] .auth-viewport {
   overflow: auto !important;
   overscroll-behavior: auto !important;
-  touch-action: auto !important;
+  touch-action: pan-y !important;
   -webkit-overflow-scrolling: touch;
+}
+
+/* 搜索壳保持裁切，只让 .home-search-body 滚 */
+html[data-page-lock='1'] .home-search-screen,
+html[data-keyboard='1'] .home-search-screen,
+html[data-scroll-lock='1'] .home-search-screen {
+  overflow: hidden !important;
+  overscroll-behavior: none !important;
+  touch-action: none !important;
+}
+
+/* 表单页随键盘上抬（settled 后才动，避免和 push 滑入动画抢 transform） */
+.app-push.app-push--settled:not(:has(.ai-chat-push)),
+.settings-push.app-push--settled,
+.login-screen,
+.auth-viewport {
+  transform: translate3d(0, calc(-1 * var(--form-lift, 0px)), 0);
+  transition: transform 0.28s cubic-bezier(0.25, 1, 0.5, 1);
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-push.app-push--settled:not(:has(.ai-chat-push)),
+  .settings-push.app-push--settled,
+  .login-screen,
+  .auth-viewport {
+    transition: none;
+  }
+}
+
+/* 表单键盘：少量垫底即可，长表单靠内滚 */
+html[data-form-keyboard='1'] .app-push__body:has(input, textarea, select):not(.ai-chat-push),
+html[data-form-keyboard='1'] .settings-push__body:has(input, textarea, select),
+html[data-form-keyboard='1'] .home-search-body,
+html[data-form-keyboard='1'] .home-search-screen,
+html[data-form-keyboard='1'] .login-screen,
+html[data-form-keyboard='1'] .auth-viewport {
+  padding-bottom: calc(var(--form-keyboard-inset, 0px) + 16px) !important;
+  scroll-padding-bottom: calc(var(--form-keyboard-inset, 0px) + 16px);
+  transition: padding-bottom 0.28s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+/* 表单键盘期底栏顺滑让出 */
+html[data-form-keyboard='1'] .app-tabbar {
+  opacity: 0;
+  pointer-events: none;
+  transform: translate3d(0, 110%, 0);
+}
+
+/* 对话搜全屏：收起底栏并释放高度 */
+html[data-ai-chat='1'] .app-tabbar {
+  opacity: 0;
+  pointer-events: none;
+  height: 0;
+  max-height: 0;
+  padding: 0 !important;
+  border: 0;
+  overflow: hidden;
+  box-shadow: none;
+  transform: none;
+}
+
+.app-tabbar {
+  transition:
+    opacity 0.28s cubic-bezier(0.25, 1, 0.5, 1),
+    transform 0.34s cubic-bezier(0.25, 1, 0.5, 1),
+    max-height 0.28s cubic-bezier(0.25, 1, 0.5, 1),
+    height 0.28s cubic-bezier(0.25, 1, 0.5, 1),
+    padding 0.28s cubic-bezier(0.25, 1, 0.5, 1);
 }
 
 html[data-chat-keyboard='1'] .app-push__body.ai-chat-push {

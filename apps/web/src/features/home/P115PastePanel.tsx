@@ -22,7 +22,7 @@ type FolderHint = {
   folderName: string;
 };
 
-/** 粘贴转存 115 — 全屏 push，非弹窗 */
+/** 粘贴转存 115 — 全屏 push，非弹窗（仓库入口） */
 export function P115PastePanel({ onBack }: { onBack: () => void }) {
   const tabCtx = useTabNavigation();
   const [paste, setPaste] = useState('');
@@ -40,10 +40,11 @@ export function P115PastePanel({ onBack }: { onBack: () => void }) {
     void getP115()
       .then((data) => {
         if (cancelled) return;
+        const t = data.targets?.warehouse;
         setFolder({
           configured: Boolean(data.configured),
-          folderCid: String(data.folderCid || '0'),
-          folderName: String(data.folderName || ''),
+          folderCid: String(t?.folderCid || data.folderCid || '0'),
+          folderName: String(t?.folderName || data.folderName || ''),
         });
       })
       .catch(() => {
@@ -80,6 +81,7 @@ export function P115PastePanel({ onBack }: { onBack: () => void }) {
       const result = await runP115Save({
         urls: links,
         password: effectivePassword || undefined,
+        source: 'warehouse',
       });
       if (!result.ok) {
         setMsg(result.message);
@@ -119,9 +121,9 @@ export function P115PastePanel({ onBack }: { onBack: () => void }) {
               <span className="p115-paste__dir-sub">
                 {folderOk
                   ? willExtract
-                    ? '转存后自动云解压'
-                    : '离线下载 / 分享转存'
-                  : '请到设置 → 115 填写 Cookie / 目录'}
+                    ? '仓库目录 · 转存后自动云解压'
+                    : '仓库入口目录 · 离线 / 分享转存'
+                  : '请到更多 → 115 填写 Cookie / 目录'}
               </span>
             </div>
             <span className={`p115-paste__badge${folderOk ? ' is-ok' : ' is-warn'}`}>

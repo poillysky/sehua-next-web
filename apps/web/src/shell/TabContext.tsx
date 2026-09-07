@@ -12,8 +12,8 @@ import {
 } from 'react';
 import { unlockPinnedPage, pinDocumentScroll } from '@/lib/iosKeyboard';
 
-/** 主 Tab：仓库 / 影视 / 片商 / 板块 / 设置 */
-export const TAB_ROUTES = ['/', '/media', '/makers', '/boards', '/settings'] as const;
+/** 主 Tab：仓库 / 影视 / 片商 / 更多 */
+export const TAB_ROUTES = ['/', '/media', '/makers', '/settings'] as const;
 export type TabRoute = (typeof TAB_ROUTES)[number];
 
 // 保持 pathname=/，只用 hash，避免命中 app/*/page 的 redirect
@@ -28,7 +28,6 @@ function readTabFromLocation(): TabRoute | null {
   const HASH_TO_TAB: Record<string, TabRoute> = {
     media: '/media',
     makers: '/makers',
-    boards: '/boards',
     settings: '/settings',
   };
   if (TAB_ROUTES.includes(path as TabRoute) && path !== '/') {
@@ -82,6 +81,9 @@ export function TabProvider({ children }: { children: ReactNode }) {
     }
     root.dataset.keyboard = '0';
     root.style.setProperty('--keyboard-inset', '0px');
+    root.style.setProperty('--form-keyboard-inset', '0px');
+    root.style.setProperty('--form-lift', '0px');
+    delete root.dataset.formKeyboard;
     delete root.dataset.pageLock;
     delete root.dataset.scrollLock;
     try {

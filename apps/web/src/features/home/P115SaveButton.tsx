@@ -11,7 +11,8 @@ import {
   normalizeLinkKind,
 } from '@/lib/detailResource';
 import { runP115Save } from '@/lib/p115SaveClient';
-import { useTabNavigation } from '@/shell';
+import type { P115SaveSource } from '@/lib/api';
+import { useTabNavigation, type TabRoute } from '@/shell';
 
 type ItemPick = Pick<
   ResourceItem,
@@ -25,14 +26,46 @@ type ItemPick = Pick<
   | 'link_kind'
 >;
 
+const P115_SAVE_SOURCE_KEY = 'nextweb:p115-save-source';
+
+function readSessionSaveSource(): P115SaveSource | null {
+  try {
+    const s = sessionStorage.getItem(P115_SAVE_SOURCE_KEY);
+    if (s === 'movie' || s === 'tv' || s === 'makers' || s === 'warehouse') {
+      return s;
+    }
+    if (s === 'media') return 'movie';
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+function sourceFromTab(tab: TabRoute | undefined): P115SaveSource {
+  if (tab === '/makers') return 'makers';
+  if (tab === '/media') return 'movie';
+  return 'warehouse';
+}
+
+function resolveSaveSource(
+  tab: TabRoute | undefined,
+  override?: P115SaveSource,
+): P115SaveSource {
+  if (override) return override;
+  return readSessionSaveSource() || sourceFromTab(tab);
+}
+
 export function P115SaveButton({
   item,
   compact = false,
   onToast,
+  source,
 }: {
   item: ItemPick;
   compact?: boolean;
   onToast?: (msg: string) => void;
+  /** 覆盖入口目录；默认读影视跳转上下文或当前主 Tab */
+  source?: P115SaveSource;
 }) {
   const tabCtx = useTabNavigation();
   const [loading, setLoading] = useState(false);
@@ -48,6 +81,7 @@ export function P115SaveButton({
     : offlineUrls.some((u) => isArchiveDownloadLink(u));
   const wantExtract = !isShareOnly && (Boolean(password) || isArchive);
   const kind = normalizeLinkKind(item.link_kind || linkKindOf(urls[0]));
+  const saveSource = resolveSaveSource(tabCtx?.activeTab, source);
 
   if (!urls.length) return null;
 
@@ -59,6 +93,7 @@ export function P115SaveButton({
         urls,
         password,
         titleHint,
+        source: saveSource,
       });
       if (!result.ok) {
         onToast?.(result.message);

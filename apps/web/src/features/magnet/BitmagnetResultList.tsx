@@ -84,13 +84,13 @@ export function MagnetCard({
           className="bm-card__magnet"
           onClick={(e) => void onCopyMagnet(e)}
         >
-          <span aria-hidden>🧲</span>
+          <span aria-hidden="true">🧲</span>
           磁力
         </button>
         <div className="bm-card__meta">
-          <span>大小 {formatByteSize(item.size || 0)}</span>
-          <span>文件 {count}</span>
-          <span>创建 {formatDate(createdTs(item))}</span>
+          <span className="bm-card__chip">大小 {formatByteSize(item.size || 0)}</span>
+          <span className="bm-card__chip">文件 {count}</span>
+          <span className="bm-card__chip">创建 {formatDate(createdTs(item))}</span>
         </div>
       </footer>
       <AppMsg onDismiss={() => setMsg('')}>{msg}</AppMsg>

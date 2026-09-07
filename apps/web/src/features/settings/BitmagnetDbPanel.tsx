@@ -3,14 +3,24 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/providers/AuthProvider';
 import {
+  createBitmagnetDbEmbedIndex,
+  exportBitmagnetDbBackup,
   getBitmagnetDb,
+  getBitmagnetDbEmbedStats,
+  getBitmagnetDbEmbedStatus,
+  listBitmagnetDbBackups,
   putBitmagnetDb,
+  startBitmagnetDbEmbed,
+  stopBitmagnetDbEmbed,
   testBitmagnetDb,
+  uploadImportBitmagnetDbBackup,
 } from '@/lib/api';
 import { Switch } from '@/components/ui/switch';
 import { AppPush } from '@/components/ui/AppPush';
 import { AppFootnote, AppMsg } from '@/components/ui/AppMsg';
 import { cn } from '@/lib/utils';
+import { DbDataBackupSection } from './DbDataBackupSection';
+import { DbEmbedSection } from './DbEmbedSection';
 
 type DsnParts = {
   host: string;
@@ -80,6 +90,7 @@ export function BitmagnetDbPanel({
   const [connected, setConnected] = useState<boolean | null>(false);
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
+  const [backupBusy, setBackupBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -203,6 +214,11 @@ export function BitmagnetDbPanel({
     setMsg('已填入常用默认值');
   }
 
+  function resolvePassword() {
+    const typed = password.trim();
+    return typed || (hasPassword ? savedPassword.current : '');
+  }
+
   const statusText =
     connected === null
       ? '检测中'
@@ -216,10 +232,10 @@ export function BitmagnetDbPanel({
   const statusTone =
     connected === true ? 'ok' : connected === null ? 'mute' : 'warn';
 
-  const locked = !isAdmin || busy;
+  const locked = !isAdmin || busy || backupBusy;
 
   return (
-    <AppPush title="Bitmagnet 库" onBack={onBack}>
+    <AppPush title="Bitmagnet" onBack={onBack}>
       <ul className="settings-group">
         <li>
           <div className="settings-kv">
@@ -324,11 +340,31 @@ export function BitmagnetDbPanel({
 
       {isAdmin ? (
         <>
+          <DbDataBackupSection
+            dirHint="backups/bitmagnet-db/"
+            disabled={busy}
+            listBackups={listBitmagnetDbBackups}
+            exportBackup={exportBitmagnetDbBackup}
+            uploadImportBackup={uploadImportBitmagnetDbBackup}
+            onMessage={setMsg}
+            onBusyChange={setBackupBusy}
+          />
+
+          <DbEmbedSection
+            disabled={busy || backupBusy}
+            getStats={getBitmagnetDbEmbedStats}
+            getStatus={getBitmagnetDbEmbedStatus}
+            startEmbed={startBitmagnetDbEmbed}
+            stopEmbed={stopBitmagnetDbEmbed}
+            createIndex={createBitmagnetDbEmbedIndex}
+            onMessage={setMsg}
+          />
+
           <div className="app-actions">
             <button
               type="button"
               className="app-btn-secondary"
-              disabled={busy}
+              disabled={locked}
               onClick={fillDefaults}
             >
               默认值
@@ -336,7 +372,7 @@ export function BitmagnetDbPanel({
             <button
               type="button"
               className="app-btn-secondary"
-              disabled={busy}
+              disabled={locked}
               onClick={() => void onTest()}
             >
               测试
@@ -345,7 +381,7 @@ export function BitmagnetDbPanel({
               type="button"
               className="app-btn-primary"
               style={{ flex: 1 }}
-              disabled={busy}
+              disabled={locked}
               onClick={() => void onSave()}
             >
               保存

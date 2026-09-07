@@ -1,4 +1,4 @@
-"""Postgres pool for resource DB (DSN from SQLite settings)."""
+"""Postgres pool for resource DB (DSN from meta settings)."""
 
 
 

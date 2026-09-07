@@ -85,11 +85,11 @@ export function MediaShelf({
 
       {!loading && !err && items.length > 0 ? (
         <div className="media-shelf__rail">
-          {items.map((it, i) => (
+          {items.map((it) => (
             <MediaPosterCard
               key={`${it.source}-${it.id}`}
               item={it}
-              rank={i + 1}
+              category={category}
               size="sm"
               onClick={() => onOpenItem(it)}
             />

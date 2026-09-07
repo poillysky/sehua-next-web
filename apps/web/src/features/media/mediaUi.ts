@@ -31,6 +31,25 @@ export function hubShelvesFor(source: MediaSourceId): MediaHubShelf[] {
       { category: 'variety', chart: 'hot', title: '综艺' },
     ];
   }
+  if (source === 'bangumi') {
+    return [
+      { category: 'anime', chart: 'rank', title: '动画排名' },
+      { category: 'anime', chart: 'heat', title: '热门动画' },
+      { category: 'anime', chart: 'score', title: '高分动画' },
+      { category: 'anime', chart: 'calendar', title: '本季放送' },
+      { category: 'tv', chart: 'real', title: '三次元' },
+    ];
+  }
+  if (source === 'anilist') {
+    return [
+      { category: 'anime', chart: 'trending', title: '趋势动画' },
+      { category: 'anime', chart: 'popular', title: '热门动画' },
+      { category: 'anime', chart: 'top_rated', title: '高分动画' },
+      { category: 'anime', chart: 'airing', title: '放送中' },
+      { category: 'anime', chart: 'upcoming', title: '即将上映' },
+      { category: 'movie', chart: 'movies', title: '剧场版' },
+    ];
+  }
   return [
     { category: 'movie', chart: 'trending', title: '本周趋势·电影' },
     { category: 'movie', chart: 'now_playing', title: '正在热映' },
@@ -89,11 +108,15 @@ export function buildMediaSearchQuery(
   return buildMediaSearchTerms(item).join('，');
 }
 
-/** 影视跳转仓库：默认进 Bitmagnet（BT 库） */
+/** 影视跳转仓库：双库同搜，优先展示 Bitmagnet */
 export function openHomeSearch(
   names: string[] | string,
   scrollToTab?: (tab: TabRoute) => void,
-  opts?: { source?: 'sehua' | 'bitmagnet' },
+  opts?: {
+    source?: 'sehua' | 'bitmagnet';
+    /** 115 转存目录：电影 / 电视剧 */
+    p115Source?: 'movie' | 'tv';
+  },
 ): boolean {
   const list = Array.isArray(names) ? names : [names];
   const q = buildMediaSearchQuery({
@@ -107,6 +130,9 @@ export function openHomeSearch(
     sessionStorage.setItem('nextweb:home-search', q.trim());
     sessionStorage.setItem('nextweb:home-search-source', source);
     sessionStorage.removeItem('nextweb:home-prefix-region');
+    if (opts?.p115Source === 'movie' || opts?.p115Source === 'tv') {
+      sessionStorage.setItem('nextweb:p115-save-source', opts.p115Source);
+    }
     window.dispatchEvent(new Event('nextweb:home-search'));
   } catch {
     return false;
@@ -119,9 +145,11 @@ export function openHomeSearchFromItem(
   item: MediaItem,
   scrollToTab?: (tab: TabRoute) => void,
 ): boolean {
+  const p115Source = item.mediaType === 'tv' ? 'tv' : 'movie';
   return openHomeSearch(
     [item.title, item.originalTitle || '', ...(item.aka || [])],
     scrollToTab,
+    { p115Source, source: 'bitmagnet' },
   );
 }
 
@@ -150,6 +178,29 @@ export function chartsForSource(
     return [
       { id: 'hot', label: '热门' },
       { id: 'new', label: '新剧/新片' },
+    ];
+  }
+  if (source === 'bangumi') {
+    if (category === 'tv') {
+      return [{ id: 'real', label: '三次元' }];
+    }
+    return [
+      { id: 'rank', label: '排名' },
+      { id: 'heat', label: '热门' },
+      { id: 'score', label: '高分' },
+      { id: 'calendar', label: '放送表' },
+    ];
+  }
+  if (source === 'anilist') {
+    if (category === 'movie') {
+      return [{ id: 'movies', label: '剧场版' }];
+    }
+    return [
+      { id: 'trending', label: '趋势' },
+      { id: 'popular', label: '热门' },
+      { id: 'top_rated', label: '高分' },
+      { id: 'airing', label: '放送中' },
+      { id: 'upcoming', label: '即将上映' },
     ];
   }
   // TMDB

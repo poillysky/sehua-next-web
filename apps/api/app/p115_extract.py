@@ -149,18 +149,10 @@ def _ensure_same_name_folder(
 
 
 def _list_offline_tasks_once(client: httpx.Client, cookie: str) -> list[Any]:
-    qs = urlencode({"ct": "lixian", "ac": "task_lists", "page": "1"})
-    res = client.get(
-        f"https://115.com/web/lixian/?{qs}",
-        headers=headers(cookie, "https://115.com/web/lixian/"),
-    )
-    data = _read_json(res)
-    tasks = data.get("tasks") or (
-        data.get("data", {}).get("tasks")
-        if isinstance(data.get("data"), dict)
-        else None
-    ) or data.get("list") or []
-    return tasks if isinstance(tasks, list) else []
+    from .p115_offline import extract_tasks_from_payload, fetch_task_lists_once
+
+    data = fetch_task_lists_once(client, cookie, page=1)
+    return extract_tasks_from_payload(data)
 
 
 def _pick_codes_from_tasks(

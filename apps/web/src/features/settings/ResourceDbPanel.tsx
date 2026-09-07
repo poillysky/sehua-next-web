@@ -2,11 +2,25 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/providers/AuthProvider';
-import { getResourceDb, putResourceDb, testResourceDb } from '@/lib/api';
+import {
+  createResourceDbEmbedIndex,
+  exportResourceDbBackup,
+  getResourceDb,
+  getResourceDbEmbedStats,
+  getResourceDbEmbedStatus,
+  listResourceDbBackups,
+  putResourceDb,
+  startResourceDbEmbed,
+  stopResourceDbEmbed,
+  testResourceDb,
+  uploadImportResourceDbBackup,
+} from '@/lib/api';
 import { Switch } from '@/components/ui/switch';
 import { AppPush } from '@/components/ui/AppPush';
 import { AppFootnote, AppMsg } from '@/components/ui/AppMsg';
 import { cn } from '@/lib/utils';
+import { DbDataBackupSection } from './DbDataBackupSection';
+import { DbEmbedSection } from './DbEmbedSection';
 
 type DsnParts = {
   host: string;
@@ -76,6 +90,7 @@ export function ResourceDbPanel({
   const [connected, setConnected] = useState<boolean | null>(false);
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
+  const [backupBusy, setBackupBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -120,10 +135,19 @@ export function ResourceDbPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function resolveDsn() {
+  function resolvePassword() {
     const typed = password.trim();
-    const pwd = typed || (hasPassword ? savedPassword.current : '');
-    return buildPostgresDsn({ host, port, user, database, password: pwd });
+    return typed || (hasPassword ? savedPassword.current : '');
+  }
+
+  function resolveDsn() {
+    return buildPostgresDsn({
+      host,
+      port,
+      user,
+      database,
+      password: resolvePassword(),
+    });
   }
 
   async function onTest() {
@@ -164,8 +188,7 @@ export function ResourceDbPanel({
     try {
       const dsn = resolveDsn();
       await putResourceDb({ enabled, dsn, note });
-      const savedPwd =
-        password.trim() || (hasPassword ? savedPassword.current : '');
+      const savedPwd = resolvePassword();
       savedPassword.current = savedPwd;
       setHasPassword(Boolean(savedPwd));
       setPassword('');
@@ -212,10 +235,10 @@ export function ResourceDbPanel({
   const statusTone =
     connected === true ? 'ok' : connected === null ? 'mute' : 'warn';
 
-  const locked = !isAdmin || busy;
+  const locked = !isAdmin || busy || backupBusy;
 
   return (
-    <AppPush title="资源数据库" onBack={onBack}>
+    <AppPush title="色花资源库" onBack={onBack}>
       <ul className="settings-group">
         <li>
           <div className="settings-kv">
@@ -320,11 +343,31 @@ export function ResourceDbPanel({
 
       {isAdmin ? (
         <>
+          <DbDataBackupSection
+            dirHint="backups/resource-db/"
+            disabled={busy}
+            listBackups={listResourceDbBackups}
+            exportBackup={exportResourceDbBackup}
+            uploadImportBackup={uploadImportResourceDbBackup}
+            onMessage={setMsg}
+            onBusyChange={setBackupBusy}
+          />
+
+          <DbEmbedSection
+            disabled={busy || backupBusy}
+            getStats={getResourceDbEmbedStats}
+            getStatus={getResourceDbEmbedStatus}
+            startEmbed={startResourceDbEmbed}
+            stopEmbed={stopResourceDbEmbed}
+            createIndex={createResourceDbEmbedIndex}
+            onMessage={setMsg}
+          />
+
           <div className="app-actions">
             <button
               type="button"
               className="app-btn-secondary"
-              disabled={busy}
+              disabled={locked}
               onClick={fillDefaults}
             >
               默认值
@@ -332,7 +375,7 @@ export function ResourceDbPanel({
             <button
               type="button"
               className="app-btn-secondary"
-              disabled={busy}
+              disabled={locked}
               onClick={() => void onTest()}
             >
               测试
@@ -341,7 +384,7 @@ export function ResourceDbPanel({
               type="button"
               className="app-btn-primary"
               style={{ flex: 1 }}
-              disabled={busy}
+              disabled={locked}
               onClick={() => void onSave()}
             >
               保存
@@ -352,7 +395,7 @@ export function ResourceDbPanel({
           </AppMsg>
         </>
       ) : (
-        <AppFootnote>普通用户仅可查看连接状态。</AppFootnote>
+        <AppFootnote>普通用户仅可查看连接状态。色花资源库与启动元库分开。</AppFootnote>
       )}
     </AppPush>
   );

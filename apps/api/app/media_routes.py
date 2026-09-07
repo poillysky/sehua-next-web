@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from .translate_routes import get_tmdb_api_key
 from . import settings_store
+from . import media_bangumi_anilist as anime_src
 
 log = logging.getLogger(__name__)
 
@@ -21,7 +22,7 @@ router = APIRouter(tags=["media"])
 _HTTPX_KW: dict[str, Any] = {
     # 外网慢/代理挂时勿拖死整站；connect 先失败，设置 Hub 才能及时返回
     "timeout": httpx.Timeout(8.0, connect=4.0),
-    "trust_env": True,
+    "trust_env": False,
     "follow_redirects": True,
 }
 
@@ -67,14 +68,10 @@ DOUBAN_CHARTS = (
 )
 
 def _get_network_proxy_url() -> str:
-    """从网络管理配置里取 HTTP 代理 URL（用于 TMDB 外联）。"""
-    raw = settings_store.get_setting(settings_store.SCRAPE_KEY) or {}
-    proxy = str(raw.get("proxyUrl") or raw.get("proxy_url") or "").strip()
-    if not proxy:
-        return ""
-    if "://" not in proxy:
-        proxy = f"http://{proxy}"
-    return proxy.rstrip("/")
+    """仅使用设置面板配置的 HTTP 代理。"""
+    from .outbound_http import resolve_scrape_proxy_url
+
+    return resolve_scrape_proxy_url()
 
 
 def _wrap(data: Any, message: str = "ok", status: int = 200) -> dict[str, Any]:
@@ -101,6 +98,21 @@ def _year_from(date_s: str | None) -> str | None:
     if len(s) >= 4 and s[:4].isdigit():
         return s[:4]
     return None
+
+
+def _sort_media_items_by_year(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """按年份新→旧；同年按评分高→低；无年份垫底。"""
+
+    def key(it: dict[str, Any]) -> tuple[int, float]:
+        y = str(it.get("year") or "").strip()
+        yi = int(y) if y.isdigit() else -1
+        try:
+            rating = float(it.get("rating") or 0)
+        except (TypeError, ValueError):
+            rating = 0.0
+        return (yi, rating)
+
+    return sorted(items, key=key, reverse=True)
 
 
 def _poster_tmdb(path: str | None) -> str | None:
@@ -311,6 +323,159 @@ async def tmdb_charts(
     return _wrap(payload)
 
 
+_TMDB_DISCOVER_SORT_MOVIE = frozenset(
+    {
+        "popularity.desc",
+        "popularity.asc",
+        "vote_average.desc",
+        "vote_average.asc",
+        "primary_release_date.desc",
+        "primary_release_date.asc",
+        "revenue.desc",
+        "vote_count.desc",
+    }
+)
+_TMDB_DISCOVER_SORT_TV = frozenset(
+    {
+        "popularity.desc",
+        "popularity.asc",
+        "vote_average.desc",
+        "vote_average.asc",
+        "first_air_date.desc",
+        "first_air_date.asc",
+        "vote_count.desc",
+    }
+)
+
+
+@router.get("/media/tmdb/genres")
+async def tmdb_genres(
+    media_type: str = Query("movie", description="movie|tv"),
+) -> dict[str, Any]:
+    mt = (media_type or "movie").strip().lower()
+    if mt not in {"movie", "tv"}:
+        raise HTTPException(status_code=400, detail="media_type 须为 movie 或 tv")
+
+    cache_key = f"tmdb:genres:{mt}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return _wrap(cached)
+
+    key = _require_tmdb_key()
+    proxy = _get_network_proxy_url()
+    client_kw = dict(_HTTPX_KW)
+    if proxy:
+        client_kw["proxy"] = proxy
+    try:
+        async with httpx.AsyncClient(**client_kw) as client:
+            data = await _tmdb_get(
+                client,
+                f"/3/genre/{mt}/list",
+                {"api_key": key, "language": "zh-CN"},
+            )
+    except httpx.TimeoutException as e:
+        raise HTTPException(status_code=504, detail="TMDB 连接超时，请检查代理/网络") from e
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail="TMDB 网络异常") from e
+
+    genres: list[dict[str, Any]] = []
+    for g in data.get("genres") or []:
+        if not isinstance(g, dict):
+            continue
+        gid = g.get("id")
+        name = str(g.get("name") or "").strip()
+        if gid is None or not name:
+            continue
+        genres.append({"id": int(gid), "name": name})
+
+    payload = {"mediaType": mt, "genres": genres}
+    _cache_set(cache_key, payload, ttl=86400)
+    return _wrap(payload)
+
+
+@router.get("/media/tmdb/discover")
+async def tmdb_discover(
+    media_type: str = Query("movie", description="movie|tv"),
+    genre: str = Query("", description="genre id，可空"),
+    sort_by: str = Query("popularity.desc", alias="sortBy"),
+    year: str = Query("", description="四位年份，可空"),
+    page: int = Query(1, ge=1, le=50),
+) -> dict[str, Any]:
+    """TMDB Discover — 类型 / 题材 / 排序 / 年份筛选（对齐官网探索用法）。"""
+    mt = (media_type or "movie").strip().lower()
+    if mt not in {"movie", "tv"}:
+        raise HTTPException(status_code=400, detail="media_type 须为 movie 或 tv")
+
+    sort = (sort_by or "popularity.desc").strip()
+    allowed = _TMDB_DISCOVER_SORT_MOVIE if mt == "movie" else _TMDB_DISCOVER_SORT_TV
+    if sort not in allowed:
+        sort = "popularity.desc"
+
+    genre_id = str(genre or "").strip()
+    if genre_id and not genre_id.isdigit():
+        raise HTTPException(status_code=400, detail="无效题材 id")
+
+    year_s = str(year or "").strip()
+    if year_s and not (len(year_s) == 4 and year_s.isdigit()):
+        raise HTTPException(status_code=400, detail="年份须为四位数字")
+
+    cache_key = f"tmdb:discover:{mt}:{genre_id or 'all'}:{sort}:{year_s or 'any'}:{page}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return _wrap(cached)
+
+    key = _require_tmdb_key()
+    params: dict[str, Any] = {
+        "api_key": key,
+        "language": "zh-CN",
+        "page": page,
+        "include_adult": "false",
+        "sort_by": sort,
+    }
+    if genre_id:
+        params["with_genres"] = genre_id
+    if year_s:
+        if mt == "movie":
+            params["primary_release_year"] = int(year_s)
+        else:
+            params["first_air_date_year"] = int(year_s)
+    # 高分排序时过滤低票数噪声（成熟站常见做法）
+    if sort.startswith("vote_average"):
+        params["vote_count.gte"] = 100 if mt == "movie" else 50
+
+    proxy = _get_network_proxy_url()
+    client_kw = dict(_HTTPX_KW)
+    if proxy:
+        client_kw["proxy"] = proxy
+    try:
+        async with httpx.AsyncClient(**client_kw) as client:
+            data = await _tmdb_get(client, f"/3/discover/{mt}", params)
+    except httpx.TimeoutException as e:
+        raise HTTPException(status_code=504, detail="TMDB 连接超时，请检查代理/网络") from e
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail="TMDB 网络异常") from e
+
+    results = data.get("results") if isinstance(data.get("results"), list) else []
+    items = [
+        _map_tmdb_list_item(x, mt)
+        for x in results
+        if isinstance(x, dict) and x.get("id")
+    ]
+    payload = {
+        "source": "tmdb",
+        "mediaType": mt,
+        "genre": genre_id or None,
+        "sortBy": sort,
+        "year": year_s or None,
+        "page": page,
+        "totalPages": min(50, int(data.get("total_pages") or 1)),
+        "totalResults": int(data.get("total_results") or 0),
+        "items": items,
+    }
+    _cache_set(cache_key, payload, ttl=1800)
+    return _wrap(payload)
+
+
 @router.get("/media/tmdb/{media_type}/{media_id}")
 async def tmdb_detail(media_type: str, media_id: str) -> dict[str, Any]:
     mt = (media_type or "").strip().lower()
@@ -320,7 +485,7 @@ async def tmdb_detail(media_type: str, media_id: str) -> dict[str, Any]:
     if not mid.isdigit():
         raise HTTPException(status_code=400, detail="无效 id")
 
-    cache_key = f"tmdb:detail:{mt}:{mid}"
+    cache_key = f"tmdb:detail:v3:{mt}:{mid}"
     cached = _cache_get(cache_key)
     if cached is not None:
         return _wrap(cached)
@@ -387,9 +552,41 @@ async def tmdb_detail(media_type: str, media_id: str) -> dict[str, Any]:
 
     cast = []
     credits = data.get("credits") if isinstance(data.get("credits"), dict) else {}
-    for c in (credits.get("cast") or [])[:8]:
-        if isinstance(c, dict) and c.get("name"):
-            cast.append(str(c["name"]))
+    seen_cast: set[str] = set()
+
+    def _push_tmdb_person(c: dict[str, Any]) -> None:
+        name = str(c.get("name") or "").strip()
+        if not name:
+            return
+        pid = str(c.get("id") or "").strip()
+        key = pid or name
+        if key in seen_cast:
+            return
+        seen_cast.add(key)
+        person: dict[str, Any] = {"name": name}
+        if pid.isdigit():
+            person["id"] = pid
+        avatar = _poster_tmdb(c.get("profile_path"))
+        if avatar and "/w500" in avatar:
+            avatar = avatar.replace("/w500", "/w185")
+        if avatar:
+            person["avatarUrl"] = avatar
+        cast.append(person)
+
+    # 导演优先（与豆瓣演职员一致），再主演
+    for c in (credits.get("crew") or []):
+        if not isinstance(c, dict):
+            continue
+        job = str(c.get("job") or "").strip().lower()
+        if job == "director":
+            _push_tmdb_person(c)
+            if len(cast) >= 2:
+                break
+    for c in (credits.get("cast") or [])[:16]:
+        if isinstance(c, dict):
+            _push_tmdb_person(c)
+        if len(cast) >= 12:
+            break
 
     genres: list[str] = []
     for g in data.get("genres") or []:
@@ -483,7 +680,7 @@ async def media_search(
     source: str = Query("tmdb"),
     page: int = Query(1, ge=1, le=20),
 ) -> dict[str, Any]:
-    """影视信息搜索（TMDB / 豆瓣）。
+    """影视信息搜索（TMDB / 豆瓣 / Bangumi / AniList）。
 
     多片名：用逗号/顿号/分号等分隔（中文片名也可用空格），逐条搜索后合并去重。
     英文片名含空格时请用逗号分隔多部作品，避免被拆碎。
@@ -492,7 +689,7 @@ async def media_search(
     query = (q or "").strip()
     if not query:
         raise HTTPException(status_code=400, detail="请输入关键词")
-    if src not in {"tmdb", "douban"}:
+    if src not in {"tmdb", "douban", "bangumi", "anilist"}:
         raise HTTPException(status_code=400, detail="未知数据源")
 
     terms = _split_media_query_terms(query)
@@ -534,6 +731,74 @@ async def media_search(
                 )
         payload = {
             "source": "tmdb",
+            "query": query,
+            "terms": terms,
+            "page": use_page,
+            "totalPages": total_pages,
+            "items": items,
+        }
+        _cache_set(cache_key, payload, ttl=1800)
+        return _wrap(payload)
+
+    if src == "bangumi":
+        proxy = _get_network_proxy_url()
+        try:
+            async with httpx.AsyncClient(**anime_src.client_kwargs(proxy)) as client:
+                if multi:
+                    batches = await asyncio.gather(
+                        *[
+                            anime_src.bangumi_search_page(
+                                client, keyword=t, page=1
+                            )
+                            for t in terms
+                        ]
+                    )
+                    items = _merge_media_items([b[0] for b in batches])
+                    total_pages = 1
+                else:
+                    items, total_pages = await anime_src.bangumi_search_page(
+                        client, keyword=terms[0], page=use_page
+                    )
+        except HTTPException:
+            raise
+        except httpx.HTTPError as e:
+            raise HTTPException(status_code=502, detail="Bangumi 网络异常") from e
+        payload = {
+            "source": "bangumi",
+            "query": query,
+            "terms": terms,
+            "page": use_page,
+            "totalPages": total_pages,
+            "items": items,
+        }
+        _cache_set(cache_key, payload, ttl=1800)
+        return _wrap(payload)
+
+    if src == "anilist":
+        proxy = _get_network_proxy_url()
+        try:
+            async with httpx.AsyncClient(**anime_src.client_kwargs(proxy)) as client:
+                if multi:
+                    batches = await asyncio.gather(
+                        *[
+                            anime_src.anilist_page(
+                                client, page=1, search=t
+                            )
+                            for t in terms
+                        ]
+                    )
+                    items = _merge_media_items([b[0] for b in batches])
+                    total_pages = 1
+                else:
+                    items, total_pages = await anime_src.anilist_page(
+                        client, page=use_page, search=terms[0]
+                    )
+        except HTTPException:
+            raise
+        except httpx.HTTPError as e:
+            raise HTTPException(status_code=502, detail="AniList 网络异常") from e
+        payload = {
+            "source": "anilist",
             "query": query,
             "terms": terms,
             "page": use_page,
@@ -922,7 +1187,7 @@ async def douban_detail(subject_id: str) -> dict[str, Any]:
     if not sid.isdigit():
         raise HTTPException(status_code=400, detail="无效豆瓣 id")
 
-    cache_key = f"douban:detail:{sid}"
+    cache_key = f"douban:detail:v2:{sid}"
     cached = _cache_get(cache_key)
     if cached is not None:
         return _wrap(cached)
@@ -1004,18 +1269,33 @@ async def douban_detail(subject_id: str) -> dict[str, Any]:
     else:
         media_type = "movie"
 
-    cast: list[str] = []
-    for key in ("directors", "actors"):
-        rows = data.get(key)
-        if not isinstance(rows, list):
-            continue
-        for row in rows:
-            if isinstance(row, dict):
-                name = str(row.get("name") or "").strip()
-            else:
-                name = str(row or "").strip()
-            if name and name not in cast:
-                cast.append(name)
+    cast: list[dict[str, Any]] = []
+    try:
+        async with httpx.AsyncClient(**_DOUBAN_HTTPX_KW) as client:
+            cast = await _douban_credits_cast(client, sid, media_type=media_type)
+    except Exception as e:
+        log.warning("douban credits failed sid=%s: %s", sid, e)
+        cast = []
+    if not cast:
+        for key in ("directors", "actors"):
+            rows = data.get(key)
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if isinstance(row, dict):
+                    name = str(row.get("name") or "").strip()
+                    pid = row.get("id")
+                else:
+                    name = str(row or "").strip()
+                    pid = None
+                if not name:
+                    continue
+                if any(p.get("name") == name for p in cast):
+                    continue
+                person: dict[str, Any] = {"name": name}
+                if pid not in (None, ""):
+                    person["id"] = str(pid)
+                cast.append(person)
 
     item = _norm_item(
         source="douban",
@@ -1047,6 +1327,611 @@ async def douban_detail(subject_id: str) -> dict[str, Any]:
         item["countries"] = countries_db[:8]
     _cache_set(cache_key, item)
     return _wrap(item)
+
+
+async def _douban_credits_cast(
+    client: httpx.AsyncClient, subject_id: str, *, media_type: str
+) -> list[dict[str, Any]]:
+    kind = "tv" if media_type == "tv" else "movie"
+    r = await client.get(
+        f"https://m.douban.com/rexxar/api/v2/{kind}/{subject_id}/credits",
+        headers={
+            "User-Agent": _DOUBAN_MOBILE_UA,
+            "Referer": f"https://m.douban.com/{kind}/subject/{subject_id}/",
+            "Origin": "https://m.douban.com",
+            "Accept": "application/json, text/plain, */*",
+        },
+    )
+    if not r.is_success:
+        return []
+    try:
+        payload = r.json() or {}
+    except Exception:
+        return []
+    rows = payload.get("items") if isinstance(payload.get("items"), list) else []
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("name") or "").strip()
+        if not name:
+            continue
+        person: dict[str, Any] = {"name": name}
+        if row.get("id") not in (None, ""):
+            person["id"] = str(row["id"])
+        avatar = None
+        av = row.get("avatar")
+        if isinstance(av, dict):
+            avatar = str(av.get("normal") or av.get("large") or "").strip() or None
+        avatar = _normalize_douban_cover(avatar)
+        if avatar:
+            person["avatarUrl"] = avatar
+        out.append(person)
+        if len(out) >= 12:
+            break
+    return out
+
+
+def _map_douban_rexxar_item(raw: dict[str, Any]) -> dict[str, Any] | None:
+    sid = str(raw.get("id") or "").strip()
+    if not sid:
+        return None
+    title = str(raw.get("title") or "").strip() or sid
+    typ = str(raw.get("type") or raw.get("subtype") or "").strip().lower()
+    media_type = "tv" if typ in {"tv", "show"} else "movie"
+    rating_f = None
+    rating = raw.get("rating")
+    if isinstance(rating, dict):
+        try:
+            val = rating.get("value")
+            rating_f = float(val) if val not in (None, "", 0, 0.0) else None
+        except (TypeError, ValueError):
+            rating_f = None
+    elif rating not in (None, ""):
+        try:
+            rating_f = float(rating)
+        except (TypeError, ValueError):
+            rating_f = None
+    poster = None
+    pic = raw.get("pic")
+    if isinstance(pic, dict):
+        poster = str(pic.get("large") or pic.get("normal") or "").strip() or None
+    if not poster:
+        poster = str(raw.get("cover_url") or raw.get("cover") or "").strip() or None
+    year = None
+    y_raw = str(raw.get("year") or "").strip()
+    if len(y_raw) >= 4 and y_raw[:4].isdigit():
+        year = y_raw[:4]
+    if not year:
+        year = _year_from(str(raw.get("release_date") or raw.get("pubdate") or ""))
+    if not year:
+        # card_subtitle: "1994 / 美国 / …"
+        sub = str(raw.get("card_subtitle") or "").strip()
+        if len(sub) >= 4 and sub[:4].isdigit():
+            year = sub[:4]
+    return _norm_item(
+        source="douban",
+        id_=sid,
+        media_type=media_type,
+        title=title,
+        poster_url=_normalize_douban_cover(poster),
+        year=year,
+        rating=rating_f,
+    )
+
+
+@router.get("/media/douban/subject/{subject_id}/related")
+async def douban_related(subject_id: str) -> dict[str, Any]:
+    """豆瓣相似推荐（rexxar recommendations）。"""
+    sid = str(subject_id or "").strip()
+    if not sid.isdigit():
+        raise HTTPException(status_code=400, detail="无效豆瓣 id")
+
+    cache_key = f"douban:related:{sid}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return _wrap(cached)
+
+    items: list[dict[str, Any]] = []
+    try:
+        async with httpx.AsyncClient(**_DOUBAN_HTTPX_KW) as client:
+            # movie / tv 两个路径都试；电影详情里 type=movie
+            for kind in ("movie", "tv"):
+                r = await client.get(
+                    f"https://m.douban.com/rexxar/api/v2/{kind}/{sid}/recommendations",
+                    headers={
+                        "User-Agent": _DOUBAN_MOBILE_UA,
+                        "Referer": f"https://m.douban.com/{kind}/subject/{sid}/",
+                        "Origin": "https://m.douban.com",
+                        "Accept": "application/json, text/plain, */*",
+                    },
+                )
+                if r.status_code in {403, 418, 429}:
+                    raise HTTPException(
+                        status_code=502, detail="豆瓣暂时拒绝访问（风控），请稍后再试"
+                    )
+                if not r.is_success:
+                    continue
+                try:
+                    data = r.json()
+                except Exception:
+                    continue
+                rows = data if isinstance(data, list) else (
+                    data.get("items") or data.get("recommendations") or []
+                    if isinstance(data, dict)
+                    else []
+                )
+                for row in rows:
+                    if not isinstance(row, dict):
+                        continue
+                    mapped = _map_douban_rexxar_item(row)
+                    if mapped and mapped["id"] != sid:
+                        items.append(mapped)
+                if items:
+                    break
+    except HTTPException:
+        raise
+    except httpx.ConnectError as e:
+        raise HTTPException(
+            status_code=502,
+            detail="无法连接豆瓣（网络或系统代理异常）",
+        ) from e
+    except Exception as e:
+        msg = str(e).strip() or e.__class__.__name__
+        raise HTTPException(status_code=502, detail=f"豆瓣推荐失败: {msg}") from e
+
+    # 去重
+    seen: set[str] = set()
+    uniq: list[dict[str, Any]] = []
+    for it in items:
+        if it["id"] in seen:
+            continue
+        seen.add(it["id"])
+        uniq.append(it)
+        if len(uniq) >= 16:
+            break
+
+    payload = {"similar": uniq, "recommendations": []}
+    _cache_set(cache_key, payload, ttl=3600 if uniq else 120)
+    return _wrap(payload)
+
+
+@router.get("/media/bangumi/charts")
+async def bangumi_charts(
+    category: str = Query("anime"),
+    chart: str = Query("rank"),
+    page: int = Query(1, ge=1, le=20),
+) -> dict[str, Any]:
+    cat = (category or "anime").strip().lower()
+    ch = (chart or "rank").strip().lower()
+    if ch not in anime_src.BANGUMI_CHARTS:
+        raise HTTPException(status_code=400, detail=f"未知榜单: {chart}")
+    cache_key = f"bangumi:charts:{cat}:{ch}:{page}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return _wrap(cached)
+    proxy = _get_network_proxy_url()
+    try:
+        async with httpx.AsyncClient(**anime_src.client_kwargs(proxy)) as client:
+            items, total_pages = await anime_src.bangumi_browse(
+                client, chart=ch, page=page
+            )
+    except HTTPException:
+        raise
+    except httpx.TimeoutException as e:
+        raise HTTPException(status_code=504, detail="Bangumi 连接超时") from e
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail="Bangumi 网络异常") from e
+    payload = {
+        "source": "bangumi",
+        "category": cat if cat in CATEGORIES else "anime",
+        "chart": ch,
+        "page": page,
+        "totalPages": total_pages,
+        "items": items,
+    }
+    _cache_set(cache_key, payload, ttl=3600)
+    return _wrap(payload)
+
+
+@router.get("/media/bangumi/subject/{subject_id}")
+async def bangumi_detail(subject_id: str) -> dict[str, Any]:
+    sid = str(subject_id or "").strip()
+    if not sid.isdigit():
+        raise HTTPException(status_code=400, detail="无效 id")
+    cache_key = f"bangumi:detail:v2:{sid}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return _wrap(cached)
+    proxy = _get_network_proxy_url()
+    try:
+        async with httpx.AsyncClient(**anime_src.client_kwargs(proxy)) as client:
+            item = await anime_src.bangumi_detail(client, sid)
+    except HTTPException:
+        raise
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail="Bangumi 网络异常") from e
+    _cache_set(cache_key, item)
+    return _wrap(item)
+
+
+@router.get("/media/bangumi/subject/{subject_id}/related")
+async def bangumi_related(subject_id: str) -> dict[str, Any]:
+    sid = str(subject_id or "").strip()
+    if not sid.isdigit():
+        raise HTTPException(status_code=400, detail="无效 id")
+    cache_key = f"bangumi:related:{sid}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return _wrap(cached)
+    proxy = _get_network_proxy_url()
+    try:
+        async with httpx.AsyncClient(**anime_src.client_kwargs(proxy)) as client:
+            items = await anime_src.bangumi_related(client, sid)
+    except HTTPException:
+        raise
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail="Bangumi 网络异常") from e
+    payload = {"similar": items, "recommendations": []}
+    _cache_set(cache_key, payload, ttl=3600 if items else 120)
+    return _wrap(payload)
+
+
+@router.get("/media/anilist/charts")
+async def anilist_charts(
+    category: str = Query("anime"),
+    chart: str = Query("trending"),
+    page: int = Query(1, ge=1, le=20),
+) -> dict[str, Any]:
+    cat = (category or "anime").strip().lower()
+    ch = (chart or "trending").strip().lower()
+    if ch not in anime_src.ANILIST_CHARTS:
+        raise HTTPException(status_code=400, detail=f"未知榜单: {chart}")
+    cache_key = f"anilist:charts:{cat}:{ch}:{page}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return _wrap(cached)
+    proxy = _get_network_proxy_url()
+    try:
+        async with httpx.AsyncClient(**anime_src.client_kwargs(proxy)) as client:
+            items, total_pages = await anime_src.anilist_page(
+                client, page=page, chart=ch
+            )
+    except HTTPException:
+        raise
+    except httpx.TimeoutException as e:
+        raise HTTPException(status_code=504, detail="AniList 连接超时") from e
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail="AniList 网络异常") from e
+    payload = {
+        "source": "anilist",
+        "category": cat if cat in CATEGORIES else "anime",
+        "chart": ch,
+        "page": page,
+        "totalPages": total_pages,
+        "items": items,
+    }
+    _cache_set(cache_key, payload, ttl=3600)
+    return _wrap(payload)
+
+
+@router.get("/media/anilist/{media_id}")
+async def anilist_detail(media_id: str) -> dict[str, Any]:
+    mid = str(media_id or "").strip()
+    if not mid.isdigit():
+        raise HTTPException(status_code=400, detail="无效 id")
+    cache_key = f"anilist:detail:v2:{mid}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return _wrap(cached)
+    proxy = _get_network_proxy_url()
+    try:
+        async with httpx.AsyncClient(**anime_src.client_kwargs(proxy)) as client:
+            item = await anime_src.anilist_detail(client, mid)
+    except HTTPException:
+        raise
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail="AniList 网络异常") from e
+    _cache_set(cache_key, item)
+    return _wrap(item)
+
+
+@router.get("/media/anilist/{media_id}/related")
+async def anilist_related(media_id: str) -> dict[str, Any]:
+    mid = str(media_id or "").strip()
+    if not mid.isdigit():
+        raise HTTPException(status_code=400, detail="无效 id")
+    cache_key = f"anilist:related:{mid}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return _wrap(cached)
+    proxy = _get_network_proxy_url()
+    try:
+        async with httpx.AsyncClient(**anime_src.client_kwargs(proxy)) as client:
+            items = await anime_src.anilist_related(client, mid)
+    except HTTPException:
+        raise
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail="AniList 网络异常") from e
+    payload = {"similar": items, "recommendations": []}
+    _cache_set(cache_key, payload, ttl=3600 if items else 120)
+    return _wrap(payload)
+
+
+async def _douban_resolve_celebrity_id(
+    client: httpx.AsyncClient, name: str
+) -> str | None:
+    r = await client.get(
+        "https://movie.douban.com/j/subject_suggest",
+        params={"q": name},
+        headers={
+            "User-Agent": _DOUBAN_UA,
+            "Referer": "https://movie.douban.com/",
+            "Accept": "application/json, text/javascript, */*;q=0.01",
+        },
+    )
+    if not r.is_success:
+        return None
+    try:
+        rows = r.json()
+    except Exception:
+        return None
+    if not isinstance(rows, list):
+        return None
+    name_key = name.strip().casefold()
+    exact: str | None = None
+    fuzzy: str | None = None
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("type") or "").strip().lower() != "celebrity":
+            continue
+        cid = str(row.get("id") or "").strip()
+        if not cid.isdigit():
+            continue
+        title = str(row.get("title") or "").strip()
+        sub = str(row.get("sub_title") or "").strip()
+        if title.casefold() == name_key or sub.casefold() == name_key:
+            exact = cid
+            break
+        if name_key in title.casefold() or name_key in sub.casefold():
+            fuzzy = fuzzy or cid
+    return exact or fuzzy
+
+
+async def _douban_celebrity_works(
+    client: httpx.AsyncClient, celebrity_id: str
+) -> list[dict[str, Any]]:
+    r = await client.get(
+        f"https://m.douban.com/rexxar/api/v2/celebrity/{celebrity_id}/works",
+        params={"start": 0, "count": 100},
+        headers={
+            "User-Agent": _DOUBAN_MOBILE_UA,
+            "Referer": f"https://m.douban.com/celebrity/{celebrity_id}/",
+            "Origin": "https://m.douban.com",
+            "Accept": "application/json, text/plain, */*",
+        },
+    )
+    if r.status_code in {403, 418, 429}:
+        raise HTTPException(
+            status_code=502, detail="豆瓣暂时拒绝访问（风控），请稍后再试"
+        )
+    if not r.is_success:
+        raise HTTPException(status_code=502, detail=f"豆瓣影人作品返回 {r.status_code}")
+    try:
+        data = r.json() or {}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail="豆瓣影人作品非 JSON") from e
+    rows = data.get("works") if isinstance(data.get("works"), list) else []
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        work = row.get("work") if isinstance(row.get("work"), dict) else None
+        if not work:
+            continue
+        mapped = _map_douban_rexxar_item(work)
+        if not mapped or mapped["id"] in seen:
+            continue
+        seen.add(mapped["id"])
+        items.append(mapped)
+        if len(items) >= 80:
+            break
+    return _sort_media_items_by_year(items)
+
+
+async def _tmdb_person_works(
+    client: httpx.AsyncClient, *, key: str, person_id: str
+) -> tuple[str, list[dict[str, Any]]]:
+    person = await _tmdb_get(
+        client,
+        f"/3/person/{person_id}",
+        {"api_key": key, "language": "zh-CN"},
+    )
+    display = str(person.get("name") or person_id).strip()
+    credits = await _tmdb_get(
+        client,
+        f"/3/person/{person_id}/combined_credits",
+        {"api_key": key, "language": "zh-CN"},
+    )
+    rows: list[dict[str, Any]] = []
+    for bucket in ("cast", "crew"):
+        part = credits.get(bucket)
+        if isinstance(part, list):
+            rows.extend([x for x in part if isinstance(x, dict)])
+    rows.sort(
+        key=lambda x: (
+            _year_from(str(x.get("release_date") or x.get("first_air_date") or ""))
+            or "0000",
+            float(x.get("vote_average") or 0),
+            float(x.get("popularity") or 0),
+        ),
+        reverse=True,
+    )
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw in rows:
+        mt = str(raw.get("media_type") or "").strip().lower()
+        if mt not in {"movie", "tv"}:
+            continue
+        if not raw.get("id"):
+            continue
+        k = f"{mt}:{raw['id']}"
+        if k in seen:
+            continue
+        seen.add(k)
+        items.append(_map_tmdb_list_item(raw, mt))
+        if len(items) >= 80:
+            break
+    return display, _sort_media_items_by_year(items)
+
+
+async def _tmdb_resolve_person_id(
+    client: httpx.AsyncClient, *, key: str, name: str
+) -> tuple[str | None, str]:
+    data = await _tmdb_get(
+        client,
+        "/3/search/person",
+        {
+            "api_key": key,
+            "language": "zh-CN",
+            "query": name,
+            "include_adult": "false",
+            "page": 1,
+        },
+    )
+    results = data.get("results") if isinstance(data.get("results"), list) else []
+    if not results or not isinstance(results[0], dict):
+        return None, name
+    row = results[0]
+    pid = str(row.get("id") or "").strip()
+    display = str(row.get("name") or name).strip()
+    return (pid if pid.isdigit() else None), display
+
+
+@router.get("/media/person/works")
+async def media_person_works(
+    source: str = Query("douban"),
+    q: str = Query(""),
+    person_id: str = Query(""),
+) -> dict[str, Any]:
+    """按影人列出参演/相关作品（TMDB / 豆瓣 / Bangumi / AniList）。"""
+    src = (source or "douban").strip().lower()
+    name = (q or "").strip()
+    pid = str(person_id or "").strip()
+    if src not in {"tmdb", "douban", "bangumi", "anilist"}:
+        raise HTTPException(status_code=400, detail="未知数据源")
+    if not name and not pid:
+        raise HTTPException(status_code=400, detail="请提供影人姓名或 id")
+
+    cache_key = f"person:v2:{src}:{pid or name.lower()}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return _wrap(cached)
+
+    def _finish(payload: dict[str, Any]) -> dict[str, Any]:
+        payload["items"] = _sort_media_items_by_year(
+            list(payload.get("items") or [])
+        )
+        _cache_set(
+            cache_key,
+            payload,
+            ttl=3600 if payload.get("items") else 120,
+        )
+        return _wrap(payload)
+
+    if src == "douban":
+        try:
+            async with httpx.AsyncClient(**_DOUBAN_HTTPX_KW) as client:
+                cid = pid if pid.isdigit() else None
+                if not cid:
+                    cid = await _douban_resolve_celebrity_id(client, name)
+                if not cid:
+                    raise HTTPException(status_code=404, detail=f"未找到影人「{name}」")
+                items = await _douban_celebrity_works(client, cid)
+                payload = {
+                    "source": "douban",
+                    "personId": cid,
+                    "name": name or cid,
+                    "items": items,
+                }
+        except HTTPException:
+            raise
+        except httpx.ConnectError as e:
+            raise HTTPException(
+                status_code=502, detail="无法连接豆瓣（网络或系统代理异常）"
+            ) from e
+        return _finish(payload)
+
+    if src == "tmdb":
+        key = _require_tmdb_key()
+        proxy = _get_network_proxy_url()
+        client_kw = dict(_HTTPX_KW)
+        if proxy:
+            client_kw["trust_env"] = False
+            client_kw["proxy"] = proxy
+        try:
+            async with httpx.AsyncClient(**client_kw) as client:
+                tid = pid if pid.isdigit() else None
+                display = name
+                if not tid:
+                    tid, display = await _tmdb_resolve_person_id(
+                        client, key=key, name=name
+                    )
+                if not tid:
+                    raise HTTPException(status_code=404, detail=f"未找到影人「{name}」")
+                display2, items = await _tmdb_person_works(
+                    client, key=key, person_id=tid
+                )
+                payload = {
+                    "source": "tmdb",
+                    "personId": tid,
+                    "name": display2 or display or name or tid,
+                    "items": items,
+                }
+        except HTTPException:
+            raise
+        except httpx.HTTPError as e:
+            raise HTTPException(status_code=502, detail="TMDB 网络异常") from e
+        return _finish(payload)
+
+    if src == "bangumi":
+        proxy = _get_network_proxy_url()
+        try:
+            async with httpx.AsyncClient(**anime_src.client_kwargs(proxy)) as client:
+                bid, display, items = await anime_src.bangumi_person_works(
+                    client, name=name, person_id=pid
+                )
+        except HTTPException:
+            raise
+        except httpx.HTTPError as e:
+            raise HTTPException(status_code=502, detail="Bangumi 网络异常") from e
+        payload = {
+            "source": "bangumi",
+            "personId": bid,
+            "name": display or name or bid,
+            "items": items,
+        }
+        return _finish(payload)
+
+    proxy = _get_network_proxy_url()
+    try:
+        async with httpx.AsyncClient(**anime_src.client_kwargs(proxy)) as client:
+            aid, display, items = await anime_src.anilist_staff_works(
+                client, name=name, staff_id=pid
+            )
+    except HTTPException:
+        raise
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail="AniList 网络异常") from e
+    payload = {
+        "source": "anilist",
+        "personId": aid,
+        "name": display or name or aid,
+        "items": items,
+    }
+    return _finish(payload)
 
 
 @router.get("/media/meta")
@@ -1086,6 +1971,29 @@ def media_meta() -> dict[str, Any]:
                         {"id": "western", "label": "欧美"},
                         {"id": "jp", "label": "日剧"},
                         {"id": "kr", "label": "韩剧"},
+                    ],
+                },
+                {
+                    "id": "bangumi",
+                    "label": "Bangumi",
+                    "charts": [
+                        {"id": "rank", "label": "排名"},
+                        {"id": "heat", "label": "热门"},
+                        {"id": "score", "label": "高分"},
+                        {"id": "calendar", "label": "放送表"},
+                        {"id": "real", "label": "三次元"},
+                    ],
+                },
+                {
+                    "id": "anilist",
+                    "label": "AniList",
+                    "charts": [
+                        {"id": "trending", "label": "趋势"},
+                        {"id": "popular", "label": "热门"},
+                        {"id": "top_rated", "label": "高分"},
+                        {"id": "airing", "label": "放送中"},
+                        {"id": "upcoming", "label": "即将上映"},
+                        {"id": "movies", "label": "剧场版"},
                     ],
                 },
             ],

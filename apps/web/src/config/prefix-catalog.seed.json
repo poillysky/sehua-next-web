@@ -1,0 +1,7854 @@
+{
+  "version": 1,
+  "updated_at": "2026-09-06T00:00:00+00:00",
+  "principle": "authority-site + curated seeds; runtime harvest fills serials",
+  "regions": {
+    "japan_censored": {
+      "id": "japan_censored",
+      "label": "日本有码",
+      "prefixes": {
+        "AARM": {
+          "maker": "アロマ企画",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "dmm",
+            "javbus",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:javbus · 本地库确认",
+          "maker_ja": "アロマ企画"
+        },
+        "ABF": {
+          "maker": "PRESTIGE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "dmm",
+            "javbus",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "436",
+          "notes": "专属现行 · 权威站:javbus · 本地库确认"
+        },
+        "ABP": {
+          "maker": "PRESTIGE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "118",
+          "notes": "专属经典 · 本地库确认"
+        },
+        "ABS": {
+          "maker": "PRESTIGE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "更早专属 · 本地库确认"
+        },
+        "ABW": {
+          "maker": "PRESTIGE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "过渡线 · 本地库确认"
+        },
+        "ACHJ": {
+          "maker": "Madonna",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "dmm",
+            "javbus",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "痴女调教旁支 · 权威站:javbus · 本地库确认",
+          "maker_ja": "マドンナ"
+        },
+        "ADN": {
+          "maker": "Attackers",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "人妻禁忌剧 · 本地库确认",
+          "maker_ja": "アタッカーズ"
+        },
+        "AED": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂有码列表×1 · DMM确认"
+        },
+        "AKA": {
+          "maker": "PRESTIGE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "出道类 · 本地库确认"
+        },
+        "AKNR": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "local-db"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "ALDN": {
+          "maker": "タカラ映像",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "dmm",
+            "javbus",
+            "local-db",
+            "sehua",
+            "sehuatangForum",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "现行常见 · 权威站:javbus · 本地库确认 · 色花堂有码列表×3",
+          "maker_ja": "タカラ映像"
+        },
+        "ANB": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂有码列表×1 · DMM确认"
+        },
+        "APAK": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂有码列表×1 · DMM确认"
+        },
+        "APNS": {
+          "maker": "オーロラプロジェクト",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "dmm",
+            "javbus",
+            "local-db",
+            "sehua",
+            "sehuatangForum",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:javbus · 本地库确认 · 色花堂有码列表×2",
+          "maker_ja": "オーロラプロジェクト・アネックス"
+        },
+        "ARM": {
+          "maker": "アロマ企画",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "ATID": {
+          "maker": "Attackers",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "强剧情单片 · 本地库确认"
+        },
+        "ATKD": {
+          "maker": "Attackers",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "精选打包 · 本地库确认"
+        },
+        "AUKG": {
+          "maker": "U＆K",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "AVOP": {
+          "maker": "AVS collector",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认",
+          "maker_ja": "アイデアポケット"
+        },
+        "AVSA": {
+          "maker": "AVS collector",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "dmm",
+            "javbus",
+            "local-db",
+            "sehua",
+            "sehuatangForum",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:javbus · 本地库确认 · 色花堂有码列表×3"
+        },
+        "BACJ": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂有码列表×1 · DMM确认"
+        },
+        "BAGR": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂有码列表×2 · DMM确认"
+        },
+        "BBAN": {
+          "maker": "ビビアン",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "dmm",
+            "javbus",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "女同主线 · 权威站:javbus · 本地库确认"
+        },
+        "BBI": {
+          "maker": "痴女ヘブン",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "较早线 · 本地库确认"
+        },
+        "BDSR": {
+          "maker": "ビッグモーカル",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "BF": {
+          "maker": "BeFree",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "戏剧单片 · 本地库确认"
+        },
+        "BGN": {
+          "maker": "PRESTIGE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "出道类 · 本地库确认"
+        },
+        "BID": {
+          "maker": "痴女ヘブン",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "较早旁支 · 本地库确认"
+        },
+        "BIJN": {
+          "maker": "美人魔女",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "BLK": {
+          "maker": "kira☆kira",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "辣妹黑系主线 · 本地库确认"
+        },
+        "BLO": {
+          "maker": "PRESTIGE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "人妻向 · 本地库确认"
+        },
+        "BMW": {
+          "maker": "WANZ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "精选/打包 · 本地库确认"
+        },
+        "BOBB": {
+          "maker": "Boin Box",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "BONY": {
+          "maker": "ボニータ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "CAWD": {
+          "maker": "kawaii",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "现行主线 · 本地库确认"
+        },
+        "CEMD": {
+          "maker": "セレブの友",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "dmm",
+            "javbus",
+            "local-db",
+            "sehua",
+            "sehuatangForum",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:javbus · 本地库确认 · 色花堂有码列表×6"
+        },
+        "CESD": {
+          "maker": "セレブの友",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "CHN": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "trusted"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "片商表/ranges/DMM/权威站"
+        },
+        "CJOD": {
+          "maker": "痴女ヘブン",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "现行主线 · 本地库确认"
+        },
+        "CLOT": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂有码列表×1 · DMM确认"
+        },
+        "CLUB": {
+          "maker": "変態紳士倶楽部",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "主线 · 本地库确认"
+        },
+        "CMN": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂有码列表×1 · DMM确认"
+        },
+        "CNADD": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "javbus",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:javbus"
+        },
+        "CVDX": {
+          "maker": "セレブの友",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "CWM": {
+          "maker": "ドリームチケット",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "DANDY": {
+          "maker": "DANDY",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "1",
+          "notes": "厂牌同名主线 · 本地库确认"
+        },
+        "DASD": {
+          "maker": "ダスッ！",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "上一代 · 本地库确认"
+        },
+        "DASS": {
+          "maker": "ダスッ！",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "现行主线 · 本地库确认"
+        },
+        "DAVK": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂有码列表×1 · DMM确认"
+        },
+        "DAZD": {
+          "maker": "ダスッ！",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "dmm",
+            "javbus",
+            "local-db",
+            "sehua",
+            "sehuatangForum",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "精选 · 权威站:javbus · 本地库确认 · 色花堂有码列表×1"
+        },
+        "DEL": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "local-db"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "DIC": {
+          "maker": "PRESTIGE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "DLDSS": {
+          "maker": "DAHLIA",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "1",
+          "notes": "人妻戏剧单片 · 本地库确认"
+        },
+        "DOJN": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "javbus",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:javbus"
+        },
+        "DSUA": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "local-db"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "DSVR": {
+          "maker": "SOD Create",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "VR · 本地库确认"
+        },
+        "DV": {
+          "maker": "アリスJAPAN",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "经典主线 · 本地库确认"
+        },
+        "DVAJ": {
+          "maker": "アリスJAPAN",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "dmm",
+            "javbus",
+            "local-db",
+            "sehua",
+            "sehuatangForum",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "较新常见 · 权威站:javbus · 本地库确认 · 色花堂有码列表×2"
+        },
+        "DVDES": {
+          "maker": "DEEP'S",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "较早 · 本地库确认"
+        },
+        "DVDMS": {
+          "maker": "DEEP'S",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "1",
+          "notes": "魔镜号等 · 本地库确认"
+        },
+        "DVMM": {
+          "maker": "DEEP'S",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "现行企划 · 本地库确认"
+        },
+        "DVPM": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "local-db"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "EBOD": {
+          "maker": "E-BODY",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "经典身材线 · 本地库确认"
+        },
+        "EBWH": {
+          "maker": "E-BODY",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "现行主线 · 本地库确认"
+        },
+        "EKDV": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂有码列表×2 · DMM未命中·待复核"
+        },
+        "EMBZ": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂有码列表×1 · DMM确认"
+        },
+        "ENFD": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "trusted"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "片商表/ranges/DMM/权威站"
+        },
+        "ESK": {
+          "maker": "PRESTIGE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "EVO": {
+          "maker": "PRESTIGE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "EYAN": {
+          "maker": "E-BODY",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "人妻身材 · 本地库确认"
+        },
+        "FAX": {
+          "maker": "FAプロ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "FCDSS": {
+          "maker": "FALENO",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "1",
+          "notes": "精选 · 本地库确认"
+        },
+        "FJIN": {
+          "maker": "その他有码",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "FLAV": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂有码列表×1 · DMM确认"
+        },
+        "FLNS": {
+          "maker": "FALENO",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "少量旁支 · 本地库确认"
+        },
+        "FNS": {
+          "maker": "FALENO",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "dmm",
+            "javbus",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "1",
+          "notes": "数字星线 · 权威站:javbus · 本地库确认"
+        },
+        "FOCS": {
+          "maker": "フォーカス",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "主线 · 本地库确认"
+        },
+        "FPRE": {
+          "maker": "Fitch",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Premium 系 · 本地库确认"
+        },
+        "FSDSS": {
+          "maker": "FALENO",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "1",
+          "notes": "专属单片 · 本地库确认"
+        },
+        "FSET": {
+          "maker": "アキノリ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "常见企划 · 本地库确认"
+        },
+        "FTN": {
+          "maker": "PRESTIGE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "GAJK": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂有码列表×1 · DMM确认"
+        },
+        "GARA": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂有码列表×1 · DMM确认"
+        },
+        "GIGL": {
+          "maker": "GIGOLO",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "GMA": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂有码列表×2 · DMM确认"
+        },
+        "GS": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂有码列表×1 · DMM确认"
+        },
+        "GVG": {
+          "maker": "Glory Quest",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "13",
+          "notes": "较早 · 本地库确认"
+        },
+        "GVH": {
+          "maker": "Glory Quest",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "dmm",
+            "javbus",
+            "local-db",
+            "sehua",
+            "sehuatangForum",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "13",
+          "notes": "现行更常见 · 权威站:javbus · 本地库确认 · 色花堂有码列表×2"
+        },
+        "HAVD": {
+          "maker": "ヒビノ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "常见主线 · 本地库确认"
+        },
+        "HAWA": {
+          "maker": "コスモス映像",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "HBAD": {
+          "maker": "ヒビノ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "1",
+          "notes": "常见主线 · 本地库确认"
+        },
+        "HHF": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂有码列表×1 · DMM确认"
+        },
+        "HIKR": {
+          "maker": "Fitch",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "少量旁支 · 本地库确认"
+        },
+        "HKG": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "local-db"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "HMN": {
+          "maker": "本中",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "现行主线 · 本地库确认"
+        },
+        "HND": {
+          "maker": "本中",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "上一代 · 本地库确认"
+        },
+        "HNDB": {
+          "maker": "本中",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "少量打包 · 本地库确认"
+        },
+        "HNDS": {
+          "maker": "本中",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "系列/合集 · 本地库确认"
+        },
+        "HODV": {
+          "maker": "h.m.p",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "常见主线 · 本地库确认"
+        },
+        "HRDV": {
+          "maker": "h.m.p",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "较早 · 本地库确认"
+        },
+        "HTHD": {
+          "maker": "センタービレッジ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "HUNBL": {
+          "maker": "Hunter",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "蓝光/特别版一类 · 本地库确认"
+        },
+        "HUNT": {
+          "maker": "Hunter",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "短前缀 · 本地库确认"
+        },
+        "HUNTA": {
+          "maker": "Hunter",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "1",
+          "notes": "较早企划 · 本地库确认"
+        },
+        "HUNTB": {
+          "maker": "Hunter",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "常见企划 · 本地库确认"
+        },
+        "HUNTC": {
+          "maker": "Hunter",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "dmm",
+            "javbus",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "较新企划 · 权威站:javbus · 本地库确认"
+        },
+        "HZGD": {
+          "maker": "人妻花園劇場",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "IDBD": {
+          "maker": "IDEA POCKET",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "精选合集 · 本地库确认"
+        },
+        "IENF": {
+          "maker": "アイエナジー",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "1",
+          "notes": "本地库确认"
+        },
+        "IESP": {
+          "maker": "アイエナジー",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "INU": {
+          "maker": "PRESTIGE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "IPBD": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "local-db"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "IPSD": {
+          "maker": "IDEA POCKET",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "少量旁支 · 本地库确认"
+        },
+        "IPTD": {
+          "maker": "IDEA POCKET",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "最早主线 · 本地库确认"
+        },
+        "IPVR": {
+          "maker": "IDEA POCKET",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "VR · 本地库确认"
+        },
+        "IPX": {
+          "maker": "IDEA POCKET",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "上一代主线 · 本地库确认"
+        },
+        "IPZ": {
+          "maker": "IDEA POCKET",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "更早主线 · 本地库确认"
+        },
+        "IPZZ": {
+          "maker": "IDEA POCKET",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "dmm",
+            "javbus",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "现行主线 · 权威站:javbus · 本地库确认",
+          "maker_ja": "アイデアポケット"
+        },
+        "JAN": {
+          "maker": "PRESTIGE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "JAVBUS": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "javbus",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:javbus"
+        },
+        "JBD": {
+          "maker": "Attackers",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "高强度调教 · 本地库确认"
+        },
+        "JBS": {
+          "maker": "PRESTIGE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "JCN": {
+          "maker": "PRESTIGE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "JFB": {
+          "maker": "Fitch",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "精选/旧线 · 本地库确认"
+        },
+        "JKSR": {
+          "maker": "ビッグモーカル",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "JRZE": {
+          "maker": "センタービレッジ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "JUC": {
+          "maker": "Madonna",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "较早 DVD · 本地库确认"
+        },
+        "JUFD": {
+          "maker": "Fitch",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "上一代 · 本地库确认"
+        },
+        "JUFE": {
+          "maker": "Fitch",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "现行主线 · 本地库确认"
+        },
+        "JUKD": {
+          "maker": "Madonna",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "最早主线 · 本地库确认"
+        },
+        "JUL": {
+          "maker": "Madonna",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "更早主线 · 本地库确认"
+        },
+        "JUNY": {
+          "maker": "Fitch",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "丰满旁支 · 本地库确认"
+        },
+        "JUQ": {
+          "maker": "Madonna",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "上一代主线 · 本地库确认"
+        },
+        "JUR": {
+          "maker": "Madonna",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "dmm",
+            "javbus",
+            "local-db",
+            "sehua",
+            "sehuatangForum",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "现行主线 · 权威站:javbus · 本地库确认 · 色花堂有码列表×15"
+        },
+        "JURA": {
+          "maker": "センタービレッジ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "五十路纪录片线 系列号 · 本地库确认"
+        },
+        "JUSD": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "local-db"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "JUX": {
+          "maker": "Madonna",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "历史主线 · 本地库确认"
+        },
+        "JUY": {
+          "maker": "Madonna",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "历史主线 · 本地库确认"
+        },
+        "KAGP": {
+          "maker": "かぐや姫Pt",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "KAPD": {
+          "maker": "kawaii",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "合辑/旁支 · 本地库确认"
+        },
+        "KAVR": {
+          "maker": "kawaii",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "VR · 本地库确认"
+        },
+        "KAWD": {
+          "maker": "kawaii",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "上一代 · 本地库确认"
+        },
+        "KIWVR": {
+          "maker": "Million",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "VR · 本地库确认"
+        },
+        "KOJA": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂有码列表×1 · DMM确认"
+        },
+        "KRND": {
+          "maker": "本中",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "旁支 · 本地库确认"
+        },
+        "KSBJ": {
+          "maker": "KSB企画",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "KTRA": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂有码列表×2 · DMM未命中·待复核"
+        },
+        "KWBD": {
+          "maker": "kawaii",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "精选 · 本地库确认"
+        },
+        "LULU": {
+          "maker": "LUNATICS",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "MAS": {
+          "maker": "PRESTIGE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "MBDD": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "trusted"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "片商表/ranges/DMM/权威站"
+        },
+        "MBRAA": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "trusted"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "片商表/ranges/DMM/权威站"
+        },
+        "MBRBA": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "trusted"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "片商表/ranges/DMM/权威站"
+        },
+        "MDB": {
+          "maker": "BAZOOKA",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "MDBK": {
+          "maker": "BAZOOKA",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "MDON": {
+          "maker": "Madonna",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "配信限定 · 本地库确认"
+        },
+        "MDS": {
+          "maker": "宇宙企画",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "宇宙企画主线（勿与国产 MDS 混淆） · 本地库确认"
+        },
+        "MDVR": {
+          "maker": "MOODYZ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "VR · 本地库确认"
+        },
+        "MDYD": {
+          "maker": "Madonna",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "极早历史号（也见于溜池） · 本地库确认"
+        },
+        "MEYD": {
+          "maker": "溜池ゴロー",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "现行主线 · 本地库确认"
+        },
+        "MFYD": {
+          "maker": "溜池ゴロー",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "旁支 · 本地库确认"
+        },
+        "MGOLD": {
+          "maker": "Million",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "1",
+          "notes": "金色系列 · 本地库确认"
+        },
+        "MIAA": {
+          "maker": "MOODYZ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "非专属上一代 · 本地库确认"
+        },
+        "MIAB": {
+          "maker": "MOODYZ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "非专属企划现行 · 本地库确认"
+        },
+        "MIAD": {
+          "maker": "MOODYZ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "早期 Acid · 本地库确认"
+        },
+        "MIAE": {
+          "maker": "MOODYZ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Acid 更早 · 本地库确认"
+        },
+        "MIBD": {
+          "maker": "MOODYZ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "旧作精选 · 本地库确认"
+        },
+        "MIDA": {
+          "maker": "MOODYZ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "专属现行 · 本地库确认"
+        },
+        "MIDD": {
+          "maker": "MOODYZ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "早期专属 · 本地库确认"
+        },
+        "MIDE": {
+          "maker": "MOODYZ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "更早专属 · 本地库确认"
+        },
+        "MIDV": {
+          "maker": "MOODYZ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "专属上一代 · 本地库确认",
+          "maker_ja": "ムーディーズ"
+        },
+        "MIFD": {
+          "maker": "MOODYZ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "新人出道 · 本地库确认"
+        },
+        "MIGD": {
+          "maker": "MOODYZ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "硬核企划 · 本地库确认"
+        },
+        "MIKR": {
+          "maker": "その他有码",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "MILD": {
+          "maker": "Million",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "较早主线 · 本地库确认"
+        },
+        "MIMK": {
+          "maker": "MOODYZ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "漫画/黄油改编 · 本地库确认"
+        },
+        "MIRD": {
+          "maker": "MOODYZ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "大型企划 · 本地库确认"
+        },
+        "MISM": {
+          "maker": "えむっ娘ラボ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "主线 · 本地库确认"
+        },
+        "MIST": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂有码列表×2 · DMM确认"
+        },
+        "MIZD": {
+          "maker": "MOODYZ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "新作精选 · 本地库确认"
+        },
+        "MKCK": {
+          "maker": "E-BODY",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "身材精选 · 本地库确认"
+        },
+        "MKD": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂有码列表×1 · DMM确认"
+        },
+        "MKMP": {
+          "maker": "Million",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "dmm",
+            "javbus",
+            "local-db",
+            "sehua",
+            "sehuatangForum",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "现行更常见 · 权威站:javbus · 本地库确认 · 色花堂有码列表×4"
+        },
+        "MKY": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "trusted"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "片商表/ranges/DMM/权威站"
+        },
+        "MOGI": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "trusted"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "片商表/ranges/DMM/权威站"
+        },
+        "MOND": {
+          "maker": "タカラ映像",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "dmm",
+            "javbus",
+            "local-db",
+            "sehua",
+            "sehuatangForum",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "あこがれ一类 · 权威站:javbus · 本地库确认 · 色花堂有码列表×1"
+        },
+        "MOOC": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂有码列表×1 · DMM确认"
+        },
+        "MOT": {
+          "maker": "マザー",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "MRSS": {
+          "maker": "ミセスの素顔",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "MSQ": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "local-db"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "MTALL": {
+          "maker": "Materiall",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "1",
+          "notes": "本地库确认"
+        },
+        "MUCD": {
+          "maker": "無垢",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "旁支/合集 · 本地库确认"
+        },
+        "MUDR": {
+          "maker": "無垢",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "常见主线 · 本地库确认"
+        },
+        "MUKC": {
+          "maker": "無垢",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "旁支 · 本地库确认"
+        },
+        "MUKD": {
+          "maker": "無垢",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "常见主线 · 本地库确认"
+        },
+        "MVG": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂有码列表×1 · DMM确认"
+        },
+        "MVSD": {
+          "maker": "エムズビデオ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "主线 · 本地库确认"
+        },
+        "MXGS": {
+          "maker": "MAXING",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "h_068",
+          "notes": "单片主线 · 本地库确认"
+        },
+        "MXSPS": {
+          "maker": "MAXING",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "精选 · 本地库确认"
+        },
+        "MZQ": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "local-db"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "NACR": {
+          "maker": "プラネットプラス",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "家政妇企划 · 本地库确认"
+        },
+        "NACT": {
+          "maker": "プラネットプラス",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "dmm",
+            "javbus",
+            "local-db",
+            "sehua",
+            "sehuatangForum",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "较新系列 · 权威站:javbus · 本地库确认 · 色花堂有码列表×7"
+        },
+        "NAD": {
+          "maker": "DOC",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "1",
+          "notes": "本地库确认"
+        },
+        "NAMH": {
+          "maker": "DOC",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "1",
+          "notes": "本地库确认"
+        },
+        "NASH": {
+          "maker": "クリスタル映像",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "NASS": {
+          "maker": "なでしこ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "NATR": {
+          "maker": "ビッグモーカル",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "NDRA": {
+          "maker": "JET映像",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "相关企划 · 本地库确认"
+        },
+        "NFDM": {
+          "maker": "フリーダム",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "NGHJ": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂有码列表×1 · DMM确认"
+        },
+        "NGOD": {
+          "maker": "JET映像",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua",
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "人妻 NTR · 本地库确认 · 色花堂有码列表×2"
+        },
+        "NHDT": {
+          "maker": "ナチュラルハイ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "更早短号 · 本地库确认"
+        },
+        "NHDTA": {
+          "maker": "ナチュラルハイ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "1",
+          "notes": "上一代 · 本地库确认"
+        },
+        "NHDTB": {
+          "maker": "ナチュラルハイ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "1",
+          "notes": "现行常见 · 本地库确认"
+        },
+        "NHDTC": {
+          "maker": "ナチュラルハイ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "1",
+          "notes": "旁支换代 · 本地库确认"
+        },
+        "NIMA": {
+          "maker": "Fitch",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "漫画改编一类 · 本地库确认"
+        },
+        "NITR": {
+          "maker": "クリスタル映像",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "NKKD": {
+          "maker": "JET映像",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "相关企划 · 本地库确认"
+        },
+        "NMH": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "local-db"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "NMS": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "local-db"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "NNOD": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂有码列表×1 · DMM确认"
+        },
+        "NNPJ": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "trusted"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "片商表/ranges/DMM/权威站"
+        },
+        "NPJS": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "trusted"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "片商表/ranges/DMM/权威站"
+        },
+        "NSFS": {
+          "maker": "ながえSTYLE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "dmm",
+            "javbus",
+            "local-db",
+            "sehua",
+            "sehuatangForum",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "和姦郁向剧情线 系列号 · 权威站:javbus · 本地库确认 · 色花堂有码列表×2"
+        },
+        "NSPS": {
+          "maker": "ながえSTYLE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "NUKA": {
+          "maker": "センタービレッジ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "OAE": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "trusted"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "片商表/ranges/DMM/权威站"
+        },
+        "OBA": {
+          "maker": "Madonna",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "更高龄熟女 · 本地库确认"
+        },
+        "OERO": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "javbus",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:javbus"
+        },
+        "OFES": {
+          "maker": "S1 NO.1 STYLE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "活动/企划旁支 · 本地库确认"
+        },
+        "OFJE": {
+          "maker": "S1 NO.1 STYLE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "精选合集 · 本地库确认"
+        },
+        "ONED": {
+          "maker": "S1 NO.1 STYLE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "最早主线 · 本地库确认"
+        },
+        "ONEZ": {
+          "maker": "Prestige",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "118",
+          "notes": "本地库确认"
+        },
+        "ONSD": {
+          "maker": "S1 NO.1 STYLE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "早期精选 · 本地库确认"
+        },
+        "OVG": {
+          "maker": "Glory Quest",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "旁支/合集 · 本地库确认"
+        },
+        "PBD": {
+          "maker": "プレミアム",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "打包/系列 · 本地库确认"
+        },
+        "PCA": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "local-db"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "PFES": {
+          "maker": "プレミアム",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "精选 · 本地库确认"
+        },
+        "PGD": {
+          "maker": "プレミアム",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "上一代 · 本地库确认"
+        },
+        "PJD": {
+          "maker": "プレミアム",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "企划旁支 · 本地库确认"
+        },
+        "PPBD": {
+          "maker": "OPPAI",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "精选 · 本地库确认"
+        },
+        "PPPD": {
+          "maker": "OPPAI",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "上一代 · 本地库确认"
+        },
+        "PPPE": {
+          "maker": "OPPAI",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "现行主线 · 本地库确认"
+        },
+        "PPSD": {
+          "maker": "OPPAI",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "系列/企划 · 本地库确认"
+        },
+        "PPT": {
+          "maker": "PRESTIGE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "PRED": {
+          "maker": "Premium",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "现行主线 · 本地库确认"
+        },
+        "PRST": {
+          "maker": "プレミアム",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "少量系列 · 本地库确认"
+        },
+        "PTB": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "javbus",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:javbus"
+        },
+        "PURETABOO": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "trusted"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "片商表/ranges/DMM/权威站"
+        },
+        "PXD": {
+          "maker": "プレミアム",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "企划旁支 · 本地库确认"
+        },
+        "PXVR": {
+          "maker": "PRESTIGE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "VR · 本地库确认"
+        },
+        "RBB": {
+          "maker": "ROOKIE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "精选 · 本地库确认"
+        },
+        "RBD": {
+          "maker": "Attackers",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "囚禁拘束 · 本地库确认"
+        },
+        "RBK": {
+          "maker": "Attackers",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "囚禁后继 · 本地库确认"
+        },
+        "RCT": {
+          "maker": "ROCKET",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "较早 · 本地库确认"
+        },
+        "RCTD": {
+          "maker": "ROCKET",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "dmm",
+            "javbus",
+            "local-db",
+            "sehua",
+            "sehuatangForum",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "1",
+          "notes": "现行更常见 · 权威站:javbus · 本地库确认 · 色花堂有码列表×3"
+        },
+        "REBD": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "trusted"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "片商表/ranges/DMM/权威站"
+        },
+        "REBDB": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "trusted"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "片商表/ranges/DMM/权威站"
+        },
+        "RKI": {
+          "maker": "ROOKIE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "dmm",
+            "javbus",
+            "local-db",
+            "sehua",
+            "sehuatangForum",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "单片/企划 · 权威站:javbus · 本地库确认 · 色花堂有码列表×2"
+        },
+        "RLMP": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂有码列表×4 · DMM确认"
+        },
+        "ROE": {
+          "maker": "Madonna",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "dmm",
+            "javbus",
+            "local-db",
+            "sehua",
+            "sehuatangForum",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "四十代向 · 权威站:javbus · 本地库确认 · 色花堂有码列表×7"
+        },
+        "ROYD": {
+          "maker": "ROYD",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "dmm",
+            "javbus",
+            "local-db",
+            "sehua",
+            "sehuatangForum",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "主线 · 权威站:javbus · 本地库确认 · 色花堂有码列表×4"
+        },
+        "SABA": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "trusted"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "片商表/ranges/DMM/权威站"
+        },
+        "SACE": {
+          "maker": "MAX-A",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "1",
+          "notes": "本地库确认"
+        },
+        "SAL": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂有码列表×1 · DMM确认"
+        },
+        "SAMA": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "trusted"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "片商表/ranges/DMM/权威站"
+        },
+        "SAME": {
+          "maker": "Attackers",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "较新暗黑线 · 本地库确认"
+        },
+        "SAO": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "local-db"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "SAVR": {
+          "maker": "SOD Create",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "VR · 本地库确认"
+        },
+        "SCPX": {
+          "maker": "SCOOP",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "SDAB": {
+          "maker": "SOD Create",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "1",
+          "notes": "制服/学生企划 · 本地库确认"
+        },
+        "SDAM": {
+          "maker": "SOD Create",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "1",
+          "notes": "本地库确认"
+        },
+        "SDDE": {
+          "maker": "SOD Create",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "1",
+          "notes": "魔镜号等 · 本地库确认"
+        },
+        "SDJS": {
+          "maker": "SOD Create",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "1",
+          "notes": "女职员企划 · 本地库确认"
+        },
+        "SDMM": {
+          "maker": "SOD Create",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "1",
+          "notes": "魔镜号相关 · 本地库确认"
+        },
+        "SDMT": {
+          "maker": "SOD Create",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "1",
+          "notes": "本地库确认"
+        },
+        "SDMU": {
+          "maker": "SOD Create",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "1",
+          "notes": "本地库确认"
+        },
+        "SDNM": {
+          "maker": "SOD Create",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "1",
+          "notes": "人妻素人纪实 · 本地库确认"
+        },
+        "SGA": {
+          "maker": "PRESTIGE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "轻熟女 · 本地库确认"
+        },
+        "SHKD": {
+          "maker": "Attackers",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "经典凌辱 · 本地库确认"
+        },
+        "SITW": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂有码列表×1 · DMM确认"
+        },
+        "SIVR": {
+          "maker": "S1 NO.1 STYLE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "VR · 本地库确认"
+        },
+        "SKMJ": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "trusted"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "片商表/ranges/DMM/权威站"
+        },
+        "SKTH": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "javbus",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:javbus"
+        },
+        "SMA": {
+          "maker": "マルクス兄弟",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "SMD": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "local-db"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "SNIS": {
+          "maker": "S1 NO.1 STYLE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "历史主线 · 本地库确认"
+        },
+        "SNOS": {
+          "maker": "S1 NO.1 STYLE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "dmm",
+            "javbus",
+            "local-db",
+            "sehua",
+            "sehuatangForum",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "高规格/4K 旁支 · 权威站:javbus · 本地库确认 · 色花堂有码列表×16"
+        },
+        "SOE": {
+          "maker": "S1 NO.1 STYLE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "早期主线 · 本地库确认"
+        },
+        "SONE": {
+          "maker": "S1 NO.1 STYLE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "现行主线 · 本地库确认",
+          "maker_ja": "エスワン ナンバーワンスタイル"
+        },
+        "SORA": {
+          "maker": "山と空",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "主线 · 本地库确认"
+        },
+        "SPND": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "local-db"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "SPRD": {
+          "maker": "タカラ映像",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "经典熟女 · 本地库确认"
+        },
+        "SPS": {
+          "maker": "S1 NO.1 STYLE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "少量旁支 · 本地库确认"
+        },
+        "SQTE": {
+          "maker": "S-Cute",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "SRXV": {
+          "maker": "MAX-A",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "SSIS": {
+          "maker": "S1 NO.1 STYLE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "上一代主线 · 本地库确认",
+          "maker_ja": "エスワン ナンバーワンスタイル"
+        },
+        "SSNI": {
+          "maker": "S1 NO.1 STYLE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "更早主线 · 本地库确认"
+        },
+        "SSPD": {
+          "maker": "Attackers",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "特别企划 · 本地库确认"
+        },
+        "STAR": {
+          "maker": "SOD Create",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "1",
+          "notes": "更早专属 · 本地库确认"
+        },
+        "STARS": {
+          "maker": "SOD Create",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "1",
+          "notes": "专属主线 · 本地库确认",
+          "maker_ja": "SODクリエイト"
+        },
+        "START": {
+          "maker": "SOD Create",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "1",
+          "notes": "近年新线 · 本地库确认"
+        },
+        "SUPA": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "trusted"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "片商表/ranges/DMM/权威站"
+        },
+        "SUPD": {
+          "maker": "IDEA POCKET",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Digital Channel · 本地库确认"
+        },
+        "SVDVD": {
+          "maker": "サディスティックヴィレッジ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "1",
+          "notes": "本地库确认"
+        },
+        "SVVRT": {
+          "maker": "サディスティックヴィレッジ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "dmm",
+            "javbus",
+            "local-db",
+            "sehua",
+            "sehuatangForum",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "1",
+          "notes": "权威站:javbus · 本地库确认 · 色花堂有码列表×3"
+        },
+        "SW": {
+          "maker": "アキノリ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "dmm",
+            "javbus",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "1",
+          "notes": "系列旁支 · 权威站:javbus · 本地库确认"
+        },
+        "TCD": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂有码列表×1 · DMM确认"
+        },
+        "TDT": {
+          "maker": "PRESTIGE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "TEK": {
+          "maker": "Muteki",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "艺能人出道 · 本地库确认"
+        },
+        "TG": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "local-db"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "TPPN": {
+          "maker": "TEPPAN",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "鉄板主线 · 本地库确认"
+        },
+        "TRE": {
+          "maker": "PRESTIGE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "UMAN": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂有码列表×1 · DMM确认"
+        },
+        "UMD": {
+          "maker": "LEO",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "公开商品页 maker=LEO · 本地库确认"
+        },
+        "URE": {
+          "maker": "Madonna",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "漫画改编 · 本地库确认"
+        },
+        "URVRSP": {
+          "maker": "PRESTIGE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "VR 企划 · 本地库确认"
+        },
+        "USAG": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂有码列表×1 · DMM确认"
+        },
+        "VAGU": {
+          "maker": "Venus",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "旁支 · 本地库确认"
+        },
+        "VDD": {
+          "maker": "ドリームチケット",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "VEC": {
+          "maker": "Venus",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "短号系列 · 本地库确认"
+        },
+        "VEMA": {
+          "maker": "Venus",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "旁支 · 本地库确认"
+        },
+        "VENU": {
+          "maker": "Venus",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "经典主线 · 本地库确认"
+        },
+        "VENX": {
+          "maker": "Venus",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "现行更常见 · 本地库确认"
+        },
+        "VICD": {
+          "maker": "V＆R PRODUCE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "VNDS": {
+          "maker": "V＆R PRODUCE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "VRKM": {
+          "maker": "V＆R PRODUCE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "VRTM": {
+          "maker": "V＆R PRODUCE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "WAAA": {
+          "maker": "WanZ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "现行主线 · 本地库确认"
+        },
+        "WANZ": {
+          "maker": "WANZ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "3",
+          "notes": "较早同名线 · 本地库确认"
+        },
+        "WDM": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "local-db"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "XRW": {
+          "maker": "REAL",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "现行多见 · 本地库确认"
+        },
+        "XV": {
+          "maker": "MAX-A",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "更早 Karen 线 系列号 · 本地库确认"
+        },
+        "XVSR": {
+          "maker": "MAX-A",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "YDNS": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂有码列表×1 · DMM确认"
+        },
+        "YM": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "local-db"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "YMDD": {
+          "maker": "桃太郎",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "常见主线 · 本地库确认"
+        },
+        "YOK": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "local-db"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "YRH": {
+          "maker": "PRESTIGE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "YRZ": {
+          "maker": "PRESTIGE",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "YSN": {
+          "maker": "桃太郎",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "常见主线 · 本地库确认"
+        },
+        "ZMX": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "local-db"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "ZOTY": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "javbus",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:javbus"
+        }
+      }
+    },
+    "japan_uncensored": {
+      "id": "japan_uncensored",
+      "label": "日本无码",
+      "prefixes": {
+        "10MU": {
+          "maker": "10musume",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "10musume",
+            "authority",
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "10musume · 权威站:javbus+carib · 本地库确认 · 色花堂论坛子分类:亚洲无码原创/10musu"
+        },
+        "10MUSUME": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatang"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂板块分类"
+        },
+        "1PON": {
+          "maker": "1pondo",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "1pondo",
+            "authority",
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "日期番号 · 权威站:javbus+carib · 本地库确认 · 色花堂论坛子分类:亚洲无码原创/一本道系"
+        },
+        "C0930": {
+          "maker": "C0930",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "c0930",
+            "local-db"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "C0930-hitozuma… · 权威站:javbus+carib · 本地库确认"
+        },
+        "CARIB": {
+          "maker": "Caribbeancom",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "carib",
+            "local-db",
+            "sehua",
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "日期番号 YYYYMMDD-XXX · 权威站:javbus+carib · 本地库确认 · 色花堂论坛子分类:亚洲无码原创/加勒比系"
+        },
+        "CARIBPR": {
+          "maker": "Caribbeancom Premium",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "carib",
+            "local-db",
+            "sehua",
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Premium，库内较少 · 权威站:javbus+carib · 本地库确认 · 色花堂论坛子分类:亚洲无码原创/加勒比PPV"
+        },
+        "FELLATIOJAPAN": {
+          "maker": "Fellatio Japan",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatang",
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂板块分类 · 色花堂论坛子分类:亚洲无码原创/fellatiojapan"
+        },
+        "GACHI": {
+          "maker": "Gachinco",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": ""
+        },
+        "H0930": {
+          "maker": "H0930",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "h0930",
+            "local-db"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "H0930-ki日期 · 本地库确认"
+        },
+        "H4610": {
+          "maker": "H4610",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "h4610",
+            "local-db"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "H4610-… · 权威站:javbus+carib · 本地库确认"
+        },
+        "HANDJOBJAPAN": {
+          "maker": "Handjob Japan",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatang",
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂板块分类 · 色花堂论坛子分类:亚洲无码原创/handjobjapan"
+        },
+        "HEYDOUGA": {
+          "maker": "Heydouga",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "heydouga",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "有货、量中等 · 本地库确认"
+        },
+        "HEYZO": {
+          "maker": "HEYZO",
+          "pad": 4,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "heyzo",
+            "local-db",
+            "sehua",
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "HEYZO-四位 · 权威站:javbus+carib · 本地库确认 · 色花堂论坛子分类:亚洲无码原创/HEYZO"
+        },
+        "JAPORNXXX": {
+          "maker": "japornxxx",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatang",
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂板块分类 · 色花堂论坛子分类:亚洲无码原创/japornxxx"
+        },
+        "KIN8": {
+          "maker": "Kin8tengoku",
+          "pad": 4,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "kin8",
+            "local-db",
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "kin8-四位 · 权威站:javbus+carib · 本地库确认 · 色花堂论坛子分类:亚洲无码原创/金髪天國"
+        },
+        "LEGSJAPAN": {
+          "maker": "Legs Japan",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatang",
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂板块分类 · 色花堂论坛子分类:亚洲无码原创/legsjapan"
+        },
+        "NYOSHIN": {
+          "maker": "Nyoshin",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "nyoshin",
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂论坛子分类:亚洲无码原创/女体のしんぴ"
+        },
+        "PACO": {
+          "maker": "Pacopacomama",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "local-db",
+            "pacopacomama",
+            "sehua",
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "pacoma 系 · 权威站:javbus+carib · 本地库确认 · 色花堂论坛子分类:亚洲无码原创/pacoma"
+        },
+        "PACOMA": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatang"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂板块分类"
+        },
+        "PT": {
+          "maker": "Pacificgirls",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": ""
+        },
+        "RHJ": {
+          "maker": "其它无码",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "极少 · 本地库确认"
+        },
+        "ROSELIP": {
+          "maker": "roselip-fetish",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂论坛子分类:亚洲无码原创/roselip-fetish"
+        },
+        "ROSELIPFETISH": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatang"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂板块分类"
+        },
+        "SMMIRACLE": {
+          "maker": "sm-miracle",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatang",
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂板块分类 · 色花堂论坛子分类:亚洲无码原创/sm-miracle"
+        },
+        "SPERMMANIA": {
+          "maker": "其它无码",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "sehuatangForum",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "spermmania · 本地库确认 · 色花堂论坛子分类:亚洲无码原创/spermmania"
+        },
+        "TOKYO": {
+          "maker": "Tokyo Hot",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "nXXXX"
+        },
+        "URABUKKAKE": {
+          "maker": "Ura Bukkake",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatang",
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂板块分类 · 色花堂论坛子分类:亚洲无码原创/urabukkake"
+        },
+        "URALESBIAN": {
+          "maker": "Ura Lesbian",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatang",
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂板块分类 · 色花堂论坛子分类:亚洲无码原创/uralesbian"
+        },
+        "XXXAV": {
+          "maker": "XXX-AV",
+          "pad": 5,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "sehuatangForum",
+            "xxx-av"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "xxx-av-五位 · 本地库确认 · 色花堂论坛子分类:亚洲无码原创/xxx-av"
+        }
+      }
+    },
+    "japan_amateur": {
+      "id": "japan_amateur",
+      "label": "日本素人",
+      "prefixes": {
+        "107SODS": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "107START": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "112SVVRT": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "136SW": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "200GANA": {
+          "maker": "ナンパTV",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "local-db",
+            "mgstage",
+            "sehua",
+            "sehuatangForum",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "ナンパTV マジ軟派 · 权威站:mgstage · 本地库确认 · 色花堂论坛子分类:素人有码系列/200GANA"
+        },
+        "201KDMN": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "20SEX": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "230ORECO": {
+          "maker": "俺の素人",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "mgstage",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "230OREX": {
+          "maker": "素人企划",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua",
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "俺の素人 · 本地库确认 · 色花堂论坛子分类:素人有码系列/230OREX"
+        },
+        "259LUXU": {
+          "maker": "ラグジュTV",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "local-db",
+            "mgstage",
+            "sehua",
+            "sehuatangForum",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "ラグジュTV · 权威站:mgstage · 本地库确认 · 色花堂论坛子分类:素人有码系列/259LUXU"
+        },
+        "300MAAN": {
+          "maker": "プレステージプレミアム",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "mgstage",
+            "sehua",
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Prestige Premium 素人约拍 · 本地库确认 · 色花堂论坛子分类:素人有码系列/300MAAN"
+        },
+        "300MIUM": {
+          "maker": "プレステージプレミアム",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "local-db",
+            "mgstage",
+            "sehua",
+            "sehuatangForum",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Prestige Premium 都市约拍 · 权威站:mgstage · 本地库确认 · 色花堂论坛子分类:素人有码系列/300MIUM · 色花堂有码列表×2"
+        },
+        "300NTK": {
+          "maker": "プレステージプレミアム",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "local-db",
+            "mgstage",
+            "sehua",
+            "sehuatangForum",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Prestige Premium ナンパ系 · 权威站:mgstage · 本地库确认 · 色花堂论坛子分类:素人有码系列/300NTK"
+        },
+        "326EVA": {
+          "maker": "素人企划",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua",
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Prestige Premium · 本地库确认 · 色花堂论坛子分类:素人有码系列/326EVA"
+        },
+        "326KFNE": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "326SCP": {
+          "maker": "素人企划",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua",
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Prestige Premium · 本地库确认 · 色花堂论坛子分类:素人有码系列/326SCP"
+        },
+        "328HMDN": {
+          "maker": "素人企划",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua",
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Prestige Premium · 本地库确认 · 色花堂论坛子分类:素人有码系列/328HMDN"
+        },
+        "332NAMA": {
+          "maker": "素人企划",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "mgstage",
+            "sehua",
+            "sehuatangForum",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Prestige Premium · 权威站:mgstage · 本地库确认 · 色花堂论坛子分类:素人有码系列/332NAMA"
+        },
+        "336KBL": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "336KNB": {
+          "maker": "素人企划",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua",
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "ナンパ系 KNB 流水号 · 本地库确认 · 色花堂论坛子分类:素人有码系列/336KNB"
+        },
+        "336TUK": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "390JAC": {
+          "maker": "Jackson",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "mgstage",
+            "sehua",
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Prestige Premium · 本地库确认 · 色花堂论坛子分类:素人有码系列/390JAC"
+        },
+        "406FCDSS": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "406FNS": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "406FSDSS": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "406FSVSS": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "513DLDSS": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "533DB": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "554SPIVR": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "893NYN": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "908JDH": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "919DF": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "93DFC": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "AB": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "AFFF": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "ARA": {
+          "maker": "素人企划",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "募集ちゃん · 本地库确认"
+        },
+        "BAFFCC": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "BEAF": {
+          "maker": "ビーフ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "dmm"
+          ],
+          "serials": [],
+          "dmm_digit": ""
+        },
+        "DA": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "DCV": {
+          "maker": "素人企划",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "家まで送ってイイですか · 本地库确认"
+        },
+        "DENP": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "EDBE": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "GANA": {
+          "maker": "ナンパTV",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "mgstage",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "200GANA 简写 · 本地库确认"
+        },
+        "GAREA": {
+          "maker": "G-area",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatang",
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂板块分类 · 色花堂论坛子分类:素人有码系列/G-area"
+        },
+        "GETCHU": {
+          "maker": "getchu",
+          "pad": 4,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatang",
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂板块分类 · 色花堂论坛子分类:素人有码系列/getchu"
+        },
+        "GIGAWEB": {
+          "maker": "giga-web",
+          "pad": 4,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatang",
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂板块分类 · 色花堂论坛子分类:素人有码系列/giga-web"
+        },
+        "GNI": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "HIMEMIX": {
+          "maker": "himemix",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatang",
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂板块分类 · 色花堂论坛子分类:素人有码系列/himemix"
+        },
+        "IMJO": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "JAC": {
+          "maker": "Jackson",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "dmm"
+          ],
+          "serials": [],
+          "dmm_digit": ""
+        },
+        "JFM": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "JQUERY": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "KBI": {
+          "maker": "KANBi",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "dmm"
+          ],
+          "serials": [],
+          "dmm_digit": ""
+        },
+        "KNB": {
+          "maker": "素人企划",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "ナンパ系 · 本地库确认"
+        },
+        "KNIGHTSVISUAL": {
+          "maker": "",
+          "pad": 4,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatang"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂板块分类"
+        },
+        "LAYOUT": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "LUXU": {
+          "maker": "ラグジュTV",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "mgstage"
+          ],
+          "serials": [],
+          "dmm_digit": ""
+        },
+        "MAAN": {
+          "maker": "プレステージプレミアム",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "local-db",
+            "mgstage",
+            "sehua",
+            "sehuatangForum",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "300MAAN 简写 · 权威站:mgstage · 本地库确认 · 色花堂有码列表×1"
+        },
+        "MAKER": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "MIUM": {
+          "maker": "プレステージプレミアム",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "mgstage",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "300MIUM 简写 · 本地库确认"
+        },
+        "MYWIFE": {
+          "maker": "舞ワイフ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua",
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Mywife · 本地库确认 · 色花堂论坛子分类:素人有码系列/Mywife"
+        },
+        "NTK": {
+          "maker": "ネットワーク",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "dmm"
+          ],
+          "serials": [],
+          "dmm_digit": ""
+        },
+        "ORE": {
+          "maker": "俺の素人",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "dmm"
+          ],
+          "serials": [],
+          "dmm_digit": ""
+        },
+        "ORECO": {
+          "maker": "素人企划",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "ORECS": {
+          "maker": "素人企划",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "ORECZ": {
+          "maker": "素人企划",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "PASN": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "POINT": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "PPX": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "PRVRSS": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "RFILE": {
+          "maker": "r-file",
+          "pad": 4,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatang",
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂板块分类 · 色花堂论坛子分类:素人有码系列/r-file"
+        },
+        "SALE": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "SAMA": {
+          "maker": "素人企划",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "S级素人 · 本地库确认"
+        },
+        "SCUTE": {
+          "maker": "S-Cute",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "dmm",
+            "local-db",
+            "sehua",
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "S-cute · 本地库确认 · 色花堂论坛子分类:素人有码系列/S-cute"
+        },
+        "SHF": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "SIRO": {
+          "maker": "シロウトTV",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "local-db",
+            "mgstage",
+            "sehua",
+            "sehuatangForum",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "シロウトTV · 权威站:mgstage · 本地库确认 · 色花堂论坛子分类:素人有码系列/SIRO · 色花堂有码列表×3"
+        },
+        "SIROHAME": {
+          "maker": "siro-hame",
+          "pad": 4,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "sehuatang",
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色花堂板块分类 · 色花堂论坛子分类:素人有码系列/siro-hame"
+        },
+        "UFF": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        },
+        "WWSZV": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "mgstage",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:mgstage"
+        }
+      }
+    },
+    "japan_gravure": {
+      "id": "japan_gravure",
+      "label": "日本写真",
+      "prefixes": {
+        "BFAZ": {
+          "maker": "ファインピクチャーズ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "dmm",
+            "javbus",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:javbus"
+        },
+        "ENFD": {
+          "maker": "イーネット・フロンティア",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "dmm",
+            "javbus",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "偶像映像 常见写真线 · 权威站:javbus · 本地库确认"
+        },
+        "GGSID": {
+          "maker": "グレイズ",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "dmm",
+            "javbus",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:javbus"
+        },
+        "MBDD": {
+          "maker": "スパイスビジュアル",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "dmm",
+            "javbus",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "影像厂牌 写真合集线 · 权威站:javbus · 本地库确认"
+        },
+        "MBRAA": {
+          "maker": "スパイスビジュアル",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "dmm",
+            "javbus",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "视觉系 偶像写真线 · 权威站:javbus · 本地库确认"
+        },
+        "MBRBA": {
+          "maker": "スパイスビジュアル",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "dmm",
+            "javbus",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "视觉系 偶像写真线 · 权威站:javbus · 本地库确认"
+        },
+        "OAE": {
+          "maker": "Aircontrol",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "dmm",
+            "javbus",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "清新偶像 写真映像线 · 权威站:javbus · 本地库确认"
+        },
+        "REBD": {
+          "maker": "REbecca",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "dmm",
+            "javbus",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:javbus · 本地库确认"
+        },
+        "REBDB": {
+          "maker": "REbecca",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "dmm",
+            "javbus",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "蓝光高清 写真映像线 · 权威站:javbus · 本地库确认"
+        },
+        "SYD": {
+          "maker": "スパイスビジュアル",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "dmm",
+            "javbus",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:javbus"
+        }
+      }
+    },
+    "fc2": {
+      "id": "fc2",
+      "label": "FC2",
+      "prefixes": {
+        "FC2": {
+          "maker": "FC2",
+          "pad": 3,
+          "format": "FC2-{num}",
+          "sources": [
+            "authority",
+            "fc2",
+            "local-db",
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认 · 色花堂论坛子分类:素人有码系列/FC2"
+        },
+        "FC2PPV": {
+          "maker": "FC2 PPV",
+          "pad": 3,
+          "format": "FC2-PPV-{num}",
+          "sources": [
+            "authority",
+            "fc2",
+            "local-db",
+            "sehuatangForum"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认 · 色花堂论坛子分类:亚洲无码原创/FC2PPV"
+        }
+      }
+    },
+    "china": {
+      "id": "china",
+      "label": "国产无码",
+      "prefixes": {
+        "91CM": {
+          "maker": "91制片厂",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "91",
+            "bitmagnet",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "91制片厂 / 果冻传媒 · 本地库确认"
+        },
+        "DA": {
+          "maker": "大象传媒",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "大象传媒 · 本地库确认"
+        },
+        "DOM": {
+          "maker": "其它国产",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "EMX": {
+          "maker": "其它国产",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "FSOG": {
+          "maker": "扣扣传媒",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "扣扣传媒 · 本地库确认"
+        },
+        "GDCM": {
+          "maker": "果冻传媒",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "果冻传媒 · 本地库确认"
+        },
+        "HKG": {
+          "maker": "星空无限",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": ""
+        },
+        "HPP": {
+          "maker": "辣椒原创",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "辣椒原创 · 本地库确认"
+        },
+        "ID": {
+          "maker": "爱豆传媒",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "爱豆传媒 · 本地库确认"
+        },
+        "IDG": {
+          "maker": "其它国产",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "JD": {
+          "maker": "精东影业",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "精东影业 · 本地库确认"
+        },
+        "JDSY": {
+          "maker": "精东影业",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "精东影业 · 本地库确认"
+        },
+        "JVID": {
+          "maker": "JVID",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "jvid"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "作者/作品 ID"
+        },
+        "KCM": {
+          "maker": "其它国产",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "LAA": {
+          "maker": "其它国产",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "LLS": {
+          "maker": "萝莉社",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "萝莉社 · 本地库确认"
+        },
+        "LY": {
+          "maker": "绝对领域",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "绝对领域 · 本地库确认"
+        },
+        "MAD": {
+          "maker": "麻豆传媒",
+          "pad": 4,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "madou",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "麻豆 / 麻豆爱豆 · 本地库确认"
+        },
+        "MCY": {
+          "maker": "其它国产",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "MD": {
+          "maker": "麻豆传媒",
+          "pad": 4,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "local-db",
+            "madou",
+            "missav",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "麻豆传媒映画 · 权威站:missav+madou · 本地库确认"
+        },
+        "MDCM": {
+          "maker": "麻豆传媒",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "国风系列 · 本地库确认"
+        },
+        "MDHG": {
+          "maker": "麻豆传媒",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "麻豆传媒 · 本地库确认"
+        },
+        "MDHT": {
+          "maker": "麻豆传媒",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "奇淫旅社 · 本地库确认"
+        },
+        "MDL": {
+          "maker": "麻豆传媒",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "剧情长篇 · 本地库确认"
+        },
+        "MDSR": {
+          "maker": "麻豆传媒",
+          "pad": 4,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "local-db",
+            "madou",
+            "missav",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "剧情系列 · 权威站:missav+madou · 本地库确认"
+        },
+        "MDWP": {
+          "maker": "麻豆传媒",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "local-db",
+            "missav",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "职场系列 · 权威站:missav+madou · 本地库确认"
+        },
+        "MDX": {
+          "maker": "麻豆传媒",
+          "pad": 4,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "madou",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "麻豆传媒 · 本地库确认"
+        },
+        "MKY": {
+          "maker": "麻豆传媒",
+          "pad": 4,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "madou",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "MMZ": {
+          "maker": "猫爪影像",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "猫爪影像 / 猫爪传媒 · 本地库确认"
+        },
+        "MPG": {
+          "maker": "其它国产",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "MSD": {
+          "maker": "麻豆传媒",
+          "pad": 4,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "madou",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "猫爪 / 麻豆署片均见 · 本地库确认"
+        },
+        "MSG": {
+          "maker": "其它国产",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "MTVQ": {
+          "maker": "其它国产",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "MXJ": {
+          "maker": "其它国产",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "NHJ": {
+          "maker": "精东影业",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": ""
+        },
+        "PH": {
+          "maker": "色控传媒",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "色控 / PsychoPorn · 本地库确认"
+        },
+        "PM": {
+          "maker": "蜜桃影像",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "蜜桃影像 / 蜜桃传媒 · 本地库确认"
+        },
+        "PMC": {
+          "maker": "蜜桃影像",
+          "pad": 4,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "madou",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "蜜桃传媒 · 本地库确认"
+        },
+        "PME": {
+          "maker": "蜜桃影像",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "蜜桃传媒 · 本地库确认"
+        },
+        "PMS": {
+          "maker": "蜜桃影像",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "蜜桃传媒 · 本地库确认"
+        },
+        "PMX": {
+          "maker": "蜜桃影像",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "蜜桃影像传媒 · 本地库确认"
+        },
+        "QQOG": {
+          "maker": "扣扣传媒",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "扣扣传媒 · 本地库确认"
+        },
+        "RAS": {
+          "maker": "皇家华人",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "皇家华人 · 本地库确认"
+        },
+        "SAT": {
+          "maker": "其它国产",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "SZL": {
+          "maker": "三只狼",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "local-db",
+            "missav",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "三只狼 · 权威站:missav+madou · 本地库确认"
+        },
+        "TM": {
+          "maker": "天美传媒",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "天美传媒 · 本地库确认"
+        },
+        "TMA": {
+          "maker": "天美传媒",
+          "pad": 4,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "madou"
+          ],
+          "serials": [],
+          "dmm_digit": ""
+        },
+        "TMG": {
+          "maker": "其它国产",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "TMW": {
+          "maker": "天美传媒",
+          "pad": 4,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "madou",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "天美传媒 · 本地库确认"
+        },
+        "TMY": {
+          "maker": "天美传媒",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "天美传媒 · 本地库确认"
+        },
+        "TZ": {
+          "maker": "桃園",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "china",
+            "local-db",
+            "sehua"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "兔子先生 · 本地库确认"
+        },
+        "XB": {
+          "maker": "杏吧传媒",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "杏吧傳媒 · 本地库确认"
+        },
+        "XJX": {
+          "maker": "香蕉秀",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "香蕉秀 · 本地库确认"
+        },
+        "XK": {
+          "maker": "星空无限传媒",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "星空传媒 · 本地库确认"
+        },
+        "XKG": {
+          "maker": "星空无限传媒",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "星空无限传媒 · 本地库确认"
+        },
+        "XKKY": {
+          "maker": "星空无限传媒",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "星空传媒 · 本地库确认"
+        },
+        "XKTC": {
+          "maker": "星空无限传媒",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "星空传媒 · 本地库确认"
+        },
+        "XKVP": {
+          "maker": "星空无限传媒",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "星空无限传媒 · 本地库确认"
+        },
+        "XSJ": {
+          "maker": "起点传媒",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "起点传媒（如《奇淫三国》） · 本地库确认"
+        },
+        "XSJKY": {
+          "maker": "性视界传媒",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "性视界传媒 · 本地库确认"
+        },
+        "YCM": {
+          "maker": "91制片厂",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "91制片厂 · 本地库确认"
+        }
+      }
+    },
+    "western": {
+      "id": "western",
+      "label": "欧美无码",
+      "prefixes": {
+        "ADULTTIME": {
+          "maker": "Pure Taboo",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Adult Time · 本地库确认"
+        },
+        "AGIRIENE": {
+          "maker": "Adult Time",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": ""
+        },
+        "ANALVIDS": {
+          "maker": "其它欧美",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "BANGBROS": {
+          "maker": "Bang Bros",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "local-db",
+            "missav",
+            "sehua",
+            "site",
+            "tpdb"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Bang Bros 主站 · 权威站:missav · 本地库确认"
+        },
+        "BANGBUS": {
+          "maker": "Bang Bros",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Bang Bus 系列 · 本地库确认"
+        },
+        "BLACKED": {
+          "maker": "BLACKED",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "local-db",
+            "missav",
+            "sehua",
+            "site",
+            "tpdb"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "权威站:missav · 本地库确认"
+        },
+        "BLACKEDRAW": {
+          "maker": "Blacked / Vixen",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Blacked Raw · 本地库确认"
+        },
+        "BRATTYSIS": {
+          "maker": "其它欧美",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "BRAZZERS": {
+          "maker": "Brazzers",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "local-db",
+            "missav",
+            "sehua",
+            "site",
+            "tpdb"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "站点片名；无统一字母流水 · 权威站:missav · 本地库确认"
+        },
+        "DEEPER": {
+          "maker": "Deeper",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "local-db",
+            "missav",
+            "sehua",
+            "site",
+            "tpdb"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Deeper · 权威站:missav · 本地库确认"
+        },
+        "DIGITALPLAYGROUND": {
+          "maker": "",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "local-db"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认 · sehua=0 bit=0"
+        },
+        "DORCEL": {
+          "maker": "Dorcel / Private",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Marc Dorcel · 本地库确认"
+        },
+        "DORCELCLUB": {
+          "maker": "其它欧美",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Dorcel Club · 本地库确认"
+        },
+        "ELEGANTANGEL": {
+          "maker": "其它欧美",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "EVILANGEL": {
+          "maker": "Evil Angel",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "local-db",
+            "missav",
+            "sehua",
+            "site",
+            "tpdb"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Evil Angel · 权威站:missav · 本地库确认"
+        },
+        "FAKETAXI": {
+          "maker": "Mofos / FakeHub",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Fake Taxi · 本地库确认"
+        },
+        "FAMILYSTROKES": {
+          "maker": "其它欧美",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "local-db",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "JULESJORDAN": {
+          "maker": "Jules Jordan",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Jules Jordan · 本地库确认"
+        },
+        "LEGALPORNO": {
+          "maker": "LegalPorno",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "tpdb"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "LegalPorno · 本地库确认"
+        },
+        "LETHALHARDCORE": {
+          "maker": "其它欧美",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "local-db",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "MANYVIDS": {
+          "maker": "OnlyFans / ManyVids",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "ManyVids · 本地库确认"
+        },
+        "MILFY": {
+          "maker": "其它欧美",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Milfy · 本地库确认"
+        },
+        "MOFOS": {
+          "maker": "Mofos / FakeHub",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Mofos · 本地库确认"
+        },
+        "NAUGHTYAMERICA": {
+          "maker": "Naughty America",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "local-db",
+            "missav",
+            "site",
+            "tpdb"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Naughty America · 权威站:missav · 本地库确认"
+        },
+        "NUBILEFILMS": {
+          "maker": "其它欧美",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Nubile Films · 本地库确认"
+        },
+        "NUBILES": {
+          "maker": "其它欧美",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Nubiles 系 · 本地库确认"
+        },
+        "ONLYFANS": {
+          "maker": "OnlyFans",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "local-db",
+            "missav",
+            "sehua",
+            "site",
+            "tpdb"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "OnlyFans · 权威站:missav · 本地库确认"
+        },
+        "PLAYBOYPLUS": {
+          "maker": "其它欧美",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Playboy Plus · 本地库确认"
+        },
+        "PORNWORLD": {
+          "maker": "其它欧美",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "PornWorld · 本地库确认"
+        },
+        "PRIVATE": {
+          "maker": "Dorcel / Private",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Private · 本地库确认"
+        },
+        "PUBLICAGENT": {
+          "maker": "其它欧美",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "本地库确认"
+        },
+        "PURETABOO": {
+          "maker": "Pure Taboo",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Pure Taboo · 本地库确认"
+        },
+        "REALITYKINGS": {
+          "maker": "Reality Kings",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "local-db",
+            "missav",
+            "site",
+            "tpdb"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "全称写法 · 权威站:missav · 本地库确认"
+        },
+        "RK": {
+          "maker": "Reality Kings",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "缩写常见于文件名 · 本地库确认"
+        },
+        "RKPRIME": {
+          "maker": "Reality Kings",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "RK Prime · 本地库确认"
+        },
+        "SEXART": {
+          "maker": "其它欧美",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "SexArt · 本地库确认"
+        },
+        "SEXMEX": {
+          "maker": "其它欧美",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "SexMex · 本地库确认"
+        },
+        "SLAYED": {
+          "maker": "Slayed",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": ""
+        },
+        "TEAMSKEET": {
+          "maker": "其它欧美",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "local-db",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Team Skeet · 本地库确认"
+        },
+        "TUSHY": {
+          "maker": "Tushy",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "local-db",
+            "missav",
+            "sehua",
+            "site",
+            "tpdb"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Tushy · 权威站:missav · 本地库确认"
+        },
+        "TUSHYRAW": {
+          "maker": "Blacked / Vixen",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Tushy Raw · 本地库确认"
+        },
+        "VIXEN": {
+          "maker": "Vixen",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "authority",
+            "bitmagnet",
+            "local-db",
+            "missav",
+            "sehua",
+            "site",
+            "tpdb"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Vixen · 权威站:missav · 本地库确认"
+        },
+        "VIXENPLUS": {
+          "maker": "Vixen Plus",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": ""
+        },
+        "WATCH4BEAUTY": {
+          "maker": "其它欧美",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "local-db",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Watch4Beauty · 本地库确认"
+        },
+        "WICKED": {
+          "maker": "其它欧美",
+          "pad": 3,
+          "format": "{prefix}-{num}",
+          "sources": [
+            "bitmagnet",
+            "local-db",
+            "sehua",
+            "site"
+          ],
+          "serials": [],
+          "dmm_digit": "",
+          "notes": "Wicked · 本地库确认"
+        }
+      }
+    }
+  }
+}

@@ -15,6 +15,7 @@ from .p115_client import (
     extract_uid,
     fetch_offline_sign,
     form_headers,
+    headers,
     human_error,
     require_cookie_parts,
 )
@@ -23,6 +24,20 @@ BATCH_LIMIT = 15
 REQUEST_GAP_S = 0.4
 
 _LINK_RE = re.compile(r"^(magnet:|ed2k://|https?://|ftp://)", re.I)
+
+# 对齐 p115client / 开放平台 clear_task flag
+CLEAR_MODE_FLAGS: dict[str, int] = {
+    "done": 0,
+    "all": 1,
+    "failed": 2,
+}
+
+_STATUS_LABEL: dict[int, str] = {
+    -1: "失败",
+    0: "排队",
+    1: "下载中",
+    2: "完成",
+}
 
 
 def _read_json(res: httpx.Response) -> Any:
@@ -367,3 +382,232 @@ def add_offline_tasks(
         "failed": failed,
         "infoHashes": hashes,
     }
+
+
+def _as_int(value: Any) -> int | None:
+    if value is None or value is False:
+        return None
+    try:
+        return int(float(str(value).strip()))
+    except (TypeError, ValueError):
+        return None
+
+
+def _as_float(value: Any) -> float | None:
+    if value is None or value is False:
+        return None
+    try:
+        return float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def extract_tasks_from_payload(data: Any) -> list[Any]:
+    """Parse tasks array from task_lists / space-like payloads."""
+    if not isinstance(data, dict):
+        return []
+    tasks = data.get("tasks") or (
+        data.get("data", {}).get("tasks")
+        if isinstance(data.get("data"), dict)
+        else None
+    ) or data.get("list") or []
+    return tasks if isinstance(tasks, list) else []
+
+
+def fetch_task_lists_once(
+    client: httpx.Client,
+    cookie: str,
+    page: int = 1,
+) -> dict[str, Any]:
+    """GET web lixian task_lists (same endpoint as extract / quota)."""
+    page_n = max(1, int(page or 1))
+    res = client.get(
+        f"https://115.com/web/lixian/?ct=lixian&ac=task_lists&page={page_n}",
+        headers=headers(cookie, "https://115.com/web/lixian/"),
+    )
+    data = _read_json(res)
+    return data if isinstance(data, dict) else {"state": False, "error": "响应异常"}
+
+
+def normalize_offline_task(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    status = _as_int(raw.get("status"))
+    if status is None:
+        status = -99
+    percent = _as_float(raw.get("percentDone") or raw.get("percent_done"))
+    if percent is None:
+        percent = 0.0
+    err = ""
+    for k in ("error_msg", "error", "message", "msg", "errMsg"):
+        v = raw.get(k)
+        if v:
+            err = str(v).strip()
+            break
+    # 部分失败任务把原因放在 move / del_path 等字段旁的文案里
+    if not err and status is not None and status < 0:
+        for k in ("move", "del_path", "file_id"):
+            v = raw.get(k)
+            if isinstance(v, str) and v.strip() and not v.strip().isdigit():
+                err = v.strip()
+                break
+    label = _STATUS_LABEL.get(status) if status is not None else None
+    if not label:
+        if status is not None and status < 0:
+            label = "失败"
+        else:
+            label = f"状态 {status}"
+    info_hash = str(raw.get("info_hash") or raw.get("infoHash") or "").strip()
+    return {
+        "name": str(raw.get("name") or raw.get("file_name") or "").strip() or "未命名任务",
+        "status": status,
+        "statusLabel": label,
+        "percent": max(0.0, min(100.0, percent)),
+        "error": err,
+        "infoHash": info_hash,
+        "size": _as_int(raw.get("size")),
+        "addTime": _as_int(raw.get("add_time") or raw.get("addTime")),
+        "updateTime": _as_int(raw.get("last_update") or raw.get("update_time")),
+        "fileId": str(raw.get("file_id") or raw.get("fileId") or "").strip() or None,
+    }
+
+
+def list_offline_tasks(cookie: str, page: int = 1) -> dict[str, Any]:
+    """List cloud-download (offline) tasks + quota snapshot."""
+    bad = require_cookie_parts(cookie)
+    if bad:
+        return {"ok": False, "message": bad, "tasks": []}
+
+    try:
+        with httpx.Client(
+            timeout=15.0, follow_redirects=True, trust_env=False
+        ) as client:
+            data = fetch_task_lists_once(client, cookie, page)
+    except Exception as e:
+        return {
+            "ok": False,
+            "message": str(e) or "获取离线任务失败",
+            "tasks": [],
+        }
+
+    if data.get("state") is False or (
+        data.get("errno") and not extract_tasks_from_payload(data)
+    ):
+        return {
+            "ok": False,
+            "message": human_error(data, "获取离线任务失败（Cookie 可能过期）"),
+            "tasks": [],
+        }
+
+    tasks: list[dict[str, Any]] = []
+    for row in extract_tasks_from_payload(data):
+        item = normalize_offline_task(row)
+        if item:
+            tasks.append(item)
+
+    return {
+        "ok": True,
+        "message": "ok",
+        "tasks": tasks,
+        "page": _as_int(data.get("page")) or max(1, int(page or 1)),
+        "pageCount": _as_int(data.get("page_count") or data.get("pageCount")),
+        "count": _as_int(data.get("count")),
+        "quota": _as_int(data.get("quota")),
+        "quotaTotal": _as_int(data.get("total") or data.get("quota_total")),
+    }
+
+
+def _is_clear_ok(data: Any) -> bool:
+    if not isinstance(data, dict):
+        return False
+    if data.get("state") is True or data.get("state") == 1:
+        return True
+    code = errcode_of(data)
+    if code == 0 and data.get("state") is not False:
+        return True
+    return False
+
+
+def _clear_via_lixian(
+    client: httpx.Client,
+    cookie: str,
+    flag: int,
+) -> dict[str, Any]:
+    res = client.post(
+        "https://115.com/web/lixian/?ct=lixian&ac=task_clear",
+        content=encode_form([("flag", flag)]),
+        headers=form_headers(cookie, "https://115.com/web/lixian/"),
+    )
+    data = _read_json(res)
+    if _is_clear_ok(data):
+        return {"ok": True, "message": "已清理", "raw": data}
+    return {
+        "ok": False,
+        "message": human_error(data, "lixian 清理失败"),
+        "raw": data,
+    }
+
+
+def _clear_via_clouddownload(
+    client: httpx.Client,
+    cookie: str,
+    flag: int,
+) -> dict[str, Any]:
+    res = client.post(
+        "https://clouddownload.115.com/?ac=task_clear",
+        content=encode_form([("flag", flag)]),
+        headers=form_headers(cookie, "https://115.com/web/lixian/"),
+    )
+    data = _read_json(res)
+    if _is_clear_ok(data):
+        return {"ok": True, "message": "已清理", "raw": data}
+    return {
+        "ok": False,
+        "message": human_error(data, "clouddownload 清理失败"),
+        "raw": data,
+    }
+
+
+def clear_offline_tasks(cookie: str, mode: str = "done") -> dict[str, Any]:
+    """Clear offline tasks. mode: done | failed | all (no source-file delete)."""
+    bad = require_cookie_parts(cookie)
+    if bad:
+        return {"ok": False, "message": bad}
+
+    key = (mode or "done").strip().lower()
+    if key not in CLEAR_MODE_FLAGS:
+        return {
+            "ok": False,
+            "message": "清理类型无效（支持 done / failed / all）",
+        }
+    flag = CLEAR_MODE_FLAGS[key]
+    label = {"done": "已完成", "failed": "已失败", "all": "全部"}.get(key, key)
+
+    try:
+        with httpx.Client(
+            timeout=20.0, follow_redirects=True, trust_env=False
+        ) as client:
+            primary = _clear_via_lixian(client, cookie, flag)
+            if primary.get("ok"):
+                primary["message"] = f"已清理{label}任务"
+                primary["mode"] = key
+                primary["flag"] = flag
+                return primary
+            msg = str(primary.get("message") or "")
+            if re.search(r"Cookie|过期|验证码|911|登录|凭证", msg, re.I):
+                primary["mode"] = key
+                primary["flag"] = flag
+                return primary
+            fallback = _clear_via_clouddownload(client, cookie, flag)
+            if fallback.get("ok"):
+                fallback["message"] = f"已清理{label}任务"
+            fallback["mode"] = key
+            fallback["flag"] = flag
+            return fallback
+    except Exception as e:
+        return {
+            "ok": False,
+            "message": str(e) or "清理离线任务失败",
+            "mode": key,
+            "flag": flag,
+        }

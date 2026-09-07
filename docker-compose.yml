@@ -1,11 +1,11 @@
 # NAS 部署 — 单镜像（web + api），Postgres 独立（不进本 compose）
 #
-# 刮削由外部 MDC-ng 写入 library；本镜像不再内置 scrape Worker (:9210)。
+# Web+API 单镜像；刮削/片商浏览已从本仓库移除。
 #
 # 目录:
 #   /vol1/1000/Docker/sehua-next-web/
 #     docker-compose.yml
-#     data/              → /app/data（SQLite、缓存等；不含 library 正文）
+#     data/              → /app/data（本地缓存等；元数据在外部 Postgres）
 #     library/           → /app/data/library（MDC-ng 片库，单独挂载便于备份/共享）
 #     config/
 #       app.json / app.local.json
@@ -21,7 +21,7 @@ name: sehua-next-web
 
 services:
   app:
-    image: poillysky/sehua-next-web:1.0.20
+    image: poillysky/sehua-next-web:1.1.0
     container_name: sehua-next-web
     restart: always
     mem_limit: 1g
@@ -30,6 +30,7 @@ services:
     environment:
       TZ: Asia/Shanghai
       SNS_COOKIE_SECURE: "0"
+      SNS_META_DSN: postgresql://postgres:postgres@192.168.2.38:5439/nextweb
       API_INTERNAL_BASE: http://127.0.0.1:8020
       WEB_PORT: "3020"
     volumes:

@@ -1,4 +1,4 @@
-"""Startup: seed admin + default settings from config → SQLite."""
+"""Startup: seed admin + default settings from config → Postgres meta."""
 
 from __future__ import annotations
 
@@ -33,22 +33,22 @@ def seed_admin_from_config() -> dict[str, Any]:
             "source": [str(p) for p in config_paths()],
             "seeded": result.get("seeded"),
             "password_reset": result.get("password_reset"),
-            "note": "密码仅首次（或 reset_password_on_boot）从 config 写入 SQLite",
+            "note": "密码仅首次（或 reset_password_on_boot）从 config 写入 Postgres",
         },
     )
 
     if result.get("seeded"):
-        log.info("admin seeded from config → sqlite: %s", username)
+        log.info("admin seeded from config → postgres: %s", username)
     elif result.get("password_reset"):
         log.warning("admin password reset from config: %s", username)
     else:
-        log.info("admin already in sqlite: %s", username)
+        log.info("admin already in postgres: %s", username)
 
     return result
 
 
 def seed_settings_from_config(*, force: bool | None = None) -> dict[str, Any]:
-    """把 config.app.json / app.local.json 的 settings 写入 SQLite。
+    """把 config.app.json / app.local.json 的 settings 写入 Postgres meta。
 
     默认：仅当 key 不存在时填入（不覆盖用户已改配置）。
     force=True 或 config.seed_settings_on_boot=true：强制覆盖写入。
@@ -73,7 +73,7 @@ def seed_settings_from_config(*, force: bool | None = None) -> dict[str, Any]:
             continue
         settings_store.put_setting(k, value)
         seeded.append(k)
-        log.info("settings seeded from config → sqlite: %s", k)
+        log.info("settings seeded from config → postgres: %s", k)
 
     meta = {
         "seeded": seeded,

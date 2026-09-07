@@ -48,6 +48,27 @@ def magnet_search(
         raise HTTPException(status_code=500, detail=f"Bitmagnet 搜索失败: {e}") from e
 
 
+@router.post("/magnet/semantic")
+async def magnet_semantic(
+    body: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Bitmagnet 语义检索（需已灌 bitmagnet_torrent_embed）。"""
+    from .bitmagnet_vector_search import search_semantic
+
+    payload = body or {}
+    q = str(payload.get("query") or payload.get("keyword") or "").strip()
+    if len(q) < 2:
+        raise HTTPException(status_code=400, detail="查询过短")
+    try:
+        data = await search_semantic(q)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"磁力语义搜索失败: {e}") from e
+    if not data.get("ok"):
+        reason = str(data.get("reason") or "unavailable")
+        raise HTTPException(status_code=400, detail=f"语义不可用: {reason}")
+    return _wrap(data, "success")
+
+
 @router.get("/magnet/detail")
 def magnet_detail(
     hash: str = Query(..., min_length=8, max_length=64),

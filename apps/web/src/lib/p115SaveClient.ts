@@ -1,4 +1,4 @@
-import { apiFetch } from "@/lib/api";
+import { apiFetch, type P115SaveSource } from "@/lib/api";
 import {
   isArchiveDownloadLink,
   linkKindOf,
@@ -52,7 +52,7 @@ function classifyFail(msg: string): P115SaveResult {
     return {
       ok: false,
       message: /尚未配置/.test(msg)
-        ? "尚未配置 115，请先到设置填写 Cookie"
+        ? "尚未配置 115，请先到更多填写 Cookie"
         : msg,
       needConfig: true,
     };
@@ -80,11 +80,14 @@ export async function runP115Save(opts: {
   urls: string[];
   password?: string | null;
   titleHint?: string;
+  /** 入口：仓库 / 影视 / 片商 → 对应保存目录 */
+  source?: P115SaveSource;
 }): Promise<P115SaveResult> {
   const urls = Array.from(
     new Set((opts.urls || []).map((u) => u.trim()).filter(Boolean)),
   );
   const password = (opts.password || "").trim();
+  const source = opts.source || 'warehouse';
   if (!urls.length) {
     return { ok: false, message: "没有可转存的磁力 / ED2K / 115 分享链接" };
   }
@@ -102,6 +105,7 @@ export async function runP115Save(opts: {
         body: JSON.stringify({
           urls: shareUrls,
           password: password || undefined,
+          source,
         }),
       });
       const json = (await res.json().catch(() => ({}))) as Envelope;
@@ -137,6 +141,7 @@ export async function runP115Save(opts: {
         password: password || undefined,
         titleHint: opts.titleHint || undefined,
         autoExtract: wantExtract,
+        source,
       }),
     });
     const json = (await res.json().catch(() => ({}))) as Envelope;

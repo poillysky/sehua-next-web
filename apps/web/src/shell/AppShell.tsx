@@ -7,7 +7,6 @@ import {
   Search,
   Clapperboard,
   Film,
-  LayoutGrid,
   Settings,
   ChevronLeft,
 } from 'lucide-react';
@@ -20,8 +19,7 @@ const NAV_ITEMS: { tab: TabRoute; label: string; icon: typeof Search }[] = [
   { tab: '/', label: '仓库', icon: Search },
   { tab: '/media', label: '影视', icon: Clapperboard },
   { tab: '/makers', label: '片商', icon: Film },
-  { tab: '/boards', label: '板块', icon: LayoutGrid },
-  { tab: '/settings', label: '设置', icon: Settings },
+  { tab: '/settings', label: '更多', icon: Settings },
 ];
 
 

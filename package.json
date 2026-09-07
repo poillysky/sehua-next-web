@@ -1,8 +1,8 @@
 {
   "name": "nextweb",
-  "version": "1.0.20",
+  "version": "1.1.0",
   "private": true,
-  "description": "NextWeb monorepo: web + api (MDC-ng 外部刮削)",
+  "description": "NextWeb monorepo: web + api",
   "scripts": {
     "dev": "npm run dev --prefix apps/web",
     "dev:web": "npm run dev --prefix apps/web",

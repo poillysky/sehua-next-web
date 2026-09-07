@@ -1,132 +1,199 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ArrowUp, ChevronRight, Sparkles } from 'lucide-react';
+import { ArrowUp, Sparkles } from 'lucide-react';
 import { AppPush } from '@/components/ui/AppPush';
 import { ResourceDetailBody } from './ResourceDetailBody';
-import { aiChatSearch, proxiedCoverUrl } from '@/lib/api';
-import { formatByteSize } from '@/lib/format';
-import { parseMakerCode } from '@/lib/makerCode';
+import { BitmagnetDetailBody } from '@/features/magnet/BitmagnetDetailBody';
+import { ScrapDetailBody } from '@/features/makers/ScrapDetailBody';
+import { MediaDetailBody } from '@/features/media/MediaDetailBody';
 import {
-  getDescriptionField,
-  normalizeResourceView,
-} from '@/lib/resourceView';
-import type { ResourceItem } from '@/types/resource';
+  assistantChatStream,
+  proxiedCoverUrl,
+  scrapLibraryCoverUrl,
+  type AssistantCard,
+  type AssistantStep,
+  type MediaItem,
+  type ScrapLibraryEmbedItem,
+} from '@/lib/api';
 import { cn } from '@/lib/utils';
-
-type ChatHit = {
-  hash: string;
-  code: string;
-  title: string;
-  board: string;
-  size: string;
-  cover: string;
-  score?: number;
-};
 
 type ChatMsg = {
   id: string;
   role: 'user' | 'assistant';
   text: string;
-  keyword?: string;
-  searchMode?: 'semantic' | 'keyword';
-  hits?: ChatHit[];
-  total?: number;
+  cards?: AssistantCard[];
+  steps?: AssistantStep[];
+  toolSummary?: string;
 };
 
-function stripForumChrome(s: string): string {
-  return s
-    .replace(/\s*[-–|]\s*Powered by Discuz!.*$/i, '')
-    .replace(/\s*[-–|]\s*98堂\s*[\[【]?原?色花堂[\]】]?.*/i, '')
-    .replace(/\[原色花堂\]/g, '')
-    .replace(
-      /\s*[-–|]\s*(亚洲有码原创|亚洲无码原创|欧美无码|国产原创|有码中字).*$/i,
-      '',
-    )
+type DetailState =
+  | { kind: 'sehua'; hash: string }
+  | { kind: 'magnet'; hash: string }
+  | { kind: 'scrap'; item: ScrapLibraryEmbedItem }
+  | { kind: 'media'; item: MediaItem }
+  | null;
+
+const SOURCE_LABEL: Record<string, string> = {
+  sehua: '色花',
+  scrap: '片商',
+  magnet: 'bitmagnet',
+  media: '影视',
+  web: '网络',
+};
+
+const SOURCE_MARK: Record<string, string> = {
+  sehua: '色',
+  scrap: '片',
+  magnet: '磁',
+  media: '影',
+  web: '网',
+};
+
+const PREFER_CHIPS: { id: string; label: string; sources: string[] }[] = [
+  { id: 'all', label: '全部', sources: [] },
+  { id: 'media', label: '影视', sources: ['media'] },
+  { id: 'scrap', label: '片商', sources: ['scrap'] },
+  { id: 'sehua', label: '色花', sources: ['sehua'] },
+  { id: 'magnet', label: 'bitmagnet', sources: ['magnet'] },
+];
+
+function coverForCard(card: AssistantCard): string {
+  const raw = String(card.cover || '').trim();
+  if (!raw) return '';
+  if (card.source === 'scrap') {
+    const item = card.open?.item as ScrapLibraryEmbedItem | undefined;
+    if (item) return scrapLibraryCoverUrl(item, { prefer: 'poster', w: 160 });
+  }
+  if (raw.startsWith('http') || raw.startsWith('/')) {
+    return proxiedCoverUrl(raw);
+  }
+  return proxiedCoverUrl(raw);
+}
+
+function hostFromUrl(url?: string): string {
+  const raw = String(url || '').trim();
+  if (!raw) return '';
+  try {
+    return new URL(raw).hostname.replace(/^www\./i, '');
+  } catch {
+    return '';
+  }
+}
+
+/** 摘要字段用间隔点拆开，便于扫读 */
+function formatCardMeta(raw?: string): string {
+  let text = String(raw || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!text) return '';
+  const labels = [
+    '导演',
+    '主演',
+    '演员',
+    '类型',
+    '制片国家/地区',
+    '制片国家',
+    '地区',
+    '上映日期',
+    '片长',
+    '年份',
+    '评分',
+    '评语',
+  ];
+  for (const label of labels) {
+    text = text.replace(
+      new RegExp(`(?<![·\\s])\\s*(${label})\\s*[:：]`, 'g'),
+      ' · $1：',
+    );
+  }
+  return text
+    .replace(/^(?:\s*·\s*)+/, '')
+    .replace(/(?:\s*·\s*){2,}/g, ' · ')
     .trim();
 }
 
-function firstCode(...parts: string[]): string {
-  for (const p of parts) {
-    const stem = p.replace(/\.(mp4|mkv|avi|wmv|iso|ts|m2ts)$/i, '');
-    const whole = parseMakerCode(stem);
-    if (whole?.canonical) return whole.canonical;
-    const re =
-      /(?:^|[^A-Za-z0-9])((?:\d{2,3})?[A-Za-z]{2,15}[-_\s]?\d{2,8}|FC2[-_\s]?PPV[-_\s]?\d{5,10})/gi;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(stem))) {
-      const parsed = parseMakerCode(m[1]);
-      if (parsed?.canonical) return parsed.canonical;
-    }
+function packLabel(cards: AssistantCard[]): string {
+  const counts: Record<string, number> = {};
+  for (const c of cards) {
+    const s = String(c.source || '');
+    counts[s] = (counts[s] || 0) + 1;
   }
-  return '';
+  return Object.entries(counts)
+    .map(([s, n]) => `${SOURCE_LABEL[s] || s} ${n}`)
+    .join(' · ');
 }
 
-function displayHitTitle(raw: ResourceItem, view: ReturnType<typeof normalizeResourceView>): {
-  code: string;
-  title: string;
-} {
-  const film = getDescriptionField(raw.description, '影片名称') || '';
-  const resource = getDescriptionField(raw.description, '资源名称') || '';
-  const code = firstCode(view.name || '', film, resource, view.title || '');
-  let title = stripForumChrome(film || resource || view.title || view.name || '');
-  if (code && title) {
-    const folded = title.replace(/[\s_\-]/g, '').toUpperCase();
-    if (folded.startsWith(code.replace(/-/g, ''))) {
-      title = title.replace(new RegExp(`^${code}[\\s_\\-]*`, 'i'), '').trim() || title;
-    }
+function cardSecondary(hit: AssistantCard): string {
+  const source = String(hit.source || '');
+  if (source === 'web' || hit.open?.kind === 'url') {
+    return hit.subtitle || hostFromUrl(hit.open?.url) || '';
   }
-  if (!title) title = view.hash;
-  return { code, title };
-}
-
-function toHits(items: ResourceItem[]): ChatHit[] {
-  return items.map((raw) => {
-    const view = normalizeResourceView(raw);
-    const cover = (view.preview_images || [])[0] || '';
-    const extra = raw as ResourceItem & { score?: number };
-    const score = typeof extra.score === 'number' ? extra.score : undefined;
-    const { code, title } = displayHitTitle(raw, view);
-    return {
-      hash: view.hash,
-      code,
-      title,
-      board: view.board_name || '',
-      size: formatByteSize(view.size),
-      cover: cover ? proxiedCoverUrl(cover) : '',
-      score,
-    };
-  });
+  return String(hit.subtitle || '').trim();
 }
 
 export function AiSearchChatPanel({ onBack }: { onBack: () => void }) {
   const [draft, setDraft] = useState('');
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
   const [busy, setBusy] = useState(false);
-  const [detailHash, setDetailHash] = useState<string | null>(null);
+  const [statusText, setStatusText] = useState('正在搜');
+  const [liveSteps, setLiveSteps] = useState<AssistantStep[]>([]);
+  const [partialCards, setPartialCards] = useState<AssistantCard[]>([]);
+  const [preferId, setPreferId] = useState('all');
+  const [detail, setDetail] = useState<DetailState>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const liveStepsRef = useRef<AssistantStep[]>([]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.dataset.aiChat = '1';
+    return () => {
+      delete root.dataset.aiChat;
+      abortRef.current?.abort();
+    };
+  }, []);
 
   useEffect(() => {
     const el = listRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [msgs, busy]);
+  }, [msgs, busy, partialCards, statusText, liveSteps]);
 
   useEffect(() => {
     const input = inputRef.current;
     const list = listRef.current;
     if (!input || !list) return;
-
     const scrollEnd = () => {
       list.scrollTop = list.scrollHeight;
     };
-
     input.addEventListener('focus', scrollEnd);
-    return () => {
-      input.removeEventListener('focus', scrollEnd);
-    };
+    return () => input.removeEventListener('focus', scrollEnd);
   }, []);
+
+  function openCard(card: AssistantCard) {
+    const open = card.open || { kind: '' };
+    if (open.kind === 'sehua' && open.hash) {
+      setDetail({ kind: 'sehua', hash: open.hash });
+      return;
+    }
+    if (open.kind === 'magnet' && open.hash) {
+      setDetail({ kind: 'magnet', hash: open.hash });
+      return;
+    }
+    if (open.kind === 'scrap' && open.item) {
+      setDetail({ kind: 'scrap', item: open.item as ScrapLibraryEmbedItem });
+      return;
+    }
+    if (open.kind === 'media' && open.item) {
+      setDetail({ kind: 'media', item: open.item as MediaItem });
+      return;
+    }
+    if (open.kind === 'url' && open.url) {
+      window.open(open.url, '_blank', 'noopener,noreferrer');
+    }
+  }
 
   async function send(textRaw?: string) {
     const text = (textRaw ?? draft).trim();
@@ -135,24 +202,60 @@ export function AiSearchChatPanel({ onBack }: { onBack: () => void }) {
     setDraft('');
     setMsgs((prev) => [...prev, userMsg]);
     setBusy(true);
+    setStatusText('小花在想…');
+    liveStepsRef.current = [];
+    setLiveSteps([]);
+    setPartialCards([]);
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
+
+    const prefer = PREFER_CHIPS.find((p) => p.id === preferId)?.sources || [];
+    const history = [...msgs, userMsg].slice(-6).map((m) => ({
+      role: m.role,
+      content: m.text,
+      summary: m.toolSummary,
+    }));
+
     try {
-      const history = [...msgs, userMsg]
-        .slice(-6)
-        .map((m) => ({ role: m.role, content: m.text }));
-      const r = await aiChatSearch({ message: text, history });
+      const r = await assistantChatStream(
+        { message: text, history, preferSources: prefer },
+        {
+          onStatus: (t) => setStatusText(t || '正在搜'),
+          onStep: (step) => {
+            liveStepsRef.current = [...liveStepsRef.current, step];
+            setLiveSteps(liveStepsRef.current);
+          },
+          onCardsPartial: (cards) => setPartialCards(cards),
+          onError: (message) => {
+            setMsgs((prev) => [
+              ...prev,
+              { id: `e-${Date.now()}`, role: 'assistant', text: message },
+            ]);
+          },
+        },
+        ac.signal,
+      );
+      const steps =
+        r.steps && r.steps.length > 0 ? r.steps : liveStepsRef.current;
+      const replyText =
+        (r.reply || '').trim() ||
+        (r.toolSummary
+          ? `已检索完成（${r.toolSummary}），但正文未生成，请再试一次。`
+          : '这次没有生成有效答复，请再试一次。');
       setMsgs((prev) => [
         ...prev,
         {
           id: `a-${Date.now()}`,
           role: 'assistant',
-          text: r.reply || '搜完了',
-          keyword: r.keyword,
-          searchMode: r.searchMode,
-          hits: toHits(r.resources || []),
-          total: r.total_count,
+          text: replyText,
+          cards: r.cards || [],
+          steps,
+          toolSummary: r.toolSummary,
         },
       ]);
     } catch (e) {
+      if ((e as Error)?.name === 'AbortError') return;
       setMsgs((prev) => [
         ...prev,
         {
@@ -163,13 +266,17 @@ export function AiSearchChatPanel({ onBack }: { onBack: () => void }) {
       ]);
     } finally {
       setBusy(false);
+      setPartialCards([]);
+      setLiveSteps([]);
+      liveStepsRef.current = [];
+      setStatusText('正在搜');
       inputRef.current?.focus();
     }
   }
 
   return (
     <>
-      <AppPush title="对话搜" onBack={onBack} bodyClassName="ai-chat-push">
+      <AppPush title="小花" onBack={onBack} bodyClassName="ai-chat-push">
         <div className="ai-chat">
           <div className="ai-chat__msgs" ref={listRef}>
             {msgs.length === 0 && !busy ? (
@@ -177,15 +284,19 @@ export function AiSearchChatPanel({ onBack }: { onBack: () => void }) {
                 <span className="ai-chat__empty-icon" aria-hidden>
                   <Sparkles size={22} strokeWidth={1.8} />
                 </span>
-                <p className="ai-chat__empty-title">用说话的方式找片</p>
-                <p className="ai-chat__empty-sub">番号、女优、类型都可以</p>
+                <p className="ai-chat__empty-title">智能搜片助手</p>
+                <p className="ai-chat__empty-sub">影视 · 片商 · 色花 · bitmagnet · 网络</p>
               </div>
             ) : null}
+
             {msgs.map((m) => (
               <div
                 key={m.id}
                 className={cn('ai-chat__row', m.role === 'user' && 'ai-chat__row--user')}
               >
+                {m.role === 'assistant' && m.steps && m.steps.length > 0 ? (
+                  <ThinkingTrace steps={m.steps} />
+                ) : null}
                 {m.text ? (
                   <div
                     className={cn(
@@ -193,70 +304,40 @@ export function AiSearchChatPanel({ onBack }: { onBack: () => void }) {
                       m.role === 'user' && 'ai-chat__bubble--user',
                     )}
                   >
-                    <p className={cn(m.role === 'user' ? '' : 'allow-select')}>{m.text}</p>
+                    {m.role === 'user' ? (
+                      <p>{m.text}</p>
+                    ) : (
+                      <AssistantText text={m.text} />
+                    )}
                   </div>
                 ) : null}
-                {m.hits && m.hits.length > 0 ? (
-                  <div className="ai-chat__pack">
-                    <p className="ai-chat__pack-label">
-                      {m.searchMode === 'semantic' ? '相近结果' : '搜索结果'}
-                      {m.total ? ` · ${m.total}` : ''}
-                    </p>
-                    <ul className="ai-chat__hits">
-                      {m.hits.map((hit) => (
-                        <li key={hit.hash}>
-                          <button
-                            type="button"
-                            className="ai-chat__hit"
-                            onClick={() => setDetailHash(hit.hash)}
-                          >
-                            {hit.cover ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img className="ai-chat__hit-cover" src={hit.cover} alt="" />
-                            ) : (
-                              <span className="ai-chat__hit-cover ai-chat__hit-cover--empty" />
-                            )}
-                            <span className="ai-chat__hit-main">
-                              {hit.code ? (
-                                <span className="ai-chat__hit-code">{hit.code}</span>
-                              ) : null}
-                              <span className="ai-chat__hit-title">{hit.title}</span>
-                              <span className="ai-chat__hit-meta">
-                                {[hit.board, hit.size].filter(Boolean).join(' · ')}
-                              </span>
-                            </span>
-                            {hit.score != null ? (
-                              <span className="ai-chat__hit-score">
-                                {hit.score.toFixed(2)}
-                              </span>
-                            ) : null}
-                            <ChevronRight
-                              className="ai-chat__hit-chevron"
-                              size={18}
-                              strokeWidth={2}
-                              aria-hidden
-                            />
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
+                {m.cards && m.cards.length > 0 ? (
+                  <CardPack cards={m.cards} onOpen={openCard} />
                 ) : null}
               </div>
             ))}
+
             {busy ? (
               <div className="ai-chat__row">
-                <div className="ai-chat__bubble ai-chat__bubble--pending">
-                  <span className="ai-chat__dots" aria-hidden>
-                    <i />
-                    <i />
-                    <i />
-                  </span>
-                  正在搜
-                </div>
+                {liveSteps.length > 0 ? (
+                  <ThinkingTrace steps={liveSteps} live statusText={statusText} />
+                ) : (
+                  <div className="ai-chat__bubble ai-chat__bubble--pending">
+                    <span className="ai-chat__dots" aria-hidden>
+                      <i />
+                      <i />
+                      <i />
+                    </span>
+                    {statusText}
+                  </div>
+                )}
+                {partialCards.length > 0 ? (
+                  <CardPack cards={partialCards} onOpen={openCard} />
+                ) : null}
               </div>
             ) : null}
           </div>
+
           <form
             className="ai-chat__composer"
             onSubmit={(e) => {
@@ -264,6 +345,21 @@ export function AiSearchChatPanel({ onBack }: { onBack: () => void }) {
               void send();
             }}
           >
+            <div className="ai-chat__prefer" role="toolbar" aria-label="优先来源">
+              {PREFER_CHIPS.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  className={cn(
+                    'ai-chat__prefer-chip',
+                    preferId === p.id && 'ai-chat__prefer-chip--on',
+                  )}
+                  onClick={() => setPreferId(p.id)}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
             <div className="ai-chat__field">
               <input
                 ref={inputRef}
@@ -284,17 +380,195 @@ export function AiSearchChatPanel({ onBack }: { onBack: () => void }) {
                 disabled={busy || !draft.trim()}
                 aria-label="发送"
               >
-                <ArrowUp size={16} strokeWidth={2.6} />
+                <ArrowUp size={18} strokeWidth={2.6} />
               </button>
             </div>
           </form>
+          <div className="ai-chat__kbd-spacer" aria-hidden />
         </div>
       </AppPush>
-      {detailHash ? (
-        <AppPush title="详情" onBack={() => setDetailHash(null)}>
-          <ResourceDetailBody hash={detailHash} />
+
+      {detail?.kind === 'sehua' ? (
+        <AppPush title="详情" scrollMode="top" onBack={() => setDetail(null)}>
+          <ResourceDetailBody hash={detail.hash} />
+        </AppPush>
+      ) : null}
+      {detail?.kind === 'magnet' ? (
+        <AppPush title="磁力" scrollMode="top" onBack={() => setDetail(null)}>
+          <BitmagnetDetailBody hash={detail.hash} />
+        </AppPush>
+      ) : null}
+      {detail?.kind === 'scrap' ? (
+        <AppPush title="片商" scrollMode="top" onBack={() => setDetail(null)}>
+          <ScrapDetailBody item={detail.item} />
+        </AppPush>
+      ) : null}
+      {detail?.kind === 'media' ? (
+        <AppPush title="影视" scrollMode="top" onBack={() => setDetail(null)}>
+          <MediaDetailBody item={detail.item} />
         </AppPush>
       ) : null}
     </>
+  );
+}
+
+function AssistantText({ text }: { text: string }) {
+  const lines = String(text || '').split(/\n+/).map((l) => l.trim()).filter(Boolean);
+  if (lines.length <= 1) {
+    return <p className="allow-select">{text}</p>;
+  }
+  return (
+    <div className="ai-chat__prose allow-select">
+      {lines.map((line, i) => {
+        const bullet = /^[·•\-–—]\s+/.test(line) || /^\d+[\.、]\s*/.test(line);
+        const body = line.replace(/^[·•\-–—]\s+/, '').replace(/^\d+[\.、]\s*/, '');
+        if (bullet) {
+          return (
+            <p key={i} className="ai-chat__prose-li">
+              <span aria-hidden>·</span>
+              <span>{body}</span>
+            </p>
+          );
+        }
+        return (
+          <p key={i} className={i === 0 ? 'ai-chat__prose-lead' : undefined}>
+            {line}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+function ThinkingTrace({
+  steps,
+  live = false,
+  statusText,
+}: {
+  steps: AssistantStep[];
+  live?: boolean;
+  statusText?: string;
+}) {
+  const [open, setOpen] = useState(live);
+  useEffect(() => {
+    if (live) setOpen(true);
+  }, [live, steps.length]);
+
+  if (!steps.length) return null;
+  return (
+    <div className={cn('ai-chat__think', live && 'ai-chat__think--live')}>
+      <button
+        type="button"
+        className="ai-chat__think-toggle"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span>{live ? statusText || '思考中…' : '思考过程'}</span>
+        <span className="ai-chat__think-count">{steps.length}</span>
+        <span className={cn('ai-chat__think-chev', open && 'ai-chat__think-chev--open')} aria-hidden>
+          ▾
+        </span>
+      </button>
+      {open ? (
+        <ol className="ai-chat__think-list">
+          {steps.map((s, i) => {
+            const label = s.label || TOOL_STEP_LABEL[String(s.tool || '')] || s.tool || '检索';
+            const detail = [s.query ? `「${s.query}」` : '', s.summary || '']
+              .filter(Boolean)
+              .join(' · ');
+            return (
+              <li key={`${s.tool || 't'}-${i}`} className={s.ok === false ? 'is-bad' : undefined}>
+                <span className="ai-chat__think-label">{label}</span>
+                {detail ? <span className="ai-chat__think-detail">{detail}</span> : null}
+              </li>
+            );
+          })}
+        </ol>
+      ) : null}
+    </div>
+  );
+}
+
+const TOOL_STEP_LABEL: Record<string, string> = {
+  sehua_keyword: '仓库搜索',
+  sehua_semantic: '仓库语义',
+  scrap_search: '片商搜索',
+  scrap_list: '片商筛选',
+  magnet_search: '磁力搜索',
+  magnet_semantic: '磁力语义',
+  media_search: '影视搜索',
+  media_person_works: '影人作品',
+  web_search: '网络搜索',
+};
+
+function CardPack({
+  cards,
+  onOpen,
+}: {
+  cards: AssistantCard[];
+  onOpen: (card: AssistantCard) => void;
+}) {
+  return (
+    <div className="ai-chat__pack">
+      <p className="ai-chat__pack-label">{packLabel(cards)}</p>
+      <ul className="ai-chat__hits">
+        {cards.map((hit) => {
+          const source = String(hit.source || 'web');
+          const cover = coverForCard(hit);
+          const secondary = cardSecondary(hit);
+          const meta = formatCardMeta(hit.meta);
+          const scoreText =
+            hit.score != null && Number.isFinite(Number(hit.score))
+              ? Number(hit.score).toFixed(2)
+              : '';
+          const mark = SOURCE_MARK[source] || (secondary || '·').slice(0, 1);
+          return (
+            <li key={hit.id}>
+              <button
+                type="button"
+                className={cn('ai-chat__hit', `ai-chat__hit--${source}`)}
+                data-source={source}
+                onClick={() => onOpen(hit)}
+              >
+                {cover ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img className="ai-chat__hit-cover" src={cover} alt="" />
+                ) : (
+                  <span
+                    className={cn(
+                      'ai-chat__hit-mark',
+                      `ai-chat__hit-mark--${source}`,
+                    )}
+                    aria-hidden
+                  >
+                    {mark}
+                  </span>
+                )}
+                <span className="ai-chat__hit-main">
+                  <span className="ai-chat__hit-source-row">
+                    <span
+                      className={cn(
+                        'ai-chat__hit-source',
+                        `ai-chat__hit-source--${source}`,
+                      )}
+                    >
+                      {SOURCE_LABEL[source] || source}
+                    </span>
+                    {secondary ? (
+                      <span className="ai-chat__hit-secondary">{secondary}</span>
+                    ) : null}
+                    {scoreText ? (
+                      <span className="ai-chat__hit-score">{scoreText}</span>
+                    ) : null}
+                  </span>
+                  <span className="ai-chat__hit-title">{hit.title}</span>
+                  {meta ? <span className="ai-chat__hit-meta">{meta}</span> : null}
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }

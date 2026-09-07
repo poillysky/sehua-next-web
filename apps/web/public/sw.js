@@ -22,10 +22,7 @@ function shouldBypassCache(url) {
     const p = u.pathname || '';
     // API / 封面 / 代理图：始终走网络，避免 iOS PWA 钉死旧 poster
     if (p.startsWith('/api/')) return true;
-    if (p.includes('/scrape/export/file')) return true;
-    if (p.includes('/scrape/export/img')) return true;
     if (p.includes('/cover-proxy')) return true;
-    if (p.includes('/maker-fs/file/')) return true;
   } catch {
     /* ignore */
   }

@@ -1,4 +1,6 @@
+curl_cffi>=0.7.0
 fastapi>=0.115.0
+python-multipart>=0.0.9
 uvicorn[standard]>=0.32.0
 pydantic>=2.9.0
 bcrypt>=4.2.0

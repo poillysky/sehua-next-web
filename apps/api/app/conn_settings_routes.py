@@ -1,4 +1,4 @@
-"""Scrape / 115 connection settings (SQLite meta)."""
+"""115 / TMDB / forum / library display settings (Postgres meta)."""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from .auth_routes import get_optional_user, require_user
 from . import p115_client, p115_extract, settings_store
 from . import p115_offline as p115_offline_svc
+from . import p115_qrlogin as p115_qrlogin_svc
 from . import p115_share as p115_share_svc
 from .db import ROOT
 
@@ -27,46 +28,10 @@ _ARCHIVE_EXT_RE = re.compile(r"\.(zip|rar|7z)(?:\.[a-z0-9]+)?$", re.I)
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
-# 单容器默认：刮削本机回环；过盾/代理由环境变量注入，UI 不开放填写
-DEFAULT_SCRAPE_ORIGIN = (
-    os.environ.get("SCRAPE_ORIGIN", "http://127.0.0.1:9210").strip()
-    or "http://127.0.0.1:9210"
-)
-DEFAULT_FLARESOLVERR_URL = (
-    os.environ.get("FLARESOLVERR_URL", "").strip()
-    or os.environ.get("SNS_FLARESOLVERR_URL", "").strip()
-)
-DEFAULT_PROXY_URL = (
-    os.environ.get("SNS_PROXY_URL", "").strip()
-    or os.environ.get("HTTPS_PROXY", "").strip()
-    or os.environ.get("HTTP_PROXY", "").strip()
-)
 DEFAULT_LIBRARY_REL = "data/library"
-_LIBRARY_SKIP_DIRS = frozenset({"maker-fs"})
+_LIBRARY_SKIP_DIRS = frozenset()
 
 
-def _normalize_flare_url(raw: str | None) -> str:
-    s = str(raw or "").strip()
-    if not s:
-        return ""
-    if "://" not in s:
-        s = f"http://{s}"
-    s = s.rstrip("/")
-    if not s.lower().endswith("/v1"):
-        s = f"{s}/v1"
-    return s
-
-
-def _normalize_origin_url(raw: str | None) -> str:
-    """支持 127.0.0.1:9210 / http://host:port；默认内置 scrape。"""
-    s = str(raw or "").strip() or DEFAULT_SCRAPE_ORIGIN
-    if "://" not in s:
-        s = f"http://{s}"
-    s = s.rstrip("/")
-    parsed = urlparse(s)
-    if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        return DEFAULT_SCRAPE_ORIGIN.rstrip("/")
-    return s
 
 
 def _normalize_library_rel(raw: str | None) -> str:
@@ -127,104 +92,6 @@ def _safe_data_rel(raw: str | None, *, default: str = "data") -> str:
         return default
 
 
-def _library_options() -> list[dict[str, str]]:
-    """扫描 data/ 下可用库目录（含嵌套，跳过 maker-fs）。"""
-    data_dir = ROOT / "data"
-    data_dir.mkdir(parents=True, exist_ok=True)
-    (data_dir / "library").mkdir(parents=True, exist_ok=True)
-    opts: list[dict[str, str]] = []
-    seen: set[str] = set()
-
-    def add(rel: str, label: str | None = None) -> None:
-        rel = rel.replace("\\", "/").strip("/")
-        if not rel or rel in seen:
-            return
-        seen.add(rel)
-        opts.append({"value": rel, "label": label or rel})
-
-    add(DEFAULT_LIBRARY_REL, "data/library（默认）")
-    try:
-        for dirpath, dirnames, _filenames in os.walk(data_dir):
-            # 跳过隐藏与 maker-fs 整棵
-            base = Path(dirpath)
-            try:
-                rel_base = base.resolve().relative_to(data_dir.resolve()).as_posix()
-            except ValueError:
-                dirnames[:] = []
-                continue
-            parts = () if rel_base == "." else Path(rel_base).parts
-            if parts and parts[0] in _LIBRARY_SKIP_DIRS:
-                dirnames[:] = []
-                continue
-            dirnames[:] = sorted(
-                (
-                    n
-                    for n in dirnames
-                    if not n.startswith(".") and n not in _LIBRARY_SKIP_DIRS
-                ),
-                key=str.lower,
-            )
-            # 深度限制：data/a/b/c 最多 3 层
-            if len(parts) >= 3:
-                dirnames[:] = []
-            for name in dirnames:
-                child_parts = parts + (name,) if parts else (name,)
-                add("data/" + "/".join(child_parts))
-    except OSError:
-        pass
-    return opts
-
-
-def _browse_library_dirs(raw_path: str | None) -> dict[str, Any]:
-    """真实列出项目 data/ 下子目录，供默认库路径浏览。"""
-    rel = _safe_data_rel(raw_path, default="data")
-    abs_dir = (ROOT / rel).resolve()
-    data_root = (ROOT / "data").resolve()
-    try:
-        abs_dir.relative_to(data_root)
-    except ValueError:
-        rel = "data"
-        abs_dir = data_root
-    abs_dir.mkdir(parents=True, exist_ok=True)
-
-    crumbs: list[dict[str, str]] = []
-    acc: list[str] = []
-    for part in Path(rel).parts:
-        acc.append(part)
-        crumbs.append({"name": part, "path": "/".join(acc)})
-
-    entries: list[dict[str, str]] = []
-    try:
-        children = sorted(
-            (c for c in abs_dir.iterdir() if c.is_dir() and not c.name.startswith(".")),
-            key=lambda x: x.name.lower(),
-        )
-        for child in children:
-            child_rel = f"{rel}/{child.name}".replace("\\", "/")
-            entries.append(
-                {
-                    "name": child.name,
-                    "path": child_rel,
-                    "absPath": str(child.resolve()),
-                }
-            )
-    except OSError:
-        pass
-
-    parent: str | None = None
-    parts = Path(rel).parts
-    if len(parts) > 1:
-        parent = "/".join(parts[:-1])
-
-    return {
-        "path": rel,
-        "absPath": str(abs_dir),
-        "parent": parent,
-        "crumbs": crumbs,
-        "entries": entries,
-        "selectable": rel != "data",
-    }
-
 
 def _normalize_proxy_url(raw: str | None) -> str:
     """裸 host:port → http://；非法则空串。"""
@@ -248,155 +115,12 @@ class Envelope(BaseModel):
 
 _COVER_DOWNLOAD_STRATEGIES = frozenset({"priority", "size"})
 
-
-def _normalize_export_concurrency(raw: Any) -> int:
-    """单通道并发：默认 2，上限 4（整容器持续 <1G）。"""
-    try:
-        n = int(raw)
-    except (TypeError, ValueError):
-        n = 2
-    if n <= 0:
-        n = 2
-    return max(1, min(4, n))
-
-
-def _pick_concurrency_raw(raw: dict[str, Any] | None, *keys: str) -> Any:
-    d = raw or {}
-    for k in keys:
-        if k in d and d.get(k) is not None:
-            return d.get(k)
-    return None
-
-
-def _resolve_channel_concurrency(
-    raw: dict[str, Any] | None,
-    *,
-    fast: Any = None,
-    slow: Any = None,
-    legacy: Any = None,
-) -> tuple[int, int, int]:
-    """快/慢通道并发；缺省时回落安全默认（快 2 / 慢 1）。返回 (fast, slow, legacy)。"""
-    d = raw or {}
-    leg = _normalize_export_concurrency(
-        legacy
-        if legacy is not None
-        else _pick_concurrency_raw(d, "exportConcurrency", "export_concurrency")
-    )
-    fast_raw = (
-        fast
-        if fast is not None
-        else _pick_concurrency_raw(
-            d, "exportFastConcurrency", "export_fast_concurrency"
-        )
-    )
-    slow_raw = (
-        slow
-        if slow is not None
-        else _pick_concurrency_raw(
-            d, "exportSlowConcurrency", "export_slow_concurrency"
-        )
-    )
-    # 仅有旧字段：按安全默认拆分，避免快慢都顶到同一高值
-    if fast_raw is None and slow_raw is None:
-        fast_n = min(leg, 2)
-        slow_n = min(leg, 1)
-    else:
-        fast_n = _normalize_export_concurrency(
-            fast_raw if fast_raw is not None else leg
-        )
-        slow_n = _normalize_export_concurrency(
-            slow_raw if slow_raw is not None else 1
-        )
-    return fast_n, slow_n, max(fast_n, slow_n)
-
-
-def _normalize_cover_download_strategy(raw: Any) -> str:
-    """缩略图下载策略：priority=按源优先级；size=全候选比文件大小。"""
-    s = str(raw or "").strip().lower()
-    if s in {"size", "filesize", "quality", "largest"}:
-        return "size"
-    if s in _COVER_DOWNLOAD_STRATEGIES:
-        return s
-    return "priority"
-
-
-class ScrapeConfig(BaseModel):
-    enabled: bool = True
-    origin: str = Field(default="127.0.0.1:9210")
-    library_root: str | None = Field(default=None, alias="libraryRoot")
-    flare_solverr_url: str | None = Field(
-        default=None, alias="flareSolverrUrl"
-    )
-    proxy_url: str | None = Field(default=None, alias="proxyUrl")
-    cover_download_strategy: str | None = Field(
-        default=None, alias="coverDownloadStrategy"
-    )
-    export_concurrency: int | None = Field(
-        default=None, alias="exportConcurrency"
-    )
-    export_fast_concurrency: int | None = Field(
-        default=None, alias="exportFastConcurrency"
-    )
-    export_slow_concurrency: int | None = Field(
-        default=None, alias="exportSlowConcurrency"
-    )
-    poster_crop: dict[str, Any] | None = Field(default=None, alias="posterCrop")
-    naming: dict[str, Any] | None = None
-    metadata_optimize: dict[str, Any] | None = Field(
-        default=None, alias="metadataOptimize"
-    )
-    write_tree: bool | None = Field(default=None, alias="writeTree")
-    write_emby: bool | None = Field(default=None, alias="writeEmby")
-    region_profiles: dict[str, Any] | None = Field(default=None, alias="regionProfiles")
-    kind_profiles: dict[str, Any] | None = Field(default=None, alias="kindProfiles")
-    sources: dict[str, Any] | list[Any] | None = None
-    field_priority: dict[str, Any] | None = Field(default=None, alias="fieldPriority")
-    retry: dict[str, Any] | int | None = None
-    scrape_tasks: list[Any] | None = Field(default=None, alias="scrapeTasks")
-
-    model_config = {"populate_by_name": True}
-
-
-class ScrapeFlareTestBody(BaseModel):
-    origin: str | None = None
-    flare_solverr_url: str | None = Field(default=None, alias="flareSolverrUrl")
-    proxy_url: str | None = Field(default=None, alias="proxyUrl")
-    sample_url: str | None = Field(default=None, alias="sampleUrl")
-
-    model_config = {"populate_by_name": True}
-
-
-class ScrapeProxyTestBody(BaseModel):
-    origin: str | None = None
-    proxy_url: str | None = Field(default=None, alias="proxyUrl")
-
-    model_config = {"populate_by_name": True}
-
-
-class ScrapeSourcesTestBody(BaseModel):
-    ids: list[str] | None = None
-
-
-class ScrapeSourcePatchBody(BaseModel):
-    enabled: bool | None = None
-    base_url: str | None = Field(default=None, alias="baseUrl")
-    retry: int | None = None
-
-    model_config = {"populate_by_name": True}
-
-
-class TmdbConfig(BaseModel):
-    api_key: str = Field(default="", alias="apiKey")
-
-    model_config = {"populate_by_name": True}
-
-
 _FORUM_REGIONS = frozenset({"japan", "china", "western", "mixed", "other"})
 
 
 class ForumSehuatangConfig(BaseModel):
     """色花堂子板地区覆盖：key = fid:typeid（整板 typeid 为空）。
-    地区：japan|china|western|mixed|other。"""
+    地区：japan|china|western|mixed|other"""
 
     region_by_key: dict[str, str] = Field(default_factory=dict, alias="regionByKey")
 
@@ -416,12 +140,20 @@ def _forum_sehuatang_public(raw: Any) -> dict[str, Any]:
     return {"regionByKey": region_by_key}
 
 
+class P115TargetFolder(BaseModel):
+    folder_cid: str = Field(default="0", alias="folderCid")
+    folder_name: str = Field(default="", alias="folderName")
+
+    model_config = {"populate_by_name": True}
+
+
 class P115Config(BaseModel):
     enabled: bool = False
     cookie: str = ""
     folder_cid: str = Field(default="0", alias="folderCid")
     folder_name: str = Field(default="", alias="folderName")
     label: str = ""
+    targets: dict[str, P115TargetFolder] | None = None
     do_validate: bool = Field(default=True, alias="validate")
 
     model_config = {"populate_by_name": True}
@@ -442,6 +174,7 @@ class P115ValidateBody(BaseModel):
 class P115OfflineBody(BaseModel):
     urls: list[str] = Field(min_length=1, max_length=50)
     folder_cid: str | None = Field(default=None, alias="folderCid")
+    source: str | None = None
     password: str | None = None
     title_hint: str | None = Field(default=None, alias="titleHint")
     auto_extract: bool | None = Field(default=None, alias="autoExtract")
@@ -452,9 +185,137 @@ class P115OfflineBody(BaseModel):
 class P115ShareBody(BaseModel):
     urls: list[str] = Field(min_length=1, max_length=20)
     folder_cid: str | None = Field(default=None, alias="folderCid")
+    source: str | None = None
     password: str | None = None
 
     model_config = {"populate_by_name": True}
+
+
+class P115TasksClearBody(BaseModel):
+    """mode: done | failed | all — maps to 115 task_clear flag 0/2/1."""
+
+    mode: str = "done"
+
+
+class P115QrStartBody(BaseModel):
+    app: str = "alipaymini"
+
+
+class P115QrStatusBody(BaseModel):
+    uid: str
+    time: str | int
+    sign: str
+
+
+class P115QrCompleteBody(BaseModel):
+    uid: str
+    app: str = "alipaymini"
+    """若 true，登录成功后直接写入已存目录配置。"""
+    save: bool = True
+
+
+P115_SOURCES = ("warehouse", "movie", "tv", "makers")
+
+
+def _normalize_target_folder(raw: Any) -> dict[str, str]:
+    if not isinstance(raw, dict):
+        return {"folderCid": "0", "folderName": ""}
+    cid = str(raw.get("folder_cid") or raw.get("folderCid") or "0").strip() or "0"
+    name = str(raw.get("folder_name") or raw.get("folderName") or "").strip()
+    return {"folderCid": cid, "folderName": name}
+
+
+def _target_usable(item: Any) -> bool:
+    return isinstance(item, dict) and (
+        item.get("folder_cid") is not None
+        or item.get("folderCid") is not None
+        or item.get("folder_name") is not None
+        or item.get("folderName") is not None
+    )
+
+
+def _p115_targets(raw: dict[str, Any] | None) -> dict[str, dict[str, str]]:
+    """Per-entry save dirs: warehouse / movie / tv / makers.
+
+    Legacy ``folder_*`` → warehouse. Legacy ``targets.media`` → movie & tv.
+    """
+    legacy_cid = str((raw or {}).get("folder_cid") or (raw or {}).get("folderCid") or "0").strip() or "0"
+    legacy_name = str((raw or {}).get("folder_name") or (raw or {}).get("folderName") or "").strip()
+    warehouse_fallback = {"folderCid": legacy_cid, "folderName": legacy_name}
+    src = (raw or {}).get("targets") if isinstance(raw, dict) else None
+    legacy_media = (
+        _normalize_target_folder(src.get("media"))
+        if isinstance(src, dict) and _target_usable(src.get("media"))
+        else None
+    )
+    out: dict[str, dict[str, str]] = {}
+    for key in P115_SOURCES:
+        item = src.get(key) if isinstance(src, dict) else None
+        if _target_usable(item):
+            out[key] = _normalize_target_folder(item)
+        elif key == "warehouse":
+            out[key] = warehouse_fallback
+        elif key in ("movie", "tv") and legacy_media is not None:
+            out[key] = dict(legacy_media)
+        else:
+            out[key] = dict(warehouse_fallback)
+    return out
+
+
+def _resolve_p115_folder(
+    raw: dict[str, Any] | None,
+    *,
+    source: str | None = None,
+    folder_cid: str | None = None,
+) -> tuple[str, str]:
+    """Return (cid, name). Explicit folder_cid wins; else targets[source]."""
+    targets = _p115_targets(raw)
+    if folder_cid is not None and str(folder_cid).strip() != "":
+        cid = str(folder_cid).strip() or "0"
+        for t in targets.values():
+            if t["folderCid"] == cid and t["folderName"]:
+                return cid, t["folderName"]
+        return cid, ""
+    key = (source or "warehouse").strip().lower()
+    # legacy alias
+    if key == "media":
+        key = "movie"
+    if key not in P115_SOURCES:
+        key = "warehouse"
+    t = targets[key]
+    return t["folderCid"], t["folderName"]
+
+
+def _targets_for_store(
+    body_targets: dict[str, P115TargetFolder] | None,
+    prev: dict[str, Any] | None,
+    *,
+    fallback_cid: str,
+    fallback_name: str,
+) -> dict[str, dict[str, str]]:
+    merged = _p115_targets(prev)
+    # Ensure warehouse reflects legacy fields when body omits targets
+    if not body_targets:
+        merged["warehouse"] = {
+            "folderCid": fallback_cid,
+            "folderName": fallback_name,
+        }
+        return {
+            k: {"folder_cid": v["folderCid"], "folder_name": v["folderName"]}
+            for k, v in merged.items()
+        }
+    for key in P115_SOURCES:
+        item = body_targets.get(key)
+        if item is None:
+            continue
+        merged[key] = {
+            "folderCid": (item.folder_cid or "0").strip() or "0",
+            "folderName": (item.folder_name or "").strip(),
+        }
+    return {
+        k: {"folder_cid": v["folderCid"], "folder_name": v["folderName"]}
+        for k, v in merged.items()
+    }
 
 
 def _is_offline_url(link: str) -> bool:
@@ -486,240 +347,22 @@ def _cookie_hint(cookie: str) -> str:
     return ""
 
 
-def _scrape_public(raw: dict[str, Any] | None) -> dict[str, Any]:
-    from . import scrape_profiles
-
-    cfg = ScrapeConfig.model_validate(raw or {})
-    origin = _normalize_origin_url(cfg.origin)
-    lib = _normalize_library_rel(cfg.library_root)
-    configured = bool(origin)
-    raw_profiles = (
-        (raw or {}).get("kindProfiles")
-        or (raw or {}).get("kind_profiles")
-        or (raw or {}).get("regionProfiles")
-        or (raw or {}).get("region_profiles")
-    )
-    if cfg.kind_profiles is not None:
-        raw_profiles = cfg.kind_profiles
-    elif cfg.region_profiles is not None:
-        raw_profiles = cfg.region_profiles
-    try:
-        priority_schema = int(
-            (raw or {}).get("kindPrioritySchema")
-            or (raw or {}).get("kind_priority_schema")
-            or 0
-        )
-    except (TypeError, ValueError):
-        priority_schema = 0
-    try:
-        field_priority_schema = int(
-            (raw or {}).get("fieldPrioritySchema")
-            or (raw or {}).get("field_priority_schema")
-            or 0
-        )
-    except (TypeError, ValueError):
-        field_priority_schema = 0
-    extras = scrape_profiles.profiles_public(
-        raw_profiles,
-        raw_sources=(raw or {}).get("sources"),
-        raw_field_priority=(raw or {}).get("fieldPriority")
-        or (raw or {}).get("field_priority"),
-        raw_retry=(raw or {}).get("retry"),
-        raw_tasks=(raw or {}).get("scrapeTasks")
-        or (raw or {}).get("scrape_tasks"),
-        priority_schema=priority_schema,
-        field_priority_schema=field_priority_schema,
-    )
-    upgraded = bool(extras.pop("_upgradedPriority", False))
-    upgraded_fp = bool(extras.pop("_upgradedFieldPriority", False))
-    if upgraded or upgraded_fp:
-        # 一次性写入新源序 / 字段默认，避免每次 GET 都判定升级
-        next_raw = dict(raw or {})
-        if upgraded or upgraded_fp:
-            next_raw["kindProfiles"] = extras.get("kindProfiles")
-            next_raw["regionProfiles"] = extras.get("kindProfiles")
-        if upgraded:
-            next_raw["kindPrioritySchema"] = scrape_profiles.KIND_PRIORITY_SCHEMA
-        if upgraded or upgraded_fp:
-            next_raw["fieldPriority"] = extras.get("fieldPriority")
-            next_raw["fieldPrioritySchema"] = scrape_profiles.FIELD_PRIORITY_SCHEMA
-        if upgraded_fp:
-            next_raw["scrapeTasks"] = extras.get("scrapeTasks")
-        try:
-            settings_store.put_setting(settings_store.SCRAPE_KEY, next_raw)
-        except Exception:
-            pass
-    raw_flare = (raw or {}).get("flareSolverrUrl")
-    if raw_flare is None:
-        raw_flare = (raw or {}).get("flare_solverr_url")
-    if raw_flare is None and cfg.flare_solverr_url is None:
-        flare = DEFAULT_FLARESOLVERR_URL
-    else:
-        flare = _normalize_flare_url(
-            cfg.flare_solverr_url if cfg.flare_solverr_url is not None else raw_flare
-        )
-    raw_proxy = (raw or {}).get("proxyUrl")
-    if raw_proxy is None:
-        raw_proxy = (raw or {}).get("proxy_url")
-    if raw_proxy is None and cfg.proxy_url is None:
-        proxy = ""
-    else:
-        proxy = _normalize_proxy_url(
-            cfg.proxy_url if cfg.proxy_url is not None else raw_proxy
-        )
-    raw_cover_strategy = (raw or {}).get("coverDownloadStrategy")
-    if raw_cover_strategy is None:
-        raw_cover_strategy = (raw or {}).get("cover_download_strategy")
-    if cfg.cover_download_strategy is not None:
-        cover_strategy = _normalize_cover_download_strategy(cfg.cover_download_strategy)
-    else:
-        cover_strategy = _normalize_cover_download_strategy(raw_cover_strategy)
-    raw_export_conc = (raw or {}).get("exportConcurrency")
-    if raw_export_conc is None:
-        raw_export_conc = (raw or {}).get("export_concurrency")
-    export_fast_concurrency, export_slow_concurrency, export_concurrency = (
-        _resolve_channel_concurrency(
-            raw if isinstance(raw, dict) else None,
-            fast=(
-                cfg.export_fast_concurrency
-                if cfg.export_fast_concurrency is not None
-                else None
-            ),
-            slow=(
-                cfg.export_slow_concurrency
-                if cfg.export_slow_concurrency is not None
-                else None
-            ),
-            legacy=(
-                cfg.export_concurrency
-                if cfg.export_concurrency is not None
-                else raw_export_conc
-            ),
-        )
-    )
-    raw_poster_crop = (raw or {}).get("posterCrop")
-    if raw_poster_crop is None:
-        raw_poster_crop = (raw or {}).get("poster_crop")
-    if cfg.poster_crop is not None:
-        poster_crop = scrape_profiles.normalize_poster_crop(cfg.poster_crop)
-    else:
-        poster_crop = scrape_profiles.normalize_poster_crop(raw_poster_crop)
-    from . import scrape_naming
-
-    # 路径固定；客户端 naming 一律忽略
-    naming = scrape_naming.fixed_naming()
-    from . import scrape_metadata_optimize
-
-    raw_meta_opt = (raw or {}).get("metadataOptimize")
-    if raw_meta_opt is None:
-        raw_meta_opt = (raw or {}).get("metadata_optimize")
-    if cfg.metadata_optimize is not None:
-        metadata_optimize = scrape_metadata_optimize.normalize_metadata_optimize(
-            cfg.metadata_optimize
-        )
-    else:
-        metadata_optimize = scrape_metadata_optimize.normalize_metadata_optimize(
-            raw_meta_opt
-        )
-    return {
-        "enabled": True,
-        "origin": origin,
-        "libraryRoot": lib,
-        "libraryAbs": _library_abs(lib),
-        "libraryOptions": _library_options(),
-        "flareSolverrUrl": flare,
-        "proxyUrl": proxy,
-        "coverDownloadStrategy": cover_strategy,
-        "exportConcurrency": export_concurrency,
-        "exportFastConcurrency": export_fast_concurrency,
-        "exportSlowConcurrency": export_slow_concurrency,
-        "posterCrop": poster_crop,
-        "naming": naming,
-        "metadataOptimize": metadata_optimize,
-        "writeTree": bool(
-            cfg.write_tree
-            if cfg.write_tree is not None
-            else (raw or {}).get("writeTree", (raw or {}).get("write_tree", True))
-        ),
-        "writeEmby": bool(
-            cfg.write_emby
-            if cfg.write_emby is not None
-            else (raw or {}).get("writeEmby", (raw or {}).get("write_emby", True))
-        ),
-        "configured": configured,
-        "sourcesLastAutoTestAt": (raw or {}).get("sourcesLastAutoTestAt")
-        or (raw or {}).get("sources_last_auto_test_at"),
-        "kindPrioritySchema": scrape_profiles.KIND_PRIORITY_SCHEMA,
-        **extras,
-    }
 
 
-def _probe_scrape_online(origin: str, *, timeout: float = 0.6) -> bool:
-    """探测刮削服务 /health 是否可达（短超时，供设置页状态）。"""
-    base = _normalize_origin_url(origin)
-    try:
-        with httpx.Client(timeout=timeout, trust_env=False) as client:
-            res = client.get(f"{base}/health")
-            return res.status_code < 400
-    except Exception:
-        return False
-
-
-def _sync_network_to_scrape(origin: str, flare_url: str, proxy_url: str) -> bool:
-    """把过盾/代理推到 :9210。成功 True，失败 False（不影响保存）。"""
-    base = _normalize_origin_url(origin)
-    try:
-        with httpx.Client(timeout=3.0, trust_env=False) as client:
-            r = client.put(
-                f"{base}/api/config/network",
-                json={
-                    "flareSolverrUrl": flare_url or "",
-                    "proxyUrl": proxy_url or "",
-                },
-            )
-            return r.status_code < 400
-    except Exception:
-        return False
-
-
-def ensure_scrape_network_synced(
-    *,
-    retries: int = 12,
-    delay_sec: float = 1.5,
-) -> bool:
-    """把设置里的网络管理配置推到刮削服务；启动或刮削前自动同步。"""
-    raw = settings_store.get_setting(settings_store.SCRAPE_KEY) or {}
-    origin = _normalize_origin_url(raw.get("origin") or DEFAULT_SCRAPE_ORIGIN)
-    flare = _normalize_flare_url(
-        str(raw.get("flareSolverrUrl") or DEFAULT_FLARESOLVERR_URL)
-    )
-    proxy = _normalize_proxy_url(
-        str(raw.get("proxyUrl") or raw.get("proxy_url") or "")
-    )
-
-    for i in range(max(1, retries)):
-        if _sync_network_to_scrape(origin, flare, proxy):
-            if i > 0:
-                logging.getLogger("sns.api").info(
-                    "scrape network synced after %s tries", i + 1
-                )
-            return True
-        time.sleep(delay_sec)
-    logging.getLogger("sns.api").warning(
-        "scrape network sync failed origin=%s", origin
-    )
-    return False
 
 
 def _p115_public(raw: dict[str, Any] | None, *, include_cookie: bool = False) -> dict[str, Any]:
-    # raw uses snake_case from sqlite
+    # raw uses snake_case from meta store
     cookie = str((raw or {}).get("cookie") or "").strip()
     configured = bool(cookie and "UID=" in cookie.upper())
+    targets = _p115_targets(raw)
+    warehouse = targets["warehouse"]
     data = {
         "enabled": bool((raw or {}).get("enabled")),
-        "folderCid": str((raw or {}).get("folder_cid") or "0"),
-        "folderName": str((raw or {}).get("folder_name") or ""),
+        "folderCid": warehouse["folderCid"],
+        "folderName": warehouse["folderName"],
         "label": str((raw or {}).get("label") or ""),
+        "targets": targets,
         "hasCookie": bool(cookie),
         "cookieHint": _cookie_hint(cookie) if configured else "",
         "configured": configured,
@@ -782,6 +425,12 @@ def put_forum_sehuatang(
     data = _forum_sehuatang_public(saved["value"])
     data["updated_at"] = saved["updated_at"]
     return Envelope(data=data, message="saved")
+
+
+class TmdbConfig(BaseModel):
+    api_key: str = Field(default="", alias="apiKey")
+
+    model_config = {"populate_by_name": True}
 
 
 @router.get("/tmdb", response_model=Envelope)
@@ -859,848 +508,6 @@ async def test_tmdb(
     )
 
 
-@router.get("/scrape", response_model=Envelope)
-def get_scrape(_user: dict[str, Any] | None = Depends(get_optional_user)) -> Envelope:
-    data = _scrape_public(settings_store.get_setting(settings_store.SCRAPE_KEY))
-    # 刮削端已移除：不再对 apps/scrape 发起 /health 探测
-    data["online"] = False
-    return Envelope(
-        data=data,
-        message="online"
-        if data["online"]
-        else ("configured" if data["configured"] else "not_configured"),
-    )
-
-
-@router.get("/scrape/poster-crop", response_model=Envelope)
-def get_scrape_poster_crop(
-    _user: dict[str, Any] | None = Depends(get_optional_user),
-) -> Envelope:
-    """仅返回海报取景配置（不探测刮削在线、不展开整包 profiles）。"""
-    from . import scrape_profiles
-
-    raw = settings_store.get_setting(settings_store.SCRAPE_KEY) or {}
-    pc = scrape_profiles.normalize_poster_crop(
-        raw.get("posterCrop") or raw.get("poster_crop")
-    )
-    return Envelope(data=pc, message="ok")
-
-
-class PosterCropBody(BaseModel):
-    poster_crop: dict[str, Any] | None = Field(default=None, alias="posterCrop")
-
-    model_config = {"populate_by_name": True}
-
-
-@router.put("/scrape/poster-crop", response_model=Envelope)
-def put_scrape_poster_crop(
-    body: PosterCropBody,
-    _user: dict[str, Any] = Depends(require_user),
-) -> Envelope:
-    """只更新 posterCrop，避免整包 scrape 保存 + 在线探测。"""
-    from . import scrape_profiles
-
-    if body.poster_crop is None:
-        raise HTTPException(status_code=400, detail="缺少 posterCrop")
-    prev = dict(settings_store.get_setting(settings_store.SCRAPE_KEY) or {})
-    pc = scrape_profiles.normalize_poster_crop(body.poster_crop)
-    prev["posterCrop"] = pc
-    settings_store.put_setting(settings_store.SCRAPE_KEY, prev)
-    return Envelope(data=pc, message="saved")
-
-
-@router.get("/scrape/library-dirs", response_model=Envelope)
-def browse_scrape_library_dirs(
-    path: str = "data",
-    _user: dict[str, Any] = Depends(require_user),
-) -> Envelope:
-    """浏览项目 data/ 下真实目录，供默认库路径选择。"""
-    return Envelope(data=_browse_library_dirs(path), message="ok")
-
-
-@router.put("/scrape", response_model=Envelope)
-def put_scrape(
-    body: ScrapeConfig,
-    _user: dict[str, Any] = Depends(require_user),
-) -> Envelope:
-    # 单镜像：刮削地址固定内置，忽略客户端填写
-    origin = _normalize_origin_url(DEFAULT_SCRAPE_ORIGIN)
-    from . import scrape_profiles
-
-    prev = settings_store.get_setting(settings_store.SCRAPE_KEY) or {}
-    # 未传 libraryRoot 时保留旧值，避免「只存任务」把库路径打回默认
-    if body.library_root is not None and str(body.library_root).strip():
-        lib = _normalize_library_rel(body.library_root)
-    else:
-        lib = _normalize_library_rel(
-            prev.get("libraryRoot") or prev.get("library_root") or DEFAULT_LIBRARY_REL
-        )
-    if body.kind_profiles is not None:
-        try:
-            prev_schema = int(
-                prev.get("kindPrioritySchema")
-                or prev.get("kind_priority_schema")
-                or 0
-            )
-        except (TypeError, ValueError):
-            prev_schema = 0
-        gfp = None
-        if body.field_priority is not None:
-            gfp = scrape_profiles.normalize_field_priority(body.field_priority)
-        # 用已存 schema 判断是否升级源序；勿传当前 SCHEMA（会跳过升级）
-        profiles = scrape_profiles.normalize_kind_profiles(
-            body.kind_profiles,
-            priority_schema=prev_schema,
-            global_field_priority=gfp,
-        )
-    elif body.region_profiles is not None:
-        try:
-            prev_schema = int(
-                prev.get("kindPrioritySchema")
-                or prev.get("kind_priority_schema")
-                or 0
-            )
-        except (TypeError, ValueError):
-            prev_schema = 0
-        gfp = None
-        if body.field_priority is not None:
-            gfp = scrape_profiles.normalize_field_priority(body.field_priority)
-        profiles = scrape_profiles.normalize_kind_profiles(
-            body.region_profiles,
-            priority_schema=prev_schema,
-            global_field_priority=gfp,
-        )
-    else:
-        try:
-            prev_schema = int(
-                prev.get("kindPrioritySchema")
-                or prev.get("kind_priority_schema")
-                or 0
-            )
-        except (TypeError, ValueError):
-            prev_schema = 0
-        gfp = None
-        if body.field_priority is not None:
-            gfp = scrape_profiles.normalize_field_priority(body.field_priority)
-        profiles = scrape_profiles.normalize_kind_profiles(
-            prev.get("kindProfiles")
-            or prev.get("kind_profiles")
-            or prev.get("regionProfiles")
-            or prev.get("region_profiles"),
-            priority_schema=prev_schema,
-            global_field_priority=gfp,
-        )
-    if body.sources is not None:
-        # 允许传 list（卡片数组）或 map
-        if isinstance(body.sources, list):
-            src_map = {str(x.get("id")): x for x in body.sources if isinstance(x, dict) and x.get("id")}
-        else:
-            src_map = body.sources
-        sources = scrape_profiles.normalize_sources_map(src_map)
-    else:
-        sources = scrape_profiles.normalize_sources_map(prev.get("sources"))
-    if body.field_priority is not None:
-        field_priority = scrape_profiles.normalize_field_priority(body.field_priority)
-    else:
-        ref = profiles.get("japan_censored") or {}
-        field_priority = scrape_profiles.normalize_field_priority(
-            ref.get("fieldPriority")
-        )
-    if body.retry is not None:
-        retry = scrape_profiles.normalize_retry(body.retry)
-    else:
-        retry = scrape_profiles.normalize_retry(prev.get("retry"))
-    if body.flare_solverr_url is not None:
-        flare = _normalize_flare_url(body.flare_solverr_url) or DEFAULT_FLARESOLVERR_URL
-    else:
-        prev_flare = prev.get("flareSolverrUrl")
-        if prev_flare is None:
-            prev_flare = prev.get("flare_solverr_url")
-        flare = (
-            DEFAULT_FLARESOLVERR_URL
-            if prev_flare is None
-            else _normalize_flare_url(str(prev_flare))
-        )
-    if body.proxy_url is not None:
-        proxy = _normalize_proxy_url(body.proxy_url) or DEFAULT_PROXY_URL
-    else:
-        prev_proxy = prev.get("proxyUrl")
-        if prev_proxy is None:
-            prev_proxy = prev.get("proxy_url")
-        proxy = _normalize_proxy_url(str(prev_proxy or "")) or DEFAULT_PROXY_URL
-    if body.cover_download_strategy is not None:
-        cover_strategy = _normalize_cover_download_strategy(body.cover_download_strategy)
-    else:
-        prev_cover = prev.get("coverDownloadStrategy")
-        if prev_cover is None:
-            prev_cover = prev.get("cover_download_strategy")
-        cover_strategy = _normalize_cover_download_strategy(prev_cover)
-    if (
-        body.export_fast_concurrency is not None
-        or body.export_slow_concurrency is not None
-    ):
-        prev_fast, prev_slow, _ = _resolve_channel_concurrency(
-            prev if isinstance(prev, dict) else None
-        )
-        export_fast_concurrency = _normalize_export_concurrency(
-            body.export_fast_concurrency
-            if body.export_fast_concurrency is not None
-            else prev_fast
-        )
-        export_slow_concurrency = _normalize_export_concurrency(
-            body.export_slow_concurrency
-            if body.export_slow_concurrency is not None
-            else prev_slow
-        )
-        export_concurrency = max(
-            export_fast_concurrency, export_slow_concurrency
-        )
-    elif body.export_concurrency is not None:
-        # 旧客户端只传 exportConcurrency：快/慢一起改
-        n = _normalize_export_concurrency(body.export_concurrency)
-        export_fast_concurrency = n
-        export_slow_concurrency = n
-        export_concurrency = n
-    else:
-        export_fast_concurrency, export_slow_concurrency, export_concurrency = (
-            _resolve_channel_concurrency(
-                prev if isinstance(prev, dict) else None
-            )
-        )
-    if body.poster_crop is not None:
-        poster_crop = scrape_profiles.normalize_poster_crop(body.poster_crop)
-    else:
-        prev_pc = prev.get("posterCrop")
-        if prev_pc is None:
-            prev_pc = prev.get("poster_crop")
-        poster_crop = scrape_profiles.normalize_poster_crop(prev_pc)
-    from . import scrape_naming
-
-    # 路径固定；忽略客户端自定义 naming
-    naming = scrape_naming.fixed_naming()
-    from . import scrape_metadata_optimize
-
-    if body.metadata_optimize is not None:
-        metadata_optimize = scrape_metadata_optimize.normalize_metadata_optimize(
-            body.metadata_optimize
-        )
-    else:
-        metadata_optimize = scrape_metadata_optimize.normalize_metadata_optimize(
-            prev.get("metadataOptimize") or prev.get("metadata_optimize")
-        )
-    if body.scrape_tasks is not None:
-        scrape_tasks = scrape_profiles.normalize_scrape_tasks(body.scrape_tasks)
-    else:
-        scrape_tasks = scrape_profiles.normalize_scrape_tasks(
-            prev.get("scrapeTasks") or prev.get("scrape_tasks")
-        )
-    if body.write_tree is not None:
-        write_tree = bool(body.write_tree)
-    else:
-        write_tree = bool(prev.get("writeTree", prev.get("write_tree", True)))
-    if body.write_emby is not None:
-        write_emby = bool(body.write_emby)
-    else:
-        write_emby = bool(prev.get("writeEmby", prev.get("write_emby", True)))
-    saved = settings_store.put_setting(
-        settings_store.SCRAPE_KEY,
-        {
-            "enabled": True,
-            "origin": origin,
-            "libraryRoot": lib,
-            "flareSolverrUrl": flare,
-            "proxyUrl": proxy,
-            "coverDownloadStrategy": cover_strategy,
-            "exportConcurrency": export_concurrency,
-            "exportFastConcurrency": export_fast_concurrency,
-            "exportSlowConcurrency": export_slow_concurrency,
-            "posterCrop": poster_crop,
-            "naming": naming,
-            "metadataOptimize": metadata_optimize,
-            "writeTree": write_tree,
-            "writeEmby": write_emby,
-            "kindProfiles": profiles,
-            "regionProfiles": profiles,
-            "sources": sources,
-            "fieldPriority": field_priority,
-            "retry": retry,
-            "scrapeTasks": scrape_tasks,
-            "kindPrioritySchema": scrape_profiles.KIND_PRIORITY_SCHEMA,
-            "fieldPrioritySchema": scrape_profiles.FIELD_PRIORITY_SCHEMA,
-        },
-    )
-    # 刮削端已移除：网络管理配置仅保存到 meta，不再尝试同步到 apps/scrape
-    # 暂停/进行中：任务卡改动立即热更新到当前导出
-    if body.scrape_tasks is not None:
-        try:
-            from . import scrape_export
-
-            scrape_export.sync_running_task_from_settings()
-        except Exception:
-            logging.getLogger("sns.settings").exception(
-                "sync running scrape task failed"
-            )
-    data = _scrape_public(saved["value"])
-    data["updated_at"] = saved["updated_at"]
-    # 刮削端已移除：不再对 apps/scrape 发起 /health 探测
-    data["online"] = False
-    return Envelope(data=data, message="saved")
-
-
-@router.post("/scrape/test", response_model=Envelope)
-def test_scrape(
-    body: ScrapeConfig,
-    _user: dict[str, Any] = Depends(require_user),
-) -> Envelope:
-    origin = _normalize_origin_url(body.origin)
-    try:
-        with httpx.Client(timeout=4.0, trust_env=False) as client:
-            res = client.get(f"{origin}/health")
-            if res.status_code >= 500:
-                raise HTTPException(status_code=502, detail=f"刮削服务异常 {res.status_code}")
-            ok = res.status_code < 400
-            return Envelope(
-                data={"ok": ok, "status": res.status_code, "origin": origin},
-                message="在线" if ok else f"HTTP {res.status_code}",
-            )
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"无法连接：{e}") from e
-
-
-def _friendly_probe_error(raw: str | Exception | None) -> str:
-    """把 WinError / httpx / 代理连接异常收成短中文。"""
-    msg = str(raw or "").strip()
-    if not msg:
-        return "探测失败"
-    if re.search(r"10054|ECONNRESET|ConnectionReset|强迫关闭|forcibly closed", msg, re.I):
-        return "连接被重置"
-    if re.search(r"10061|ECONNREFUSED|Connection refused", msg, re.I):
-        return "连接被拒绝"
-    if re.search(r"ConnectError", msg, re.I):
-        return "无法建立连接"
-    if re.search(r"timed?\s*out|Timeout", msg, re.I):
-        return "探测超时"
-    if re.search(r"proxy", msg, re.I) and re.search(r"407|auth", msg, re.I):
-        return "代理认证失败"
-    if re.search(r"proxy", msg, re.I) and re.search(r"refused|connect|unreachable", msg, re.I):
-        return "代理连接失败"
-    if re.search(r"InvalidURL|No host supplied|URL has an invalid label|Invalid port", msg, re.I):
-        return "地址格式不正确"
-    if re.search(r"getaddrinfo failed|Name or service not known|nodename nor servname", msg, re.I):
-        return "域名解析失败"
-    if re.search(r"certificate|ssl|tls", msg, re.I):
-        return "SSL 连接失败"
-    return msg[:160]
-
-
-def _friendly_flare_message(raw: str | Exception | None) -> str:
-    """把 FlareSolverr 原始英文 message 收成短中文。"""
-    msg = str(raw or "").strip()
-    if not msg:
-        return "过盾失败"
-    if re.search(r"Challenge not detected", msg, re.I):
-        return "过盾正常"
-    if re.search(r"Challenge solved", msg, re.I):
-        return "过盾正常"
-    if re.search(r"timed?\s*out|Timeout", msg, re.I):
-        return "过盾超时"
-    if re.search(r"session.+doesn't exist|session.+not exist", msg, re.I):
-        return "过盾会话不存在"
-    if re.search(r"blocked this request|ip is banned|Access denied", msg, re.I):
-        return "目标站点拒绝访问"
-    if re.search(r"proxy", msg, re.I) and re.search(r"auth|407", msg, re.I):
-        return "代理认证失败"
-    if re.search(r"proxy", msg, re.I):
-        return "过盾代理异常"
-    if re.search(r"invalid.+cmd|mandatory", msg, re.I):
-        return "过盾请求参数错误"
-    return _friendly_probe_error(msg)
-
-
-def _is_transient_probe_error(exc: BaseException) -> bool:
-    """刮削热重载 / 瞬时断连，可重试。"""
-    if isinstance(
-        exc,
-        (
-            httpx.ConnectError,
-            httpx.RemoteProtocolError,
-            httpx.ReadError,
-            httpx.WriteError,
-            httpx.CloseError,
-        ),
-    ):
-        return True
-    msg = str(exc)
-    return bool(
-        re.search(
-            r"10054|10061|ECONNRESET|ECONNREFUSED|ConnectionReset|强迫关闭|"
-            r"forcibly closed|Server disconnected|Connection refused",
-            msg,
-            re.I,
-        )
-    )
-
-
-def _probe_one_source(origin: str, sid: str, base_url: str) -> dict[str, Any]:
-    """调 :9210 探测；forum 本地视为 ok。
-
-    探测路径禁止全量镜像发现；过盾单枪约 ≤42s（airav 跟镜像），代理直连 ≤18s。
-    httpx 留一点余量。遇连接重置（刮削热重载）自动重试。
-    """
-    import time
-
-    if sid == "forum":
-        return {"id": sid, "status": "ok", "lastError": None, "cooldownSec": 0}
-    payload = {"id": sid, "baseUrl": base_url}
-    last_err: Exception | None = None
-    # airav 等不稳定过盾可能多跳镜像，单枪留足时间
-    probe_timeout = 70.0 if sid in {"airav_io", "airav", "mgstage"} else 50.0
-    for attempt in range(3):
-        try:
-            with httpx.Client(timeout=probe_timeout, trust_env=False) as client:
-                r = client.post(
-                    f"{origin.rstrip('/')}/api/sources/probe", json=payload
-                )
-                if r.status_code >= 400:
-                    return {
-                        "id": sid,
-                        "status": "error",
-                        "lastError": f"probe HTTP {r.status_code}",
-                        "cooldownSec": 10,
-                    }
-                body = r.json() if r.content else {}
-                data = body.get("data") if isinstance(body, dict) else None
-                if isinstance(data, dict):
-                    try:
-                        cd = int(data.get("cooldownSec") or 0)
-                    except (TypeError, ValueError):
-                        cd = 0
-                    err = data.get("lastError") or data.get("last_error")
-                    if err:
-                        err = _friendly_probe_error(str(err))
-                    resolved = data.get("resolvedBaseUrl") or data.get(
-                        "resolved_base_url"
-                    )
-                    hit: dict[str, Any] = {
-                        "id": sid,
-                        "status": str(data.get("status") or "unknown"),
-                        "lastError": err,
-                        "cooldownSec": cd,
-                    }
-                    if resolved:
-                        hit["resolvedBaseUrl"] = str(resolved).strip()
-                    via = data.get("probeVia") or data.get("probe_via")
-                    if via:
-                        hit["probeVia"] = str(via).strip().lower()
-                    return hit
-                return {
-                    "id": sid,
-                    "status": "error",
-                    "lastError": "bad probe response",
-                    "cooldownSec": 10,
-                }
-        except httpx.TimeoutException:
-            return {
-                "id": sid,
-                "status": "error",
-                "lastError": "探测超时",
-                "cooldownSec": 10,
-            }
-        except Exception as e:
-            last_err = e
-            if attempt < 2 and _is_transient_probe_error(e):
-                time.sleep(0.6 * (attempt + 1))
-                continue
-            return {
-                "id": sid,
-                "status": "error",
-                "lastError": _friendly_probe_error(e),
-                "cooldownSec": 10,
-            }
-    return {
-        "id": sid,
-        "status": "error",
-        "lastError": _friendly_probe_error(last_err),
-        "cooldownSec": 10,
-    }
-
-
-def run_scrape_sources_test(
-    ids: list[str] | None = None,
-    *,
-    auto: bool = False,
-) -> tuple[dict[str, Any], str]:
-    """探测已启用源（或指定 ids），写回 settings。供路由与定时任务共用。"""
-    from datetime import datetime, timezone
-
-    from . import scrape_profiles
-
-    raw = settings_store.get_setting(settings_store.SCRAPE_KEY) or {}
-    origin = _normalize_origin_url(raw.get("origin"))
-    _sync_network_to_scrape(
-        origin,
-        _normalize_flare_url(
-            str(raw.get("flareSolverrUrl") or DEFAULT_FLARESOLVERR_URL)
-        ),
-        _normalize_proxy_url(
-            str(raw.get("proxyUrl") or raw.get("proxy_url") or "")
-        ),
-    )
-    sources = scrape_profiles.normalize_sources_map(raw.get("sources"))
-    want = [str(x).strip().lower() for x in (ids or []) if str(x).strip()]
-    if want:
-        probe_ids = [sid for sid in want if sid in sources]
-    else:
-        probe_ids = [
-            sid
-            for sid, cfg in sources.items()
-            if cfg.get("enabled") or sid == "forum"
-        ]
-    ok_n = 0
-    err_n = 0
-
-    def _job(sid: str) -> tuple[str, dict[str, Any]]:
-        try:
-            hit = _probe_one_source(
-                origin, sid, str(sources[sid].get("baseUrl") or "")
-            )
-            return sid, hit
-        except httpx.TimeoutException:
-            return sid, {
-                "id": sid,
-                "status": "error",
-                "lastError": "探测超时",
-                "cooldownSec": 10,
-            }
-        except Exception as e:
-            return sid, {
-                "id": sid,
-                "status": "error",
-                "lastError": _friendly_probe_error(e),
-                "cooldownSec": 10,
-            }
-
-    # 一个一个测：过盾单飞，并行只会互相空等/误报超时，还容易拖垮 Flare
-    for sid in probe_ids:
-        sid, hit = _job(sid)
-        st = str(hit.get("status") or "unknown")
-        try:
-            cd = int(hit.get("cooldownSec") or 0)
-        except (TypeError, ValueError):
-            cd = 0
-        sources = scrape_profiles.apply_source_probe(
-            sources,
-            sid,
-            status=st,
-            last_error=hit.get("lastError"),
-            cooldown_sec=cd,
-            resolved_base_url=hit.get("resolvedBaseUrl"),
-            probe_via=hit.get("probeVia"),
-        )
-        if st == "ok":
-            ok_n += 1
-        elif st == "error":
-            err_n += 1
-
-    raw["sources"] = sources
-    if auto:
-        raw["sourcesLastAutoTestAt"] = datetime.now(timezone.utc).strftime(
-            "%Y-%m-%dT%H:%M:%SZ"
-        )
-    saved = settings_store.put_setting(settings_store.SCRAPE_KEY, raw)
-    data = _scrape_public(saved["value"])
-    data["updated_at"] = saved["updated_at"]
-
-    # 单源失败时把 lastError 拼进摘要，避免 UI 只看到「异常 1」
-    detail = ""
-    if err_n > 0 and len(probe_ids) == 1:
-        sid0 = probe_ids[0]
-        err0 = str((sources.get(sid0) or {}).get("lastError") or "").strip()
-        if err0:
-            detail = f" · {sid0}: {err0}"
-    elif err_n > 0 and ok_n == 0 and len(probe_ids) <= 3:
-        bits: list[str] = []
-        for sid0 in probe_ids:
-            err0 = str((sources.get(sid0) or {}).get("lastError") or "").strip()
-            if err0:
-                bits.append(f"{sid0}: {err0}")
-        if bits:
-            detail = " · " + "；".join(bits[:3])
-    elif ok_n > 0 and err_n == 0 and len(probe_ids) == 1:
-        # 单源成功：标明实际走直连还是过盾
-        sid0 = probe_ids[0]
-        via0 = str((sources.get(sid0) or {}).get("lastProbeVia") or "").strip().lower()
-        via_label = {"direct": "代理直连", "curl": "curl直连", "flare": "过盾"}.get(
-            via0
-        )
-        if via_label:
-            detail = f" · {via_label}"
-
-    # 仅测过「代理过盾 / 不稳定过盾」源时才清理 Flare；纯直连/代理直连不碰过盾
-    used_flare = False
-    for sid in probe_ids:
-        access = str((sources.get(sid) or {}).get("access") or "").strip().lower()
-        if access in ("proxy_flare", "proxy_adaptive"):
-            used_flare = True
-            break
-    summary = f"测试完成 · 正常 {ok_n} · 异常 {err_n}{detail}"
-    if used_flare:
-        flare_msg = _restart_flare_after_source_probe(origin)
-        return data, f"{summary} · {flare_msg}"
-    return data, summary
-
-
-def _restart_flare_after_source_probe(origin: str) -> str:
-    """数据源测完后清理 Flare 脏会话。
-
-    优先重启容器；NAS 未配 FLARESOLVERR_RESTART_CMD/SSH 时刮削侧会降级为回收会话。
-    刮削进行中则跳过，避免打断过盾。
-    """
-    try:
-        from . import scrape_export
-
-        st = scrape_export.export_status(event_limit=0)
-        if st.get("running"):
-            return "跳过清理 Flare（刮削进行中）"
-    except Exception:
-        pass
-    # 不依赖 apps/scrape：直接销毁 FlareSolverr sessions，达到“重启/回收”同等效果（会话级重置）
-    try:
-        raw = settings_store.get_setting(settings_store.SCRAPE_KEY) or {}
-        flare = _normalize_flare_url(
-            raw.get("flareSolverrUrl") or raw.get("flare_solverr_url") or DEFAULT_FLARESOLVERR_URL
-        )
-        with httpx.Client(timeout=60.0, trust_env=False) as client:
-            r = client.post(flare, json={"cmd": "sessions.list"})
-            payload = r.json() if r.content else {}
-            session_ids = payload.get("sessions") if isinstance(payload, dict) else None
-            if not isinstance(session_ids, list):
-                session_ids = []
-
-            destroyed = 0
-            last_msg = ""
-            for sid in session_ids:
-                dr = client.post(
-                    flare,
-                    json={"cmd": "sessions.destroy", "session": sid},
-                )
-                dp = dr.json() if dr.content else {}
-                last_msg = str(dp.get("message") or "") if isinstance(dp, dict) else ""
-                if isinstance(dp, dict) and dp.get("status") == "ok":
-                    destroyed += 1
-
-        if destroyed > 0:
-            return f"已清理 Flare 会话（{destroyed}）{('：' + last_msg) if last_msg else ''}"
-        return "已清理 Flare（无会话可回收）"
-    except Exception as e:
-        return f"清理 Flare 失败：{e}"
-
-
-@router.post("/scrape/flaresolverr/test", response_model=Envelope)
-def test_scrape_flaresolverr(
-    body: ScrapeFlareTestBody,
-    _user: dict[str, Any] = Depends(require_user),
-) -> Envelope:
-    raw = settings_store.get_setting(settings_store.SCRAPE_KEY) or {}
-    flare = _normalize_flare_url(
-        body.flare_solverr_url
-        if body.flare_solverr_url is not None
-        else raw.get("flareSolverrUrl") or DEFAULT_FLARESOLVERR_URL
-    )
-    proxy = _normalize_proxy_url(
-        body.proxy_url
-        if body.proxy_url is not None
-        else raw.get("proxyUrl") or raw.get("proxy_url")
-    )
-    try:
-        if not flare:
-            raise HTTPException(status_code=400, detail="请先填写 FlareSolverr 地址")
-        sample_url = body.sample_url or "https://javdb.com/"
-        req: dict[str, Any] = {
-            "cmd": "request.get",
-            "url": sample_url,
-            "maxTimeout": 60000,
-        }
-        if proxy:
-            req["proxy"] = {"url": proxy}
-
-        with httpx.Client(timeout=90.0, trust_env=False) as client:
-            r = client.post(flare, json=req)
-            payload = r.json() if r.content else {}
-            status = payload.get("status") if isinstance(payload, dict) else None
-            msg = str(payload.get("message") or "") if isinstance(payload, dict) else ""
-
-            # FlareSolverr：HTTP 可能 200，但 status 会给 ok/error
-            ok = status == "ok"
-            solution_present = bool(isinstance(payload, dict) and payload.get("solution"))
-            return Envelope(
-                data={
-                    "ok": ok,
-                    "sampleOk": solution_present if ok else None,
-                    "flareSolverrUrl": flare,
-                    "proxyUrl": proxy,
-                    "detail": payload if isinstance(payload, dict) else {},
-                },
-                message=("过盾正常" if ok else _friendly_flare_message(msg)),
-            )
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=502,
-            detail=f"过盾测试失败：{_friendly_probe_error(e)}",
-        ) from e
-
-
-def _scrape_flare_proxy(
-    origin: str,
-    path: str,
-    *,
-    method: str = "GET",
-    timeout: float = 60.0,
-) -> tuple[dict[str, Any], str]:
-    """转发到 scrape worker 的 FlareSolverr 监控接口。"""
-    url = f"{origin.rstrip('/')}{path}"
-    try:
-        with httpx.Client(timeout=timeout, trust_env=False) as client:
-            if method.upper() == "POST":
-                r = client.post(url)
-            else:
-                r = client.get(url)
-            payload = r.json() if r.content else {}
-            data = payload.get("data") if isinstance(payload, dict) else None
-            msg = (
-                str(payload.get("message") or "")
-                if isinstance(payload, dict)
-                else ""
-            )
-            if r.status_code >= 400:
-                raise HTTPException(
-                    status_code=502, detail=msg or f"过盾监控 HTTP {r.status_code}"
-                )
-            return (data if isinstance(data, dict) else {}), msg
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"过盾监控失败：{e}") from e
-
-
-@router.get("/scrape/flaresolverr/monitor", response_model=Envelope)
-def get_scrape_flaresolverr_monitor(
-    _user: dict[str, Any] = Depends(require_user),
-) -> Envelope:
-    # 刮削端已移除：网络管理不再提供“过盾监控/回收/重启”能力
-    raise HTTPException(status_code=404, detail="已移除：过盾监控")
-
-
-@router.post("/scrape/flaresolverr/recycle", response_model=Envelope)
-def post_scrape_flaresolverr_recycle(
-    _user: dict[str, Any] = Depends(require_user),
-) -> Envelope:
-    # 刮削端已移除：网络管理不再提供“过盾监控/回收/重启”能力
-    raise HTTPException(status_code=404, detail="已移除：回收会话")
-
-
-@router.post("/scrape/flaresolverr/restart", response_model=Envelope)
-def post_scrape_flaresolverr_restart(
-    _user: dict[str, Any] = Depends(require_user),
-) -> Envelope:
-    # 刮削端已移除：网络管理不再提供“过盾监控/回收/重启”能力
-    raise HTTPException(status_code=404, detail="已移除：重启过盾")
-
-
-@router.post("/scrape/proxy/test", response_model=Envelope)
-def test_scrape_proxy(
-    body: ScrapeProxyTestBody,
-    _user: dict[str, Any] = Depends(require_user),
-) -> Envelope:
-    raw = settings_store.get_setting(settings_store.SCRAPE_KEY) or {}
-    proxy = _normalize_proxy_url(
-        body.proxy_url
-        if body.proxy_url is not None
-        else raw.get("proxyUrl") or raw.get("proxy_url")
-    )
-    try:
-        if not proxy:
-            raise HTTPException(status_code=400, detail="请先填写代理地址")
-
-        sample_urls = ["https://httpbin.org/ip", "https://api.ipify.org?format=json"]
-        last_err = ""
-
-        with httpx.Client(timeout=30.0, trust_env=False, proxy=proxy) as client:
-            for sample_url in sample_urls:
-                try:
-                    r = client.get(sample_url)
-                    payload = r.json() if r.content else {}
-                    ok = r.status_code < 400
-                    detail = payload if isinstance(payload, dict) else {"status": r.status_code}
-                    return Envelope(
-                        data={
-                            "ok": ok,
-                            "proxyUrl": proxy,
-                            "detail": detail,
-                        },
-                        message=("代理正常" if ok else f"代理失败（HTTP {r.status_code}）"),
-                    )
-                except Exception as e:
-                    last_err = _friendly_probe_error(e)
-                    continue
-
-        raise HTTPException(status_code=502, detail=f"代理测试失败：{last_err}")
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=502,
-            detail=f"代理测试失败：{_friendly_probe_error(e)}",
-        ) from e
-
-
-@router.post("/scrape/sources/test", response_model=Envelope)
-def test_scrape_sources(
-    body: ScrapeSourcesTestBody,
-    _user: dict[str, Any] = Depends(require_user),
-) -> Envelope:
-    try:
-        want = [
-            str(x).strip().lower() for x in (body.ids or []) if str(x).strip()
-        ]
-        data, message = run_scrape_sources_test(want or None, auto=False)
-        return Envelope(data=data, message=message)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"测试失败：{e}") from e
-
-
-@router.patch("/scrape/sources/{source_id}", response_model=Envelope)
-def patch_scrape_source(
-    source_id: str,
-    body: ScrapeSourcePatchBody,
-    _user: dict[str, Any] = Depends(require_user),
-) -> Envelope:
-    from . import scrape_profiles
-
-    sid = (source_id or "").strip().lower()
-    raw = settings_store.get_setting(settings_store.SCRAPE_KEY) or {}
-    sources = scrape_profiles.normalize_sources_map(raw.get("sources"))
-    if sid not in sources:
-        raise HTTPException(status_code=404, detail="未知数据源")
-    if body.enabled is not None and sid != "forum":
-        sources[sid]["enabled"] = bool(body.enabled)
-    if body.base_url is not None:
-        sources[sid]["baseUrl"] = body.base_url.strip()
-    if body.retry is not None:
-        sources[sid]["retry"] = max(0, min(8, int(body.retry)))
-    raw["sources"] = sources
-    saved = settings_store.put_setting(settings_store.SCRAPE_KEY, raw)
-    data = _scrape_public(saved["value"])
-    data["updated_at"] = saved["updated_at"]
-    return Envelope(data=data, message="saved")
-
-
 @router.get("/p115", response_model=Envelope)
 def get_p115(_user: dict[str, Any] | None = Depends(get_optional_user)) -> Envelope:
     raw = settings_store.get_setting(settings_store.P115_KEY)
@@ -1748,6 +555,164 @@ def get_p115_status(_user: dict[str, Any] | None = Depends(get_optional_user)) -
     return Envelope(data=data, message="ok")
 
 
+@router.get("/p115/tasks", response_model=Envelope)
+def get_p115_tasks(
+    page: int = 1,
+    _user: dict[str, Any] = Depends(require_user),
+) -> Envelope:
+    """离线云下载任务列表（转存工作台）。"""
+    prev = settings_store.get_setting(settings_store.P115_KEY) or {}
+    cookie = str(prev.get("cookie") or "").strip()
+    if not cookie:
+        raise HTTPException(status_code=400, detail="尚未配置 115，请先填写 Cookie")
+    result = p115_offline_svc.list_offline_tasks(cookie, page=max(1, int(page or 1)))
+    if not result.get("ok"):
+        raise HTTPException(
+            status_code=400,
+            detail=str(result.get("message") or "获取任务失败"),
+        )
+    return Envelope(
+        data={
+            "tasks": result.get("tasks") or [],
+            "page": result.get("page"),
+            "pageCount": result.get("pageCount"),
+            "count": result.get("count"),
+            "quota": result.get("quota"),
+            "quotaTotal": result.get("quotaTotal"),
+        },
+        message=str(result.get("message") or "ok"),
+    )
+
+
+@router.post("/p115/tasks/clear", response_model=Envelope)
+def post_p115_tasks_clear(
+    body: P115TasksClearBody,
+    _user: dict[str, Any] = Depends(require_user),
+) -> Envelope:
+    """清理离线任务：done / failed / all（不删盘内源文件）。"""
+    prev = settings_store.get_setting(settings_store.P115_KEY) or {}
+    cookie = str(prev.get("cookie") or "").strip()
+    if not cookie:
+        raise HTTPException(status_code=400, detail="尚未配置 115，请先填写 Cookie")
+    mode = (body.mode or "done").strip().lower()
+    result = p115_offline_svc.clear_offline_tasks(cookie, mode)
+    if not result.get("ok"):
+        raise HTTPException(
+            status_code=400,
+            detail=str(result.get("message") or "清理失败"),
+        )
+    # 清理后顺带回传最新列表与额度，减少前端往返
+    listed = p115_offline_svc.list_offline_tasks(cookie, page=1)
+    data: dict[str, Any] = {
+        "ok": True,
+        "mode": result.get("mode") or mode,
+        "message": result.get("message"),
+    }
+    if listed.get("ok"):
+        data.update(
+            {
+                "tasks": listed.get("tasks") or [],
+                "count": listed.get("count"),
+                "quota": listed.get("quota"),
+                "quotaTotal": listed.get("quotaTotal"),
+            }
+        )
+    return Envelope(data=data, message=str(result.get("message") or "已清理"))
+
+
+@router.post("/p115/qrcode/start", response_model=Envelope)
+def post_p115_qrcode_start(
+    body: P115QrStartBody | None = None,
+    _user: dict[str, Any] = Depends(require_user),
+) -> Envelope:
+    app = (body.app if body else None) or "alipaymini"
+    result = p115_qrlogin_svc.start_qrlogin(app)
+    if not result.get("ok"):
+        raise HTTPException(
+            status_code=400,
+            detail=str(result.get("message") or "获取二维码失败"),
+        )
+    return Envelope(
+        data={
+            "uid": result.get("uid"),
+            "time": result.get("time"),
+            "sign": result.get("sign"),
+            "qrImage": result.get("qrImage"),
+            "qrcode": result.get("qrcode"),
+            "app": result.get("app"),
+        },
+        message=str(result.get("message") or "ok"),
+    )
+
+
+@router.post("/p115/qrcode/status", response_model=Envelope)
+def post_p115_qrcode_status(
+    body: P115QrStatusBody,
+    _user: dict[str, Any] = Depends(require_user),
+) -> Envelope:
+    result = p115_qrlogin_svc.poll_qrlogin_status(body.uid, body.time, body.sign)
+    if not result.get("ok"):
+        raise HTTPException(
+            status_code=400,
+            detail=str(result.get("message") or "查询扫码状态失败"),
+        )
+    return Envelope(
+        data={
+            "status": result.get("status"),
+            "statusLabel": result.get("statusLabel"),
+            "done": bool(result.get("done")),
+            "expired": bool(result.get("expired")),
+        },
+        message=str(result.get("message") or "ok"),
+    )
+
+
+@router.post("/p115/qrcode/complete", response_model=Envelope)
+def post_p115_qrcode_complete(
+    body: P115QrCompleteBody,
+    _user: dict[str, Any] = Depends(require_user),
+) -> Envelope:
+    result = p115_qrlogin_svc.complete_qrlogin(body.uid, body.app)
+    if not result.get("ok"):
+        raise HTTPException(
+            status_code=400,
+            detail=str(result.get("message") or "扫码登录失败"),
+        )
+    cookie = str(result.get("cookie") or "").strip()
+    data: dict[str, Any] = {
+        "cookie": cookie,
+        "app": result.get("app"),
+        "saved": False,
+    }
+    if body.save and cookie:
+        prev = settings_store.get_setting(settings_store.P115_KEY) or {}
+        targets = _targets_for_store(
+            None,
+            prev,
+            fallback_cid=str(prev.get("folder_cid") or "0"),
+            fallback_name=str(prev.get("folder_name") or ""),
+        )
+        warehouse = targets.get("warehouse") or {
+            "folder_cid": "0",
+            "folder_name": "",
+        }
+        value = {
+            "enabled": True,
+            "cookie": cookie,
+            "folder_cid": str(warehouse.get("folder_cid") or "0"),
+            "folder_name": str(warehouse.get("folder_name") or ""),
+            "label": str(prev.get("label") or ""),
+            "targets": targets,
+        }
+        saved = settings_store.put_setting(settings_store.P115_KEY, value)
+        public = _p115_public(saved["value"])
+        public["updated_at"] = saved["updated_at"]
+        public["saved"] = True
+        return Envelope(data=public, message="扫码登录成功，已保存 Cookie")
+
+    return Envelope(data=data, message=str(result.get("message") or "扫码登录成功"))
+
+
 @router.put("/p115", response_model=Envelope)
 def put_p115(
     body: P115Config,
@@ -1757,8 +722,19 @@ def put_p115(
     cookie = (body.cookie or "").strip()
     if not cookie:
         cookie = str(prev.get("cookie") or "").strip()
-    folder_cid = (body.folder_cid or "0").strip() or "0"
-    folder_name = (body.folder_name or "").strip()
+
+    stored_targets = _targets_for_store(
+        body.targets,
+        prev,
+        fallback_cid=(body.folder_cid or "0").strip() or "0",
+        fallback_name=(body.folder_name or "").strip(),
+    )
+    warehouse = stored_targets.get("warehouse") or {
+        "folder_cid": "0",
+        "folder_name": "",
+    }
+    folder_cid = str(warehouse.get("folder_cid") or "0").strip() or "0"
+    folder_name = str(warehouse.get("folder_name") or "").strip()
     label = (body.label or "").strip()
 
     if not cookie:
@@ -1777,6 +753,10 @@ def put_p115(
             )
         if not folder_name:
             folder_name = str(check.get("folderName") or "")
+            stored_targets["warehouse"] = {
+                "folder_cid": folder_cid,
+                "folder_name": folder_name,
+            }
         quota = check.get("quota")
         quota_total = check.get("quotaTotal")
         message = str(check.get("message") or "已保存")
@@ -1798,6 +778,7 @@ def put_p115(
         "folder_cid": folder_cid,
         "folder_name": folder_name,
         "label": label,
+        "targets": stored_targets,
     }
     saved = settings_store.put_setting(settings_store.P115_KEY, value)
     data = _p115_public(saved["value"])
@@ -1933,12 +914,10 @@ def post_p115_offline(
         if not urls:
             raise HTTPException(status_code=400, detail="没有可转存的磁力/ED2K 链接")
 
-        folder_cid = (
-            (
-                body.folder_cid
-                or str(prev.get("folder_cid") or prev.get("folderCid") or "0")
-            ).strip()
-            or "0"
+        folder_cid, _folder_name = _resolve_p115_folder(
+            prev,
+            source=body.source,
+            folder_cid=body.folder_cid,
         )
         result = p115_offline_svc.add_offline_tasks(cookie, urls, folder_cid)
         password = (body.password or "").strip()
@@ -2008,12 +987,10 @@ def post_p115_share(
         if not urls:
             raise HTTPException(status_code=400, detail="没有可转存的 115 分享链接")
 
-        folder_cid = (
-            (
-                body.folder_cid
-                or str(prev.get("folder_cid") or prev.get("folderCid") or "0")
-            ).strip()
-            or "0"
+        folder_cid, _folder_name = _resolve_p115_folder(
+            prev,
+            source=body.source,
+            folder_cid=body.folder_cid,
         )
         result = p115_share_svc.receive_115_shares(
             cookie,
@@ -2035,3 +1012,840 @@ def post_p115_share(
             message=f"转存异常：{type(e).__name__}: {e}",
             status=400,
         )
+
+
+def _proxy_host_port(raw: str | None) -> str:
+    """规范化后的代理 → 展示用 host:port（可含 user:pass@）。"""
+    full = _normalize_proxy_url(raw)
+    if not full:
+        return ""
+    parsed = urlparse(full)
+    return parsed.netloc or ""
+
+
+def _flare_host_port(raw: str | None) -> str:
+    """FlareSolverr 基址 → 展示用 host:port。"""
+    from .outbound_http import normalize_flaresolverr_url
+
+    full = normalize_flaresolverr_url(raw)
+    if not full:
+        return ""
+    parsed = urlparse(full)
+    return parsed.netloc or ""
+
+
+def _as_bool(raw: Any, *, default: bool = False) -> bool:
+    if raw is None:
+        return default
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, (int, float)):
+        return bool(raw)
+    s = str(raw).strip().lower()
+    if s in ("1", "true", "yes", "on"):
+        return True
+    if s in ("0", "false", "no", "off", ""):
+        return False
+    return default
+
+
+def _network_public(raw: Any) -> dict[str, Any]:
+    from .outbound_http import normalize_flaresolverr_url
+
+    stored = ""
+    enabled_raw: Any = None
+    flare_stored = ""
+    flare_enabled_raw: Any = None
+    if isinstance(raw, dict):
+        stored = _normalize_proxy_url(
+            str(raw.get("proxyUrl") or raw.get("proxy_url") or "")
+        )
+        enabled_raw = raw.get("proxyEnabled")
+        if enabled_raw is None:
+            enabled_raw = raw.get("proxy_enabled")
+        flare_stored = normalize_flaresolverr_url(
+            str(
+                raw.get("flareSolverrUrl")
+                or raw.get("flare_solverr_url")
+                or raw.get("flaresolverrUrl")
+                or ""
+            )
+        )
+        flare_enabled_raw = raw.get("flareSolverrEnabled")
+        if flare_enabled_raw is None:
+            flare_enabled_raw = raw.get("flare_solverr_enabled")
+    if not stored:
+        legacy = settings_store.get_setting("scrape") or {}
+        if isinstance(legacy, dict):
+            stored = _normalize_proxy_url(
+                str(legacy.get("proxyUrl") or legacy.get("proxy_url") or "")
+            )
+            if enabled_raw is None:
+                enabled_raw = legacy.get("proxyEnabled")
+                if enabled_raw is None:
+                    enabled_raw = legacy.get("proxy_enabled")
+    # 有地址且未写开关时默认启用，兼容旧配置
+    enabled = _as_bool(enabled_raw, default=bool(stored))
+    active = bool(stored and enabled)
+    flare_enabled = _as_bool(flare_enabled_raw, default=bool(flare_stored))
+    flare_active = bool(flare_stored and flare_enabled)
+    return {
+        "proxyUrl": _proxy_host_port(stored),
+        "proxyEnabled": enabled,
+        "configured": active,
+        "fromEnv": False,
+        "effectiveProxyUrl": _proxy_host_port(stored if active else ""),
+        "flareSolverrUrl": _flare_host_port(flare_stored),
+        "flareSolverrEnabled": flare_enabled,
+        "flareSolverrConfigured": flare_active,
+        "effectiveFlareSolverrUrl": _flare_host_port(flare_stored if flare_active else ""),
+    }
+
+
+class NetworkConfig(BaseModel):
+    proxy_url: str = Field(default="", alias="proxyUrl")
+    proxy_enabled: bool | None = Field(default=None, alias="proxyEnabled")
+    flare_solverr_url: str | None = Field(default=None, alias="flareSolverrUrl")
+    flare_solverr_enabled: bool | None = Field(default=None, alias="flareSolverrEnabled")
+
+    model_config = {"populate_by_name": True}
+
+
+def _friendly_probe_error(exc: BaseException) -> str:
+    msg = str(exc).strip() or exc.__class__.__name__
+    low = msg.lower()
+    if "connect" in low or "timeout" in low:
+        return "无法连接代理或目标站超时"
+    if "proxy" in low:
+        return f"代理错误：{msg}"
+    return msg
+
+
+@router.get("/network", response_model=Envelope)
+def get_network(_user: dict[str, Any] | None = Depends(get_optional_user)) -> Envelope:
+    data = _network_public(settings_store.get_setting(settings_store.LIBRARY_KEY))
+    return Envelope(
+        data=data,
+        message="configured" if data["configured"] else "not_configured",
+    )
+
+
+@router.put("/network", response_model=Envelope)
+def put_network(
+    body: NetworkConfig,
+    _user: dict[str, Any] = Depends(require_user),
+) -> Envelope:
+    from .outbound_http import normalize_flaresolverr_url
+
+    prev = settings_store.get_setting(settings_store.LIBRARY_KEY) or {}
+    if not isinstance(prev, dict):
+        prev = {}
+    next_val = dict(prev)
+    # 代理：仅当请求显式带了 proxyUrl 字段时更新（Pydantic 总有默认 ""）
+    # 前端保存会整包提交；空串表示清空
+    next_val["proxyUrl"] = _normalize_proxy_url(body.proxy_url)
+    if body.proxy_enabled is not None:
+        next_val["proxyEnabled"] = bool(body.proxy_enabled)
+    elif "proxyEnabled" not in next_val and "proxy_enabled" not in next_val:
+        next_val["proxyEnabled"] = bool(next_val["proxyUrl"])
+
+    if body.flare_solverr_url is not None:
+        next_val["flareSolverrUrl"] = normalize_flaresolverr_url(body.flare_solverr_url)
+    if body.flare_solverr_enabled is not None:
+        next_val["flareSolverrEnabled"] = bool(body.flare_solverr_enabled)
+    elif body.flare_solverr_url is not None and (
+        "flareSolverrEnabled" not in next_val and "flare_solverr_enabled" not in next_val
+    ):
+        next_val["flareSolverrEnabled"] = bool(next_val.get("flareSolverrUrl"))
+
+    saved = settings_store.put_setting(settings_store.LIBRARY_KEY, next_val)
+    data = _network_public(saved["value"])
+    data["updated_at"] = saved["updated_at"]
+    return Envelope(data=data, message="saved")
+
+
+@router.post("/network/test", response_model=Envelope)
+def test_network(
+    body: NetworkConfig,
+    _user: dict[str, Any] = Depends(require_user),
+) -> Envelope:
+    raw = settings_store.get_setting(settings_store.LIBRARY_KEY) or {}
+    proxy = _normalize_proxy_url(
+        body.proxy_url
+        if body.proxy_url is not None and str(body.proxy_url).strip()
+        else (
+            (raw.get("proxyUrl") or raw.get("proxy_url"))
+            if isinstance(raw, dict)
+            else ""
+        )
+    )
+    if not proxy:
+        raise HTTPException(status_code=400, detail="请先填写代理地址")
+
+    sample_urls = [
+        "https://httpbin.org/ip",
+        "https://api.ipify.org?format=json",
+        "https://api.themoviedb.org/3",
+    ]
+    last_err = ""
+    try:
+        with httpx.Client(timeout=12.0, trust_env=False, proxy=proxy) as client:
+            for sample_url in sample_urls:
+                try:
+                    r = client.get(sample_url)
+                    ok = r.status_code < 500
+                    detail: Any
+                    try:
+                        detail = r.json() if r.content else {"status": r.status_code}
+                    except Exception:
+                        detail = {"status": r.status_code}
+                    return Envelope(
+                        data={
+                            "ok": ok,
+                            "proxyUrl": _proxy_host_port(proxy),
+                            "detail": detail if isinstance(detail, dict) else {"status": r.status_code},
+                        },
+                        message="代理正常" if ok else f"代理失败（HTTP {r.status_code}）",
+                    )
+                except Exception as e:
+                    last_err = _friendly_probe_error(e)
+                    continue
+        raise HTTPException(status_code=502, detail=f"代理测试失败：{last_err}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"代理测试失败：{_friendly_probe_error(e)}",
+        ) from e
+
+
+@router.post("/network/flare-test", response_model=Envelope)
+def test_flaresolverr(
+    body: NetworkConfig,
+    _user: dict[str, Any] = Depends(require_user),
+) -> Envelope:
+    from .outbound_http import flaresolverr_ping, normalize_flaresolverr_url
+
+    raw = settings_store.get_setting(settings_store.LIBRARY_KEY) or {}
+    flare = ""
+    if body.flare_solverr_url is not None and str(body.flare_solverr_url).strip():
+        flare = normalize_flaresolverr_url(body.flare_solverr_url)
+    elif isinstance(raw, dict):
+        flare = normalize_flaresolverr_url(
+            str(
+                raw.get("flareSolverrUrl")
+                or raw.get("flare_solverr_url")
+                or ""
+            )
+        )
+    if not flare:
+        raise HTTPException(status_code=400, detail="请先填写 FlareSolverr 地址")
+    try:
+        detail = flaresolverr_ping(flare)
+        return Envelope(
+            data={
+                "ok": True,
+                "flareSolverrUrl": _flare_host_port(flare),
+                "detail": detail,
+            },
+            message="FlareSolverr 正常",
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"FlareSolverr 测试失败：{_friendly_probe_error(e)}",
+        ) from e
+
+
+# —— 片商管理（数据源链接） ——
+
+
+class MakersCatalogBody(BaseModel):
+    javbus: dict[str, Any] | None = None
+    iqqtv: dict[str, Any] | None = None
+    missav: dict[str, Any] | None = None
+    sevenmmtv: dict[str, Any] | None = Field(default=None, alias="7mmtv")
+    madou: dict[str, Any] | None = None
+    sourceOrder: list[str] | None = None
+
+    model_config = {"populate_by_name": True}
+
+
+class MakersProbeBody(BaseModel):
+    source: str = "javbus"
+    persist: bool = True
+    javbus: dict[str, Any] | None = None
+    iqqtv: dict[str, Any] | None = None
+    missav: dict[str, Any] | None = None
+    sevenmmtv: dict[str, Any] | None = Field(default=None, alias="7mmtv")
+    madou: dict[str, Any] | None = None
+
+    model_config = {"populate_by_name": True}
+
+
+@router.get("/makers", response_model=Envelope)
+def get_makers_catalog(
+    _user: dict[str, Any] | None = Depends(get_optional_user),
+) -> Envelope:
+    from . import makers_settings
+
+    data = makers_settings.makers_catalog_public()
+    return Envelope(
+        data=data,
+        message="configured" if data.get("configured") else "not_configured",
+    )
+
+
+@router.post("/makers/refresh", response_model=Envelope)
+def refresh_makers_mirrors(
+    _user: dict[str, Any] = Depends(require_user),
+) -> Envelope:
+    """强制发现最新落地镜像并写入全局缓存；片商拉页立即改用。"""
+    from . import makers_settings
+    from . import site_mirror
+
+    cfg = makers_settings.resolve_makers_catalog()
+    refresh: dict[str, Any] = {}
+
+    jobs: list[tuple[str, list[str], callable]] = []
+    if cfg["javbus"].get("enabled"):
+        jobs.append(("javbus", list(cfg["javbus"].get("bases") or []), lambda b: b))
+    if cfg["iqqtv"].get("enabled"):
+        jobs.append(
+            ("iqqtv", list(cfg["iqqtv"].get("seeds") or []), lambda b: f"{b}/cn")
+        )
+    if cfg["missav"].get("enabled"):
+        jobs.append(
+            ("missav", list(cfg["missav"].get("seeds") or []), lambda b: f"{b}/cn")
+        )
+    if cfg["7mmtv"].get("enabled"):
+        jobs.append(("7mmtv", list(cfg["7mmtv"].get("seeds") or []), lambda b: b))
+    if cfg["madou"].get("enabled"):
+        jobs.append(("madou", list(cfg["madou"].get("seeds") or []), lambda b: b))
+
+    for sid, seeds, fmt in jobs:
+        t0 = time.perf_counter()
+        try:
+            base = site_mirror.resolve(sid, seeds=seeds, force=True)
+            refresh[sid] = {
+                "ok": True,
+                "activeBase": fmt(base),
+                "root": base,
+                "ms": int((time.perf_counter() - t0) * 1000),
+            }
+        except Exception as e:
+            refresh[sid] = {
+                "ok": False,
+                "error": str(e),
+                "ms": int((time.perf_counter() - t0) * 1000),
+            }
+
+    data = makers_settings.makers_catalog_public()
+    data["refresh"] = refresh
+    ok_n = sum(1 for v in refresh.values() if isinstance(v, dict) and v.get("ok"))
+    return Envelope(
+        data=data,
+        message=f"refreshed · {ok_n}/{len(refresh)}" if refresh else "noop",
+    )
+
+
+@router.put("/makers", response_model=Envelope)
+def put_makers_catalog(
+    body: MakersCatalogBody,
+    _user: dict[str, Any] = Depends(require_user),
+) -> Envelope:
+    from . import makers_settings
+    from .makers_catalog_routes import _clear_makers_cache
+
+    payload = body.model_dump(exclude_none=True, by_alias=True)
+    # 兼容未走 alias 的字段名
+    if "sevenmmtv" in payload and "7mmtv" not in payload:
+        payload["7mmtv"] = payload.pop("sevenmmtv")
+    if "miss_av" in payload and "missav" not in payload:
+        payload["missav"] = payload.pop("miss_av")
+    data = makers_settings.save_makers_catalog(payload)
+    try:
+        # 只清列表缓存，保留 live 镜像；新种子会在下次 refresh / 拉页时优先探测
+        _clear_makers_cache(wipe_mirrors=False)
+    except Exception:
+        pass
+    return Envelope(data=data, message="saved")
+
+
+@router.post("/makers/test", response_model=Envelope)
+def test_makers_catalog(
+    body: MakersProbeBody,
+    _user: dict[str, Any] = Depends(require_user),
+) -> Envelope:
+    """测通数据源：优先用请求体临时配置，否则读已保存配置。
+
+    persist=True 时写入全局镜像缓存，拉页会优先用最新落地基址。
+    """
+    from bs4 import BeautifulSoup
+
+    from . import makers_settings
+    from . import site_mirror
+    from .makers_catalog_routes import _TIMEOUT, _UA
+    from .outbound_http import resolve_scrape_proxy_url
+
+    src = (body.source or "javbus").strip().lower()
+    persist = bool(body.persist)
+    base_cfg = makers_settings.resolve_makers_catalog()
+    if isinstance(body.javbus, dict):
+        base_cfg["javbus"] = makers_settings._provider_block(
+            {**base_cfg["javbus"], **body.javbus},
+            default_enabled=True,
+            default_urls=makers_settings.DEFAULT_JAVBUS_BASES,
+            url_key="bases",
+            cookie_default=makers_settings.DEFAULT_JAVBUS_COOKIE,
+        )
+    if isinstance(body.iqqtv, dict):
+        base_cfg["iqqtv"] = makers_settings._provider_block(
+            {**base_cfg["iqqtv"], **body.iqqtv},
+            default_enabled=True,
+            default_urls=makers_settings.DEFAULT_IQQTV_SEEDS,
+            url_key="seeds",
+        )
+    missav_body = body.missav
+    if isinstance(missav_body, dict):
+        base_cfg["missav"] = makers_settings._provider_block(
+            {**base_cfg["missav"], **missav_body},
+            default_enabled=True,
+            default_urls=makers_settings.DEFAULT_MISSAV_SEEDS,
+            url_key="seeds",
+        )
+    seven_body = body.sevenmmtv
+    if isinstance(seven_body, dict):
+        base_cfg["7mmtv"] = makers_settings._provider_block(
+            {**base_cfg["7mmtv"], **seven_body},
+            default_enabled=True,
+            default_urls=makers_settings.DEFAULT_SEVENMM_SEEDS,
+            url_key="seeds",
+        )
+    if isinstance(body.madou, dict):
+        base_cfg["madou"] = makers_settings._provider_block(
+            {**base_cfg["madou"], **body.madou},
+            default_enabled=True,
+            default_urls=makers_settings.DEFAULT_MADOU_SEEDS,
+            url_key="seeds",
+        )
+
+    proxy = resolve_scrape_proxy_url()
+
+    def _probe_simple_origin(
+        *,
+        sid: str,
+        seeds: list[str],
+        path: str,
+        looks: callable,
+        label: str,
+        active_fmt: callable | None = None,
+    ) -> Envelope:
+        last_err = ""
+        if persist and len(seeds) > 1:
+            t0 = time.perf_counter()
+            try:
+                live = site_mirror.resolve(sid, seeds=seeds, force=True)
+                elapsed_ms = int((time.perf_counter() - t0) * 1000)
+                active = active_fmt(live) if active_fmt else live
+                return Envelope(
+                    data={
+                        "ok": True,
+                        "source": sid,
+                        "base": live,
+                        "activeBase": active,
+                        "via": "proxy" if proxy else "direct",
+                        "ms": elapsed_ms,
+                    },
+                    message=f"{label} 通 · {elapsed_ms}ms · {active}",
+                )
+            except Exception as e:
+                last_err = str(e)
+
+        for seed in seeds:
+            root = site_mirror.origin(seed) or seed.rstrip("/")
+            if sid == "missav" and site_mirror.is_missav_dead_host(root):
+                last_err = "missav.com 已失效（ThisAV 占位），请换 .ws/.ai 镜像"
+                continue
+            url = f"{root}{path}"
+            opts_list: list[dict[str, Any]] = []
+            if proxy:
+                opts_list.append({"proxy": proxy, "verify": False})
+            opts_list.append({"verify": False})
+            html = ""
+            via = "direct"
+            elapsed_ms = 0
+            final_url = url
+            for opts in opts_list:
+                try:
+                    t0 = time.perf_counter()
+                    with httpx.Client(
+                        timeout=_TIMEOUT,
+                        trust_env=False,
+                        follow_redirects=True,
+                        **opts,
+                    ) as client:
+                        r = client.get(
+                            url,
+                            headers={"User-Agent": _UA, "Accept": "text/html"},
+                        )
+                    elapsed_ms = int((time.perf_counter() - t0) * 1000)
+                    if r.status_code >= 400:
+                        last_err = f"HTTP {r.status_code}"
+                        continue
+                    html = r.text or ""
+                    final_url = str(r.url)
+                    via = "proxy" if "proxy" in opts else "direct"
+                    if html:
+                        break
+                except Exception as e:
+                    last_err = str(e)
+                    continue
+            if not html or len(html) < 200:
+                last_err = last_err or "页面过短"
+                continue
+            if re.search(r"just a moment|attention required", html, re.I):
+                last_err = "CF 盾拦截（代理自适应未过）"
+                continue
+            if not looks(html):
+                # 尽量带上可观测计数，方便区分空壳 vs 结构变化
+                n = 0
+                if sid == "missav":
+                    n = site_mirror.missav_content_count(html)
+                elif sid == "7mmtv":
+                    n = site_mirror.sevenmm_content_count(html)
+                elif sid == "madou":
+                    n = site_mirror.madou_content_count(html)
+                last_err = f"无有效列表（items={n}）"
+                continue
+            landed = site_mirror.origin(final_url) or root
+            if sid == "missav" and site_mirror.is_missav_dead_host(landed):
+                last_err = "missav.com 已失效（ThisAV 占位），请换 .ws/.ai 镜像"
+                continue
+            # 跟到落地站后，若 host 变了再验一次，日常直连 landed
+            if site_mirror.origin(landed) != site_mirror.origin(root):
+                try:
+                    t1 = time.perf_counter()
+                    with httpx.Client(
+                        timeout=_TIMEOUT,
+                        trust_env=False,
+                        follow_redirects=True,
+                        **({"proxy": proxy, "verify": False} if proxy else {"verify": False}),
+                    ) as client:
+                        r2 = client.get(
+                            f"{landed}{path}",
+                            headers={"User-Agent": _UA, "Accept": "text/html"},
+                        )
+                    elapsed_ms = int((time.perf_counter() - t1) * 1000)
+                    if r2.status_code < 400 and looks(r2.text or ""):
+                        landed = site_mirror.origin(str(r2.url)) or landed
+                        html = r2.text or html
+                    else:
+                        last_err = "落地站无有效列表"
+                        continue
+                except Exception as e:
+                    last_err = str(e)
+                    continue
+            if sid == "iqqtv" and site_mirror.is_iqqtv_redirect_seed(landed):
+                last_err = "仍为跳转网关，未得到直连站"
+                continue
+            if sid == "missav" and site_mirror.is_missav_dead_host(landed):
+                last_err = "missav.com 已失效（ThisAV 占位），请换 .ws/.ai 镜像"
+                continue
+            if persist:
+                site_mirror.remember(sid, landed, discovered_from=seed)
+            active = active_fmt(landed) if active_fmt else landed
+            items = 0
+            if sid == "missav":
+                items = site_mirror.missav_content_count(html)
+            elif sid == "7mmtv":
+                items = site_mirror.sevenmm_content_count(html)
+            elif sid == "madou":
+                items = site_mirror.madou_content_count(html)
+            return Envelope(
+                data={
+                    "ok": True,
+                    "source": sid,
+                    "seed": seed,
+                    "base": landed,
+                    "activeBase": active,
+                    "via": via,
+                    "items": items,
+                    "ms": elapsed_ms,
+                },
+                message=f"{label} 通 · {elapsed_ms}ms · {via} · {items}条",
+            )
+        raise HTTPException(
+            status_code=502,
+            detail=f"{label} 测通失败：{last_err or '全部种子不可用'}",
+        )
+
+    if src == "javbus":
+        jav = base_cfg["javbus"]
+        seeds = list(jav.get("bases") or makers_settings.DEFAULT_JAVBUS_BASES)
+        cookie = str(jav.get("cookie") or makers_settings.DEFAULT_JAVBUS_COOKIE)
+        last_err = ""
+        # 全局发现：按种子顺序找第一个可用并可选落盘
+        if persist and len(seeds) > 1:
+            t0 = time.perf_counter()
+            try:
+                live = site_mirror.resolve("javbus", seeds=seeds, force=True)
+                elapsed_ms = int((time.perf_counter() - t0) * 1000)
+                return Envelope(
+                    data={
+                        "ok": True,
+                        "source": "javbus",
+                        "base": live,
+                        "activeBase": live,
+                        "via": "proxy" if proxy else "direct",
+                        "ms": elapsed_ms,
+                    },
+                    message=f"JavBus 通 · {elapsed_ms}ms · {live}",
+                )
+            except Exception as e:
+                last_err = str(e)
+
+        for base in seeds:
+            headers = {
+                "User-Agent": _UA,
+                "Accept": "text/html,application/xhtml+xml",
+                "Accept-Language": "zh-CN,zh;q=0.9",
+                "Referer": f"{base}/",
+            }
+            if cookie:
+                headers["Cookie"] = cookie
+            opts_list: list[dict[str, Any]] = []
+            if proxy:
+                opts_list.append({"proxy": proxy, "verify": False})
+            opts_list.append({"verify": False})
+            html = ""
+            via = "direct"
+            elapsed_ms = 0
+            final_url = base
+            for opts in opts_list:
+                try:
+                    t0 = time.perf_counter()
+                    with httpx.Client(
+                        timeout=_TIMEOUT,
+                        trust_env=False,
+                        follow_redirects=True,
+                        **opts,
+                    ) as client:
+                        r = client.get(f"{base}/", headers=headers)
+                    elapsed_ms = int((time.perf_counter() - t0) * 1000)
+                    if r.status_code >= 400:
+                        last_err = f"HTTP {r.status_code}"
+                        continue
+                    html = r.text or ""
+                    final_url = str(r.url)
+                    via = "proxy" if "proxy" in opts else "direct"
+                    if html:
+                        break
+                except Exception as e:
+                    last_err = str(e)
+                    continue
+            if not html or len(html) < 200:
+                last_err = last_err or "页面过短"
+                continue
+            if re.search(r"Age Verification|年齡驗證|年龄验证", html, re.I) and not re.search(
+                r"movie-box|bigImage", html, re.I
+            ):
+                last_err = "年龄门未过，请检查 Cookie"
+                continue
+            if "just a moment" in html.lower():
+                last_err = "CF 盾拦截"
+                continue
+            soup = BeautifulSoup(html, "lxml")
+            boxes = len(soup.select("a.movie-box"))
+            if boxes < 3:
+                # 停放页/空壳也会 200，必须有真实列表才算可用
+                last_err = f"无有效列表（movie-box={boxes}）"
+                continue
+            landed = site_mirror.origin(final_url) or base
+            # 统一 https 展示（探测可用后）
+            if landed.startswith("http://"):
+                landed = "https://" + landed[len("http://") :]
+            if persist:
+                site_mirror.remember("javbus", landed, discovered_from=base)
+            return Envelope(
+                data={
+                    "ok": True,
+                    "source": "javbus",
+                    "base": landed,
+                    "activeBase": landed,
+                    "via": via,
+                    "movieBoxes": boxes,
+                    "ms": elapsed_ms,
+                },
+                message=f"JavBus 通 · {elapsed_ms}ms · {via} · {boxes}条",
+            )
+        raise HTTPException(
+            status_code=502,
+            detail=f"JavBus 测通失败：{last_err or '全部镜像不可用'}",
+        )
+
+    if src == "iqqtv":
+        seeds = list(
+            base_cfg["iqqtv"].get("seeds") or makers_settings.DEFAULT_IQQTV_SEEDS
+        )
+        last_err = ""
+        if persist and len(seeds) > 1:
+            t0 = time.perf_counter()
+            try:
+                root = site_mirror.resolve("iqqtv", seeds=seeds, force=True)
+                elapsed_ms = int((time.perf_counter() - t0) * 1000)
+                active = f"{root}/cn"
+                return Envelope(
+                    data={
+                        "ok": True,
+                        "source": "iqqtv",
+                        "seed": seeds[0],
+                        "base": root,
+                        "activeBase": active,
+                        "ms": elapsed_ms,
+                    },
+                    message=f"iQQTV 通 · {elapsed_ms}ms · {active}",
+                )
+            except Exception as e:
+                last_err = str(e)
+
+        for seed in seeds:
+            try:
+                opts_list: list[dict[str, Any]] = []
+                if proxy:
+                    opts_list.append({"proxy": proxy, "verify": False})
+                opts_list.append({"verify": False})
+                html = ""
+                via = "direct"
+                elapsed_ms = 0
+                final = ""
+                for opts in opts_list:
+                    try:
+                        t0 = time.perf_counter()
+                        with httpx.Client(
+                            timeout=_TIMEOUT,
+                            trust_env=False,
+                            follow_redirects=True,
+                            **opts,
+                        ) as client:
+                            r = client.get(
+                                f"{seed}/cn/",
+                                headers={"User-Agent": _UA, "Accept": "text/html"},
+                            )
+                        elapsed_ms = int((time.perf_counter() - t0) * 1000)
+                        if r.status_code >= 400:
+                            last_err = f"HTTP {r.status_code}"
+                            continue
+                        html = r.text or ""
+                        final = str(r.url)
+                        via = "proxy" if "proxy" in opts else "direct"
+                        if html:
+                            break
+                    except Exception as e:
+                        last_err = str(e)
+                        continue
+                if not html or len(html) < 200:
+                    last_err = last_err or "页面过短"
+                    continue
+                if re.search(r"just a moment|attention required", html, re.I):
+                    last_err = "CF 盾拦截"
+                    continue
+                items = site_mirror.iqqtv_content_count(html)
+                if items < 3:
+                    last_err = f"无有效列表（items={items}）"
+                    continue
+                # 再以真实列表解析为准，避免模板里残留 /h/ 链误判
+                from .makers_catalog_routes import _parse_iqqtv_list
+
+                root_guess = site_mirror.origin(final) or site_mirror.origin(seed) or ""
+                parsed = _parse_iqqtv_list(html, root_guess) if root_guess else []
+                if len(parsed) < 3:
+                    last_err = f"无有效列表（parsed={len(parsed)}）"
+                    continue
+                items = len(parsed)
+                root = root_guess
+                if not root:
+                    last_err = "无效落地"
+                    continue
+                if site_mirror.is_iqqtv_redirect_seed(root):
+                    last_err = "仍为跳转网关，未得到直连站"
+                    continue
+                if persist:
+                    remembered = site_mirror.remember(
+                        "iqqtv", root, discovered_from=seed
+                    )
+                    if remembered:
+                        root = remembered
+                    elif site_mirror.is_iqqtv_redirect_seed(root):
+                        root = site_mirror.resolve("iqqtv", seeds=[seed], force=True)
+                if site_mirror.is_iqqtv_redirect_seed(root):
+                    last_err = "仍为跳转网关，未得到直连站"
+                    continue
+                active = f"{root}/cn"
+                return Envelope(
+                    data={
+                        "ok": True,
+                        "source": "iqqtv",
+                        "seed": seed,
+                        "base": root,
+                        "activeBase": active,
+                        "items": items,
+                        "via": via,
+                        "ms": elapsed_ms,
+                    },
+                    message=f"iQQTV 通 · {elapsed_ms}ms · {via} · {items}条",
+                )
+            except Exception as e:
+                last_err = str(e)
+                continue
+        raise HTTPException(
+            status_code=502,
+            detail=f"iQQTV 测通失败：{last_err or '全部种子不可用'}",
+        )
+
+    if src == "missav":
+        from . import makers_providers_extra as makers_extra
+
+        seeds = list(
+            base_cfg["missav"].get("seeds") or makers_settings.DEFAULT_MISSAV_SEEDS
+        )
+        return _probe_simple_origin(
+            sid="missav",
+            seeds=seeds,
+            path="/cn/",
+            looks=makers_extra.looks_missav,
+            label="MissAV",
+            active_fmt=lambda b: f"{b}/cn",
+        )
+
+    if src in ("7mmtv", "sevenmmtv"):
+        from . import makers_providers_extra as makers_extra
+
+        seeds = list(
+            base_cfg["7mmtv"].get("seeds") or makers_settings.DEFAULT_SEVENMM_SEEDS
+        )
+        return _probe_simple_origin(
+            sid="7mmtv",
+            seeds=seeds,
+            path="/zh/",
+            looks=makers_extra.looks_sevenmm,
+            label="7MMTV",
+        )
+
+    if src == "madou":
+        from . import makers_providers_extra as makers_extra
+
+        seeds = list(
+            base_cfg["madou"].get("seeds") or makers_settings.DEFAULT_MADOU_SEEDS
+        )
+        return _probe_simple_origin(
+            sid="madou",
+            seeds=seeds,
+            path="/",
+            looks=makers_extra.looks_madou,
+            label="Madou",
+        )
+
+    raise HTTPException(status_code=400, detail=f"未知数据源: {src}")
+

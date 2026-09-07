@@ -7,7 +7,7 @@
   justify-content: center;
   font-size: 14px;
   color: var(--mute);
-  background: #f2f2f7;
+  background: var(--app-bg);
 }
 .auth-viewport {
   position: relative;
@@ -16,19 +16,14 @@
   width: auto;
   overflow: hidden;
   overscroll-behavior: none;
-  background: #f2f2f7;
+  background: var(--app-bg);
   touch-action: manipulation;
 }
 
 .login-screen {
   --login-blue: #007aff;
   --login-blue-deep: #0066d6;
-  --login-bg:
-    radial-gradient(ellipse 120% 70% at 50% -8%, rgba(0, 122, 255, 0.12), transparent 58%),
-    radial-gradient(ellipse 80% 45% at 100% 85%, rgba(180, 210, 255, 0.16), transparent 55%),
-    radial-gradient(ellipse 70% 40% at 0% 70%, rgba(232, 240, 255, 0.5), transparent 50%),
-    /* 收尾用系统灰，与 html/body/PWA theme 一致，底栏无白缝色差 */
-    linear-gradient(180deg, #f7faff 0%, #f2f2f7 55%, #f2f2f7 100%);
+  --login-bg: var(--app-bg);
   --border: var(--hairline);
   --brand: var(--login-blue);
   position: absolute;
@@ -467,9 +462,7 @@
 
 @media (prefers-color-scheme: dark) {
   .login-screen {
-    --login-bg:
-      radial-gradient(ellipse 120% 70% at 50% -8%, rgba(10, 132, 255, 0.16), transparent 58%),
-      linear-gradient(180deg, #0b1220 0%, #000 55%, #0a1018 100%);
+    --login-bg: var(--app-bg);
     color: #f5f5f7;
   }
 

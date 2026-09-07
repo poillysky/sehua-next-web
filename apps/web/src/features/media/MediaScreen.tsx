@@ -5,6 +5,8 @@ import { Search } from 'lucide-react';
 import {
   fetchMediaDetail,
   fetchMediaMeta,
+  proxiedCoverUrl,
+  type MediaCastPerson,
   type MediaCategoryId,
   type MediaItem,
   type MediaSourceId,
@@ -13,13 +15,26 @@ import { AppPush } from '@/components/ui/AppPush';
 import { AppMsg } from '@/components/ui/AppMsg';
 import { useTabNavigation } from '@/shell';
 import { useOverlay } from '@/components/overlay/OverlayContext';
+import { useStackCover } from '@/hooks/useStackCover';
 import { MediaChartBody } from './MediaChartBody';
 import { MediaDetailBody } from './MediaDetailBody';
+import { MediaExploreBody } from './MediaExploreBody';
+import { MediaPersonBody } from './MediaPersonBody';
 import { MediaSearchBody } from './MediaSearchBody';
 import { MediaShelf } from './MediaShelf';
 import { hubShelvesFor, mediaCategoryLabel } from './mediaUi';
 
-type DetailFrom = 'hub' | 'chart' | 'search';
+type HubTab = MediaSourceId | 'explore';
+
+type DetailFrom = 'hub' | 'chart' | 'search' | 'person' | 'explore';
+
+type DetailBack = {
+  category: MediaCategoryId;
+  item: MediaItem;
+  detail: MediaItem | null;
+  from: Exclude<DetailFrom, 'person'>;
+  chart?: string;
+};
 
 type Stack =
   | { kind: 'hub' }
@@ -32,16 +47,32 @@ type Stack =
       detail: MediaItem | null;
       from: DetailFrom;
       chart?: string;
+      /** 从影人作品页点进详情时，返回用 */
+      person?: MediaCastPerson;
+      detailBack?: DetailBack;
+    }
+  | {
+      kind: 'person';
+      person: MediaCastPerson;
+      detailBack: DetailBack;
     };
 
 export function MediaScreen() {
   const tabCtx = useTabNavigation();
   const { toast } = useOverlay();
   const [stack, setStack] = useState<Stack>({ kind: 'hub' });
-  const [source, setSource] = useState<MediaSourceId>('tmdb');
+  const [hubTab, setHubTab] = useState<HubTab>('tmdb');
   const [tmdbOk, setTmdbOk] = useState(true);
   const [msg, setMsg] = useState('');
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const hubCover = useStackCover(
+    stack.kind !== 'hub',
+    'media-hub',
+    'app-hub media-hub-root',
+  );
+
+  const source: MediaSourceId = hubTab === 'explore' ? 'tmdb' : hubTab;
+  const exploring = hubTab === 'explore';
 
   useEffect(() => {
     if (!tabCtx || tabCtx.activeTab !== '/media') return;
@@ -55,8 +86,8 @@ export function MediaScreen() {
         const meta = await fetchMediaMeta();
         if (cancelled) return;
         setTmdbOk(Boolean(meta.tmdbConfigured));
-        if (!meta.tmdbConfigured && source === 'tmdb') {
-          setSource('douban');
+        if (!meta.tmdbConfigured && (hubTab === 'tmdb' || hubTab === 'explore')) {
+          setHubTab('douban');
         }
       } catch {
         /* ignore */
@@ -72,25 +103,44 @@ export function MediaScreen() {
       category: MediaCategoryId,
       item: MediaItem,
       from: DetailFrom,
-      chart?: string,
+      opts?: {
+        chart?: string;
+        person?: MediaCastPerson;
+        detailBack?: DetailBack;
+      },
     ) => {
       setLoadingDetail(true);
       setMsg('');
+      const base = {
+        kind: 'detail' as const,
+        category,
+        item,
+        from,
+        chart: opts?.chart,
+        person: opts?.person,
+        detailBack: opts?.detailBack,
+      };
       startTransition(() => {
-        setStack({ kind: 'detail', category, item, detail: null, from, chart });
+        setStack({ ...base, detail: null });
       });
+      const cover = proxiedCoverUrl(item.posterUrl);
+      if (cover && typeof window !== 'undefined') {
+        const warm = new window.Image();
+        warm.decoding = 'async';
+        warm.src = cover;
+      }
       try {
         const detail = await fetchMediaDetail({
           source: item.source,
           id: item.id,
           mediaType: item.mediaType,
         });
-        setStack({ kind: 'detail', category, item, detail, from, chart });
+        setStack({ ...base, detail });
       } catch (e) {
         const text = e instanceof Error ? e.message : '详情加载失败';
         setMsg(text);
         toast(text, 'error');
-        setStack({ kind: 'detail', category, item, detail: item, from, chart });
+        setStack({ ...base, detail: item });
       } finally {
         setLoadingDetail(false);
       }
@@ -101,81 +151,89 @@ export function MediaScreen() {
   const shelves = hubShelvesFor(source);
 
   const hub = (
-    <div className="app-hub media-hub-root" aria-hidden={stack.kind !== 'hub'}>
+    <div {...hubCover}>
       <div className="media-hub__top">
-        <h1 className="app-hub__title">影视</h1>
-        <div className="media-hub__top-actions">
+        <div className="media-hub__top-row">
           <button
             type="button"
             className="media-hub__search-btn"
             aria-label="搜索影视"
             onClick={() => startTransition(() => setStack({ kind: 'search' }))}
           >
-            <Search size={18} strokeWidth={2.25} aria-hidden />
+            <Search size={17} strokeWidth={2.4} aria-hidden />
           </button>
-          <div className="media-source-switch" role="tablist" aria-label="数据源">
+          <h1 className="app-hub__title">影视</h1>
+        </div>
+        <div className="media-source-switch" role="tablist" aria-label="数据源">
+          {(
+            [
+              { id: 'tmdb', label: 'TMDB' },
+              { id: 'douban', label: '豆瓣' },
+              { id: 'bangumi', label: 'Bangumi' },
+              { id: 'anilist', label: 'AniList' },
+              { id: 'explore', label: '探索' },
+            ] as const
+          ).map((s) => (
             <button
+              key={s.id}
               type="button"
               role="tab"
-              aria-selected={source === 'tmdb'}
+              aria-selected={hubTab === s.id}
               className={
-                source === 'tmdb'
+                hubTab === s.id
                   ? 'media-source-switch__btn is-active'
                   : 'media-source-switch__btn'
               }
               onClick={() => {
-                if (!tmdbOk) {
-                  toast('请先在 设置 → TMDB 配置 API Key', 'info');
+                if ((s.id === 'tmdb' || s.id === 'explore') && !tmdbOk) {
+                  toast('请先在 更多 → TMDB 配置 API Key', 'info');
                   return;
                 }
-                setSource('tmdb');
+                setHubTab(s.id);
               }}
             >
-              TMDB
+              {s.label}
             </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={source === 'douban'}
-              className={
-                source === 'douban'
-                  ? 'media-source-switch__btn is-active'
-                  : 'media-source-switch__btn'
-              }
-              onClick={() => setSource('douban')}
-            >
-              豆瓣
-            </button>
-          </div>
+          ))}
         </div>
       </div>
 
-      {!tmdbOk && source === 'douban' ? (
-        <p className="media-hub__tip">TMDB 未配置，当前使用豆瓣</p>
-      ) : null}
-
       <div className="app-hub__scroll media-hub">
-        <div className="media-hub__shelves">
-          {shelves.map((s) => (
-            <MediaShelf
-              key={`${source}-${s.category}-${s.chart}`}
-              source={source}
-              category={s.category}
-              chart={s.chart}
-              title={s.title}
-              onOpenAll={() =>
-                startTransition(() =>
-                  setStack({
-                    kind: 'chart',
-                    category: s.category,
-                    chart: s.chart,
-                  }),
-                )
-              }
-              onOpenItem={(item) => void openDetail(s.category, item, 'hub', s.chart)}
-            />
-          ))}
-        </div>
+        {exploring ? (
+          <MediaExploreBody
+            onOpen={(item) =>
+              void openDetail(
+                item.mediaType === 'tv' ? 'tv' : 'movie',
+                item,
+                'explore',
+              )
+            }
+          />
+        ) : (
+          <div className="media-hub__shelves">
+            {shelves.map((s) => (
+              <MediaShelf
+                key={`${source}-${s.category}-${s.chart}`}
+                source={source}
+                category={s.category}
+                chart={s.chart}
+                title={s.title}
+                onOpenAll={() =>
+                  startTransition(() =>
+                    setStack({
+                      kind: 'chart',
+                      category: s.category,
+                      chart: s.chart,
+                    }),
+                  )
+                }
+                onOpenItem={(item) =>
+                  void openDetail(s.category, item, 'hub', { chart: s.chart })
+                }
+              />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -184,7 +242,11 @@ export function MediaScreen() {
 
   if (stack.kind === 'search') {
     push = (
-      <AppPush title="搜索影视" onBack={() => setStack({ kind: 'hub' })}>
+      <AppPush
+        title="搜索影视"
+        scrollKey={`media-search-${source}`}
+        onBack={() => setStack({ kind: 'hub' })}
+      >
         <MediaSearchBody
           source={source}
           onOpen={(item) =>
@@ -201,6 +263,7 @@ export function MediaScreen() {
     push = (
       <AppPush
         title={mediaCategoryLabel(stack.category)}
+        scrollKey={`media-chart-${source}-${stack.category}-${stack.chart || ''}`}
         onBack={() => setStack({ kind: 'hub' })}
       >
         <MediaChartBody
@@ -208,7 +271,38 @@ export function MediaScreen() {
           category={stack.category}
           initialChart={stack.chart}
           onOpen={(item) =>
-            void openDetail(stack.category, item, 'chart', stack.chart)
+            void openDetail(stack.category, item, 'chart', {
+              chart: stack.chart,
+            })
+          }
+        />
+      </AppPush>
+    );
+  } else if (stack.kind === 'person') {
+    push = (
+      <AppPush
+        title={stack.person.name}
+        scrollKey={`media-person-${stack.person.id}`}
+        onBack={() =>
+          setStack({
+            kind: 'detail',
+            ...stack.detailBack,
+          })
+        }
+      >
+        <MediaPersonBody
+          source={source}
+          person={stack.person}
+          onOpen={(item) =>
+            void openDetail(
+              item.mediaType === 'tv' ? 'tv' : 'movie',
+              item,
+              'person',
+              {
+                person: stack.person,
+                detailBack: stack.detailBack,
+              },
+            )
           }
         />
       </AppPush>
@@ -216,6 +310,14 @@ export function MediaScreen() {
   } else if (stack.kind === 'detail') {
     const show = stack.detail || stack.item;
     const onBack = () => {
+      if (stack.from === 'person' && stack.person && stack.detailBack) {
+        setStack({
+          kind: 'person',
+          person: stack.person,
+          detailBack: stack.detailBack,
+        });
+        return;
+      }
       if (stack.from === 'search') setStack({ kind: 'search' });
       else if (stack.from === 'chart') {
         setStack({
@@ -226,22 +328,47 @@ export function MediaScreen() {
       } else setStack({ kind: 'hub' });
     };
     push = (
-      <AppPush title={show.title} onBack={onBack}>
-        {loadingDetail && !stack.detail ? (
-          <p className="media-empty">加载详情…</p>
-        ) : (
-          <MediaDetailBody
-            item={show}
-            onOpenRelated={(next) =>
-              void openDetail(
-                next.mediaType === 'tv' ? 'tv' : stack.category,
-                next,
-                stack.from,
-                stack.chart,
-              )
-            }
-          />
-        )}
+      <AppPush
+        title={show.title}
+        scrollKey={`media-detail-${show.source}-${show.id}`}
+        scrollMode="top"
+        onBack={onBack}
+      >
+        <MediaDetailBody
+          item={show}
+          enriching={loadingDetail && !stack.detail}
+          onOpenRelated={(next) =>
+            void openDetail(
+              next.mediaType === 'tv' ? 'tv' : stack.category,
+              next,
+              stack.from === 'person' ? 'person' : stack.from,
+              {
+                chart: stack.chart,
+                person: stack.person,
+                detailBack: stack.detailBack,
+              },
+            )
+          }
+          onOpenPerson={(person) => {
+            const from =
+              stack.from === 'person'
+                ? stack.detailBack?.from || 'hub'
+                : stack.from;
+            startTransition(() =>
+              setStack({
+                kind: 'person',
+                person,
+                detailBack: {
+                  category: stack.category,
+                  item: stack.item,
+                  detail: stack.detail,
+                  from,
+                  chart: stack.chart,
+                },
+              }),
+            );
+          }}
+        />
         <AppMsg allowSelect onDismiss={() => setMsg('')}>
           {msg}
         </AppMsg>

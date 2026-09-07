@@ -10,7 +10,7 @@ export function TabPane({ children }: { children: ReactNode }) {
 
   return (
     <div
-      className="overflow-hidden"
+      className="overflow-hidden app-tab-pane"
       style={{
         height: h ? `${h}px` : '100%',
         /* 必须等于滚动容器 clientWidth；禁止 100vw（桌面预览会撑破） */
@@ -22,7 +22,9 @@ export function TabPane({ children }: { children: ReactNode }) {
         boxSizing: 'border-box',
       }}
     >
-      <div className="mx-auto h-full w-full max-w-2xl">{children}</div>
+      <div className="app-tab-pane__inner mx-auto h-full w-full max-w-2xl">
+        {children}
+      </div>
     </div>
   );
 }

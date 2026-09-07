@@ -1,2 +1,6 @@
-# Optional: sehua vector ingest job only. Do not add to Docker image.
+# Optional: local vector ingest only. Do not add to Docker image.
 fastembed>=0.4.0
+# Windows AMD/Intel/NVIDIA: DirectML EP（与官方 onnxruntime 互斥，勿同时装）
+onnxruntime-directml>=1.24.0; sys_platform == "win32"
+# 非 Windows 回退 CPU 版
+onnxruntime>=1.17.0; sys_platform != "win32"

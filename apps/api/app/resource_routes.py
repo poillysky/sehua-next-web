@@ -7,7 +7,6 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 
 from . import prefix_ranges, prefix_service, resource_service
-from .boards_nav import load_board_nav
 from .pg import ResourceDbUnavailable
 
 router = APIRouter(tags=["resources"])
@@ -15,14 +14,6 @@ router = APIRouter(tags=["resources"])
 
 def _wrap(data: Any, message: str = "ok", status: int = 200) -> dict[str, Any]:
     return {"data": data, "message": message, "status": status}
-
-
-@router.get("/boards")
-def boards() -> dict[str, Any]:
-    try:
-        return _wrap(load_board_nav(), "success")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/prefix-covers")
@@ -143,7 +134,7 @@ def prefix_resources(
 @router.get("/browse")
 def browse(
     p: int = Query(1, ge=1),
-    ps: int = Query(10, ge=1, le=50),
+    ps: int = Query(10, ge=1, le=500),
     link_kind: str | None = Query(None),
     board_fid: str | None = Query(None),
     board: str | None = Query(None),

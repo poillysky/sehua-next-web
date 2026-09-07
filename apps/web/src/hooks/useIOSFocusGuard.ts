@@ -2,10 +2,12 @@
 
 import { useEffect } from 'react';
 import {
+  ensureFormFieldAboveKeyboard,
   focusWithoutScroll,
   isEditableElement,
   isPinnedFocusSurface,
   lockPinnedPage,
+  PINNED_FOCUS_SEL,
   pinDocumentScroll,
   pinMainLayout,
   unlockPinnedPage,
@@ -21,13 +23,7 @@ export function useIOSFocusGuard(enabled = true) {
     if (!enabled || typeof window === 'undefined') return;
 
     const shouldGuard = (el: HTMLElement) => {
-      if (
-        el.closest(
-          '.app-push, .settings-push, .app-search, .login-screen, .auth-viewport, .p115-paste-page',
-        )
-      ) {
-        return true;
-      }
+      if (el.closest(PINNED_FOCUS_SEL)) return true;
       return shouldUseNativeShell();
     };
 
@@ -38,6 +34,12 @@ export function useIOSFocusGuard(enabled = true) {
         window.setTimeout(pinMainLayout, 50);
         window.setTimeout(pinMainLayout, 160);
         window.setTimeout(pinMainLayout, 320);
+        window.setTimeout(() => {
+          const vv = window.visualViewport;
+          if (!vv) return;
+          const gap = Math.max(0, window.innerHeight - vv.height);
+          if (gap > 24) ensureFormFieldAboveKeyboard(gap);
+        }, 280);
         return;
       }
       pinDocumentScroll();
@@ -79,12 +81,7 @@ export function useIOSFocusGuard(enabled = true) {
       window.setTimeout(() => {
         const active = document.activeElement;
         if (isPinnedFocusSurface(active)) return;
-        if (
-          active instanceof Element &&
-          active.closest(
-            '.app-search, .login-screen, .auth-viewport, .app-push, .settings-push',
-          )
-        ) {
+        if (active instanceof Element && active.closest(PINNED_FOCUS_SEL)) {
           return;
         }
         if (document.documentElement.dataset.keyboard === '1') {

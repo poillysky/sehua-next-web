@@ -1,11 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ClipboardPaste, MessageCircle, Sparkles } from 'lucide-react';
+import { ClipboardPaste, LayoutGrid, Sparkles } from 'lucide-react';
 import {
   DEFAULT_MATCH_MODE,
   DEFAULT_SORT_TYPE,
   SEARCH_KEYWORD_LENGTH_MIN,
+  BROWSE_LATEST_MAX,
+  BROWSE_LATEST_PAGE_SIZE,
   SEARCH_PAGE_SIZE,
   normalizeFilterSize,
   normalizeFilterTime,
@@ -29,9 +31,11 @@ import type { FeedSource } from '@/lib/mixedSearch';
 import { AppPush } from '@/components/ui/AppPush';
 import { AppMsg } from '@/components/ui/AppMsg';
 import { useTabNavigation } from '@/shell';
+import { useStackCover } from '@/hooks/useStackCover';
 import { HomeSearchField } from './HomeSearchField';
 import { P115PastePanel } from './P115PastePanel';
 import { AiSearchChatPanel } from './AiSearchChatPanel';
+import { BoardsScreen } from '@/features/boards/BoardsScreen';
 import { ResourceDetailBody } from './ResourceDetailBody';
 import { ResourceCard } from './ResourceCard';
 import { SearchFilters } from './SearchFilters';
@@ -109,7 +113,8 @@ function syncSearchUrl(opts: {
 }
 
 /**
- * 搜索页 — 一关键字双库并行，色花堂 / Bitmagnet 分 Tab 展示
+ * 搜索页 — 一关键字双库并行；色花堂 / Bitmagnet 分来源展示
+ * 影视入口优先 Bitmagnet，片商入口优先色花堂
  */
 export function HomeScreen() {
   const tabCtx = useTabNavigation();
@@ -139,6 +144,7 @@ export function HomeScreen() {
   const [msg, setMsg] = useState('');
   const [pasteOpen, setPasteOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [boardsOpen, setBoardsOpen] = useState(false);
   const [detailHash, setDetailHash] = useState<string | null>(null);
   const [detailSource, setDetailSource] = useState<FeedSource>('sehua');
   const [reloadToken, setReloadToken] = useState(0);
@@ -149,6 +155,12 @@ export function HomeScreen() {
   const sehuaReqId = useRef(0);
   const magnetReqId = useRef(0);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const overlayOpen = Boolean(detailHash || pasteOpen || chatOpen || boardsOpen);
+  const mainCover = useStackCover(
+    overlayOpen,
+    'home-main',
+    'home-stack-main',
+  );
   const scrollBodyRef = useRef<HTMLDivElement | null>(null);
   const hydrated = useRef(false);
   const skipUrlWrite = useRef(false);
@@ -200,6 +212,11 @@ export function HomeScreen() {
     setMagnetPage(1);
     resetLists();
     closeDetail();
+    try {
+      sessionStorage.removeItem('nextweb:p115-save-source');
+    } catch {
+      /* ignore */
+    }
   }
 
   useEffect(() => {
@@ -328,6 +345,11 @@ export function HomeScreen() {
       setMsg(`请输入至少 ${SEARCH_KEYWORD_LENGTH_MIN} 个字符`);
       return;
     }
+    try {
+      sessionStorage.removeItem('nextweb:p115-save-source');
+    } catch {
+      /* ignore */
+    }
     setDraft(next);
     setKeyword(next);
     setBrowsing(false);
@@ -340,6 +362,11 @@ export function HomeScreen() {
   }
 
   function browseLatest() {
+    try {
+      sessionStorage.removeItem('nextweb:p115-save-source');
+    } catch {
+      /* ignore */
+    }
     setDraft('');
     setKeyword('');
     setBrowsing(true);
@@ -435,21 +462,31 @@ export function HomeScreen() {
         } else {
           const data = await fetchBrowse({
             page: sehuaPage,
-            pageSize: SEARCH_PAGE_SIZE,
+            pageSize: BROWSE_LATEST_PAGE_SIZE,
             signal: ac.signal,
           });
           if (id !== sehuaReqId.current) return;
+          const baseCount = append ? items.length : 0;
           setItems((prev) => {
-            if (!append) return data.resources;
+            if (!append) return data.resources.slice(0, BROWSE_LATEST_MAX);
             const seen = new Set(prev.map((x) => x.hash));
             return [
               ...prev,
               ...data.resources.filter((x) => !seen.has(x.hash)),
-            ];
+            ].slice(0, BROWSE_LATEST_MAX);
           });
           setKeywords([]);
-          setSehualTotal(data.total_count);
-          setSehualHasMore(data.has_more);
+          const added = append
+            ? data.resources.filter(
+                (x) => !items.some((p) => p.hash === x.hash),
+              ).length
+            : Math.min(data.resources.length, BROWSE_LATEST_MAX);
+          const loaded = Math.min(BROWSE_LATEST_MAX, baseCount + added);
+          const apiTotal = Number(data.total_count) || loaded;
+          setSehualTotal(Math.min(apiTotal, BROWSE_LATEST_MAX));
+          setSehualHasMore(
+            Boolean(data.has_more) && loaded < BROWSE_LATEST_MAX,
+          );
           if (!append) setCostMs(Math.round(performance.now() - t0));
         }
       } catch (e) {
@@ -492,14 +529,9 @@ export function HomeScreen() {
     searchRegion,
   ]);
 
-  // Bitmagnet（仅关键词搜索，且当前选中 Bitmagnet 页签时才请求，避免拖慢色花堂）
+  // Bitmagnet：关键词搜索时与色花堂并行拉取（分 Tab 展示，入口决定优先页签）
   useEffect(() => {
     if (mode !== 'results' || !isKeywordSearch) {
-      setMagnetLoading(false);
-      setMagnetLoadingMore(false);
-      return;
-    }
-    if (searchSource !== 'bitmagnet') {
       setMagnetLoading(false);
       setMagnetLoadingMore(false);
       return;
@@ -558,7 +590,7 @@ export function HomeScreen() {
           setMagnetTotal(0);
         }
         setMagnetHasMore(false);
-        setMagnetError(e instanceof Error ? e.message : 'Bitmagnet 搜索失败');
+        setMagnetError(e instanceof Error && e.message ? e.message : 'Bitmagnet 搜索失败');
       } finally {
         if (id === magnetReqId.current) {
           setMagnetLoading(false);
@@ -577,7 +609,6 @@ export function HomeScreen() {
     filterTime,
     filterSize,
     reloadToken,
-    searchSource,
   ]);
 
   const activeSource: SearchSource = browsing ? 'sehua' : searchSource;
@@ -628,25 +659,29 @@ export function HomeScreen() {
   ]);
 
   const hint = isKeywordSearch
-    ? activeSource === 'sehua'
-      ? (() => {
-          const parts: string[] = [];
-          if (sehuaLoading && sehuaTotal === 0) parts.push('加载中…');
-          else parts.push(`${sehuaTotal} 条`);
-          if (costMs > 0) parts.push(`${costMs}ms`);
-          if (searchRegion) parts.push('分区');
-          return parts.join(' · ');
-        })()
-      : (() => {
-          const parts: string[] = [];
-          if (magnetLoading && magnetTotal === 0) parts.push('加载中…');
-          else if (magnetError && magnetTotal === 0) parts.push('不可用');
-          else parts.push(`${magnetTotal} 条`);
-          if (magnetCostMs > 0) parts.push(`${magnetCostMs}ms`);
-          return parts.join(' · ');
-        })()
+    ? (() => {
+        const sehuaPart =
+          sehuaLoading && sehuaTotal === 0 && items.length === 0
+            ? '色花堂…'
+            : `色花堂 ${sehuaTotal}`;
+        const bmPart =
+          magnetLoading && magnetTotal === 0 && magnetItems.length === 0
+            ? magnetError
+              ? 'Bt 不可用'
+              : 'Bt…'
+            : magnetError && magnetTotal === 0
+              ? 'Bt 不可用'
+              : `Bt ${magnetTotal}`;
+        // 优先来源写在前面
+        const dual =
+          searchSource === 'bitmagnet'
+            ? `${bmPart} · ${sehuaPart}`
+            : `${sehuaPart} · ${bmPart}`;
+        if (searchRegion) return `${dual} · 分区`;
+        return dual;
+      })()
     : sehuaTotal > 0
-      ? `最新 · ${sehuaTotal} 条`
+      ? `最新 · ${Math.min(sehuaTotal, BROWSE_LATEST_MAX)} 条`
       : '最新资源';
 
   function onFilterChange<T>(setter: (v: T) => void) {
@@ -674,51 +709,79 @@ export function HomeScreen() {
 
   return (
     <div className="app-stack-root">
+      <div {...mainCover}>
       {mode === 'landing' ? (
         <div className="home-landing">
-          <div className="home-landing__toolbar" role="toolbar" aria-label="快捷操作">
-            <button type="button" className="home-landing__chip" onClick={browseLatest}>
-              <span className="home-landing__chip-ico" aria-hidden>
-                <Sparkles size={13} strokeWidth={2.4} />
-              </span>
-              <span className="home-landing__chip-txt">最新</span>
-            </button>
-            <button type="button" className="home-landing__chip" onClick={() => setChatOpen(true)}>
-              <span className="home-landing__chip-ico" aria-hidden>
-                <MessageCircle size={13} strokeWidth={2.4} />
-              </span>
-              <span className="home-landing__chip-txt">对话</span>
-            </button>
+          <div className="home-landing__top">
+            <div className="home-landing__top-row">
+              <div className="home-landing__toolbar" role="toolbar" aria-label="快捷操作">
+                <button type="button" className="home-landing__chip" onClick={browseLatest}>
+                  <span className="home-landing__chip-ico" aria-hidden>
+                    <Sparkles size={13} strokeWidth={2.4} />
+                  </span>
+                  <span className="home-landing__chip-txt">最新</span>
+                </button>
+                <button
+                  type="button"
+                  className="home-landing__chip"
+                  onClick={() => setBoardsOpen(true)}
+                >
+                  <span className="home-landing__chip-ico" aria-hidden>
+                    <LayoutGrid size={13} strokeWidth={2.4} />
+                  </span>
+                  <span className="home-landing__chip-txt">板块</span>
+                </button>
+                <button
+                  type="button"
+                  className="home-landing__chip"
+                  onClick={() => setPasteOpen(true)}
+                >
+                  <span className="home-landing__chip-ico" aria-hidden>
+                    <ClipboardPaste size={13} strokeWidth={2.4} />
+                  </span>
+                  <span className="home-landing__chip-txt">转存</span>
+                </button>
+              </div>
+            </div>
+          </div>
+          <div className="home-landing__main">
+            <div className="home-landing__hero">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                className="home-landing__rose"
+                src="/brand/logo.png"
+                alt=""
+                width={156}
+                height={156}
+                decoding="async"
+              />
+              <h2 className="home-landing__title">资源仓库</h2>
+              <p className="home-landing__sub">片名 · 番号 · 关键词 · 双库同搜</p>
+              {searchField({ size: 'hero' })}
+            </div>
             <button
               type="button"
-              className="home-landing__chip"
-              onClick={() => setPasteOpen(true)}
+              className="home-landing__bot"
+              aria-label="AI 对话搜索"
+              onClick={() => setChatOpen(true)}
             >
-              <span className="home-landing__chip-ico" aria-hidden>
-                <ClipboardPaste size={13} strokeWidth={2.4} />
-              </span>
-              <span className="home-landing__chip-txt">转存</span>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                className="home-landing__bot-img"
+                src="/brand/chat-bot.png"
+                alt=""
+                width={58}
+                height={58}
+                decoding="async"
+              />
+              <span className="home-landing__bot-pulse" aria-hidden />
             </button>
+            {msg ? (
+              <div className="home-landing__msg">
+                <AppMsg onDismiss={() => setMsg('')}>{msg}</AppMsg>
+              </div>
+            ) : null}
           </div>
-          <div className="home-landing__hero">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              className="home-landing__rose"
-              src="/brand/logo.png"
-              alt=""
-              width={156}
-              height={156}
-              decoding="async"
-            />
-            <h1 className="home-landing__title">资源仓库</h1>
-            <p className="home-landing__sub">片名 · 番号 · 关键词 · 双库同搜</p>
-            {searchField({ size: 'hero' })}
-          </div>
-          {msg ? (
-            <div className="home-landing__msg">
-              <AppMsg onDismiss={() => setMsg('')}>{msg}</AppMsg>
-            </div>
-          ) : null}
         </div>
       ) : (
         <div className="home-search-screen" aria-hidden={detailHash != null}>
@@ -763,10 +826,7 @@ export function HomeScreen() {
             ) : null}
 
             <p className="app-hint">{hint}</p>
-            {isKeywordSearch &&
-            activeSource === 'bitmagnet' &&
-            magnetError &&
-            magnetTotal === 0 ? (
+            {isKeywordSearch && magnetError && magnetTotal === 0 ? (
               <p className="app-footnote" style={{ marginTop: 0, marginBottom: 8 }}>
                 Bitmagnet：{magnetError}
               </p>
@@ -777,7 +837,7 @@ export function HomeScreen() {
             ) : activeSource === 'sehua' && error && items.length === 0 ? (
               <div className="app-error">
                 <p>{error}</p>
-                <p className="app-error-hint">请到「设置」检查资源库配置</p>
+                <p className="app-error-hint">请到「更多」检查资源库配置</p>
                 <div className="app-actions" style={{ justifyContent: 'center' }}>
                   <button
                     type="button"
@@ -840,9 +900,15 @@ export function HomeScreen() {
           </div>
         </div>
       )}
+      </div>
 
       {detailHash ? (
-        <AppPush title="详情" onBack={closeDetail}>
+        <AppPush
+          title="详情"
+          scrollKey={`home-detail-${detailSource}-${detailHash}`}
+          scrollMode="top"
+          onBack={closeDetail}
+        >
           {detailSource === 'bitmagnet' ? (
             <BitmagnetDetailBody hash={detailHash} />
           ) : (
@@ -853,6 +919,9 @@ export function HomeScreen() {
 
       {pasteOpen ? <P115PastePanel onBack={() => setPasteOpen(false)} /> : null}
       {chatOpen ? <AiSearchChatPanel onBack={() => setChatOpen(false)} /> : null}
+      {boardsOpen ? (
+        <BoardsScreen onClose={() => setBoardsOpen(false)} />
+      ) : null}
     </div>
   );
 }

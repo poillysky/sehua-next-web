@@ -20,7 +20,8 @@ const nextConfig: NextConfig = {
   },
   devIndicators: false,
   experimental: {
-    proxyTimeout: 180_000,
+    // 资源库 zip 导入可达数 GB，放宽代理超时
+    proxyTimeout: 3_600_000,
   },
   webpack: (config, { dev }) => {
     if (dev) {
@@ -34,7 +35,6 @@ const nextConfig: NextConfig = {
           '**/.next/**',
           '**/data/**',
           '**/library/**',
-          '**/maker-fs/**',
           '**/.venv/**',
           '**/apps/api/**',
           '**/System Volume Information/**',

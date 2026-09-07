@@ -1,17 +1,28 @@
 'use client';
 
 import { useState } from 'react';
-import type { MediaItem } from '@/lib/api';
+import type { MediaCategoryId, MediaItem } from '@/lib/api';
 import { proxiedCoverUrl } from '@/lib/api';
+import { MEDIA_CATEGORY_MARK } from './mediaUi';
+
+function typeMark(
+  item: MediaItem,
+  category?: MediaCategoryId,
+): string {
+  if (category && MEDIA_CATEGORY_MARK[category]) {
+    return MEDIA_CATEGORY_MARK[category];
+  }
+  return item.mediaType === 'tv' ? '剧' : '影';
+}
 
 export function MediaPosterCard({
   item,
-  rank,
+  category,
   onClick,
   size = 'md',
 }: {
   item: MediaItem;
-  rank?: number;
+  category?: MediaCategoryId;
   onClick: () => void;
   size?: 'sm' | 'md' | 'lg';
 }) {
@@ -21,6 +32,7 @@ export function MediaPosterCard({
     item.rating != null && Number(item.rating) > 0
       ? Number(item.rating).toFixed(1)
       : null;
+  const mark = typeMark(item, category);
 
   return (
     <button
@@ -42,18 +54,9 @@ export function MediaPosterCard({
         ) : (
           <span className="media-poster__ph">{item.title.slice(0, 1)}</span>
         )}
-        {rank != null && rank > 0 ? (
-          <span
-            className={
-              rank <= 3
-                ? `media-poster__rank media-poster__rank--${rank}`
-                : 'media-poster__rank'
-            }
-            aria-hidden
-          >
-            {rank}
-          </span>
-        ) : null}
+        <span className="media-poster__type" aria-hidden>
+          {mark}
+        </span>
         {rating ? (
           <span className="media-poster__score" aria-hidden>
             {rating}
@@ -62,9 +65,6 @@ export function MediaPosterCard({
       </span>
       <span className="media-poster__caption">
         <span className="media-poster__title">{item.title}</span>
-        {item.year ? (
-          <span className="media-poster__year">{item.year}</span>
-        ) : null}
       </span>
     </button>
   );

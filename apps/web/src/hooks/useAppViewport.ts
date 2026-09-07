@@ -4,8 +4,11 @@ import { useEffect, useLayoutEffect, useState } from 'react';
 import {
   applyChatKeyboardInset,
   clearChatKeyboardInset,
+  clearFormKeyboardInset,
+  ensureFormFieldAboveKeyboard,
   isPinnedFormTyping,
   lockPinnedPage,
+  PINNED_FOCUS_SEL,
   pinDocumentScroll,
   pinMainLayout,
   pinUnderlyingScrollers,
@@ -65,7 +68,10 @@ export function useAppViewport() {
     const commitKeyboard = (open: boolean, inset: number) => {
       root.dataset.keyboard = open ? '1' : '0';
       root.style.setProperty('--keyboard-inset', `${open ? inset : 0}px`);
-      if (!open) clearChatKeyboardInset();
+      if (!open) {
+        clearChatKeyboardInset();
+        clearFormKeyboardInset();
+      }
     };
 
     const applyLayoutHeight = () => {
@@ -104,7 +110,7 @@ export function useAppViewport() {
       const gap = measureGap();
       const pinnedFormTyping = isPinnedFormTyping();
 
-      // 钉页表单输入：vv 随联想栏微抖，勿反复开关键盘 / 锁页
+      // 钉页表单输入：vv 随联想栏微抖，勿反复开关键盘 / 锁页；仍垫高并抬输入
       if (pinnedFormTyping && gap > 24) {
         if (root.dataset.keyboard !== '1') {
           root.dataset.keyboard = '1';
@@ -112,6 +118,7 @@ export function useAppViewport() {
           lockPinnedPage();
         }
         applyChatKeyboardInset(gap);
+        ensureFormFieldAboveKeyboard(gap);
         pinDocumentScroll();
         return;
       }
@@ -121,6 +128,7 @@ export function useAppViewport() {
       if (gap <= KEYBOARD_THRESHOLD) {
         if (pinnedFormTyping) {
           applyChatKeyboardInset(gap);
+          ensureFormFieldAboveKeyboard(gap);
           return;
         }
         if (stabilityTimer) {
@@ -129,11 +137,10 @@ export function useAppViewport() {
         }
         commitKeyboard(false, 0);
         clearChatKeyboardInset();
+        clearFormKeyboardInset();
         const stillPinned = Boolean(
           document.activeElement &&
-            (document.activeElement as HTMLElement).closest?.(
-              '.app-search, .app-search-row, .login-screen, .auth-viewport, .home-search, .app-push, .settings-push, .p115-paste-page',
-            ),
+            (document.activeElement as HTMLElement).closest?.(PINNED_FOCUS_SEL),
         );
         if (!stillPinned) unlockPinnedPage();
         if (!isStandalone()) applyLayoutHeight();
@@ -147,8 +154,9 @@ export function useAppViewport() {
           : layoutH;
       pendingInset = Math.min(gap, capH * 0.55);
       applyChatKeyboardInset(gap);
+      ensureFormFieldAboveKeyboard(gap);
 
-      // 首次判定键盘打开：只写 flag；inset 等稳定后再提交（钉页表单不消费 inset）
+      // 首次判定键盘打开：只写 flag；壳 inset 等稳定后再提交（钉页表单不消费壳 inset）
       if (root.dataset.keyboard !== '1') {
         root.dataset.keyboard = '1';
         root.style.setProperty(
@@ -168,6 +176,7 @@ export function useAppViewport() {
         const stillSkipInset = shouldSkipViewportFight();
         commitKeyboard(true, stillSkipInset ? 0 : pendingInset);
         applyChatKeyboardInset(measureGap());
+        ensureFormFieldAboveKeyboard(measureGap());
         pinDocumentScroll();
         pinUnderlyingScrollers();
         if (!stillSkipInset) pinMainLayout();
@@ -223,10 +232,12 @@ export function useAppViewport() {
       const gap = measureGap();
       if (isPinnedFormTyping()) {
         applyChatKeyboardInset(gap);
+        ensureFormFieldAboveKeyboard(gap);
         pinDocumentScroll();
         return;
       }
       applyChatKeyboardInset(gap);
+      ensureFormFieldAboveKeyboard(gap);
       if (shouldSkipViewportFight()) {
         pinDocumentScroll();
         return;

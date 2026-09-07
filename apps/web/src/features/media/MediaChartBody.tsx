@@ -106,11 +106,11 @@ export function MediaChartBody({
 
       {!loading && !err && items.length > 0 ? (
         <div className="media-wall">
-          {items.map((it, i) => (
+          {items.map((it) => (
             <MediaPosterCard
               key={`${it.source}-${it.id}`}
               item={it}
-              rank={(page - 1) * 20 + i + 1}
+              category={category}
               size="md"
               onClick={() => onOpen(it)}
             />

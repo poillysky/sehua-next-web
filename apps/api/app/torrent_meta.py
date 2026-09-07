@@ -2,7 +2,7 @@
 
 策略：
 - 只对「磁力且无 dn/后缀」补全；ed2k / 已有扩展名不走这里
-- 成功结果写入 SQLite（torrent_file_cache），重启后仍可直接用
+- 成功结果写入 Postgres meta（torrent_file_cache），重启后仍可直接用
 - 外网失败只短时记 miss，不长期误判为「没有」
 """
 
@@ -182,7 +182,7 @@ def _ensure_table() -> None:
                     CREATE TABLE IF NOT EXISTS torrent_file_cache (
                       info_hash TEXT PRIMARY KEY,
                       files_json TEXT NOT NULL,
-                      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                     )
                     """
                 )
@@ -240,10 +240,10 @@ def _disk_put(h: str, files: list[dict[str, Any]]) -> None:
             conn.execute(
                 """
                 INSERT INTO torrent_file_cache (info_hash, files_json, updated_at)
-                VALUES (?, ?, datetime('now'))
+                VALUES (?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(info_hash) DO UPDATE SET
-                  files_json = excluded.files_json,
-                  updated_at = excluded.updated_at
+                  files_json = EXCLUDED.files_json,
+                  updated_at = EXCLUDED.updated_at
                 """,
                 (h, payload),
             )
@@ -314,7 +314,7 @@ def _download_torrent(h: str) -> bytes | None:
 def files_from_infohash(info_hash: str) -> list[dict[str, Any]]:
     """
     Resolve file list for a magnet that only has btih.
-    命中顺序：内存 → SQLite → 外网 .torrent 缓存。
+    命中顺序：内存 → Postgres → 外网 .torrent 缓存。
     """
     h = (info_hash or "").strip().lower()
     if not _HASH_RE.match(h):

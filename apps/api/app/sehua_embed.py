@@ -12,9 +12,9 @@ from .scrape_forum_title import clean_forum_zh_title
 
 from .ai_config import resolve_embed_config
 
-DEFAULT_EMBED_MODEL = "BAAI/bge-small-zh-v1.5"
-DEFAULT_EMBED_DIM = 512
-# BGE 中文检索：只给「查询」加指令，文档侧不加
+DEFAULT_EMBED_MODEL = "intfloat/multilingual-e5-large"
+DEFAULT_EMBED_DIM = 1024
+# 仅 BGE 中文系列需要；E5 / Jina 多语种由 fastembed query_embed 处理前缀
 QUERY_INSTRUCTION = "为这个句子生成表示以用于检索相关文章："
 
 _EXT_RE = re.compile(r"\.(mp4|mkv|avi|wmv|iso|ts|m2ts|mov|flv|rmvb)$", re.I)
@@ -186,8 +186,23 @@ def row_embed_payload(row: dict[str, Any]) -> dict[str, str]:
     }
 
 
-def format_query_text(query: str) -> str:
+def _needs_bge_zh_instruction(model: str | None) -> bool:
+    m = str(model or "").strip().lower()
+    if not m or "bge" not in m:
+        return False
+    return "zh" in m or "chinese" in m
+
+
+def format_query_text(query: str, *, model: str | None = None) -> str:
     q = _WS_RE.sub(" ", str(query or "").strip())
     if not q:
         return ""
-    return QUERY_INSTRUCTION + q
+    name = model
+    if name is None:
+        try:
+            name = str(resolve_embed_config().get("model") or "")
+        except Exception:  # noqa: BLE001
+            name = ""
+    if _needs_bge_zh_instruction(name):
+        return QUERY_INSTRUCTION + q
+    return q

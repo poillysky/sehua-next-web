@@ -74,7 +74,7 @@ FORUM_COVER_HOST_RE = re.compile(
     r"sehuatang\.(net|org)|picdcd\.com|adipcd\.com|pkapic\.cc|imgccc\.com|"
     r"11img\.com|yichkp\.com|ewrewej\.la|ymawv\.la|ldkms\.la|qpic\.ws|"
     r"gdvdvb\.com|img906\.com|microsoftsa\.com|xunse\.pics|023pic3\.cc|"
-    r"pic26077\.cc|pic2607a\.cc|pic505hz\.cc|pid505st\.cc",
+    r"pic26077\.cc|pic2607a\.cc|pic505hz\.cc|pid505st\.cc|djhdhs\.us",
     re.I,
 )
 

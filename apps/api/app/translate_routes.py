@@ -31,21 +31,16 @@ _LATIN_TITLE = re.compile(r"^[a-zA-Z0-9\s:.'&!?,\-]+$")
 
 _HTTPX_KW: dict[str, Any] = {
     "timeout": 12.0,
-    "trust_env": True,
+    "trust_env": False,
     "follow_redirects": True,
     "headers": {"User-Agent": "sehua-next-search/1.0"},
 }
 
 def _get_network_proxy_url() -> str:
-    """从网络管理配置里取 HTTP 代理 URL（用于 TMDB 外联）。"""
-    raw = settings_store.get_setting(settings_store.SCRAPE_KEY) or {}
-    proxy = str(raw.get("proxyUrl") or raw.get("proxy_url") or "").strip()
-    if not proxy:
-        return ""
-    # 容错：如果没有协议头，默认补 http://
-    if "://" not in proxy:
-        proxy = f"http://{proxy}"
-    return proxy.rstrip("/")
+    """仅使用设置面板配置的 HTTP 代理。"""
+    from .outbound_http import resolve_scrape_proxy_url
+
+    return resolve_scrape_proxy_url()
 
 
 class TranslateBody(BaseModel):

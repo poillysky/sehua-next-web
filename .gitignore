@@ -33,10 +33,14 @@ yarn-error.log*
 apps/api/_*.py
 apps/api/_*.json
 apps/api/_*.html
+apps/api/_*.txt
+apps/api/_*.out.txt
 apps/api/__pycache__/
 
-# cursor (keep rules optional — ignore local)
+# cursor / local agent (keep out of repo)
 .cursor/
+.agents/
+.refs/
 
 # vercel / ts
 .vercel
@@ -45,6 +49,9 @@ apps/web/next-env.d.ts
 
 # never let Next/Tailwind watch a local library mount
 /library/
+
+# DB dumps (resource / bitmagnet)
+/backups/
 
 # data (keep folder, ignore runtime DBs & heavy caches)
 /data/*.sqlite
@@ -55,8 +62,16 @@ apps/web/next-env.d.ts
 /data/library/
 /data/maker-fs/
 /data/scrape_maps/
+/data/cover-cache/
+/data/_debug/
+/data/meta/
+/data/prefix_catalog/
+/data/presets/
+/data/scrap-library/
+/data/strm-library/
 /data/*.json
 !/data/.gitkeep
+!/data/README.md
 
 # local overrides
 /config/app.local.json

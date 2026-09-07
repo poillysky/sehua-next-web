@@ -987,7 +987,7 @@ def is_likely_chinese(title: str | None) -> bool:
     return True
 
 
-# 本地索引 titleZh 可复用门槛：壳题 / 截断壳不合格 → 仍走网络
+# 论坛 titleZh 可复用门槛：壳题 / 截断壳不合格 → 仍走网络
 _TITLE_ZH_TRUNC_TAIL_RE = re.compile(r"[、，,…]+$")
 _TITLE_ZH_BROKEN_LEAD_RE = re.compile(r"^.{1,4}[、，,]")
 _TITLE_ZH_WESTERN_NAME_RE = re.compile(

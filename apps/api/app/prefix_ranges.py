@@ -16,7 +16,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from .db import ROOT, db_path
+from .db import ROOT, data_dir
 
 log = logging.getLogger(__name__)
 
@@ -148,7 +148,7 @@ _thread: threading.Thread | None = None
 
 
 def cache_path() -> Path:
-    return db_path().parent / "prefix-code-ranges.json"
+    return data_dir() / "prefix-code-ranges.json"
 
 
 def norm_prefix(prefix: str) -> str:
@@ -503,13 +503,6 @@ def set_pad(prefix: str, pad: int, *, lock: bool = True) -> dict[str, Any] | Non
             "updated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         }
         _write_doc(_doc)
-    # 同步本地 maker-fs 索引里的 pad（若有）
-    try:
-        from . import maker_fs
-
-        maker_fs.sync_prefix_pad(key, width)
-    except Exception:
-        log.debug("sync maker-fs pad %s failed", key, exc_info=True)
     return get_range(key)
 
 

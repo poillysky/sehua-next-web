@@ -35,11 +35,11 @@ def _clean_actor_raw(name: str) -> str:
 
 
 def mapping_language_from_settings() -> str:
-    """读刮削配置里的 mappingLanguage，失败则 zh-CN。"""
+    """读 library / 旧 scrape 配置里的 mappingLanguage，失败则 zh-CN。"""
     try:
         from . import settings_store
 
-        raw = settings_store.get_setting(settings_store.SCRAPE_KEY) or {}
+        raw = settings_store.get_setting(settings_store.LIBRARY_KEY) or settings_store.get_setting("scrape") or {}
         if not isinstance(raw, dict):
             return str(DEFAULT_METADATA_OPTIMIZE["mappingLanguage"])
         opt = normalize_metadata_optimize(
@@ -69,7 +69,7 @@ def normalize_actor_names(
         try:
             from . import settings_store
 
-            raw = settings_store.get_setting(settings_store.SCRAPE_KEY) or {}
+            raw = settings_store.get_setting(settings_store.LIBRARY_KEY) or settings_store.get_setting("scrape") or {}
             if isinstance(raw, dict):
                 opt = normalize_metadata_optimize(
                     raw.get("metadataOptimize") or raw.get("metadata_optimize")

@@ -152,7 +152,7 @@ export function UserManagePanel({
 
   return (
     <>
-      <AppPush title="用户管理" onBack={onBack}>
+      <AppPush title="用户管理" scrollKey="users-hub" onBack={onBack}>
         <div className="user-card">
           <span className="user-card__avatar" aria-hidden>
             {initial}
@@ -210,7 +210,7 @@ export function UserManagePanel({
         <ul className="settings-group">
           <li>
             <button type="button" className="settings-nav" onClick={() => setSub('password')}>
-              <span className="settings-nav__icon settings-nav__icon--violet" aria-hidden>
+              <span className="settings-nav__icon settings-nav__icon--indigo" aria-hidden>
                 <KeyRound size={14} strokeWidth={2.25} />
               </span>
               <span className="settings-nav__main">
@@ -237,7 +237,11 @@ export function UserManagePanel({
       </AppPush>
 
       {sub === 'password' ? (
-        <AppPush title="修改密码" onBack={() => setSub(null)}>
+        <AppPush
+          title="修改密码"
+          scrollKey="users-password"
+          onBack={() => setSub(null)}
+        >
           <section className="app-section">
             <div className="app-section-body">
               <label className="app-field">
@@ -289,6 +293,7 @@ export function UserManagePanel({
       {sub === 'users' ? (
         <AppPush
           title="用户管理"
+          scrollKey="users-list"
           onBack={() => setSub(null)}
           right={
             <button
@@ -340,7 +345,11 @@ export function UserManagePanel({
       ) : null}
 
       {sub === 'create' ? (
-        <AppPush title="创建普通用户" onBack={() => setSub('users')}>
+        <AppPush
+          title="创建普通用户"
+          scrollKey="users-create"
+          onBack={() => setSub('users')}
+        >
           <section className="app-section">
             <div className="app-section-body">
               <label className="app-field">
@@ -380,7 +389,11 @@ export function UserManagePanel({
       ) : null}
 
       {sub && typeof sub === 'object' && sub.kind === 'detail' ? (
-        <AppPush title={sub.user.username} onBack={() => setSub('users')}>
+        <AppPush
+          title={sub.user.username}
+          scrollKey={`users-detail-${sub.user.id}`}
+          onBack={() => setSub('users')}
+        >
           <ul className="settings-group">
             <li>
               <div className="settings-kv">
@@ -428,7 +441,7 @@ export function UserManagePanel({
 
           {user?.id !== sub.user.id ? (
             <>
-              <p className="settings-group-label" style={{ marginTop: 28 }}>
+              <p className="settings-group-label settings-group-label--spaced">
                 危险操作
               </p>
               <ul className="settings-group">

@@ -134,8 +134,16 @@ def pg_trgm_available() -> bool:
 
 def _page_params(p: int, ps: int) -> tuple[int, int, int]:
     page = max(1, int(p or 1))
-    # search pool may request up to 80; browse route still caps at 50
+    # search pool may request up to 80
     page_size = min(max(int(ps or 10), 1), 80)
+    offset = min((page - 1) * page_size, MAX_SEARCH_OFFSET)
+    return page, page_size, offset
+
+
+def _browse_page_params(p: int, ps: int) -> tuple[int, int, int]:
+    page = max(1, int(p or 1))
+    # 「最新」首屏可一次拉到 500
+    page_size = min(max(int(ps or 10), 1), 500)
     offset = min((page - 1) * page_size, MAX_SEARCH_OFFSET)
     return page, page_size, offset
 
@@ -183,7 +191,7 @@ def browse_resources(
     ? board_fid ?? resource_sources ???``fid`` ? ``fid:%``??
     ???? COUNT?``ps+1`` ? has_more???? 5?10s ?????
     """
-    page, page_size, offset = _page_params(p, ps)
+    page, page_size, offset = _browse_page_params(p, ps)
     kind = (link_kind or "").strip()
     link_sql = ""
     if kind == "magnet":

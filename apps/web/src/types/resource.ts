@@ -62,15 +62,6 @@ export type FilterSize =
   | 'gt1gb-lt5gb'
   | 'gt5gb';
 
-export type BoardNavCategory = {
-  category: string;
-  parents: Array<{
-    name: string;
-    fid?: string;
-    children?: Array<{ name: string; fid?: string; search_keyword?: string }>;
-  }>;
-};
-
 export type AuthUser = {
   id: number;
   username: string;
