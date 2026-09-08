@@ -14,6 +14,8 @@ export type P115PanelSnapshot = {
   configured: boolean;
   hint: string;
   targets: Record<P115SaveSource, P115TargetFolder>;
+  subsFolder: P115TargetFolder;
+  subsLayered: boolean;
   tab: P115PanelTab;
   quota: number | null;
   quotaTotal: number | null;
@@ -64,6 +66,10 @@ export function emptyP115Targets(): Record<P115SaveSource, P115TargetFolder> {
   };
 }
 
+export function emptyP115SubsFolder(): P115TargetFolder {
+  return { folderCid: '0', folderName: '' };
+}
+
 /** 从 getP115 结果写一版最小缓存（无配额时） */
 export function cacheFromP115Config(
   data: P115Config,
@@ -74,6 +80,8 @@ export function cacheFromP115Config(
     configured: Boolean(data.configured),
     hint: data.cookieHint || '',
     targets,
+    subsFolder: data.subsFolder || prev?.subsFolder || emptyP115SubsFolder(),
+    subsLayered: data.subsLayered ?? prev?.subsLayered ?? true,
     tab: prev?.tab && data.configured ? prev.tab : data.configured ? 'overview' : 'config',
     quota: data.quota ?? prev?.quota ?? null,
     quotaTotal: data.quotaTotal ?? prev?.quotaTotal ?? null,

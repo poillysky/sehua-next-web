@@ -20792,6 +20792,36 @@ a.scrape-src-card__url:active {
   color: #c93400;
 }
 
+.mkd-sub {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 96px;
+  height: 48px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 14px;
+  background: rgba(120, 120, 128, 0.14);
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mkd-sub:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.mkd-sub--on {
+  background: rgba(52, 199, 89, 0.18);
+  color: #1b7f3a;
+}
+
 .dark .mkd-fav {
   background: rgba(120, 120, 128, 0.24);
 }
@@ -20799,6 +20829,15 @@ a.scrape-src-card__url:active {
 .dark .mkd-fav--on {
   background: rgba(255, 159, 10, 0.22);
   color: #ff9f0a;
+}
+
+.dark .mkd-sub {
+  background: rgba(120, 120, 128, 0.24);
+}
+
+.dark .mkd-sub--on {
+  background: rgba(48, 209, 88, 0.22);
+  color: #30d158;
 }
 
 .mkd-cta.media-detail__cta {

@@ -2,6 +2,7 @@ import type { MakerCatalogSourceId } from '@/lib/api';
 import { SEARCH_KEYWORD_LENGTH_MIN } from '@/config/search';
 import type { TabRoute } from '@/shell';
 import { openHomeSearch } from '@/features/media/mediaUi';
+import { writeP115AttachSubs } from '@/lib/p115AttachSubs';
 
 /** 七区顶栏（库 / 分区） */
 export const MAKER_KIND_TABS: Array<{
@@ -75,16 +76,24 @@ export function makerSourceLabel(id: MakerCatalogSourceId): string {
   return MAKER_KIND_TABS.find((t) => t.id === id)?.label || id;
 }
 
-/** 片商详情跳仓库：双库同搜，优先展示色花堂；115 落到「片商」目录 */
+/** 片商详情跳仓库：双库同搜，优先展示色花堂；115 落到「片商」区分子目录 */
 export function openMakerHomeSearch(
-  item: { code?: string | null; title?: string | null; id?: string },
+  item: {
+    code?: string | null;
+    title?: string | null;
+    id?: string;
+    region?: string | null;
+  },
   scrollToTab?: (tab: TabRoute) => void,
 ): boolean {
   const code = String(item.code || '').trim();
   const title = String(item.title || '').trim();
   const id = String(item.id || '').trim();
+  const region = String(item.region || '').trim();
   const q = code || title || id;
   if (q.trim().length < SEARCH_KEYWORD_LENGTH_MIN) return false;
+  // 转存 115：按分区进子目录，字幕进「字幕」
+  writeP115AttachSubs({ code, itemId: id, region });
   return openHomeSearch(q, scrollToTab, {
     source: 'sehua',
     p115Source: 'makers',

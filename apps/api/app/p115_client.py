@@ -460,3 +460,210 @@ def list_folders(cookie: str, parent_cid: str = "0") -> dict[str, Any]:
         "path": path,
         "folders": folders,
     }
+
+
+def add_folder(cookie: str, parent_cid: str, name: str) -> dict[str, Any]:
+    """在父目录下新建文件夹；已存在时 errno=20004，需调用方再 list。"""
+    bad = require_cookie_parts(cookie)
+    if bad:
+        return {"ok": False, "message": bad}
+    pid = (parent_cid or "0").strip() or "0"
+    cname = str(name or "").strip()
+    if not cname:
+        return {"ok": False, "message": "文件夹名为空"}
+    try:
+        with httpx.Client(
+            timeout=15.0, follow_redirects=True, trust_env=False
+        ) as client:
+            res = client.post(
+                "https://webapi.115.com/files/add",
+                headers=form_headers(cookie),
+                content=encode_form([("pid", pid), ("cname", cname)]),
+            )
+            data = res.json()
+    except Exception as e:
+        return {"ok": False, "message": str(e) or "创建目录失败"}
+    if not isinstance(data, dict):
+        return {"ok": False, "message": "创建目录响应无效"}
+    # 已存在
+    errno = data.get("errno")
+    if data.get("state") is True or str(data.get("cid") or ""):
+        cid = str(data.get("cid") or data.get("file_id") or "")
+        if cid:
+            return {
+                "ok": True,
+                "cid": cid,
+                "name": str(data.get("cname") or data.get("file_name") or cname),
+                "created": True,
+            }
+    if errno in (20004, "20004") or "已存在" in str(data.get("error") or ""):
+        return {"ok": False, "message": "exists", "exists": True}
+    return {
+        "ok": False,
+        "message": human_error(data, "创建目录失败"),
+    }
+
+
+def ensure_child_folder(
+    cookie: str, parent_cid: str, name: str
+) -> dict[str, Any]:
+    """在父目录下查找同名文件夹；没有则创建。返回 {ok,cid,name,created}。"""
+    want = str(name or "").strip()
+    if not want:
+        return {"ok": False, "message": "文件夹名为空"}
+    listed = list_folders(cookie, parent_cid)
+    if not listed.get("ok"):
+        return {
+            "ok": False,
+            "message": str(listed.get("message") or "列出目录失败"),
+        }
+    want_key = want.casefold()
+    for f in listed.get("folders") or []:
+        if not isinstance(f, dict):
+            continue
+        n = str(f.get("name") or "").strip()
+        if n.casefold() == want_key:
+            return {
+                "ok": True,
+                "cid": str(f.get("cid") or ""),
+                "name": n,
+                "created": False,
+            }
+    created = add_folder(cookie, parent_cid, want)
+    if created.get("ok") and created.get("cid"):
+        return created
+    # 并发创建时可能已存在：再 list 一次
+    listed2 = list_folders(cookie, parent_cid)
+    for f in listed2.get("folders") or []:
+        if not isinstance(f, dict):
+            continue
+        n = str(f.get("name") or "").strip()
+        if n.casefold() == want_key:
+            return {
+                "ok": True,
+                "cid": str(f.get("cid") or ""),
+                "name": n,
+                "created": False,
+            }
+    return {
+        "ok": False,
+        "message": str(created.get("message") or "无法确保子目录"),
+    }
+
+
+RECEIVE_INBOX_NAME = "最近接受"
+
+
+def ensure_receive_inbox(cookie: str) -> dict[str, Any]:
+    """115 根目录下的「最近接受」文件夹（转存落点）。"""
+    return ensure_child_folder(cookie, "0", RECEIVE_INBOX_NAME)
+
+
+def move_files(
+    cookie: str,
+    file_ids: list[str],
+    dest_cid: str,
+) -> dict[str, Any]:
+    """移动文件/文件夹到目标目录。POST /files/move"""
+    bad = require_cookie_parts(cookie)
+    if bad:
+        return {"ok": False, "message": bad, "moved": 0}
+    ids = [str(x).strip() for x in (file_ids or []) if str(x).strip()]
+    if not ids:
+        return {"ok": False, "message": "没有可移动的文件", "moved": 0}
+    pid = (dest_cid or "0").strip() or "0"
+    form: list[tuple[str, str]] = [("pid", pid)]
+    for i, fid in enumerate(ids):
+        form.append((f"fid[{i}]", fid))
+    try:
+        with httpx.Client(
+            timeout=30.0, follow_redirects=True, trust_env=False
+        ) as client:
+            res = client.post(
+                "https://webapi.115.com/files/move",
+                headers=form_headers(cookie),
+                content=encode_form(form),
+            )
+            data = res.json()
+    except Exception as e:
+        return {"ok": False, "message": str(e) or "移动失败", "moved": 0}
+    if not isinstance(data, dict):
+        return {"ok": False, "message": "移动响应无效", "moved": 0}
+    if data.get("state") is True or data.get("state") == 1:
+        return {"ok": True, "message": f"已移动 {len(ids)} 项", "moved": len(ids)}
+    return {
+        "ok": False,
+        "message": human_error(data, "移动失败"),
+        "moved": 0,
+    }
+
+
+def list_dir_entries(
+    cookie: str,
+    parent_cid: str = "0",
+    *,
+    limit: int = 100,
+) -> dict[str, Any]:
+    """列出目录下文件+文件夹（含 fid / cid）。"""
+    bad = require_cookie_parts(cookie)
+    if bad:
+        return {"ok": False, "message": bad, "entries": []}
+    cid = (parent_cid or "0").strip() or "0"
+    qs = urlencode(
+        {
+            "aid": "1",
+            "cid": cid,
+            "o": "user_ptime",
+            "asc": "0",
+            "offset": "0",
+            "show_dir": "1",
+            "limit": str(max(1, min(200, int(limit)))),
+            "type": "0",
+            "format": "json",
+        }
+    )
+    try:
+        with httpx.Client(
+            timeout=15.0, follow_redirects=True, trust_env=False
+        ) as client:
+            res = client.get(
+                f"https://webapi.115.com/files?{qs}",
+                headers=headers(cookie),
+            )
+            data = res.json()
+    except Exception as e:
+        return {"ok": False, "message": str(e) or "列出失败", "entries": []}
+    if not isinstance(data, dict) or data.get("state") is False or data.get("errno"):
+        return {
+            "ok": False,
+            "message": human_error(data if isinstance(data, dict) else {}, "列出失败"),
+            "entries": [],
+        }
+    rows = data.get("data") if isinstance(data.get("data"), list) else []
+    entries: list[dict[str, str]] = []
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("n") or item.get("name") or "").strip()
+        fid = str(item.get("fid") or "").strip()
+        item_cid = str(item.get("cid") or "").strip()
+        # 文件夹：有 cid、无 fid；文件：有 fid
+        if fid:
+            entries.append(
+                {
+                    "id": fid,
+                    "name": name,
+                    "kind": "file",
+                    "pickCode": str(item.get("pc") or ""),
+                }
+            )
+        elif item_cid and item_cid != cid:
+            entries.append(
+                {
+                    "id": item_cid,
+                    "name": name,
+                    "kind": "folder",
+                    "pickCode": str(item.get("pc") or ""),
+                }
+            )
+    return {"ok": True, "message": "ok", "entries": entries, "parentCid": cid}

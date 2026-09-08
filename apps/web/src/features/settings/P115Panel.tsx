@@ -24,6 +24,9 @@ import {
   putP115,
   startP115Qrcode,
   validateP115,
+  getSubtitleSettings,
+  putSubtitleSettings,
+  testAssrtToken,
   type P115ClearMode,
   type P115Config,
   type P115FolderItem,
@@ -38,6 +41,7 @@ import { AppCenterModal } from '@/components/ui/AppCenterModal';
 import { cn } from '@/lib/utils';
 import {
   cacheFromP115Config,
+  emptyP115SubsFolder,
   getP115PanelCache,
   isP115PanelCacheFresh,
   patchP115PanelCache,
@@ -46,6 +50,7 @@ import {
 } from './p115PanelCache';
 
 type Tab = P115PanelTab;
+type BrowseTarget = P115SaveSource | 'subs';
 
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: 'overview', label: '概览' },
@@ -58,10 +63,10 @@ const SAVE_SOURCES: Array<{
   label: string;
   desc: string;
 }> = [
-  { key: 'warehouse', label: '仓库', desc: '搜索 / 粘贴转存' },
-  { key: 'movie', label: '电影', desc: '影视 · 电影' },
-  { key: 'tv', label: '电视剧', desc: '影视 · 剧集' },
-  { key: 'makers', label: '片商', desc: '片商入口资源' },
+  { key: 'warehouse', label: '仓库', desc: '先最近接受 → 再进本目录' },
+  { key: 'movie', label: '电影', desc: '影视·电影 · 先最近接受 → 再进本目录' },
+  { key: 'tv', label: '电视剧', desc: '影视·剧集 · 先最近接受 → 再进本目录' },
+  { key: 'makers', label: '片商', desc: '片商 · 先最近接受 → 再进分区目录' },
 ];
 
 function emptyTargets(): Record<P115SaveSource, P115TargetFolder> {
@@ -212,7 +217,18 @@ export function P115Panel({
   const [targets, setTargets] = useState<Record<P115SaveSource, P115TargetFolder>>(
     () => cached?.targets ?? emptyTargets(),
   );
-  const [browseSource, setBrowseSource] = useState<P115SaveSource>('warehouse');
+  const [subsFolder, setSubsFolder] = useState<P115TargetFolder>(
+    () => cached?.subsFolder ?? emptyP115SubsFolder(),
+  );
+  const [subsLayered, setSubsLayered] = useState(
+    () => cached?.subsLayered ?? true,
+  );
+  const [assrtToken, setAssrtToken] = useState('');
+  const [assrtHint, setAssrtHint] = useState('');
+  const [assrtConfigured, setAssrtConfigured] = useState(false);
+  const [assrtFromEnv, setAssrtFromEnv] = useState(false);
+  const [assrtShowEdit, setAssrtShowEdit] = useState(true);
+  const [browseSource, setBrowseSource] = useState<BrowseTarget>('warehouse');
   const [quota, setQuota] = useState<number | null>(() => cached?.quota ?? null);
   const [quotaTotal, setQuotaTotal] = useState<number | null>(() => cached?.quotaTotal ?? null);
   const [quotaError, setQuotaError] = useState(() => cached?.quotaError ?? '');
@@ -288,9 +304,13 @@ export function P115Panel({
     const nextConfigured = Boolean(data.configured);
     const nextHint = data.cookieHint || '';
     const nextTargets = normalizeTargets(data);
+    const nextSubs = data.subsFolder || emptyP115SubsFolder();
+    const nextLayered = data.subsLayered ?? true;
     setConfigured(nextConfigured);
     setHint(nextHint);
     setTargets(nextTargets);
+    setSubsFolder(nextSubs);
+    setSubsLayered(nextLayered);
     setCookie('');
     setShowCookieEdit(!nextConfigured);
     applyQuotaInfo(data);
@@ -305,6 +325,8 @@ export function P115Panel({
         configured: false,
         hint: nextHint,
         targets: nextTargets,
+        subsFolder: nextSubs,
+        subsLayered: nextLayered,
         tab: 'config',
         quota: null,
         quotaTotal: null,
@@ -419,6 +441,67 @@ export function P115Panel({
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const d = await getSubtitleSettings();
+        if (cancelled) return;
+        setAssrtHint(d.assrtTokenHint || '');
+        setAssrtConfigured(Boolean(d.assrtConfigured));
+        setAssrtFromEnv(Boolean(d.assrtFromEnv));
+        setAssrtShowEdit(!d.assrtConfigured || Boolean(d.assrtFromEnv));
+      } catch {
+        /* 字幕设置可选，失败不挡主流程 */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function onSaveAssrt() {
+    const key = assrtToken.trim();
+    if (!key && !assrtConfigured) {
+      setMsg('请填写 Assrt Token（assrt.net 用户面板）');
+      return;
+    }
+    setBusy(true);
+    setMsg('');
+    try {
+      const next = await putSubtitleSettings({ assrtToken: key });
+      setAssrtHint(next.assrtTokenHint || '');
+      setAssrtToken('');
+      setAssrtConfigured(Boolean(next.assrtConfigured));
+      setAssrtFromEnv(Boolean(next.assrtFromEnv));
+      setAssrtShowEdit(!next.assrtConfigured || Boolean(next.assrtFromEnv));
+      setMsg(
+        next.assrtFromEnv
+          ? '已保存（仍以环境变量 ASSRT_TOKEN 为准）'
+          : next.assrtConfigured
+            ? 'Assrt Token 已保存'
+            : '已保存',
+      );
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : '保存失败');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onTestAssrt() {
+    setBusy(true);
+    setMsg('');
+    try {
+      const r = await testAssrtToken({ assrtToken: assrtToken.trim() });
+      setMsg(r.message || (r.ok ? '测试成功' : '失败'));
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : '测试失败');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  useEffect(() => {
     patchP115PanelCache({ tab });
   }, [tab]);
 
@@ -503,7 +586,7 @@ export function P115Panel({
     setQrStatusLabel('');
   }
 
-  async function browseFolders(source: P115SaveSource, cid = '0') {
+  async function browseFolders(source: BrowseTarget, cid = '0') {
     setBrowseSource(source);
     setBrowsing(true);
     setMsg('');
@@ -523,6 +606,12 @@ export function P115Panel({
   }
 
   function selectFolder(item: P115FolderItem) {
+    if (browseSource === 'subs') {
+      setSubsFolder({ folderCid: item.cid, folderName: item.name });
+      setShowBrowser(false);
+      setMsg(`已选择「${item.name}」作为字幕目录，记得保存`);
+      return;
+    }
     setTargets((prev) => ({
       ...prev,
       [browseSource]: {
@@ -575,6 +664,8 @@ export function P115Panel({
       const next = await putP115({
         cookie: cookie.trim() || undefined,
         targets,
+        subsFolder,
+        subsLayered,
         validate: true,
       });
       applyConfig(next);
@@ -786,6 +877,19 @@ export function P115Panel({
               <li>
                 <div className="settings-nav">
                   <span className="settings-nav__icon settings-nav__icon--violet" aria-hidden>
+                    <CloudDownload size={14} strokeWidth={2.25} />
+                  </span>
+                  <span className="settings-nav__main">
+                    <span className="settings-nav__title">转存流程</span>
+                    <span className="settings-nav__desc allow-select">
+                      影视 / 片商 / 仓库：先入根目录「最近接受」，完成后再移到各自指定目录
+                    </span>
+                  </span>
+                </div>
+              </li>
+              <li>
+                <div className="settings-nav">
+                  <span className="settings-nav__icon settings-nav__icon--violet" aria-hidden>
                     <KeyRound size={14} strokeWidth={2.25} />
                   </span>
                   <span className="settings-nav__main">
@@ -828,6 +932,29 @@ export function P115Panel({
                   </li>
                 );
               })}
+              <li>
+                <div className="settings-nav">
+                  <span className="settings-nav__icon settings-nav__icon--violet" aria-hidden>
+                    <FolderOpen size={14} strokeWidth={2.25} />
+                  </span>
+                  <span className="settings-nav__main">
+                    <span className="settings-nav__title">字幕</span>
+                    <span className="settings-nav__desc allow-select">
+                      {subsFolder.folderName
+                        ? `${folderDisplayName(subsFolder)} · CID ${subsFolder.folderCid || '0'}`
+                        : '未配置（默认片商根/字幕）'}
+                      {subsLayered ? ' · 按分区分层' : ' · 扁平'}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    className="settings-inline-action"
+                    onClick={() => setTab('config')}
+                  >
+                    更改
+                  </button>
+                </div>
+              </li>
             </ul>
           </div>
         ) : null}
@@ -975,12 +1102,140 @@ export function P115Panel({
                     );
                   })}
                 </ul>
+                <p className="settings-group-label" style={{ marginTop: 16 }}>
+                  字幕目录
+                </p>
+                <ul className="settings-group">
+                  <li>
+                    <div className="settings-nav">
+                      <span className="settings-nav__icon settings-nav__icon--violet" aria-hidden>
+                        <FolderOpen size={14} strokeWidth={2.25} />
+                      </span>
+                      <span className="settings-nav__main">
+                        <span className="settings-nav__title">字幕根目录</span>
+                        <span className="settings-nav__desc allow-select">
+                          {subsFolder.folderName
+                            ? `${folderDisplayName(subsFolder)} · CID ${subsFolder.folderCid || '0'}`
+                            : '未选：默认片商根下「字幕」'}
+                          <span className="p115-target-hint">
+                            {' '}
+                            · 仅中文 · 命名 ABC-123.chi.srt · 多源评分选优
+                          </span>
+                        </span>
+                      </span>
+                      <button
+                        type="button"
+                        className="settings-inline-action"
+                        disabled={locked}
+                        onClick={() =>
+                          void browseFolders('subs', subsFolder.folderCid || '0')
+                        }
+                      >
+                        浏览
+                      </button>
+                    </div>
+                  </li>
+                  <li>
+                    <div className="settings-nav">
+                      <span className="settings-nav__icon settings-nav__icon--violet" aria-hidden>
+                        <Folder size={14} strokeWidth={2.25} />
+                      </span>
+                      <span className="settings-nav__main">
+                        <span className="settings-nav__title">按分区分层</span>
+                        <span className="settings-nav__desc allow-select">
+                          {subsLayered
+                            ? '开启：字幕根/日本有码/SSIS-949.chi.srt'
+                            : '关闭：字幕根/SSIS-949.chi.srt'}
+                        </span>
+                      </span>
+                      <button
+                        type="button"
+                        className={cn(
+                          'makers-ios-switch',
+                          subsLayered && 'makers-ios-switch--on',
+                        )}
+                        role="switch"
+                        aria-checked={subsLayered}
+                        disabled={locked}
+                        onClick={() => setSubsLayered((v) => !v)}
+                      >
+                        <span className="makers-ios-switch__thumb" />
+                      </button>
+                    </div>
+                  </li>
+                </ul>
+                <p className="settings-group-label" style={{ marginTop: 16 }}>
+                  字幕源
+                </p>
+                <ul className="settings-group">
+                  <li>
+                    <div className="settings-nav" style={{ alignItems: 'flex-start' }}>
+                      <span className="settings-nav__icon settings-nav__icon--violet" aria-hidden>
+                        <KeyRound size={14} strokeWidth={2.25} />
+                      </span>
+                      <span className="settings-nav__main" style={{ flex: 1, minWidth: 0 }}>
+                        <span className="settings-nav__title">Assrt Token（可选）</span>
+                        <span className="settings-nav__desc allow-select">
+                          多源：SubtitleCat / 迅雷 / Assrt / SubHD，自动评分选最优。
+                          {assrtConfigured
+                            ? ` · 已配置${assrtFromEnv ? '（环境变量）' : ''} ${assrtHint}`
+                            : ' · 未配置时跳过 Assrt'}
+                        </span>
+                        {assrtShowEdit ? (
+                          <input
+                            type="password"
+                            className="p115-cookie-card__input allow-select"
+                            style={{ marginTop: 8, width: '100%' }}
+                            placeholder="assrt.net 用户面板 API Token"
+                            value={assrtToken}
+                            disabled={locked || busy}
+                            onChange={(e) => setAssrtToken(e.target.value)}
+                            autoComplete="off"
+                          />
+                        ) : null}
+                        <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                          {!assrtShowEdit ? (
+                            <button
+                              type="button"
+                              className="settings-inline-action"
+                              disabled={locked || busy}
+                              onClick={() => setAssrtShowEdit(true)}
+                            >
+                              更换
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="settings-inline-action"
+                              disabled={locked || busy}
+                              onClick={() => void onSaveAssrt()}
+                            >
+                              保存 Token
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="settings-inline-action"
+                            disabled={locked || busy}
+                            onClick={() => void onTestAssrt()}
+                          >
+                            测试
+                          </button>
+                        </div>
+                      </span>
+                    </div>
+                  </li>
+                </ul>
               </section>
             ) : null}
 
             <AppCenterModal
               open={showBrowser}
-              title={`选择${SAVE_SOURCES.find((s) => s.key === browseSource)?.label || ''}目录`}
+              title={
+                browseSource === 'subs'
+                  ? '选择字幕目录'
+                  : `选择${SAVE_SOURCES.find((s) => s.key === browseSource)?.label || ''}目录`
+              }
               onClose={() => setShowBrowser(false)}
               cardClassName="p115-browser-modal"
               footer={
@@ -1043,7 +1298,11 @@ export function P115Panel({
                     <p className="p115-browser__empty">此层无子文件夹，可选用当前路径</p>
                   ) : (
                     folders.map((f) => {
-                      const selected = f.cid === targets[browseSource].folderCid;
+                      const selectedCid =
+                        browseSource === 'subs'
+                          ? subsFolder.folderCid
+                          : targets[browseSource].folderCid;
+                      const selected = f.cid === selectedCid;
                       return (
                         <div
                           key={f.cid}

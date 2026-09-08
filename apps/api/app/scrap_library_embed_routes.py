@@ -88,6 +88,126 @@ def start_ingest(
     return {"ok": True, "data": data}
 
 
+@router.post("/embed/ensure-poster")
+def ensure_poster(
+    itemId: str = Query("", alias="itemId"),
+    _user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    """缺本地海报时把 NFO cover 外链下载到番号目录 poster.jpg。"""
+    iid = str(itemId or "").strip()
+    if not iid:
+        raise HTTPException(400, "itemId required")
+    try:
+        data = svc.ensure_local_poster(item_id=iid)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, str(e)) from e
+    return {"ok": True, "data": data}
+
+
+class SubtitleFetchBody(BaseModel):
+    itemId: str = ""
+    code: str = ""
+    force: bool = False
+    # 搜到后立即上传 115 字幕目录
+    upload115: bool = Field(default=False, alias="upload115")
+    region: str = ""
+
+    model_config = {"populate_by_name": True}
+
+
+@router.get("/embed/subtitles")
+def get_subtitles(
+    itemId: str = Query("", alias="itemId"),
+    code: str = Query(""),
+    _user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    from . import scrap_subtitles
+
+    try:
+        data = scrap_subtitles.local_subs_for_code_or_item(
+            item_id=itemId, code=code
+        )
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, str(e)) from e
+    return {"ok": True, "data": data}
+
+
+@router.post("/embed/subtitles/fetch")
+def fetch_subtitles(
+    body: SubtitleFetchBody,
+    _user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    """搜中文字幕 → 本地保存；可选立即上传 115 字幕目录。"""
+    from . import scrap_subtitles
+
+    if not str(body.itemId or "").strip() and not str(body.code or "").strip():
+        raise HTTPException(400, "itemId 或 code 必填")
+    try:
+        data = scrap_subtitles.fetch_and_save_for_item(
+            item_id=body.itemId,
+            code=body.code,
+            force=bool(body.force),
+        )
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, str(e)) from e
+
+    # 本地已有或新下成功：按需立刻上 115
+    if (
+        bool(body.upload115)
+        and data.get("ok")
+        and list(data.get("files") or [])
+    ):
+        try:
+            from . import settings_store
+            from .conn_settings_routes import (
+                _attach_local_subs_to_115,
+                _resolve_p115_folder,
+            )
+
+            prev = settings_store.get_setting(settings_store.P115_KEY) or {}
+            cookie = str(prev.get("cookie") or "").strip()
+            if not cookie:
+                data["upload115"] = {
+                    "ok": False,
+                    "count": 0,
+                    "message": "尚未配置 115 Cookie",
+                }
+            else:
+                makers_root_cid, _ = _resolve_p115_folder(prev, source="makers")
+                up = _attach_local_subs_to_115(
+                    cookie,
+                    makers_root_cid,
+                    attach_subs_code=str(data.get("code") or body.code or ""),
+                    scrap_item_id=str(
+                        data.get("itemId") or body.itemId or ""
+                    ),
+                    makers_root_cid=makers_root_cid,
+                    region=str(body.region or "").strip() or None,
+                    settings_raw=prev,
+                ) or {"ok": False, "count": 0, "message": "未上传"}
+                data["upload115"] = up
+                if up.get("ok") and up.get("count"):
+                    data["message"] = (
+                        f"{data.get('message') or '字幕已就绪'} · {up.get('message')}"
+                    )
+                elif up.get("message"):
+                    data["message"] = (
+                        f"{data.get('message') or '字幕已保存本地'} · "
+                        f"115：{up.get('message')}"
+                    )
+        except Exception as e:  # noqa: BLE001
+            data["upload115"] = {
+                "ok": False,
+                "count": 0,
+                "message": f"上传 115 异常：{e}",
+            }
+            data["message"] = (
+                f"{data.get('message') or '字幕已保存本地'} · 上传 115 异常：{e}"
+            )
+
+    return {"ok": True, "data": data}
+
+
 @router.get("/embed/regions")
 def get_regions(_user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
     try:

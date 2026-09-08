@@ -18,11 +18,15 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from .auth_routes import get_optional_user, require_user
-from . import p115_client, p115_extract, settings_store
+from . import p115_client, p115_extract, p115_relocate, settings_store
 from . import p115_offline as p115_offline_svc
 from . import p115_qrlogin as p115_qrlogin_svc
 from . import p115_share as p115_share_svc
+from . import p115_upload
+from . import scrap_subtitles
 from .db import ROOT
+
+log = logging.getLogger(__name__)
 
 _ARCHIVE_EXT_RE = re.compile(r"\.(zip|rar|7z)(?:\.[a-z0-9]+)?$", re.I)
 
@@ -154,6 +158,9 @@ class P115Config(BaseModel):
     folder_name: str = Field(default="", alias="folderName")
     label: str = ""
     targets: dict[str, P115TargetFolder] | None = None
+    # 字幕：独立目录 + 是否按分区分层（字幕根/日本有码/ABC-123.srt）
+    subs_folder: P115TargetFolder | None = Field(default=None, alias="subsFolder")
+    subs_layered: bool = Field(default=True, alias="subsLayered")
     do_validate: bool = Field(default=True, alias="validate")
 
     model_config = {"populate_by_name": True}
@@ -178,6 +185,10 @@ class P115OfflineBody(BaseModel):
     password: str | None = None
     title_hint: str | None = Field(default=None, alias="titleHint")
     auto_extract: bool | None = Field(default=None, alias="autoExtract")
+    # 片商详情：转存落到区分子目录；字幕落到「字幕」
+    attach_subs_code: str | None = Field(default=None, alias="attachSubsCode")
+    scrap_item_id: str | None = Field(default=None, alias="scrapItemId")
+    region: str | None = None
 
     model_config = {"populate_by_name": True}
 
@@ -187,6 +198,19 @@ class P115ShareBody(BaseModel):
     folder_cid: str | None = Field(default=None, alias="folderCid")
     source: str | None = None
     password: str | None = None
+    attach_subs_code: str | None = Field(default=None, alias="attachSubsCode")
+    scrap_item_id: str | None = Field(default=None, alias="scrapItemId")
+    region: str | None = None
+
+    model_config = {"populate_by_name": True}
+
+
+class P115SubsUploadBody(BaseModel):
+    """搜字幕后立即上传到配置的字幕目录。"""
+
+    attach_subs_code: str | None = Field(default=None, alias="attachSubsCode")
+    scrap_item_id: str | None = Field(default=None, alias="scrapItemId")
+    region: str | None = None
 
     model_config = {"populate_by_name": True}
 
@@ -215,6 +239,16 @@ class P115QrCompleteBody(BaseModel):
 
 
 P115_SOURCES = ("warehouse", "movie", "tv", "makers")
+
+# 先入「最近接受」、再移到指定目录（影视 movie/tv + 片商 makers；仓库一并）
+P115_INBOX_RELOCATE_SOURCES = frozenset({"warehouse", "movie", "tv", "makers", "media"})
+
+
+def _use_receive_inbox(source: str | None) -> bool:
+    key = (source or "warehouse").strip().lower()
+    if key == "media":
+        key = "movie"
+    return key in P115_INBOX_RELOCATE_SOURCES
 
 
 def _normalize_target_folder(raw: Any) -> dict[str, str]:
@@ -284,6 +318,149 @@ def _resolve_p115_folder(
         key = "warehouse"
     t = targets[key]
     return t["folderCid"], t["folderName"]
+
+
+def _region_folder_label(region: str | None) -> str:
+    """刮削区 id / 中文标签 → 115 子目录名（日本有码 / 日本无码 / …）。"""
+    from .region_meta import REGION_META, resolve_fs_region
+
+    raw = str(region or "").strip()
+    if not raw:
+        return ""
+    for meta in REGION_META.values():
+        label = str(meta.get("label") or "")
+        if raw == label or raw.casefold() == label.casefold():
+            return label
+    key = resolve_fs_region(raw) or (raw if raw in REGION_META else "")
+    if key and key in REGION_META:
+        return str(REGION_META[key].get("label") or key)
+    return raw
+
+
+def _lookup_scrap_region(
+    *,
+    scrap_item_id: str | None = None,
+    attach_subs_code: str | None = None,
+    region: str | None = None,
+) -> str:
+    rid = str(region or "").strip()
+    if rid:
+        return rid
+    try:
+        row = scrap_subtitles._load_item(
+            item_id=str(scrap_item_id or ""),
+            code=str(attach_subs_code or ""),
+        )
+        if row:
+            return str(row.get("region") or "").strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _resolve_makers_save_cid(
+    cookie: str,
+    makers_root_cid: str,
+    *,
+    region: str | None = None,
+    scrap_item_id: str | None = None,
+    attach_subs_code: str | None = None,
+) -> tuple[str, str]:
+    """片商根 → 区分子目录；无区信息则退回根。"""
+    root = (makers_root_cid or "0").strip() or "0"
+    rid = _lookup_scrap_region(
+        scrap_item_id=scrap_item_id,
+        attach_subs_code=attach_subs_code,
+        region=region,
+    )
+    label = _region_folder_label(rid)
+    if not label:
+        return root, ""
+    ensured = p115_client.ensure_child_folder(cookie, root, label)
+    if ensured.get("ok") and ensured.get("cid"):
+        return str(ensured["cid"]), str(ensured.get("name") or label)
+    log.warning("makers region folder %s failed: %s", label, ensured.get("message"))
+    return root, ""
+
+
+def _resolve_makers_subs_cid(cookie: str, makers_root_cid: str) -> tuple[str, str]:
+    root = (makers_root_cid or "0").strip() or "0"
+    ensured = p115_client.ensure_child_folder(cookie, root, "字幕")
+    if ensured.get("ok") and ensured.get("cid"):
+        return str(ensured["cid"]), str(ensured.get("name") or "字幕")
+    return root, ""
+
+
+def _p115_subs_settings(raw: dict[str, Any] | None) -> dict[str, Any]:
+    """字幕目录配置：可选手选目录；默认分层。"""
+    folder = _normalize_target_folder(
+        (raw or {}).get("subs_folder") or (raw or {}).get("subsFolder")
+    )
+    layered_raw = (raw or {}).get("subs_layered")
+    if layered_raw is None:
+        layered_raw = (raw or {}).get("subsLayered")
+    layered = True if layered_raw is None else bool(layered_raw)
+    return {"folder": folder, "layered": layered}
+
+
+def _ensure_folder_path(
+    cookie: str, root_cid: str, parts: list[str]
+) -> tuple[str, str]:
+    """在 root 下按层级 ensure 子目录，返回最终 (cid, pathHint)。"""
+    cid = (root_cid or "0").strip() or "0"
+    names: list[str] = []
+    for part in parts:
+        label = str(part or "").strip()
+        if not label:
+            continue
+        ensured = p115_client.ensure_child_folder(cookie, cid, label)
+        if not (ensured.get("ok") and ensured.get("cid")):
+            log.warning("ensure folder %s under %s failed: %s", label, cid, ensured)
+            break
+        cid = str(ensured["cid"])
+        names.append(str(ensured.get("name") or label))
+    return cid, "/".join(names)
+
+
+def _resolve_subs_upload_cid(
+    cookie: str,
+    raw: dict[str, Any] | None,
+    *,
+    makers_root_cid: str | None = None,
+    region: str | None = None,
+    scrap_item_id: str | None = None,
+    attach_subs_code: str | None = None,
+) -> tuple[str, str]:
+    """解析字幕上传目录：配置目录 或 片商根/字幕；可选分区层。"""
+    cfg = _p115_subs_settings(raw)
+    folder = cfg["folder"]
+    layered = bool(cfg["layered"])
+    root_cid = str(folder.get("folderCid") or "").strip()
+    root_name = str(folder.get("folderName") or "").strip()
+    configured = bool(root_name) or (bool(root_cid) and root_cid != "0")
+    if not configured:
+        # 未配置：退回片商根下「字幕」
+        makers = (makers_root_cid or "").strip()
+        if makers:
+            root_cid, root_name = _resolve_makers_subs_cid(cookie, makers)
+        else:
+            root_cid, root_name = "0", ""
+    else:
+        root_cid = root_cid or "0"
+    hint_parts = [root_name] if root_name else []
+    if layered:
+        rid = _lookup_scrap_region(
+            scrap_item_id=scrap_item_id,
+            attach_subs_code=attach_subs_code,
+            region=region,
+        )
+        label = _region_folder_label(rid)
+        if label:
+            child_cid, child_hint = _ensure_folder_path(cookie, root_cid, [label])
+            if child_hint:
+                hint_parts.append(child_hint)
+            return child_cid, "/".join(p for p in hint_parts if p)
+    return root_cid, "/".join(p for p in hint_parts if p) or root_name
 
 
 def _targets_for_store(
@@ -357,12 +534,15 @@ def _p115_public(raw: dict[str, Any] | None, *, include_cookie: bool = False) ->
     configured = bool(cookie and "UID=" in cookie.upper())
     targets = _p115_targets(raw)
     warehouse = targets["warehouse"]
+    subs = _p115_subs_settings(raw)
     data = {
         "enabled": bool((raw or {}).get("enabled")),
         "folderCid": warehouse["folderCid"],
         "folderName": warehouse["folderName"],
         "label": str((raw or {}).get("label") or ""),
         "targets": targets,
+        "subsFolder": subs["folder"],
+        "subsLayered": bool(subs["layered"]),
         "hasCookie": bool(cookie),
         "cookieHint": _cookie_hint(cookie) if configured else "",
         "configured": configured,
@@ -505,6 +685,88 @@ async def test_tmdb(
     return Envelope(
         data={"ok": True, "totalResults": total},
         message=f"测试成功，命中约 {total} 条",
+    )
+
+
+def _subtitle_public(raw: dict[str, Any] | None) -> dict[str, Any]:
+    env_tok = os.environ.get("ASSRT_TOKEN", "").strip()
+    stored = str((raw or {}).get("assrtToken") or (raw or {}).get("assrt_token") or "").strip()
+    effective = env_tok or stored
+    hint = ""
+    if effective:
+        hint = f"{effective[:4]}…{effective[-4:]}" if len(effective) > 10 else "****"
+    return {
+        "assrtConfigured": bool(effective),
+        "assrtFromEnv": bool(env_tok),
+        "assrtTokenHint": hint,
+        "sources": ["subtitlecat", "xunlei", "assrt", "subhd"],
+    }
+
+
+class SubtitleConfig(BaseModel):
+    assrt_token: str = Field(default="", alias="assrtToken")
+
+    model_config = {"populate_by_name": True}
+
+
+@router.get("/subtitle", response_model=Envelope)
+def get_subtitle(_user: dict[str, Any] | None = Depends(get_optional_user)) -> Envelope:
+    data = _subtitle_public(settings_store.get_setting(settings_store.SUBTITLE_KEY))
+    return Envelope(
+        data=data,
+        message="configured" if data["assrtConfigured"] else "ok",
+    )
+
+
+@router.put("/subtitle", response_model=Envelope)
+def put_subtitle(
+    body: SubtitleConfig,
+    _user: dict[str, Any] = Depends(require_user),
+) -> Envelope:
+    prev = settings_store.get_setting(settings_store.SUBTITLE_KEY) or {}
+    prev_tok = str(prev.get("assrtToken") or prev.get("assrt_token") or "").strip()
+    next_tok = body.assrt_token.strip()
+    tok = next_tok or prev_tok
+    saved = settings_store.put_setting(
+        settings_store.SUBTITLE_KEY,
+        {"assrtToken": tok},
+    )
+    data = _subtitle_public(saved["value"])
+    data["updated_at"] = saved["updated_at"]
+    return Envelope(data=data, message="saved")
+
+
+@router.post("/subtitle/test-assrt", response_model=Envelope)
+def test_assrt_token(
+    body: SubtitleConfig,
+    _user: dict[str, Any] = Depends(require_user),
+) -> Envelope:
+    tok = body.assrt_token.strip() or os.environ.get("ASSRT_TOKEN", "").strip()
+    if not tok:
+        stored = settings_store.get_setting(settings_store.SUBTITLE_KEY) or {}
+        tok = str(stored.get("assrtToken") or stored.get("assrt_token") or "").strip()
+    if not tok:
+        raise HTTPException(status_code=400, detail="请先填写 Assrt Token")
+    from . import subtitlecat
+
+    try:
+        data = subtitlecat._assrt_get(
+            "/v1/user/quota",
+            token=tok,
+            params={},
+        )
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"无法连接 Assrt: {e}") from e
+    if int(data.get("status") or 0) != 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Assrt 返回错误 status={data.get('status')}",
+        )
+    user = data.get("user") if isinstance(data.get("user"), dict) else {}
+    quota = user.get("quota")
+    return Envelope(
+        data={"ok": True, "quota": quota},
+        message=f"Assrt Token 有效，配额约 {quota}",
     )
 
 
@@ -703,6 +965,11 @@ def post_p115_qrcode_complete(
             "folder_name": str(warehouse.get("folder_name") or ""),
             "label": str(prev.get("label") or ""),
             "targets": targets,
+            "subs_folder": {
+                "folder_cid": _p115_subs_settings(prev)["folder"]["folderCid"],
+                "folder_name": _p115_subs_settings(prev)["folder"]["folderName"],
+            },
+            "subs_layered": bool(_p115_subs_settings(prev)["layered"]),
         }
         saved = settings_store.put_setting(settings_store.P115_KEY, value)
         public = _p115_public(saved["value"])
@@ -772,6 +1039,23 @@ def put_p115(
             if key in check:
                 extra[key] = check.get(key)
 
+    prev_subs = _p115_subs_settings(prev)
+    if body.subs_folder is not None:
+        subs_folder_store = {
+            "folder_cid": (body.subs_folder.folder_cid or "0").strip() or "0",
+            "folder_name": (body.subs_folder.folder_name or "").strip(),
+        }
+    else:
+        subs_folder_store = {
+            "folder_cid": prev_subs["folder"]["folderCid"],
+            "folder_name": prev_subs["folder"]["folderName"],
+        }
+    fields_set = getattr(body, "model_fields_set", None) or set()
+    if "subs_layered" in fields_set or "subsLayered" in fields_set:
+        subs_layered_store = bool(body.subs_layered)
+    else:
+        subs_layered_store = bool(prev_subs["layered"])
+
     value = {
         "enabled": True if cookie else bool(body.enabled),
         "cookie": cookie,
@@ -779,6 +1063,8 @@ def put_p115(
         "folder_name": folder_name,
         "label": label,
         "targets": stored_targets,
+        "subs_folder": subs_folder_store,
+        "subs_layered": subs_layered_store,
     }
     saved = settings_store.put_setting(settings_store.P115_KEY, value)
     data = _p115_public(saved["value"])
@@ -824,6 +1110,124 @@ def p115_validate(
             detail=str(result.get("message") or "测试失败"),
         )
     return Envelope(data=result, message=str(result.get("message") or "ok"))
+
+
+def _attach_local_subs_to_115(
+    cookie: str,
+    folder_cid: str,
+    *,
+    attach_subs_code: str | None = None,
+    scrap_item_id: str | None = None,
+    makers_root_cid: str | None = None,
+    region: str | None = None,
+    settings_raw: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """转存成功后：仅中文字幕，命名 ABC-123.xxx，上传到配置的字幕目录（可分层）。"""
+    code = str(attach_subs_code or "").strip()
+    iid = str(scrap_item_id or "").strip()
+    if not code and not iid:
+        return None
+    try:
+        info = scrap_subtitles.local_subs_for_code_or_item(item_id=iid, code=code)
+        files = list(info.get("files") or [])
+        code_s = str(info.get("code") or code or "").strip()
+        if not files:
+            fetched = scrap_subtitles.fetch_and_save_for_item(
+                item_id=iid, code=code, force=False
+            )
+            files = list(fetched.get("files") or [])
+            code_s = str(fetched.get("code") or code_s).strip()
+            if not files:
+                return {
+                    "ok": False,
+                    "count": 0,
+                    "message": str(
+                        fetched.get("message")
+                        or fetched.get("reason")
+                        or "未找到中文字幕"
+                    ),
+                }
+        # 只传一个：优先与番号同名的中文字幕
+        paths = [f["path"] for f in files if f.get("path")]
+        if not paths:
+            return {"ok": False, "count": 0, "message": "未找到中文字幕文件"}
+        primary = paths[0]
+        # 上传前先规范化时间轴/编码，避免坏 SRT 原样上 115
+        primary_path, normalized = scrap_subtitles.prepare_subtitle_for_upload(
+            primary
+        )
+        upload_name = scrap_subtitles.upload_filename_for_code(
+            code_s, primary_path
+        )
+
+        target_cid, target_hint = _resolve_subs_upload_cid(
+            cookie,
+            settings_raw,
+            makers_root_cid=makers_root_cid,
+            region=region or str(info.get("region") or "") or None,
+            scrap_item_id=iid,
+            attach_subs_code=code_s,
+        )
+        up = p115_upload.upload_many(
+            cookie,
+            [str(primary_path)],
+            folder_cid=target_cid,
+            filenames=[upload_name],
+        )
+        where = f"「{target_hint}」" if target_hint else "网盘"
+        msg = f"字幕已上传 {upload_name} 到{where}"
+        if normalized:
+            msg += "（已规范化格式）"
+        if up.get("failed"):
+            msg += f"；失败 {len(up['failed'])}"
+        return {
+            "ok": bool(up.get("ok")),
+            "count": int(up.get("count") or 0),
+            "failed": up.get("failed") or [],
+            "folderCid": target_cid,
+            "folderName": target_hint,
+            "filename": upload_name,
+            "normalized": normalized,
+            "message": msg,
+        }
+    except Exception as e:  # noqa: BLE001
+        log.warning("attach subs failed: %s", e)
+        return {"ok": False, "count": 0, "message": f"字幕上传失败: {e}"}
+
+
+@router.post("/p115/subs/upload", response_model=Envelope)
+def post_p115_subs_upload(
+    body: P115SubsUploadBody,
+    _user: dict[str, Any] = Depends(require_user),
+) -> Envelope:
+    """片商搜字幕后：立即上传中文字幕到配置的字幕目录（可分层）。"""
+    prev = settings_store.get_setting(settings_store.P115_KEY) or {}
+    cookie = str(prev.get("cookie") or "").strip()
+    if not cookie:
+        raise HTTPException(
+            status_code=400,
+            detail="尚未配置 115，请先打开「设置」填写 Cookie",
+        )
+    code = str(body.attach_subs_code or "").strip()
+    iid = str(body.scrap_item_id or "").strip()
+    if not code and not iid:
+        raise HTTPException(status_code=400, detail="attachSubsCode 或 scrapItemId 必填")
+
+    makers_root_cid, _ = _resolve_p115_folder(prev, source="makers")
+    info = _attach_local_subs_to_115(
+        cookie,
+        makers_root_cid,
+        attach_subs_code=code,
+        scrap_item_id=iid,
+        makers_root_cid=makers_root_cid,
+        region=body.region,
+        settings_raw=prev,
+    ) or {"ok": False, "count": 0, "message": "未上传"}
+    status_msg = str(info.get("message") or ("ok" if info.get("ok") else "上传失败"))
+    if not info.get("ok"):
+        # 业务失败仍 200 + ok:false，便于前端 toast；配置缺失已 400
+        return Envelope(data=info, message=status_msg)
+    return Envelope(data=info, message=status_msg)
 
 
 def _p115_public_result(result: dict[str, Any]) -> dict[str, Any]:
@@ -894,7 +1298,7 @@ def post_p115_offline(
     body: P115OfflineBody,
     _user: dict[str, Any] = Depends(require_user),
 ) -> JSONResponse:
-    """对齐 sehua `/api/115/offline`：lixian → clouddownload，成功后可调度云解压。"""
+    """离线转存：影视/片商/仓库均先入「最近接受」，完成后再移到指定目录。"""
     try:
         prev = settings_store.get_setting(settings_store.P115_KEY) or {}
         cookie = str(prev.get("cookie") or "").strip()
@@ -914,12 +1318,40 @@ def post_p115_offline(
         if not urls:
             raise HTTPException(status_code=400, detail="没有可转存的磁力/ED2K 链接")
 
-        folder_cid, _folder_name = _resolve_p115_folder(
+        src_key = (body.source or "").strip().lower()
+        makers_root_cid: str | None = None
+        if src_key == "makers":
+            makers_root_cid, _ = _resolve_p115_folder(prev, source="makers")
+
+        # 最终目录：影视→movie/tv；片商→区分子目录
+        dest_cid, dest_name = _resolve_p115_folder(
             prev,
             source=body.source,
             folder_cid=body.folder_cid,
         )
-        result = p115_offline_svc.add_offline_tasks(cookie, urls, folder_cid)
+        if makers_root_cid and not (
+            body.folder_cid is not None and str(body.folder_cid).strip() != ""
+        ):
+            dest_cid, resolved = _resolve_makers_save_cid(
+                cookie,
+                makers_root_cid,
+                region=body.region,
+                scrap_item_id=body.scrap_item_id,
+                attach_subs_code=body.attach_subs_code,
+            )
+            if resolved:
+                dest_name = resolved
+
+        # 影视 / 片商 / 仓库：先入根目录「最近接受」
+        want_inbox = _use_receive_inbox(body.source)
+        inbox = (
+            p115_client.ensure_receive_inbox(cookie) if want_inbox else {"ok": False}
+        )
+        use_inbox = bool(want_inbox and inbox.get("ok") and inbox.get("cid"))
+        inbox_cid = str(inbox.get("cid") or "") if use_inbox else dest_cid
+        save_cid = inbox_cid if use_inbox else dest_cid
+
+        result = p115_offline_svc.add_offline_tasks(cookie, urls, save_cid)
         password = (body.password or "").strip()
         looks_archive = any(_looks_archive_link(u) for u in urls)
         want_extract = (
@@ -929,12 +1361,32 @@ def post_p115_offline(
             and (bool(password) or looks_archive or body.auto_extract is True)
         )
 
+        relocate_scheduled = False
         extract_scheduled = False
-        if want_extract:
+        if (
+            result.get("ok")
+            and int(result.get("added") or 0) > 0
+            and use_inbox
+            and inbox_cid != dest_cid
+        ):
+            p115_relocate.schedule_deferred_relocate(
+                {
+                    "cookie": cookie,
+                    "inboxCid": inbox_cid,
+                    "destCid": dest_cid,
+                    "password": password,
+                    "infoHashes": result.get("infoHashes") or [],
+                    "titleHint": body.title_hint or "",
+                    "wantExtract": want_extract,
+                }
+            )
+            relocate_scheduled = True
+        elif want_extract:
+            # 未走接受目录时：保持原云解压轮询
             p115_extract.schedule_deferred_extract(
                 {
                     "cookie": cookie,
-                    "folderCid": folder_cid,
+                    "folderCid": dest_cid,
                     "password": password,
                     "infoHashes": result.get("infoHashes") or [],
                     "titleHint": body.title_hint or "",
@@ -942,9 +1394,33 @@ def post_p115_offline(
             )
             extract_scheduled = True
 
+        subs_info = None
+        if result.get("ok"):
+            subs_info = _attach_local_subs_to_115(
+                cookie,
+                dest_cid,
+                attach_subs_code=body.attach_subs_code,
+                scrap_item_id=body.scrap_item_id,
+                makers_root_cid=makers_root_cid,
+                region=body.region,
+                settings_raw=prev,
+            )
+
         message = str(result.get("message") or "")
-        if extract_scheduled:
+        if use_inbox:
+            message = f"{message} · 已入「最近接受」"
+        if relocate_scheduled:
+            dest_label = dest_name or "指定目录"
+            message = (
+                f"{message} · 后台等待完成后移到「{dest_label}」"
+                + ("（含云解压）" if want_extract else "")
+            )
+        elif extract_scheduled:
             message = f"{message} · 后台轮询转存（最长约 30 秒），完成后立即云解压"
+        if subs_info and subs_info.get("count"):
+            message = f"{message} · {subs_info.get('message')}"
+        elif subs_info and (body.attach_subs_code or body.scrap_item_id):
+            message = f"{message} · 字幕：{subs_info.get('message') or '未上传'}"
 
         status = 200 if result.get("ok") else 400
         return _p115_json_response(
@@ -952,8 +1428,18 @@ def post_p115_offline(
             message=message,
             status=status,
             extra={
-                "extractScheduled": extract_scheduled,
-                "extractMode": "poll" if extract_scheduled else None,
+                "inboxCid": inbox_cid if use_inbox else None,
+                "destCid": dest_cid,
+                "destName": dest_name,
+                "relocateScheduled": relocate_scheduled,
+                "extractScheduled": extract_scheduled
+                or (relocate_scheduled and want_extract),
+                "extractMode": (
+                    "poll-relocate"
+                    if relocate_scheduled
+                    else ("poll" if extract_scheduled else None)
+                ),
+                "subs": subs_info,
             },
         )
     except HTTPException:
@@ -971,7 +1457,7 @@ def post_p115_share(
     body: P115ShareBody,
     _user: dict[str, Any] = Depends(require_user),
 ) -> JSONResponse:
-    """对齐 sehua `/api/115/share`。"""
+    """分享转存：影视/片商/仓库均先入「最近接受」，再移到指定目录。"""
     try:
         prev = settings_store.get_setting(settings_store.P115_KEY) or {}
         cookie = str(prev.get("cookie") or "").strip()
@@ -987,22 +1473,95 @@ def post_p115_share(
         if not urls:
             raise HTTPException(status_code=400, detail="没有可转存的 115 分享链接")
 
-        folder_cid, _folder_name = _resolve_p115_folder(
+        src_key = (body.source or "").strip().lower()
+        makers_root_cid: str | None = None
+        if src_key == "makers":
+            makers_root_cid, _ = _resolve_p115_folder(prev, source="makers")
+
+        dest_cid, dest_name = _resolve_p115_folder(
             prev,
             source=body.source,
             folder_cid=body.folder_cid,
         )
+        if makers_root_cid and not (
+            body.folder_cid is not None and str(body.folder_cid).strip() != ""
+        ):
+            dest_cid, resolved = _resolve_makers_save_cid(
+                cookie,
+                makers_root_cid,
+                region=body.region,
+                scrap_item_id=body.scrap_item_id,
+                attach_subs_code=body.attach_subs_code,
+            )
+            if resolved:
+                dest_name = resolved
+
+        # 影视 / 片商 / 仓库：先入「最近接受」再转移
+        want_inbox = _use_receive_inbox(body.source)
+        inbox = (
+            p115_client.ensure_receive_inbox(cookie) if want_inbox else {"ok": False}
+        )
+        use_inbox = bool(want_inbox and inbox.get("ok") and inbox.get("cid"))
+        inbox_cid = str(inbox.get("cid") or "") if use_inbox else dest_cid
+        save_cid = inbox_cid if use_inbox else dest_cid
+
+        before_ids: set[str] = set()
+        if use_inbox and inbox_cid != dest_cid:
+            before_ids = p115_relocate._snapshot_ids(cookie, inbox_cid)
+
         result = p115_share_svc.receive_115_shares(
             cookie,
             urls,
-            folder_cid,
+            save_cid,
             (body.password or "").strip(),
         )
+
+        relocate_info = None
+        if result.get("ok") and use_inbox and inbox_cid != dest_cid:
+            relocate_info = p115_relocate.relocate_share_new_items(
+                cookie,
+                inbox_cid=inbox_cid,
+                dest_cid=dest_cid,
+                before_ids=before_ids,
+            )
+
+        subs_info = None
+        if result.get("ok"):
+            subs_info = _attach_local_subs_to_115(
+                cookie,
+                dest_cid,
+                attach_subs_code=body.attach_subs_code,
+                scrap_item_id=body.scrap_item_id,
+                makers_root_cid=makers_root_cid,
+                region=body.region,
+                settings_raw=prev,
+            )
+        message = str(result.get("message") or "")
+        if use_inbox:
+            message = f"{message} · 已入「最近接受」"
+        if relocate_info and relocate_info.get("ok") and relocate_info.get("moved"):
+            message = (
+                f"{message} · 已移到「{dest_name or '指定目录'}」"
+                f"（{relocate_info.get('moved')}）"
+            )
+        elif relocate_info and not relocate_info.get("ok"):
+            message = f"{message} · 移动：{relocate_info.get('message') or '未移到指定目录'}"
+        if subs_info and subs_info.get("count"):
+            message = f"{message} · {subs_info.get('message')}"
+        elif subs_info and (body.attach_subs_code or body.scrap_item_id):
+            message = f"{message} · 字幕：{subs_info.get('message') or '未上传'}"
         status = 200 if result.get("ok") else 400
         return _p115_json_response(
             result=result,
-            message=str(result.get("message") or ""),
+            message=message,
             status=status,
+            extra={
+                "inboxCid": inbox_cid if use_inbox else None,
+                "destCid": dest_cid,
+                "destName": dest_name,
+                "relocate": relocate_info,
+                "subs": subs_info,
+            },
         )
     except HTTPException:
         raise

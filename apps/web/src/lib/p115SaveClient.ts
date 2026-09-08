@@ -3,6 +3,7 @@ import {
   isArchiveDownloadLink,
   linkKindOf,
 } from "@/lib/detailResource";
+import { readP115AttachSubs } from "@/lib/p115AttachSubs";
 
 export type P115SaveResult = {
   ok: boolean;
@@ -12,6 +13,7 @@ export type P115SaveResult = {
   extractScheduled?: boolean;
   shareCount?: number;
   offlineCount?: number;
+  subsUploaded?: number;
 };
 
 type Envelope = {
@@ -88,6 +90,15 @@ export async function runP115Save(opts: {
   );
   const password = (opts.password || "").trim();
   const source = opts.source || 'warehouse';
+  const attach = readP115AttachSubs();
+  const attachPayload =
+    attach && (attach.code || attach.itemId || attach.region)
+      ? {
+          attachSubsCode: attach.code || undefined,
+          scrapItemId: attach.itemId || undefined,
+          region: attach.region || undefined,
+        }
+      : {};
   if (!urls.length) {
     return { ok: false, message: "没有可转存的磁力 / ED2K / 115 分享链接" };
   }
@@ -106,6 +117,7 @@ export async function runP115Save(opts: {
           urls: shareUrls,
           password: password || undefined,
           source,
+          ...attachPayload,
         }),
       });
       const json = (await res.json().catch(() => ({}))) as Envelope;
@@ -126,6 +138,9 @@ export async function runP115Save(opts: {
             envelopeMessage(json, "") ||
             `已转存 ${shareUrls.length} 个 115 分享到网盘`,
           shareCount: shareUrls.length,
+          subsUploaded: Number(
+            (json.data as { subs?: { count?: number } } | null)?.subs?.count || 0,
+          ) || undefined,
         };
       }
     }
@@ -142,6 +157,7 @@ export async function runP115Save(opts: {
         titleHint: opts.titleHint || undefined,
         autoExtract: wantExtract,
         source,
+        ...attachPayload,
       }),
     });
     const json = (await res.json().catch(() => ({}))) as Envelope;
@@ -168,11 +184,15 @@ export async function runP115Save(opts: {
     const shareHint = shareUrls.length
       ? `115 分享 ${shareUrls.length} 个已转存；`
       : "";
+    const subsCount = Number(
+      (json.data as { subs?: { count?: number } } | null)?.subs?.count || 0,
+    );
     return {
       ok: true,
       extractScheduled,
       offlineCount: offlineUrls.length,
       shareCount: shareUrls.length || undefined,
+      subsUploaded: subsCount || undefined,
       message: extractScheduled
         ? `${shareHint}已转存 ${offlineUrls.length} 条；后台轮询（约 30 秒内）完成后自动云解压`
         : msg || `${shareHint}已转存 ${offlineUrls.length} 条到 115 云下载`,

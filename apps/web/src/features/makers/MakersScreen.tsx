@@ -926,12 +926,13 @@ export function MakersScreen() {
     ) : null;
 
   function shelfRail(
+    railKey: string,
     title: string,
     children: ReactNode,
     onMore?: () => void,
   ) {
     return (
-      <section className="media-shelf makers-shelf">
+      <section key={railKey} className="media-shelf makers-shelf">
         <button
           type="button"
           className="media-shelf__head"
@@ -1043,6 +1044,7 @@ export function MakersScreen() {
             const items = shelf.latest || [];
             if (items.length === 0) return null;
             return shelfRail(
+              shelf.region || title,
               `${title} · 最新`,
               items.map((item, i) => (
                 <ScrapPosterCard

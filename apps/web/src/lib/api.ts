@@ -820,6 +820,49 @@ export async function testTmdb(body: {
   return { ok: Boolean(json.data?.ok), message: json.message || '' };
 }
 
+export type SubtitleSettings = {
+  assrtConfigured?: boolean;
+  assrtFromEnv?: boolean;
+  assrtTokenHint?: string;
+  sources?: string[];
+  updated_at?: string;
+};
+
+export async function getSubtitleSettings(): Promise<SubtitleSettings> {
+  const res = await apiFetch('/settings/subtitle');
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<SubtitleSettings>).data;
+}
+
+export async function putSubtitleSettings(body: {
+  assrtToken: string;
+}): Promise<SubtitleSettings> {
+  const res = await apiFetch('/settings/subtitle', {
+    method: 'PUT',
+    body: JSON.stringify({ assrtToken: body.assrtToken }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<SubtitleSettings>).data;
+}
+
+export async function testAssrtToken(body: {
+  assrtToken?: string;
+}): Promise<{ ok: boolean; message: string; quota?: number }> {
+  const res = await apiFetch('/settings/subtitle/test-assrt', {
+    method: 'POST',
+    body: JSON.stringify({ assrtToken: body.assrtToken || '' }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  const json = (await res.json()) as Envelope<{ ok: boolean; quota?: number }> & {
+    message: string;
+  };
+  return {
+    ok: Boolean(json.data?.ok),
+    message: json.message || '',
+    quota: json.data?.quota,
+  };
+}
+
 export type NetworkConfig = {
   proxyUrl?: string;
   proxyEnabled?: boolean;
@@ -1247,6 +1290,131 @@ export async function startScrapLibraryEmbed(body?: {
   return ((await res.json()) as Envelope<{ started: boolean }>).data;
 }
 
+/** 缺本地海报时，把远程 cover 落到番号目录 poster.jpg */
+export async function ensureScrapLibraryPoster(itemId: string) {
+  const id = String(itemId || '').trim();
+  if (!id) return null;
+  const q = new URLSearchParams({ itemId: id });
+  const res = await apiFetch(`/scrap-library/embed/ensure-poster?${q}`, {
+    method: 'POST',
+  });
+  if (!res.ok) return null;
+  return (
+    (await res.json()) as Envelope<{
+      ok?: boolean;
+      skipped?: boolean;
+      posterPath?: string;
+      posterApi?: string;
+      reason?: string;
+    }>
+  ).data;
+}
+
+export type ScrapSubtitleFile = {
+  name?: string;
+  path?: string;
+  size?: number;
+  rel?: string;
+};
+
+export type ScrapSubtitleFetchResult = {
+  ok?: boolean;
+  skipped?: boolean;
+  code?: string;
+  itemId?: string;
+  saved?: string;
+  lang?: string;
+  source?: string;
+  title?: string;
+  files?: ScrapSubtitleFile[];
+  message?: string;
+  reason?: string;
+  upload115?: {
+    ok?: boolean;
+    count?: number;
+    message?: string;
+    filename?: string;
+    folderName?: string;
+    normalized?: boolean;
+  };
+};
+
+/** 搜中文字幕并保存；upload115 时同一请求内上传到 115 */
+export async function fetchScrapLibrarySubtitles(opts: {
+  itemId?: string;
+  code?: string;
+  force?: boolean;
+  upload115?: boolean;
+  region?: string;
+}): Promise<ScrapSubtitleFetchResult> {
+  const res = await apiFetch('/scrap-library/embed/subtitles/fetch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      itemId: opts.itemId || '',
+      code: opts.code || '',
+      force: Boolean(opts.force),
+      upload115: Boolean(opts.upload115),
+      region: opts.region || '',
+    }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return (
+    (await res.json()) as Envelope<ScrapSubtitleFetchResult>
+  ).data;
+}
+
+export async function listScrapLibrarySubtitles(opts: {
+  itemId?: string;
+  code?: string;
+}): Promise<ScrapSubtitleFetchResult> {
+  const q = new URLSearchParams();
+  if (opts.itemId) q.set('itemId', opts.itemId);
+  if (opts.code) q.set('code', opts.code);
+  const res = await apiFetch(
+    `/scrap-library/embed/subtitles${q.toString() ? `?${q}` : ''}`,
+  );
+  if (!res.ok) throw new Error(await parseError(res));
+  return (
+    (await res.json()) as Envelope<ScrapSubtitleFetchResult>
+  ).data;
+}
+
+export type P115SubsUploadResult = {
+  ok?: boolean;
+  count?: number;
+  message?: string;
+  folderCid?: string;
+  folderName?: string;
+  filename?: string;
+  failed?: Array<{ file?: string; message?: string }>;
+};
+
+/** 本地中文字幕立即上传到 115 配置的字幕目录 */
+export async function uploadScrapSubsToP115(opts: {
+  itemId?: string;
+  code?: string;
+  region?: string;
+}): Promise<P115SubsUploadResult> {
+  const res = await apiFetch('/settings/p115/subs/upload', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      scrapItemId: opts.itemId || undefined,
+      attachSubsCode: opts.code || undefined,
+      region: opts.region || undefined,
+    }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  const json = (await res.json()) as Envelope<P115SubsUploadResult> & {
+    message?: string;
+  };
+  return {
+    ...(json.data || {}),
+    message: json.data?.message || json.message,
+  };
+}
+
 export type ScrapLibraryEmbedItem = {
   itemId?: string;
   region?: string;
@@ -1254,6 +1422,7 @@ export type ScrapLibraryEmbedItem = {
   code?: string;
   title?: string;
   sourceText?: string;
+  relPath?: string;
   posterPath?: string;
   thumbPath?: string;
   fanartPath?: string;
@@ -1965,6 +2134,10 @@ export type P115Config = {
   folderName: string;
   label: string;
   targets?: Partial<Record<P115SaveSource | 'media', P115TargetFolder>>;
+  /** 字幕根目录（可浏览选择）；未配则片商根下自动用「字幕」 */
+  subsFolder?: P115TargetFolder;
+  /** 字幕分层：根/日本有码/ABC-123.srt */
+  subsLayered?: boolean;
   hasCookie: boolean;
   cookieHint: string;
   configured?: boolean;
@@ -2009,6 +2182,8 @@ export async function putP115(body: {
   folderName?: string;
   label?: string;
   targets?: Partial<Record<P115SaveSource | 'media', P115TargetFolder>>;
+  subsFolder?: P115TargetFolder;
+  subsLayered?: boolean;
   validate?: boolean;
 }): Promise<P115Config & { message?: string }> {
   const warehouse = body.targets?.warehouse;
@@ -2020,6 +2195,8 @@ export async function putP115(body: {
       folderName: body.folderName ?? warehouse?.folderName ?? '',
       label: body.label ?? '',
       targets: body.targets,
+      subsFolder: body.subsFolder,
+      subsLayered: body.subsLayered,
       validate: body.validate ?? true,
       enabled: true,
     }),

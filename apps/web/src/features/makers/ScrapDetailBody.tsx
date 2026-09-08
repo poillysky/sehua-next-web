@@ -1,15 +1,18 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Bookmark, BookmarkCheck, Search } from 'lucide-react';
+import { Bookmark, BookmarkCheck, Captions, Search } from 'lucide-react';
 import {
+  fetchScrapLibrarySubtitles,
   listScrapLibraryEmbedItems,
+  listScrapLibrarySubtitles,
   searchScrapLibraryEmbed,
   scrapLibraryCoverUrl,
   type ScrapLibraryEmbedItem,
 } from '@/lib/api';
 import { useTabNavigation } from '@/shell';
 import { useOverlay } from '@/components/overlay/OverlayContext';
+import { writeP115AttachSubs } from '@/lib/p115AttachSubs';
 import { openMakerHomeSearch } from './makersUi';
 import { isScrapFavorite, toggleScrapFavorite, ensureScrapFavoritesLoaded } from './scrapFavorites';
 import { parseScrapSourceText } from './scrapSourceMeta';
@@ -78,11 +81,14 @@ export function ScrapDetailBody({
   const [imgGone, setImgGone] = useState(false);
   const [favorited, setFavorited] = useState(false);
   const [favBusy, setFavBusy] = useState(false);
+  const [subBusy, setSubBusy] = useState(false);
+  const [subReady, setSubReady] = useState(false);
   const [related, setRelated] = useState<ScrapLibraryEmbedItem[]>([]);
   const [relatedLoading, setRelatedLoading] = useState(false);
 
   useEffect(() => {
     setImgGone(false);
+    setSubReady(false);
     let cancelled = false;
     const id = String(item.itemId || '');
     // 收藏真相在服务端：先确保缓存就绪再据其点亮状态
@@ -91,10 +97,21 @@ export function ScrapDetailBody({
       if (cancelled) return;
       setFavorited(isScrapFavorite(id));
     })();
+    void (async () => {
+      try {
+        const st = await listScrapLibrarySubtitles({
+          itemId: id,
+          code,
+        });
+        if (!cancelled) setSubReady((st.files || []).length > 0);
+      } catch {
+        if (!cancelled) setSubReady(false);
+      }
+    })();
     return () => {
       cancelled = true;
     };
-  }, [item.itemId]);
+  }, [item.itemId, code]);
 
   useEffect(() => {
     let cancelled = false;
@@ -206,12 +223,71 @@ export function ScrapDetailBody({
   }
 
   function onSearch() {
+    const region = String(regionProp || item.region || '').trim();
     const ok = openMakerHomeSearch(
-      { code, title, id: item.itemId },
+      { code, title, id: item.itemId, region },
       tabCtx?.scrollToTab,
     );
     if (!ok) toast('没有可用的番号用于搜索', 'error');
     else toast('已跳转资源库搜索', 'success');
+  }
+
+  async function onFetchSubtitle() {
+    if (subBusy) return;
+    if (!code && !item.itemId) {
+      toast('没有可用的番号', 'error');
+      return;
+    }
+    setSubBusy(true);
+    const region = String(regionProp || item.region || '').trim();
+    try {
+      const data = await fetchScrapLibrarySubtitles({
+        itemId: String(item.itemId || ''),
+        code,
+        force: subReady,
+        upload115: true,
+        region,
+      });
+      writeP115AttachSubs({
+        code,
+        itemId: String(item.itemId || ''),
+        region,
+      });
+      const n = (data.files || []).length;
+      const up = data.upload115;
+      if (!(data.ok && n > 0)) {
+        setSubReady(false);
+        toast(
+          data.reason === 'not_found'
+            ? data.message || '未找到对应中文字幕'
+            : data.reason === 'network'
+              ? data.message || '无法连接字幕站，请检查代理'
+              : data.message || data.reason || '搜字幕失败',
+          'error',
+        );
+        return;
+      }
+      setSubReady(true);
+      if (up?.ok && (up.count || 0) > 0) {
+        toast(data.message || up.message || '字幕已上传到 115', 'success');
+      } else if (up && !up.ok) {
+        toast(
+          up.message
+            ? `字幕已保存本地；115：${up.message}`
+            : '字幕已保存本地，但上传 115 失败',
+          'error',
+        );
+      } else {
+        toast(
+          data.message || `字幕已保存（${n}），但未返回上传结果`,
+          'error',
+        );
+      }
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '搜字幕失败', 'error');
+    } finally {
+      setSubBusy(false);
+    }
   }
 
   const facts: Array<{ k: string; v: string; onClick?: () => void }> = [];
@@ -353,6 +429,22 @@ export function ScrapDetailBody({
             <Bookmark size={17} strokeWidth={2.25} aria-hidden />
           )}
           {favBusy ? '…' : favorited ? '已收藏' : '收藏'}
+        </button>
+        <button
+          type="button"
+          className={
+            subReady ? 'mkd-sub mkd-sub--on' : 'mkd-sub'
+          }
+          onClick={() => void onFetchSubtitle()}
+          disabled={subBusy}
+          title={
+            subReady
+              ? '本地已有字幕；再点可强制重下并上传 115'
+              : '搜索中文字幕并立即上传到 115 字幕目录'
+          }
+        >
+          <Captions size={17} strokeWidth={2.25} aria-hidden />
+          {subBusy ? '处理中…' : subReady ? '已有字幕' : '搜字幕'}
         </button>
         <button
           type="button"

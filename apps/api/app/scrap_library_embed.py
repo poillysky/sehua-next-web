@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 import os
+import queue
 import re
 import threading
 import time
@@ -456,6 +457,239 @@ def _scan_workers() -> int:
     return max(8, min(32, cpus * 2))
 
 
+_POSTER_DL_WORKERS = 3
+_poster_dl_q: queue.Queue[tuple[str, str, str]] | None = None
+_poster_dl_lock = threading.Lock()
+_poster_dl_inflight: set[str] = set()
+_poster_dl_fail_until: dict[str, float] = {}
+
+
+def _is_http_url(url: str) -> bool:
+    u = str(url or "").strip().lower()
+    return u.startswith("http://") or u.startswith("https://")
+
+
+def _fetch_cover_bytes(url: str) -> tuple[bytes, str] | None:
+    """复用封面代理拉图；失败返回 None（不抛到列表路径）。"""
+    try:
+        from .cover_focus_routes import _fetch_bytes
+
+        data, ctype = _fetch_bytes(url)
+        if not data or len(data) < 1024:
+            return None
+        return data, ctype or "image/jpeg"
+    except Exception as e:  # noqa: BLE001
+        log.debug("scrap poster download fetch failed: %s", e)
+        return None
+
+
+def _write_poster_jpg(folder: Path, data: bytes) -> Path | None:
+    """写入番号目录 poster.jpg；成功返回路径。"""
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        dest = folder / "poster.jpg"
+        tmp = folder / "poster.jpg.part"
+        tmp.write_bytes(data)
+        # 拒绝空图占位
+        if _is_blank_cover_file(tmp):
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            return None
+        tmp.replace(dest)
+        rel = _media_rel(dest)
+        if rel:
+            _blank_cover_cache.pop(rel, None)
+            _blank_cover_cache[rel] = False
+        return dest
+    except Exception as e:  # noqa: BLE001
+        log.debug("scrap poster write failed: %s", e)
+        try:
+            (folder / "poster.jpg.part").unlink(missing_ok=True)
+        except OSError:
+            pass
+        return None
+
+
+def download_remote_poster(
+    folder: Path,
+    cover_url: str,
+    *,
+    media_root: Path | None = None,
+) -> str:
+    """本地缺/空 poster 时，把远程 cover 落到 folder/poster.jpg，返回 media 相对路径。"""
+    if not _is_http_url(cover_url):
+        return ""
+    if not folder.is_dir():
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return ""
+    existing = folder / "poster.jpg"
+    if existing.is_file() and not _is_blank_cover_file(existing):
+        return _media_rel(existing, media_root=media_root)
+
+    got = _fetch_cover_bytes(cover_url)
+    if not got:
+        return ""
+    data, ctype = got
+    # 非 JPEG 也落成 poster.jpg（列表/NFO 惯例）；必要时转码
+    if "png" in (ctype or "").lower() or "webp" in (ctype or "").lower():
+        try:
+            import io
+
+            from PIL import Image
+
+            im = Image.open(io.BytesIO(data))
+            if im.mode not in ("RGB", "L"):
+                im = im.convert("RGB")
+            elif im.mode == "L":
+                im = im.convert("RGB")
+            buf = io.BytesIO()
+            im.save(buf, format="JPEG", quality=90, optimize=True)
+            data = buf.getvalue()
+        except Exception:
+            pass
+    dest = _write_poster_jpg(folder, data)
+    if not dest:
+        return ""
+    return _media_rel(dest, media_root=media_root)
+
+
+def _update_item_poster_path(item_id: str, poster_path: str) -> None:
+    if not item_id or not poster_path:
+        return
+    pool = get_meta_pool()
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"""
+            UPDATE {TABLE}
+            SET poster_path = %s, updated_at = now()
+            WHERE item_id = %s
+            """,
+            (poster_path, item_id),
+        )
+        conn.commit()
+
+
+def ensure_local_poster(
+    *,
+    item_id: str = "",
+    rel_path: str = "",
+    cover_url: str = "",
+) -> dict[str, Any]:
+    """同步兜底：缺本地海报则下载远程 cover → poster.jpg，并回写库。"""
+    ensure_schema()
+    iid = str(item_id or "").strip()
+    rel = str(rel_path or "").strip().replace("\\", "/")
+    url = str(cover_url or "").strip()
+    if iid and (not rel or not url):
+        pool = get_meta_pool()
+        with pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT item_id, rel_path, poster_path, cover_url
+                FROM {TABLE}
+                WHERE item_id = %s
+                LIMIT 1
+                """,
+                (iid,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return {"ok": False, "reason": "not_found"}
+        d = dict(row) if isinstance(row, dict) else {}
+        rel = str(d.get("rel_path") or rel).replace("\\", "/")
+        url = str(d.get("cover_url") or url).strip()
+        existing = str(d.get("poster_path") or "").strip()
+        if existing and not _is_blank_cover_rel(existing):
+            return {
+                "ok": True,
+                "skipped": True,
+                "posterPath": existing,
+                "posterApi": local_file_api(existing),
+            }
+
+    if not rel or not _is_http_url(url):
+        return {"ok": False, "reason": "no_cover"}
+
+    root = resolve_root(get_settings().get("root"))
+    folder = (root / rel).resolve()
+    try:
+        folder.relative_to(root.resolve())
+    except ValueError:
+        return {"ok": False, "reason": "bad_path"}
+
+    poster = download_remote_poster(folder, url)
+    if not poster:
+        return {"ok": False, "reason": "download_failed"}
+    if iid:
+        _update_item_poster_path(iid, poster)
+    return {
+        "ok": True,
+        "posterPath": poster,
+        "posterApi": local_file_api(poster),
+    }
+
+
+def _poster_dl_worker_loop() -> None:
+    assert _poster_dl_q is not None
+    while True:
+        item_id, rel_path, cover_url = _poster_dl_q.get()
+        try:
+            ensure_local_poster(
+                item_id=item_id, rel_path=rel_path, cover_url=cover_url
+            )
+        except Exception as e:  # noqa: BLE001
+            log.debug("poster dl worker: %s", e)
+            _poster_dl_fail_until[item_id] = time.time() + 600
+        finally:
+            with _poster_dl_lock:
+                _poster_dl_inflight.discard(item_id)
+            _poster_dl_q.task_done()
+
+
+def _ensure_poster_dl_pool() -> None:
+    global _poster_dl_q
+    with _poster_dl_lock:
+        if _poster_dl_q is not None:
+            return
+        _poster_dl_q = queue.Queue()
+        for i in range(_POSTER_DL_WORKERS):
+            threading.Thread(
+                target=_poster_dl_worker_loop,
+                name=f"scrap-poster-dl-{i}",
+                daemon=True,
+            ).start()
+
+
+def schedule_ensure_local_poster(
+    *,
+    item_id: str,
+    rel_path: str,
+    cover_url: str,
+) -> bool:
+    """列表/详情看到缺本地时后台补图；同 item 去重，失败冷却 10 分钟。"""
+    iid = str(item_id or "").strip()
+    rel = str(rel_path or "").strip()
+    url = str(cover_url or "").strip()
+    if not iid or not rel or not _is_http_url(url):
+        return False
+    now = time.time()
+    with _poster_dl_lock:
+        until = float(_poster_dl_fail_until.get(iid) or 0)
+        if until > now:
+            return False
+        if iid in _poster_dl_inflight:
+            return False
+        _poster_dl_inflight.add(iid)
+    _ensure_poster_dl_pool()
+    assert _poster_dl_q is not None
+    _poster_dl_q.put((iid, rel, url))
+    return True
+
+
 def _scan_one_nfo(
     nfo: Path,
     *,
@@ -513,6 +747,11 @@ def _scan_one_nfo(
     thumb_path = pick(str(meta.get("thumb") or ""), "thumb.jpg")
     fanart_path = pick(str(meta.get("fanart") or ""), "fanart.jpg")
     cover_url = str(meta.get("cover_url") or "").strip()
+    # 本地无有效海报时，把 NFO cover 外链落到 poster.jpg
+    if not poster_path and _is_http_url(cover_url):
+        poster_path = download_remote_poster(
+            folder, cover_url, media_root=media_root
+        )
     source_text = build_nfo_embed_text(meta, region=region, prefix=prefix)
     return {
         "item_id": item_id_from_rel(rel),
@@ -922,17 +1161,26 @@ def _hit_from_row(row: dict[str, Any], *, score: float | None = None) -> dict[st
     poster = str(row.get("poster_path") or "")
     thumb = str(row.get("thumb_path") or "")
     fanart = str(row.get("fanart_path") or "")
+    cover = str(row.get("cover_url") or "")
+    item_id = str(row.get("item_id") or "")
+    rel_path = str(row.get("rel_path") or "")
+    # 浏览时发现缺本地：后台把远程 cover 落到番号目录（不挡列表）
+    if cover and not poster:
+        schedule_ensure_local_poster(
+            item_id=item_id, rel_path=rel_path, cover_url=cover
+        )
     out: dict[str, Any] = {
-        "itemId": row.get("item_id"),
+        "itemId": item_id or row.get("item_id"),
         "region": row.get("region") or "",
         "prefix": row.get("prefix") or "",
         "code": row.get("code") or "",
         "title": row.get("title") or "",
         "sourceText": row.get("source_text") or "",
+        "relPath": rel_path,
         "posterPath": poster,
         "thumbPath": thumb,
         "fanartPath": fanart,
-        "coverUrl": str(row.get("cover_url") or ""),
+        "coverUrl": cover,
         "posterApi": local_file_api(poster) if poster else "",
         "thumbApi": local_file_api(thumb) if thumb else "",
         "fanartApi": local_file_api(fanart) if fanart else "",
@@ -1179,7 +1427,7 @@ def list_items(
             cur.execute(
                 f"""
                 SELECT
-                  item_id, region, prefix, code, title, source_text,
+                  item_id, region, prefix, code, title, source_text, rel_path,
                   poster_path, thumb_path, fanart_path, cover_url
                 FROM {TABLE}
                 WHERE {where}
@@ -1876,7 +2124,7 @@ def search(query: str, *, limit: int = 8, region: str = "") -> list[dict[str, An
             cur.execute(
                 f"""
                 SELECT
-                  item_id, region, prefix, code, title, source_text,
+                  item_id, region, prefix, code, title, source_text, rel_path,
                   poster_path, thumb_path, fanart_path, cover_url,
                   1 - (embedding <=> %s::vector) AS score
                 FROM {TABLE}
