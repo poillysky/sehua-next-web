@@ -224,9 +224,7 @@ export function useAppViewport() {
       onViewportSignal();
     };
 
-    window.addEventListener('resize', onWinResize);
-    window.visualViewport?.addEventListener('resize', onViewportSignal);
-    window.visualViewport?.addEventListener('scroll', () => {
+    const onViewportScroll = () => {
       applyVisualHeight();
       if (root.dataset.keyboard !== '1') return;
       const gap = measureGap();
@@ -245,8 +243,8 @@ export function useAppViewport() {
       pinDocumentScroll();
       pinUnderlyingScrollers();
       pinMainLayout();
-    });
-    window.addEventListener('orientationchange', () => {
+    };
+    const onOrientationChange = () => {
       if (stabilityTimer) window.clearTimeout(stabilityTimer);
       commitKeyboard(false, 0);
       window.setTimeout(() => {
@@ -255,8 +253,8 @@ export function useAppViewport() {
         applyVisualHeight();
         healViewport();
       }, 200);
-    });
-    document.addEventListener('focusout', () => {
+    };
+    const onFocusOut = () => {
       window.setTimeout(() => {
         if (isEditableFocused()) return;
         commitKeyboard(false, 0);
@@ -266,13 +264,22 @@ export function useAppViewport() {
         healViewport();
       }, 120);
       window.setTimeout(healViewport, 400);
-    });
+    };
+
+    window.addEventListener('resize', onWinResize);
+    window.visualViewport?.addEventListener('resize', onViewportSignal);
+    window.visualViewport?.addEventListener('scroll', onViewportScroll);
+    window.addEventListener('orientationchange', onOrientationChange);
+    document.addEventListener('focusout', onFocusOut);
 
     return () => {
       boot.forEach((id) => window.clearTimeout(id));
       if (stabilityTimer) window.clearTimeout(stabilityTimer);
       window.removeEventListener('resize', onWinResize);
       window.visualViewport?.removeEventListener('resize', onViewportSignal);
+      window.visualViewport?.removeEventListener('scroll', onViewportScroll);
+      window.removeEventListener('orientationchange', onOrientationChange);
+      document.removeEventListener('focusout', onFocusOut);
     };
   }, []);
 

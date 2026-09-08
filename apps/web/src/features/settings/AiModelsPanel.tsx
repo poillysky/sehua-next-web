@@ -111,7 +111,7 @@ const PRESET_DEFAULTS = {
   continuePrefill: false,
   squashSystemMessages: false,
   showThoughts: false,
-} as const;
+};
 
 function hubStatus(llm: AiLlmConfig | null, embed: AiEmbedConfig | null): string {
   const llmOk = Boolean(llm?.enabled && llm?.configured);

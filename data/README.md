@@ -5,3 +5,7 @@
 # scrape_maps/     演员/标签映射缓存（可选，搜索展示用）
 # prefix-code-ranges.json  前缀范围缓存（可选）
 # prefix_catalog/  七区前缀→真实番号目录（网络校验；API /api/prefix-catalog）
+#
+# 片库类目录已迁到仓库根 media/（见 media/README.md）：
+#   media/strm-library/   七区 STRM 输出
+#   media/scrap-library/  刮削库（NFO→向量）

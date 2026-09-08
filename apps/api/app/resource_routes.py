@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
@@ -9,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Query
 from . import prefix_ranges, prefix_service, resource_service
 from .pg import ResourceDbUnavailable
 
+log = logging.getLogger(__name__)
 router = APIRouter(tags=["resources"])
 
 
@@ -216,7 +218,25 @@ def search(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        msg = str(e)
+        low = msg.lower()
+        # 双库并行时色花超时不应 500 弹 toast；返回空结果让 BT 侧正常展示
+        if "statement timeout" in low or "canceling statement" in low:
+            log.warning("search timeout keyword=%r: %s", keyword[:80], e)
+            return _wrap(
+                {
+                    "keywords": [keyword],
+                    "resources": [],
+                    "total_count": 0,
+                    "has_more": False,
+                    "page": max(1, p),
+                    "page_size": ps,
+                    "match_mode": matchMode,
+                    "timedOut": True,
+                },
+                "色花堂搜索超时",
+            )
+        raise HTTPException(status_code=500, detail=msg) from e
 
 
 @router.get("/resources/{hash}")

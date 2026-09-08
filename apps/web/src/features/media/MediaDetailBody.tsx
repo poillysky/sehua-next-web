@@ -1,17 +1,40 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Search, Star } from 'lucide-react';
+import { Cloud, ExternalLink, HardDrive, LoaderCircle, Search, Star } from 'lucide-react';
 import {
+  fetchCloudSaverSearch,
   fetchMediaRelated,
+  fetchPansouSearch,
   type MediaCastPerson,
   type MediaItem,
+  type PansouHit,
+  type PansouLink,
   proxiedCoverUrl,
 } from '@/lib/api';
+import { copyText } from '@/lib/clipboard';
+import { linkKindOf } from '@/lib/resourceView';
+import { runP115Save } from '@/lib/p115SaveClient';
 import { useTabNavigation } from '@/shell';
 import { useOverlay } from '@/components/overlay/OverlayContext';
-import { openHomeSearchFromItem } from './mediaUi';
+import { AppCenterModal } from '@/components/ui/AppCenterModal';
+import { openHomeSearchFromItem, pickCloudSearchKeyword } from './mediaUi';
 import { MediaPosterCard } from './MediaPosterCard';
+
+type CloudSearchKind = 'pansou' | 'cloudsaver';
+
+function is115ShareLink(lk: PansouLink): boolean {
+  return linkKindOf(lk.url) === '115share';
+}
+
+function isOfflineSaveLink(lk: PansouLink): boolean {
+  const kind = linkKindOf(lk.url);
+  return kind === 'magnet' || kind === 'ed2k';
+}
+
+function canSaveTo115(lk: PansouLink): boolean {
+  return is115ShareLink(lk) || isOfflineSaveLink(lk);
+}
 
 function pickAka(item: MediaItem): string[] {
   return [item.originalTitle, ...(item.aka || [])]
@@ -23,6 +46,34 @@ function pickAka(item: MediaItem): string[] {
       (s) => !/^[\u0590-\u05FF\u0600-\u06FF\u0E00-\u0E7F\u1780-\u17FF]+/.test(s),
     )
     .slice(0, 2);
+}
+
+const COUNTRY_SHORT: Record<string, string> = {
+  'United States of America': '美国',
+  'United States': '美国',
+  USA: '美国',
+  'United Kingdom': '英国',
+  UK: '英国',
+  Japan: '日本',
+  China: '中国',
+  'Hong Kong': '中国香港',
+  Taiwan: '中国台湾',
+  'South Korea': '韩国',
+  Korea: '韩国',
+  France: '法国',
+  Germany: '德国',
+  Italy: '意大利',
+  Spain: '西班牙',
+  Canada: '加拿大',
+  Australia: '澳大利亚',
+  India: '印度',
+  Thailand: '泰国',
+  Russia: '俄罗斯',
+};
+
+function shortCountry(name: string): string {
+  const s = String(name || '').trim();
+  return COUNTRY_SHORT[s] || s;
 }
 
 function normalizeCast(raw: MediaItem['cast']): MediaCastPerson[] {
@@ -65,6 +116,15 @@ export function MediaDetailBody({
   const { toast } = useOverlay();
   const [imgGone, setImgGone] = useState(false);
   const [related, setRelated] = useState<MediaItem[]>([]);
+  const [relatedLoading, setRelatedLoading] = useState(Boolean(onOpenRelated));
+  const [cloudBusy, setCloudBusy] = useState(false);
+  const [cloudOpen, setCloudOpen] = useState(false);
+  const [cloudKind, setCloudKind] = useState<CloudSearchKind>('pansou');
+  const [cloudKw, setCloudKw] = useState('');
+  const [cloudItems, setCloudItems] = useState<PansouHit[] | null>(null);
+  const [cloudTotal, setCloudTotal] = useState(0);
+  const [saving115, setSaving115] = useState<string | null>(null);
+  const cloudAbortRef = useRef<AbortController | null>(null);
   /** 同一条目内锁定首张已展示海报，避免详情回填换 URL 导致闪没再载 */
   const stickyPosterRef = useRef<{ id: string; url: string }>({
     id: item.id,
@@ -78,17 +138,40 @@ export function MediaDetailBody({
   }
   const poster = stickyPosterRef.current.url;
   const cast = normalizeCast(item.cast);
+  const showCastSkel = enriching && cast.length === 0;
+  const showRelatedSkel = Boolean(onOpenRelated) && relatedLoading && related.length === 0;
 
   useEffect(() => {
     setImgGone(false);
+    setCloudOpen(false);
+    setCloudKw('');
+    setCloudItems(null);
+    setCloudTotal(0);
+    setCloudBusy(false);
+    setSaving115(null);
+    cloudAbortRef.current?.abort();
+    cloudAbortRef.current = null;
   }, [item.id]);
 
   useEffect(() => {
-    if (!onOpenRelated || enriching) {
-      if (enriching) setRelated([]);
+    return () => {
+      cloudAbortRef.current?.abort();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!onOpenRelated) {
+      setRelated([]);
+      setRelatedLoading(false);
+      return;
+    }
+    if (enriching) {
+      setRelated([]);
+      setRelatedLoading(true);
       return;
     }
     let cancelled = false;
+    setRelatedLoading(true);
     void (async () => {
       try {
         const data = await fetchMediaRelated({
@@ -113,6 +196,8 @@ export function MediaDetailBody({
         setRelated(uniq);
       } catch {
         if (!cancelled) setRelated([]);
+      } finally {
+        if (!cancelled) setRelatedLoading(false);
       }
     })();
     return () => {
@@ -131,6 +216,78 @@ export function MediaDetailBody({
     if (!ok) toast('没有可用的片名用于搜索', 'error');
     else toast('已跳转 BT 库搜索', 'success');
   }
+
+  async function onCloudSearch(kind: CloudSearchKind) {
+    const kw = pickCloudSearchKeyword(item);
+    if (!kw) {
+      toast('没有可用的片名用于搜索', 'error');
+      return;
+    }
+    cloudAbortRef.current?.abort();
+    const ac = new AbortController();
+    cloudAbortRef.current = ac;
+    setCloudKind(kind);
+    setCloudKw(kw);
+    setCloudOpen(true);
+    setCloudBusy(true);
+    setCloudItems(null);
+    setCloudTotal(0);
+    try {
+      const data =
+        kind === 'cloudsaver'
+          ? await fetchCloudSaverSearch({ keyword: kw, signal: ac.signal })
+          : await fetchPansouSearch({ keyword: kw, signal: ac.signal });
+      if (ac.signal.aborted) return;
+      setCloudItems(data.items || []);
+      setCloudTotal(data.total || data.items?.length || 0);
+    } catch (e) {
+      if (ac.signal.aborted) return;
+      const msg =
+        e instanceof Error
+          ? e.message
+          : kind === 'cloudsaver'
+            ? 'CloudSaver 搜索失败'
+            : '盘搜失败';
+      toast(msg, 'error');
+      setCloudItems([]);
+      setCloudTotal(0);
+    } finally {
+      if (!ac.signal.aborted) setCloudBusy(false);
+    }
+  }
+
+  function onCloseCloud() {
+    cloudAbortRef.current?.abort();
+    cloudAbortRef.current = null;
+    setCloudOpen(false);
+    setCloudBusy(false);
+  }
+
+  async function onCopyLink(url: string, password?: string) {
+    const text = password ? `${url}\n提取码: ${password}` : url;
+    const ok = await copyText(text);
+    toast(ok ? (password ? '已复制链接和提取码' : '已复制链接') : '复制失败', ok ? 'success' : 'error');
+  }
+
+  async function onSave115(lk: PansouLink, titleHint: string) {
+    if (saving115) return;
+    setSaving115(lk.url);
+    try {
+      const result = await runP115Save({
+        urls: [lk.url],
+        password: lk.password || undefined,
+        titleHint,
+        source: item.mediaType === 'tv' ? 'tv' : 'movie',
+      });
+      toast(result.message || (result.ok ? '已转存' : '转存失败'), result.ok ? 'success' : 'error');
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '转存失败', 'error');
+    } finally {
+      setSaving115(null);
+    }
+  }
+
+  const cloudLabel = cloudKind === 'cloudsaver' ? 'CloudSaver' : '盘搜';
 
   return (
     <div className="media-detail">
@@ -193,78 +350,88 @@ export function MediaDetailBody({
                   .join(' · ')}
               </p>
               {(item.genres?.length || item.countries?.length) ? (
-                <p className="media-detail__meta-sub allow-select">
-                  {[
-                    ...(item.genres || []).slice(0, 4),
-                    ...(item.countries || []).slice(0, 2),
-                  ]
-                    .filter(Boolean)
-                    .join(' · ')}
-                </p>
+                <div className="media-detail__tags" aria-label="类型与地区">
+                  {(item.genres || []).slice(0, 4).map((g) => (
+                    <span key={`g-${g}`} className="media-detail__tag">
+                      {g}
+                    </span>
+                  ))}
+                  {(item.countries || []).slice(0, 2).map((c) => (
+                    <span
+                      key={`c-${c}`}
+                      className="media-detail__tag media-detail__tag--place"
+                    >
+                      {shortCountry(c)}
+                    </span>
+                  ))}
+                </div>
               ) : null}
             </div>
           </div>
 
-          {cast.length > 0 ? (
-            <p className="media-detail__leads allow-select">
-              <span className="media-detail__leads-k">主演</span>
-              <span className="media-detail__leads-v">
-                {cast
-                  .slice(0, 4)
-                  .map((p) => p.name)
-                  .join(' · ')}
-              </span>
-            </p>
-          ) : null}
         </div>
       </div>
 
-      {cast.length > 0 ? (
+      {cast.length > 0 || showCastSkel ? (
         <section className="media-detail__section media-detail__cast-sec">
           <h3 className="media-detail__h">主演</h3>
-          <div className="media-detail__cast-rail">
-            {cast.map((p, i) => {
-              const avatar = proxiedCoverUrl(p.avatarUrl);
-              const body = (
-                <>
-                  <span className="media-detail__cast-avatar" aria-hidden>
-                    {avatar ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={avatar}
-                        alt=""
-                        loading="lazy"
-                        decoding="async"
-                        referrerPolicy="no-referrer"
-                      />
-                    ) : (
-                      <span className="media-detail__cast-ph">
-                        {p.name.slice(0, 1)}
-                      </span>
-                    )}
-                  </span>
-                  <span className="media-detail__cast-name">{p.name}</span>
-                </>
-              );
-              return onOpenPerson ? (
-                <button
-                  key={`${p.id || p.name}-${i}`}
-                  type="button"
-                  className="media-detail__cast-card"
-                  onClick={() => onOpenPerson(p)}
-                >
-                  {body}
-                </button>
-              ) : (
+          {showCastSkel ? (
+            <div className="media-detail__cast-rail" aria-hidden>
+              {Array.from({ length: 6 }).map((_, i) => (
                 <div
-                  key={`${p.id || p.name}-${i}`}
+                  key={i}
                   className="media-detail__cast-card media-detail__cast-card--static"
                 >
-                  {body}
+                  <span className="media-detail__cast-avatar media-detail__cast-skel" />
+                  <span className="media-detail__cast-skel-name" />
                 </div>
-              );
-            })}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div className="media-detail__cast-rail">
+              {cast.map((p, i) => {
+                const avatar = proxiedCoverUrl(p.avatarUrl);
+                const body = (
+                  <>
+                    <span className="media-detail__cast-avatar" aria-hidden>
+                      {avatar ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={avatar}
+                          alt=""
+                          loading="lazy"
+                          decoding="async"
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <span className="media-detail__cast-ph">
+                          {p.name.slice(0, 1)}
+                        </span>
+                      )}
+                    </span>
+                    <span className="media-detail__cast-name">{p.name}</span>
+                  </>
+                );
+                return onOpenPerson ? (
+                  <button
+                    key={`${p.id || p.name}-${i}`}
+                    type="button"
+                    className="media-detail__cast-card"
+                    onClick={() => onOpenPerson(p)}
+                  >
+                    {body}
+                  </button>
+                ) : (
+                  <div
+                    key={`${p.id || p.name}-${i}`}
+                    className="media-detail__cast-card media-detail__cast-card--static"
+                  >
+                    {body}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </section>
       ) : null}
 
@@ -274,29 +441,169 @@ export function MediaDetailBody({
           <p className="media-detail__overview allow-select">{item.overview}</p>
         </section>
       ) : enriching ? (
-        <p className="media-empty" style={{ marginTop: 8 }}>
-          加载详情…
-        </p>
+        <section className="media-detail__section" aria-hidden>
+          <h3 className="media-detail__h">简介</h3>
+          <div className="media-detail__overview-skel">
+            <span />
+            <span />
+            <span />
+            <span className="media-detail__overview-skel__short" />
+          </div>
+        </section>
       ) : null}
 
-      <button type="button" className="media-detail__cta" onClick={onSearch}>
-        <Search size={17} strokeWidth={2.25} aria-hidden />
-        在 BT 库搜索
-      </button>
+      <div className="media-detail__actions">
+        <button type="button" className="media-detail__cta media-detail__cta--bt" onClick={onSearch}>
+          <Search size={17} strokeWidth={2.25} aria-hidden />
+          BT 库
+        </button>
+        <button
+          type="button"
+          className="media-detail__cta media-detail__cta--pansou"
+          onClick={() => void onCloudSearch('pansou')}
+          disabled={cloudBusy && cloudKind === 'pansou' && cloudOpen}
+        >
+          {cloudBusy && cloudKind === 'pansou' && cloudOpen ? (
+            <LoaderCircle size={17} strokeWidth={2.4} className="media-detail__cta-spin" aria-hidden />
+          ) : (
+            <HardDrive size={17} strokeWidth={2.25} aria-hidden />
+          )}
+          盘搜
+        </button>
+        <button
+          type="button"
+          className="media-detail__cta media-detail__cta--cloudsaver"
+          onClick={() => void onCloudSearch('cloudsaver')}
+          disabled={cloudBusy && cloudKind === 'cloudsaver' && cloudOpen}
+        >
+          {cloudBusy && cloudKind === 'cloudsaver' && cloudOpen ? (
+            <LoaderCircle size={17} strokeWidth={2.4} className="media-detail__cta-spin" aria-hidden />
+          ) : (
+            <Cloud size={17} strokeWidth={2.25} aria-hidden />
+          )}
+          CS
+        </button>
+      </div>
 
-      {related.length > 0 && onOpenRelated ? (
+      <AppCenterModal
+        open={cloudOpen}
+        title={
+          cloudBusy
+            ? `${cloudLabel}中`
+            : cloudTotal > 0
+              ? `${cloudLabel} · ${cloudTotal}`
+              : cloudLabel
+        }
+        onClose={onCloseCloud}
+        cardClassName={
+          cloudKind === 'cloudsaver' ? 'pansou-modal pansou-modal--cs' : 'pansou-modal'
+        }
+      >
+        {cloudKw ? (
+          <div className="pansou-modal__kw">
+            <span className="pansou-modal__kw-label">关键词</span>
+            <span className="pansou-modal__kw-text allow-select">{cloudKw}</span>
+          </div>
+        ) : null}
+        {cloudBusy ? (
+          <div className="pansou-modal__loading">
+            <LoaderCircle size={22} strokeWidth={2.2} className="media-detail__cta-spin" />
+            <span>正在拉取网盘结果…</span>
+          </div>
+        ) : cloudItems && cloudItems.length === 0 ? (
+          <div className="pansou-modal__empty">
+            <HardDrive size={28} strokeWidth={1.75} aria-hidden />
+            <span>没有找到相关网盘资源</span>
+          </div>
+        ) : (
+          <ul className="pansou-list">
+            {(cloudItems || []).map((hit, idx) => (
+              <li key={hit.id} className="pansou-card">
+                <div className="pansou-card__head">
+                  <span className="pansou-card__idx" aria-hidden>
+                    {idx + 1}
+                  </span>
+                  <div className="pansou-card__head-main">
+                    <p className="pansou-card__title allow-select">{hit.title}</p>
+                    {hit.channel ? (
+                      <p className="pansou-card__meta">{hit.channel}</p>
+                    ) : null}
+                  </div>
+                </div>
+                {hit.links.length > 0 ? (
+                  <div className="pansou-card__links">
+                    {hit.links.map((lk) => (
+                      <div
+                        key={`${hit.id}-${lk.url}`}
+                        className={`pansou-link pansou-link--${lk.type || 'other'}`}
+                      >
+                        <span className="pansou-link__type">{lk.label || lk.type}</span>
+                        <div className="pansou-link__actions">
+                          {lk.password ? (
+                            <span className="pansou-link__pwd allow-select">
+                              码 {lk.password}
+                            </span>
+                          ) : null}
+                          {canSaveTo115(lk) ? (
+                            <button
+                              type="button"
+                              className="pansou-link__save"
+                              disabled={saving115 != null}
+                              onClick={() => void onSave115(lk, hit.title)}
+                            >
+                              {saving115 === lk.url ? '转存中' : '转存'}
+                            </button>
+                          ) : null}
+                          <button
+                            type="button"
+                            className="pansou-link__copy"
+                            onClick={() => void onCopyLink(lk.url, lk.password)}
+                          >
+                            复制
+                          </button>
+                          <a
+                            className="pansou-link__open"
+                            href={lk.url}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                          >
+                            <ExternalLink size={13} strokeWidth={2.35} aria-hidden />
+                            打开
+                          </a>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="pansou-card__meta">暂无可用链接</p>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </AppCenterModal>
+
+      {onOpenRelated && (showRelatedSkel || related.length > 0) ? (
         <section className="media-detail__section">
           <h3 className="media-detail__h">相似推荐</h3>
-          <div className="media-shelf__rail">
-            {related.map((it) => (
-              <MediaPosterCard
-                key={`${it.source}-${it.id}`}
-                item={it}
-                size="sm"
-                onClick={() => onOpenRelated(it)}
-              />
-            ))}
-          </div>
+          {showRelatedSkel ? (
+            <div className="media-shelf__rail media-shelf__rail--skel" aria-hidden>
+              {Array.from({ length: 5 }).map((_, i) => (
+                <span key={i} className="media-poster-skel" />
+              ))}
+            </div>
+          ) : (
+            <div className="media-shelf__rail">
+              {related.map((it) => (
+                <MediaPosterCard
+                  key={`${it.source}-${it.id}`}
+                  item={it}
+                  size="sm"
+                  onClick={() => onOpenRelated(it)}
+                />
+              ))}
+            </div>
+          )}
         </section>
       ) : null}
     </div>

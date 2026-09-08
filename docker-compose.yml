@@ -6,12 +6,13 @@
 #   /vol1/1000/Docker/sehua-next-web/
 #     docker-compose.yml
 #     data/              → /app/data（本地缓存等；元数据在外部 Postgres）
+#     media/             → /app/media（STRM / 刮削库）
 #     library/           → /app/data/library（MDC-ng 片库，单独挂载便于备份/共享）
 #     config/
 #       app.json / app.local.json
 #
 # 启动:
-#   mkdir -p /vol1/1000/Docker/sehua-next-web/{data,library,config}
+#   mkdir -p /vol1/1000/Docker/sehua-next-web/{data,media,library,config}
 #   cd /vol1/1000/Docker/sehua-next-web && docker compose pull && docker compose up -d
 # 访问: http://NAS_IP:3020
 #
@@ -21,7 +22,7 @@ name: sehua-next-web
 
 services:
   app:
-    image: poillysky/sehua-next-web:1.1.0
+    image: poillysky/sehua-next-web:1.2.0
     container_name: sehua-next-web
     restart: always
     mem_limit: 1g
@@ -35,6 +36,7 @@ services:
       WEB_PORT: "3020"
     volumes:
       - /vol1/1000/Docker/sehua-next-web/data:/app/data
+      - /vol1/1000/Docker/sehua-next-web/media:/app/media
       - /vol1/1000/Docker/sehua-next-web/library:/app/data/library
       - /vol1/1000/Docker/sehua-next-web/config:/app/config
     dns:

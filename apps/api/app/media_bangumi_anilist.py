@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from typing import Any
 
 import httpx
@@ -14,6 +15,9 @@ log = logging.getLogger(__name__)
 _BGM_UA = "sehua-next-web/1.0 (media hub; contact: local-dev)"
 _BGM_BASE = "https://api.bgm.tv"
 _ANILIST_URL = "https://graphql.anilist.co"
+_ANILIST_OUTAGE_MSG = "AniList API 暂时关闭（官方稳定性维护），请改用 Bangumi 或稍后再试"
+# 官方 403 停服时短路一段时间，避免货架并发把对方打挂 / 拖慢本端
+_anilist_outage_until = 0.0
 
 _HTTPX_KW: dict[str, Any] = {
     "timeout": httpx.Timeout(12.0, connect=5.0),
@@ -73,6 +77,58 @@ def _norm_item(
         "rating": rating,
         "overview": (overview or "").strip() or None,
     }
+
+
+def _anilist_headers() -> dict[str, str]:
+    return {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": _BGM_UA,
+    }
+
+
+def _anilist_mark_outage(seconds: float = 300.0) -> None:
+    global _anilist_outage_until
+    _anilist_outage_until = time.monotonic() + max(30.0, seconds)
+
+
+def _anilist_raise_if_known_outage() -> None:
+    if time.monotonic() < _anilist_outage_until:
+        raise HTTPException(status_code=502, detail=_ANILIST_OUTAGE_MSG)
+
+
+def _anilist_graphql_error_message(payload: Any) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    errs = payload.get("errors")
+    if not isinstance(errs, list) or not errs:
+        return ""
+    first = errs[0] if isinstance(errs[0], dict) else {}
+    return str(first.get("message") or "").strip()
+
+
+def _anilist_is_stability_outage(message: str) -> bool:
+    m = (message or "").lower()
+    return "temporarily disabled" in m or "stability issues" in m
+
+
+def _raise_anilist_http(r: httpx.Response) -> None:
+    """非 2xx 时抛出可读的 HTTPException；官方停服会进入短期短路。"""
+    detail = f"AniList 返回 {r.status_code}"
+    msg = ""
+    try:
+        payload = r.json()
+        msg = _anilist_graphql_error_message(payload)
+    except Exception:
+        payload = None
+    if _anilist_is_stability_outage(msg):
+        _anilist_mark_outage()
+        detail = _ANILIST_OUTAGE_MSG
+    elif msg:
+        detail = msg[:240]
+    elif r.status_code == 429:
+        detail = "AniList 请求过于频繁，请稍后再试"
+    raise HTTPException(status_code=502, detail=detail)
 
 
 def _bgm_headers() -> dict[str, str]:
@@ -456,6 +512,7 @@ async def anilist_page(
     chart: str = "trending",
     search: str | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
+    _anilist_raise_if_known_outage()
     ch = (chart or "trending").strip().lower()
     variables: dict[str, Any] = {
         "page": page,
@@ -484,17 +541,20 @@ async def anilist_page(
     r = await client.post(
         _ANILIST_URL,
         json={"query": _ANILIST_PAGE_QUERY, "variables": variables},
-        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        headers=_anilist_headers(),
     )
     if not r.is_success:
-        raise HTTPException(status_code=502, detail=f"AniList 返回 {r.status_code}")
+        _raise_anilist_http(r)
     try:
         payload = r.json() or {}
     except Exception as e:
         raise HTTPException(status_code=502, detail="AniList 响应非 JSON") from e
     if payload.get("errors"):
-        msg = payload["errors"][0].get("message") if payload["errors"] else "AniList 错误"
-        raise HTTPException(status_code=502, detail=str(msg))
+        msg = _anilist_graphql_error_message(payload) or "AniList 错误"
+        if _anilist_is_stability_outage(msg):
+            _anilist_mark_outage()
+            raise HTTPException(status_code=502, detail=_ANILIST_OUTAGE_MSG)
+        raise HTTPException(status_code=502, detail=str(msg)[:240])
     page_data = ((payload.get("data") or {}).get("Page")) or {}
     media = page_data.get("media") if isinstance(page_data.get("media"), list) else []
     info = page_data.get("pageInfo") if isinstance(page_data.get("pageInfo"), dict) else {}
@@ -545,15 +605,20 @@ async def anilist_detail(client: httpx.AsyncClient, media_id: str) -> dict[str, 
         mid = int(media_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail="无效 AniList id") from e
+    _anilist_raise_if_known_outage()
     r = await client.post(
         _ANILIST_URL,
         json={"query": query, "variables": {"id": mid}},
-        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        headers=_anilist_headers(),
     )
     if not r.is_success:
-        raise HTTPException(status_code=502, detail=f"AniList 返回 {r.status_code}")
+        _raise_anilist_http(r)
     payload = r.json() if isinstance(r.json(), dict) else {}
     if payload.get("errors"):
+        msg = _anilist_graphql_error_message(payload)
+        if _anilist_is_stability_outage(msg):
+            _anilist_mark_outage()
+            raise HTTPException(status_code=502, detail=_ANILIST_OUTAGE_MSG)
         raise HTTPException(status_code=404, detail="AniList 条目不存在")
     raw = ((payload.get("data") or {}).get("Media")) or None
     if not isinstance(raw, dict):
@@ -690,15 +755,20 @@ async def anilist_related(
         mid = int(media_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail="无效 AniList id") from e
+    _anilist_raise_if_known_outage()
     r = await client.post(
         _ANILIST_URL,
         json={"query": query, "variables": {"id": mid}},
-        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        headers=_anilist_headers(),
     )
     if not r.is_success:
-        raise HTTPException(status_code=502, detail=f"AniList 返回 {r.status_code}")
+        _raise_anilist_http(r)
     payload = r.json() if isinstance(r.json(), dict) else {}
     if payload.get("errors"):
+        msg = _anilist_graphql_error_message(payload)
+        if _anilist_is_stability_outage(msg):
+            _anilist_mark_outage()
+            raise HTTPException(status_code=502, detail=_ANILIST_OUTAGE_MSG)
         return []
     media = ((payload.get("data") or {}).get("Media")) or {}
     if not isinstance(media, dict):
@@ -852,15 +922,20 @@ async def anilist_staff_works(
     else:
         raise HTTPException(status_code=400, detail="请提供影人姓名或 id")
 
+    _anilist_raise_if_known_outage()
     r = await client.post(
         _ANILIST_URL,
         json={"query": query, "variables": variables},
-        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        headers=_anilist_headers(),
     )
     if not r.is_success:
-        raise HTTPException(status_code=502, detail=f"AniList 返回 {r.status_code}")
+        _raise_anilist_http(r)
     payload = r.json() if isinstance(r.json(), dict) else {}
     if payload.get("errors"):
+        msg = _anilist_graphql_error_message(payload)
+        if _anilist_is_stability_outage(msg):
+            _anilist_mark_outage()
+            raise HTTPException(status_code=502, detail=_ANILIST_OUTAGE_MSG)
         raise HTTPException(status_code=404, detail=f"未找到人物「{name or sid}」")
     staff = ((payload.get("data") or {}).get("Staff")) or None
     if not isinstance(staff, dict):

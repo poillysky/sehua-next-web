@@ -15,6 +15,8 @@ FORUM_SEHUATANG_KEY = "forum.sehuatang"
 AI_LLM_KEY = "ai.llm"
 AI_EMBED_KEY = "ai.embed"
 MAKERS_CATALOG_KEY = "makers.catalog"
+PANSOU_KEY = "pansou"
+CLOUDSAVER_KEY = "cloudsaver"
 
 
 def get_setting(key: str) -> Any | None:

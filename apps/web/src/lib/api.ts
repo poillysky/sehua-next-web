@@ -282,6 +282,137 @@ export async function fetchMagnetSearch(opts: {
   return ((await res.json()) as Envelope<MagnetSearchResult>).data;
 }
 
+export type PansouLink = {
+  type: string;
+  url: string;
+  password?: string;
+  workTitle?: string;
+  label?: string;
+};
+
+export type PansouHit = {
+  id: string;
+  title: string;
+  content?: string;
+  channel?: string;
+  datetime?: string;
+  tags?: string[];
+  links: PansouLink[];
+};
+
+export type PansouSearchResult = {
+  keyword: string;
+  source: string;
+  baseUrl?: string;
+  host?: string;
+  total: number;
+  items: PansouHit[];
+};
+
+export async function fetchPansouSearch(opts: {
+  keyword: string;
+  refresh?: boolean;
+  src?: 'all' | 'tg' | 'plugin';
+  signal?: AbortSignal;
+}): Promise<PansouSearchResult> {
+  const q = new URLSearchParams();
+  q.set('keyword', opts.keyword);
+  if (opts.refresh) q.set('refresh', 'true');
+  if (opts.src) q.set('src', opts.src);
+  const res = await apiFetch(`/pansou/search?${q}`, { signal: opts.signal });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<PansouSearchResult>).data;
+}
+
+export async function fetchCloudSaverSearch(opts: {
+  keyword: string;
+  signal?: AbortSignal;
+}): Promise<PansouSearchResult> {
+  const q = new URLSearchParams();
+  q.set('keyword', opts.keyword);
+  const res = await apiFetch(`/cloudsaver/search?${q}`, { signal: opts.signal });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<PansouSearchResult>).data;
+}
+
+export type PansouSettings = {
+  enabled: boolean;
+  baseUrl: string;
+  timeoutSec: number;
+  note?: string;
+};
+
+export async function getPansouSettings(): Promise<PansouSettings> {
+  const res = await apiFetch('/settings/pansou');
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<PansouSettings>).data;
+}
+
+export async function putPansouSettings(body: {
+  enabled: boolean;
+  baseUrl: string;
+  timeoutSec?: number;
+  note?: string;
+}): Promise<PansouSettings> {
+  const res = await apiFetch('/settings/pansou', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<PansouSettings>).data;
+}
+
+export async function testPansou(): Promise<{ ok: boolean; message: string }> {
+  const res = await apiFetch('/pansou/health');
+  if (!res.ok) throw new Error(await parseError(res));
+  const data = ((await res.json()) as Envelope<{ ok?: boolean; message?: string }>).data;
+  return {
+    ok: Boolean(data?.ok),
+    message: data?.message || (data?.ok ? '连接成功' : '连接失败'),
+  };
+}
+
+export type CloudSaverSettings = {
+  enabled: boolean;
+  baseUrl: string;
+  username: string;
+  hasPassword?: boolean;
+  timeoutSec: number;
+  note?: string;
+};
+
+export async function getCloudSaverSettings(): Promise<CloudSaverSettings> {
+  const res = await apiFetch('/settings/cloudsaver');
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<CloudSaverSettings>).data;
+}
+
+export async function putCloudSaverSettings(body: {
+  enabled: boolean;
+  baseUrl: string;
+  username: string;
+  password?: string;
+  timeoutSec?: number;
+  note?: string;
+}): Promise<CloudSaverSettings> {
+  const res = await apiFetch('/settings/cloudsaver', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<CloudSaverSettings>).data;
+}
+
+export async function testCloudSaver(): Promise<{ ok: boolean; message: string }> {
+  const res = await apiFetch('/cloudsaver/health');
+  if (!res.ok) throw new Error(await parseError(res));
+  const data = ((await res.json()) as Envelope<{ ok?: boolean; message?: string }>).data;
+  return {
+    ok: Boolean(data?.ok),
+    message: data?.message || (data?.ok ? '登录成功' : '登录失败'),
+  };
+}
+
 export async function fetchMagnetDetail(
   hash: string,
   signal?: AbortSignal,
@@ -1184,9 +1315,11 @@ export async function listScrapLibraryEmbedRegions(): Promise<
 
 export async function listScrapLibraryEmbedPrefixes(
   region = '',
+  opts?: { studio?: string },
 ): Promise<ScrapLibraryEmbedPrefix[]> {
   const q = new URLSearchParams();
   if (region) q.set('region', region);
+  if (opts?.studio) q.set('studio', opts.studio);
   const res = await apiFetch(
     `/scrap-library/embed/prefixes${q.toString() ? `?${q}` : ''}`,
   );
@@ -1204,6 +1337,7 @@ export async function listScrapLibraryEmbedItems(opts?: {
   genre?: string;
   tag?: string;
   studio?: string;
+  actress?: string;
   sort?: 'code' | 'recent' | 'name' | 'year' | 'studio' | 'prefix' | 'actress' | 'random' | string;
   order?: 'asc' | 'desc' | string;
   offset?: number;
@@ -1216,6 +1350,7 @@ export async function listScrapLibraryEmbedItems(opts?: {
   if (opts?.genre) q.set('genre', opts.genre);
   if (opts?.tag) q.set('tag', opts.tag);
   if (opts?.studio) q.set('studio', opts.studio);
+  if (opts?.actress) q.set('actress', opts.actress);
   if (opts?.sort) q.set('sort', opts.sort);
   if (opts?.order) q.set('order', opts.order);
   if (opts?.offset != null) q.set('offset', String(opts.offset));
@@ -1229,11 +1364,15 @@ export async function listScrapLibraryEmbedItems(opts?: {
 
 export async function listScrapLibraryEmbedFacets(opts?: {
   region?: string;
-  kind?: 'genre' | 'tag' | 'studio' | string;
+  kind?: 'genre' | 'tag' | 'studio' | 'actress' | string;
+  studio?: string;
+  prefix?: string;
 }): Promise<ScrapLibraryEmbedFacet[]> {
   const q = new URLSearchParams();
   if (opts?.region) q.set('region', opts.region);
   if (opts?.kind) q.set('kind', opts.kind);
+  if (opts?.studio) q.set('studio', opts.studio);
+  if (opts?.prefix) q.set('prefix', opts.prefix);
   const res = await apiFetch(
     `/scrap-library/embed/facets${q.toString() ? `?${q}` : ''}`,
   );
@@ -1274,6 +1413,56 @@ export async function searchScrapLibraryEmbed(opts: {
     ((await res.json()) as Envelope<{ hits: ScrapLibraryEmbedItem[] }>).data
       .hits || []
   );
+}
+
+/** 片商刮削库收藏（服务端按登录账号持久化） */
+export type ScrapFavoriteServerItem = ScrapLibraryEmbedItem & {
+  favoritedAt?: number;
+  hubRegion?: string;
+};
+
+export async function listScrapFavoritesServer(): Promise<
+  ScrapFavoriteServerItem[]
+> {
+  const res = await apiFetch('/scrap-favorites');
+  if (!res.ok) throw new Error(await parseError(res));
+  return (
+    (
+      (await res.json()) as Envelope<{
+        items: ScrapFavoriteServerItem[];
+        total: number;
+      }>
+    ).data.items || []
+  );
+}
+
+export async function addScrapFavoriteServer(
+  item: ScrapLibraryEmbedItem,
+  hubRegion?: string,
+): Promise<void> {
+  const itemId = String(item.itemId || '').trim();
+  if (!itemId) throw new Error('缺少条目 ID');
+  // itemId 含路径分隔符，放 body 而非 URL path
+  const res = await apiFetch('/scrap-favorites', {
+    method: 'PUT',
+    body: JSON.stringify({
+      itemId,
+      region: String(hubRegion || '').trim(),
+      payload: item,
+    }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+}
+
+export async function removeScrapFavoriteServer(itemId: string): Promise<void> {
+  const id = String(itemId || '').trim();
+  if (!id) throw new Error('缺少条目 ID');
+  const q = new URLSearchParams();
+  q.set('itemId', id);
+  const res = await apiFetch(`/scrap-favorites?${q}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) throw new Error(await parseError(res));
 }
 
 /** 列表卡片预览最长边；详情/大图不传 w / prefer poster */
@@ -1443,6 +1632,12 @@ export async function assistantChatStream(
   },
   signal?: AbortSignal,
 ): Promise<AssistantChatResult> {
+  const abortError = () => {
+    const err = new DOMException('Aborted', 'AbortError');
+    throw err;
+  };
+  if (signal?.aborted) abortError();
+
   const res = await apiFetch('/ai/assistant/chat/stream', {
     method: 'POST',
     body: JSON.stringify({
@@ -1452,6 +1647,7 @@ export async function assistantChatStream(
     }),
     signal,
   });
+  if (signal?.aborted) abortError();
   if (!res.ok) throw new Error(await parseError(res));
   if (!res.body) throw new Error('无流式响应');
 
@@ -1460,43 +1656,59 @@ export async function assistantChatStream(
   let buffer = '';
   let finalResult: AssistantChatResult | null = null;
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const chunks = buffer.split('\n\n');
-    buffer = chunks.pop() || '';
-    for (const chunk of chunks) {
-      const line = chunk
-        .split('\n')
-        .map((l) => l.trim())
-        .find((l) => l.startsWith('data:'));
-      if (!line) continue;
-      const raw = line.replace(/^data:\s*/, '');
-      try {
-        const evt = JSON.parse(raw) as {
-          event?: string;
-          data?: Record<string, unknown>;
-        };
-        const data = (evt.data || {}) as Record<string, unknown>;
-        if (evt.event === 'status') {
-          handlers.onStatus?.(String(data.text || ''), data.tool ? String(data.tool) : undefined);
-        } else if (evt.event === 'step') {
-          handlers.onStep?.(data as AssistantStep);
-        } else if (evt.event === 'cards_partial') {
-          handlers.onCardsPartial?.((data.cards as AssistantCard[]) || []);
-        } else if (evt.event === 'error') {
-          handlers.onError?.(String(data.message || '失败'));
-        } else if (evt.event === 'done') {
-          finalResult = data as unknown as AssistantChatResult;
-          handlers.onDone?.(finalResult);
+  const onAbort = () => {
+    void reader.cancel().catch(() => undefined);
+  };
+  signal?.addEventListener('abort', onAbort, { once: true });
+
+  try {
+    while (true) {
+      if (signal?.aborted) abortError();
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const chunks = buffer.split('\n\n');
+      buffer = chunks.pop() || '';
+      for (const chunk of chunks) {
+        const line = chunk
+          .split('\n')
+          .map((l) => l.trim())
+          .find((l) => l.startsWith('data:'));
+        if (!line) continue;
+        const raw = line.replace(/^data:\s*/, '');
+        try {
+          const evt = JSON.parse(raw) as {
+            event?: string;
+            data?: Record<string, unknown>;
+          };
+          const data = (evt.data || {}) as Record<string, unknown>;
+          if (evt.event === 'status') {
+            handlers.onStatus?.(String(data.text || ''), data.tool ? String(data.tool) : undefined);
+          } else if (evt.event === 'step') {
+            handlers.onStep?.(data as AssistantStep);
+          } else if (evt.event === 'cards_partial') {
+            handlers.onCardsPartial?.((data.cards as AssistantCard[]) || []);
+          } else if (evt.event === 'error') {
+            handlers.onError?.(String(data.message || '失败'));
+          } else if (evt.event === 'done') {
+            finalResult = data as unknown as AssistantChatResult;
+            handlers.onDone?.(finalResult);
+          }
+        } catch {
+          /* ignore bad chunk */
         }
-      } catch {
-        /* ignore bad chunk */
       }
     }
+  } catch (e) {
+    if (signal?.aborted) abortError();
+    if (e instanceof DOMException && e.name === 'AbortError') throw e;
+    if (e instanceof Error && e.name === 'AbortError') throw e;
+    throw e;
+  } finally {
+    signal?.removeEventListener('abort', onAbort);
   }
 
+  if (signal?.aborted) abortError();
   if (!finalResult) throw new Error('流式结束但无结果');
   return finalResult;
 }
@@ -2044,7 +2256,7 @@ export type MediaItem = {
   year?: string | null;
   rating?: number | null;
   overview?: string | null;
-  cast?: MediaCastPerson[];
+  cast?: Array<MediaCastPerson | string>;
   genres?: string[];
   runtime?: number | null;
   countries?: string[];

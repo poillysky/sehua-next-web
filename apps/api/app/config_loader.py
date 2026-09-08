@@ -108,14 +108,17 @@ def admin_bootstrap() -> dict[str, Any]:
 
     admin = load_config().get("admin") or {}
 
+    # 环境变量最高优先级：生产部署无需把口令写进 config 文件
+    env_password = os.environ.get("SNS_ADMIN_PASSWORD")
+
+    password = env_password if env_password is not None else str(admin.get("password") or "")
+
     return {
 
         "username": str(admin.get("username") or "admin").strip(),
 
-        "password": str(admin.get("password") or ""),
+        "password": password,
 
         "reset_password_on_boot": bool(admin.get("reset_password_on_boot")),
 
     }
-
-

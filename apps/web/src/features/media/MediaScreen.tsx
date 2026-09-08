@@ -1,6 +1,6 @@
 'use client';
 
-import { startTransition, useCallback, useEffect, useState } from 'react';
+import { startTransition, useCallback, useEffect, useRef, useState } from 'react';
 import { Search } from 'lucide-react';
 import {
   fetchMediaDetail,
@@ -63,8 +63,10 @@ export function MediaScreen() {
   const [stack, setStack] = useState<Stack>({ kind: 'hub' });
   const [hubTab, setHubTab] = useState<HubTab>('tmdb');
   const [tmdbOk, setTmdbOk] = useState(true);
+  const [hubNotice, setHubNotice] = useState('');
   const [msg, setMsg] = useState('');
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const detailReqId = useRef(0);
   const hubCover = useStackCover(
     stack.kind !== 'hub',
     'media-hub',
@@ -109,6 +111,7 @@ export function MediaScreen() {
         detailBack?: DetailBack;
       },
     ) => {
+      const reqId = ++detailReqId.current;
       setLoadingDetail(true);
       setMsg('');
       const base = {
@@ -121,6 +124,7 @@ export function MediaScreen() {
         detailBack: opts?.detailBack,
       };
       startTransition(() => {
+        if (reqId !== detailReqId.current) return;
         setStack({ ...base, detail: null });
       });
       const cover = proxiedCoverUrl(item.posterUrl);
@@ -135,14 +139,16 @@ export function MediaScreen() {
           id: item.id,
           mediaType: item.mediaType,
         });
+        if (reqId !== detailReqId.current) return;
         setStack({ ...base, detail });
       } catch (e) {
+        if (reqId !== detailReqId.current) return;
         const text = e instanceof Error ? e.message : '详情加载失败';
         setMsg(text);
         toast(text, 'error');
         setStack({ ...base, detail: item });
       } finally {
-        setLoadingDetail(false);
+        if (reqId === detailReqId.current) setLoadingDetail(false);
       }
     },
     [toast],
@@ -189,6 +195,7 @@ export function MediaScreen() {
                   toast('请先在 更多 → TMDB 配置 API Key', 'info');
                   return;
                 }
+                setHubNotice('');
                 setHubTab(s.id);
               }}
             >
@@ -211,6 +218,11 @@ export function MediaScreen() {
           />
         ) : (
           <div className="media-hub__shelves">
+            {hubNotice ? (
+              <p className="media-hub__notice allow-select" role="status">
+                {hubNotice}
+              </p>
+            ) : null}
             {shelves.map((s) => (
               <MediaShelf
                 key={`${source}-${s.category}-${s.chart}`}
@@ -230,6 +242,10 @@ export function MediaScreen() {
                 onOpenItem={(item) =>
                   void openDetail(s.category, item, 'hub', { chart: s.chart })
                 }
+                onLoadError={(message) => {
+                  if (!message) return;
+                  setHubNotice((prev) => prev || message);
+                }}
               />
             ))}
           </div>

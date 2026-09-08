@@ -9,7 +9,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { ArrowDown, ArrowUp, Check, ChevronRight, Search } from 'lucide-react';
+import { ArrowDown, ArrowUp, Check, ChevronRight, Search, X } from 'lucide-react';
 import {
   listScrapLibraryEmbedFacets,
   listScrapLibraryEmbedItems,
@@ -42,15 +42,24 @@ import { ScrapActressCard, ScrapCollageCard } from './ScrapCollageCard';
 import { ScrapDetailBody } from './ScrapDetailBody';
 import {
   listScrapFavorites,
+  ensureScrapFavoritesLoaded,
 } from './scrapFavorites';
 
 type DrillStack =
   | { kind: 'hub' }
   | { kind: 'search' }
-  | { kind: 'prefix'; prefix: string }
+  /** 文件夹：厂牌 → 前缀 → 女优 → 番号 */
+  | { kind: 'folderStudio'; studio: string }
+  | { kind: 'folderPrefix'; studio: string; prefix: string }
+  | {
+      kind: 'folderActress';
+      studio: string;
+      prefix: string;
+      actress: string;
+    }
   | {
       kind: 'facet';
-      facet: 'genre' | 'tag' | 'studio';
+      facet: 'genre' | 'tag';
       value: string;
       /** 从详情芯片跳转时，返回可回到该条目 */
       fromDetail?: ScrapLibraryEmbedItem;
@@ -108,6 +117,43 @@ export function MakersScreen() {
   const [total, setTotal] = useState(0);
   const [prefixes, setPrefixes] = useState<ScrapLibraryEmbedPrefix[]>([]);
   const [facets, setFacets] = useState<ScrapLibraryEmbedFacet[]>([]);
+  const [drillPrefixes, setDrillPrefixes] = useState<ScrapLibraryEmbedPrefix[]>(
+    [],
+  );
+  const [drillFacets, setDrillFacets] = useState<ScrapLibraryEmbedFacet[]>([]);
+  const [drillTotal, setDrillTotal] = useState(0);
+  const [drillLoading, setDrillLoading] = useState(false);
+  const drillCacheRef = useRef(
+    new Map<
+      string,
+      {
+        prefixes: ScrapLibraryEmbedPrefix[];
+        facets: ScrapLibraryEmbedFacet[];
+        total: number;
+      }
+    >(),
+  );
+  const putDrillCache = useCallback(
+    (
+      key: string,
+      payload: {
+        prefixes: ScrapLibraryEmbedPrefix[];
+        facets: ScrapLibraryEmbedFacet[];
+        total: number;
+      },
+    ) => {
+      const m = drillCacheRef.current;
+      if (m.has(key)) m.delete(key);
+      m.set(key, payload);
+      while (m.size > 48) {
+        const oldest = m.keys().next().value;
+        if (oldest == null) break;
+        m.delete(oldest);
+      }
+    },
+    [],
+  );
+  const loadedDrillKeyRef = useRef('');
   const [recommend, setRecommend] = useState<ScrapLibraryEmbedRecommend | null>(
     null,
   );
@@ -122,7 +168,7 @@ export function MakersScreen() {
 
   const hubCover = useStackCover(
     stack.kind !== 'hub',
-    'makers-hub',
+    `makers-hub-${hubTab}-${libraryView}`,
     'app-hub makers-hub media-hub-root',
   );
 
@@ -130,12 +176,32 @@ export function MakersScreen() {
     return listScrapFavorites(hubTab);
   }, [hubTab, favTick]);
 
-  const prefixFilter =
-    stack.kind === 'prefix'
+  const folderStudio =
+    stack.kind === 'folderStudio' ||
+    stack.kind === 'folderPrefix' ||
+    stack.kind === 'folderActress'
+      ? stack.studio
+      : stack.kind === 'detail' &&
+          (stack.from.kind === 'folderStudio' ||
+            stack.from.kind === 'folderPrefix' ||
+            stack.from.kind === 'folderActress')
+        ? stack.from.studio
+        : undefined;
+  const folderPrefix =
+    stack.kind === 'folderPrefix' || stack.kind === 'folderActress'
       ? stack.prefix
-      : stack.kind === 'detail' && stack.from.kind === 'prefix'
+      : stack.kind === 'detail' &&
+          (stack.from.kind === 'folderPrefix' ||
+            stack.from.kind === 'folderActress')
         ? stack.from.prefix
         : undefined;
+  const folderActress =
+    stack.kind === 'folderActress'
+      ? stack.actress
+      : stack.kind === 'detail' && stack.from.kind === 'folderActress'
+        ? stack.from.actress
+        : undefined;
+
   const facetKind =
     stack.kind === 'facet'
       ? stack.facet
@@ -153,8 +219,10 @@ export function MakersScreen() {
     libraryView !== 'recommended' && libraryView !== 'favorites';
   const isItemSortView =
     libraryView === 'movies' ||
-    stack.kind === 'prefix' ||
-    stack.kind === 'facet';
+    stack.kind === 'folderActress' ||
+    stack.kind === 'facet' ||
+    (stack.kind === 'detail' &&
+      (stack.from.kind === 'folderActress' || stack.from.kind === 'facet'));
 
   const loadItems = useCallback(
     async (offset: number, append: boolean) => {
@@ -165,10 +233,11 @@ export function MakersScreen() {
       try {
         const page = await listScrapLibraryEmbedItems({
           region: hubTab,
-          prefix: prefixFilter,
+          prefix: folderPrefix,
+          studio: folderStudio,
+          actress: folderActress,
           genre: facetKind === 'genre' ? facetValue : undefined,
           tag: facetKind === 'tag' ? facetValue : undefined,
-          studio: facetKind === 'studio' ? facetValue : undefined,
           sort: itemSort,
           order: sortOrder,
           offset,
@@ -195,7 +264,9 @@ export function MakersScreen() {
     },
     [
       hubTab,
-      prefixFilter,
+      folderStudio,
+      folderPrefix,
+      folderActress,
       facetKind,
       facetValue,
       itemSort,
@@ -230,11 +301,7 @@ export function MakersScreen() {
         setRecommend(data);
         setTotal(data.total || 0);
       } else if (libraryView === 'folders') {
-        const rows = await listScrapLibraryEmbedPrefixes(hubTab);
-        if (seq !== loadSeq.current) return;
-        setPrefixes(sortPrefixes(rows, facetSort, sortOrder));
-        setTotal(rows.length);
-      } else if (libraryView === 'collections') {
+        // 文件夹根：厂牌
         const rows = await listScrapLibraryEmbedFacets({
           region: hubTab,
           kind: 'studio',
@@ -259,6 +326,9 @@ export function MakersScreen() {
         setFacets(sortFacets(rows, facetSort, sortOrder));
         setTotal(rows.length);
       } else if (libraryView === 'favorites') {
+        await ensureScrapFavoritesLoaded();
+        if (seq !== loadSeq.current) return;
+        setFavTick((t) => t + 1);
         setTotal(listScrapFavorites(hubTab).length);
       }
     } catch (e) {
@@ -283,16 +353,111 @@ export function MakersScreen() {
     void loadHubView();
   }, [hubTab, libraryView, itemSort, facetSort, sortOrder, loadHubView]);
 
+  // 文件夹中间层：厂牌下前缀 / 前缀下女优
+  const folderMidKey = useMemo(() => {
+    if (stack.kind === 'folderStudio') {
+      return `fs|${hubTab}|${stack.studio}|${facetSort}|${sortOrder}`;
+    }
+    if (stack.kind === 'folderPrefix') {
+      return `fp|${hubTab}|${stack.studio}|${stack.prefix}|${facetSort}|${sortOrder}`;
+    }
+    if (stack.kind === 'detail' && stack.from.kind === 'folderStudio') {
+      return `fs|${hubTab}|${stack.from.studio}|${facetSort}|${sortOrder}`;
+    }
+    if (stack.kind === 'detail' && stack.from.kind === 'folderPrefix') {
+      return `fp|${hubTab}|${stack.from.studio}|${stack.from.prefix}|${facetSort}|${sortOrder}`;
+    }
+    return '';
+  }, [stack, hubTab, facetSort, sortOrder]);
+
+  useEffect(() => {
+    drillCacheRef.current.clear();
+    loadedDrillKeyRef.current = '';
+  }, [hubTab]);
+
+  useEffect(() => {
+    if (!folderMidKey) return;
+    const cached = drillCacheRef.current.get(folderMidKey);
+    if (cached) {
+      setDrillPrefixes(cached.prefixes);
+      setDrillFacets(cached.facets);
+      setDrillTotal(cached.total);
+      setDrillLoading(false);
+      return;
+    }
+    let cancelled = false;
+    const level = folderMidKey.startsWith('fs|') ? 'studio' : 'prefix';
+    // 已有同层内容时不先清空，避免后退闪白
+    setDrillLoading(true);
+    setMsg('');
+    void (async () => {
+      try {
+        if (level === 'studio') {
+          const studio = folderStudio || '';
+          const rows = await listScrapLibraryEmbedPrefixes(hubTab, { studio });
+          if (cancelled) return;
+          const prefixes = sortPrefixes(rows, facetSort, sortOrder);
+          const payload = {
+            prefixes,
+            facets: [] as ScrapLibraryEmbedFacet[],
+            total: rows.length,
+          };
+          putDrillCache(folderMidKey, payload);
+          setDrillPrefixes(payload.prefixes);
+          setDrillFacets(payload.facets);
+          setDrillTotal(payload.total);
+        } else {
+          const rows = await listScrapLibraryEmbedFacets({
+            region: hubTab,
+            kind: 'actress',
+            studio: folderStudio,
+            prefix: folderPrefix,
+          });
+          if (cancelled) return;
+          const facets = sortFacets(rows, facetSort, sortOrder);
+          const payload = {
+            prefixes: [] as ScrapLibraryEmbedPrefix[],
+            facets,
+            total: rows.length,
+          };
+          putDrillCache(folderMidKey, payload);
+          setDrillPrefixes(payload.prefixes);
+          setDrillFacets(payload.facets);
+          setDrillTotal(payload.total);
+        }
+      } catch (e) {
+        if (cancelled) return;
+        setMsg(e instanceof Error ? e.message : '加载失败');
+        setDrillPrefixes([]);
+        setDrillFacets([]);
+        setDrillTotal(0);
+      } finally {
+        if (!cancelled) setDrillLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    folderMidKey,
+    hubTab,
+    folderStudio,
+    folderPrefix,
+    facetSort,
+    sortOrder,
+    putDrillCache,
+  ]);
+
   // 钻取列表：详情盖住时保持同一 drillKey，避免返回时重新拉数
   const drillLoadKey = useMemo(() => {
-    if (stack.kind === 'prefix') {
-      return `${hubTab}|prefix|${stack.prefix}|${itemSort}|${sortOrder}`;
+    if (stack.kind === 'folderActress') {
+      return `${hubTab}|fa|${stack.studio}|${stack.prefix}|${stack.actress}|${itemSort}|${sortOrder}`;
     }
     if (stack.kind === 'facet') {
       return `${hubTab}|facet|${stack.facet}|${stack.value}|${itemSort}|${sortOrder}`;
     }
-    if (stack.kind === 'detail' && stack.from.kind === 'prefix') {
-      return `${hubTab}|prefix|${stack.from.prefix}|${itemSort}|${sortOrder}`;
+    if (stack.kind === 'detail' && stack.from.kind === 'folderActress') {
+      return `${hubTab}|fa|${stack.from.studio}|${stack.from.prefix}|${stack.from.actress}|${itemSort}|${sortOrder}`;
     }
     if (stack.kind === 'detail' && stack.from.kind === 'facet') {
       return `${hubTab}|facet|${stack.from.facet}|${stack.from.value}|${itemSort}|${sortOrder}`;
@@ -302,8 +467,18 @@ export function MakersScreen() {
 
   useEffect(() => {
     if (!drillLoadKey) return;
-    void loadItems(0, false);
-  }, [drillLoadKey, loadItems]);
+    // 同 key 已加载过（含从详情返回）→ 不重拉，避免闪烁
+    if (loadedDrillKeyRef.current === drillLoadKey) return;
+    const key = drillLoadKey;
+    setItems([]);
+    setTotal(0);
+    void (async () => {
+      await loadItems(0, false);
+      loadedDrillKeyRef.current = key;
+    })();
+    // 仅随 drillLoadKey 变化拉取；loadItems 引用变化不触发
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drillLoadKey]);
 
   const sortLabel = isItemSortView
     ? MAKER_SORT_OPTS.find((o) => o.id === itemSort)?.label || '名称'
@@ -462,7 +637,24 @@ export function MakersScreen() {
     if (stack.kind === 'detail') return stack.from;
     if (stack.kind === 'hub') return { kind: 'hub' };
     if (stack.kind === 'search') return { kind: 'search' };
-    if (stack.kind === 'prefix') return { kind: 'prefix', prefix: stack.prefix };
+    if (stack.kind === 'folderStudio') {
+      return { kind: 'folderStudio', studio: stack.studio };
+    }
+    if (stack.kind === 'folderPrefix') {
+      return {
+        kind: 'folderPrefix',
+        studio: stack.studio,
+        prefix: stack.prefix,
+      };
+    }
+    if (stack.kind === 'folderActress') {
+      return {
+        kind: 'folderActress',
+        studio: stack.studio,
+        prefix: stack.prefix,
+        actress: stack.actress,
+      };
+    }
     return {
       kind: 'facet',
       facet: stack.facet,
@@ -477,14 +669,10 @@ export function MakersScreen() {
     );
   }
 
-  function openFacetFromDetail(
-    facet: 'genre' | 'tag' | 'studio',
-    value: string,
-  ) {
+  function openFacetFromDetail(facet: 'genre' | 'tag', value: string) {
     const name = String(value || '').trim();
     if (!name) return;
-    const fromDetail =
-      stack.kind === 'detail' ? stack.item : undefined;
+    const fromDetail = stack.kind === 'detail' ? stack.item : undefined;
     startTransition(() =>
       setStack({
         kind: 'facet',
@@ -492,6 +680,14 @@ export function MakersScreen() {
         value: name,
         fromDetail,
       }),
+    );
+  }
+
+  function openStudioFromDetail(value: string) {
+    const name = String(value || '').trim();
+    if (!name) return;
+    startTransition(() =>
+      setStack({ kind: 'folderStudio', studio: name }),
     );
   }
 
@@ -573,16 +769,14 @@ export function MakersScreen() {
     switch (libraryView) {
       case 'recommended':
         return `${base} · 推荐`;
-      case 'collections':
-        return `${base} · ${total} 个厂牌`;
+      case 'folders':
+        return `${base} · ${facets.length} 个厂牌`;
       case 'genres':
-        return `${base} · ${total} 个标签`;
+        return `${base} · ${facets.length} 个标签`;
       case 'tags':
-        return `${base} · ${total} 位女优`;
+        return `${base} · ${facets.length} 位女优`;
       case 'favorites':
         return `${base} · ${favoriteItems.length} 项收藏`;
-      case 'folders':
-        return `${base} · ${total} 个文件夹`;
       default:
         return `${base} · 共 ${total} 项`;
     }
@@ -590,6 +784,15 @@ export function MakersScreen() {
 
   const hubBody = () => {
     if (libraryView === 'favorites') {
+      if (loading) {
+        return (
+          <div className="media-wall media-wall--skel makers-hub__wall" aria-hidden>
+            {Array.from({ length: 9 }).map((_, i) => (
+              <span key={i} className="makers-poster-skel" />
+            ))}
+          </div>
+        );
+      }
       if (favoriteItems.length === 0) {
         return (
           <p className="media-empty makers-hub__empty allow-select">
@@ -661,30 +864,6 @@ export function MakersScreen() {
                 () => setLibraryView('genres'),
               )
             : null}
-          {recommend.collections.length > 0
-            ? shelfRail(
-                '厂牌',
-                recommend.collections.map((f) => (
-                  <ScrapCollageCard
-                    key={f.name}
-                    title={f.name}
-                    count={f.count}
-                    posterApi={f.posterApi}
-                    posterApis={f.posterApis}
-                    onClick={() =>
-                      startTransition(() =>
-                        setStack({
-                          kind: 'facet',
-                          facet: 'studio',
-                          value: f.name,
-                        }),
-                      )
-                    }
-                  />
-                )),
-                () => setLibraryView('collections'),
-              )
-            : null}
           {recommend.folders.length > 0
             ? shelfRail(
                 '文件夹',
@@ -697,7 +876,10 @@ export function MakersScreen() {
                     posterApis={p.posterApis}
                     onClick={() =>
                       startTransition(() =>
-                        setStack({ kind: 'prefix', prefix: p.prefix }),
+                        setStack({
+                          kind: 'folderStudio',
+                          studio: p.prefix,
+                        }),
                       )
                     }
                   />
@@ -718,25 +900,25 @@ export function MakersScreen() {
           </div>
         );
       }
-      if (prefixes.length === 0) {
+      if (facets.length === 0) {
         return (
           <p className="media-empty makers-hub__empty allow-select">
-            暂无文件夹
+            暂无厂牌
           </p>
         );
       }
       return (
         <div className="makers-collage-grid">
-          {prefixes.map((p) => (
+          {facets.map((f) => (
             <ScrapCollageCard
-              key={p.prefix}
-              title={p.prefix}
-              count={p.count}
-              posterApi={p.posterApi}
-              posterApis={p.posterApis}
+              key={f.name}
+              title={f.name}
+              count={f.count}
+              posterApi={f.posterApi}
+              posterApis={f.posterApis}
               onClick={() =>
                 startTransition(() =>
-                  setStack({ kind: 'prefix', prefix: p.prefix }),
+                  setStack({ kind: 'folderStudio', studio: f.name }),
                 )
               }
             />
@@ -744,7 +926,7 @@ export function MakersScreen() {
         </div>
       );
     }
-    if (libraryView === 'collections' || libraryView === 'genres') {
+    if (libraryView === 'genres') {
       if (loading) {
         return (
           <div className="makers-collage-grid makers-collage-grid--skel" aria-hidden>
@@ -756,27 +938,23 @@ export function MakersScreen() {
       }
       if (facets.length === 0) {
         return (
-          <p className="media-empty makers-hub__empty allow-select">
-            {libraryView === 'collections' ? '暂无厂牌' : '暂无标签'}
-          </p>
+          <p className="media-empty makers-hub__empty allow-select">暂无标签</p>
         );
       }
-      const overlay = libraryView === 'genres';
       return (
         <div className="makers-collage-grid">
           {facets.map((f) => (
             <ScrapCollageCard
               key={f.name}
               title={f.name}
-              count={overlay ? undefined : f.count}
               posterApi={f.posterApi}
               posterApis={f.posterApis}
-              overlay={overlay}
+              overlay
               onClick={() =>
                 startTransition(() =>
                   setStack({
                     kind: 'facet',
-                    facet: libraryView === 'collections' ? 'studio' : 'genre',
+                    facet: 'genre',
                     value: f.name,
                   }),
                 )
@@ -937,9 +1115,10 @@ export function MakersScreen() {
   let push = null;
 
   if (stack.kind === 'search') {
+    const searchQuery = searchDraft.trim();
     push = (
       <AppPush
-        title="搜索刮削库"
+        title="搜索"
         scrollKey={`makers-search-${hubTab}`}
         onBack={() => {
           setSearchHits([]);
@@ -948,49 +1127,221 @@ export function MakersScreen() {
         }}
         skipEnterAnimation
       >
-        <div className="makers-library-panel">
+        <div className="makers-search-panel">
           <form
-            className="makers-prefix-search"
+            className="makers-search"
             onSubmit={(e) => {
               e.preventDefault();
               void runSemanticSearch(searchDraft);
             }}
           >
-            <input
-              className="makers-prefix-search__input"
-              value={searchDraft}
-              onChange={(e) => setSearchDraft(e.target.value)}
-              placeholder={`在 ${makerSourceLabel(hubTab)} 搜番号 / 语义`}
-              autoFocus
-            />
-            <button type="submit" className="makers-prefix-search__go">
-              搜索
+            <label className="makers-search__field">
+              <Search
+                className="makers-search__icon"
+                size={17}
+                strokeWidth={2.25}
+                aria-hidden
+              />
+              <input
+                className="makers-search__input"
+                value={searchDraft}
+                onChange={(e) => setSearchDraft(e.target.value)}
+                placeholder={`${makerSourceLabel(hubTab)} · 番号或语义`}
+                autoFocus
+                enterKeyHint="search"
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+              {searchDraft ? (
+                <button
+                  type="button"
+                  className="makers-search__clear"
+                  aria-label="清除"
+                  onClick={() => {
+                    setSearchDraft('');
+                    setSearchHits([]);
+                    setSearchDone(false);
+                  }}
+                >
+                  <X size={15} strokeWidth={2.35} aria-hidden />
+                </button>
+              ) : null}
+            </label>
+            <button
+              type="submit"
+              className="makers-search__go"
+              disabled={searchLoading || searchQuery.length < SEARCH_KEYWORD_LENGTH_MIN}
+            >
+              {searchLoading ? '…' : '搜索'}
             </button>
           </form>
-          <p className="makers-prefix-panel__meta allow-select">
-            {searchLoading
-              ? '搜索中…'
-              : searchDone
-                ? `「${searchDraft.trim()}」· ${searchHits.length} 条`
-                : '支持番号关键字与中文语义'}
-          </p>
-          {wall(
-            searchHits,
-            searchDone ? '无匹配结果' : '输入后搜索',
-            { loading: searchLoading },
+
+          {searchLoading || (searchDone && searchHits.length > 0) ? (
+            <p className="makers-search__status allow-select" aria-live="polite">
+              {searchLoading ? '搜索中…' : `${searchHits.length} 条结果`}
+            </p>
+          ) : null}
+
+          {!searchLoading && !searchDone && searchHits.length === 0 ? (
+            <div className="makers-search-empty allow-select">
+              <span className="makers-search-empty__icon" aria-hidden>
+                <Search size={28} strokeWidth={1.75} />
+              </span>
+              <p className="makers-search-empty__title">搜番号或语义</p>
+              <p className="makers-search-empty__hint">
+                例如 SSIS-001、女优名
+              </p>
+            </div>
+          ) : !searchLoading && searchDone && searchHits.length === 0 ? (
+            <div className="makers-search-empty allow-select">
+              <span className="makers-search-empty__icon" aria-hidden>
+                <Search size={28} strokeWidth={1.75} />
+              </span>
+              <p className="makers-search-empty__title">无匹配结果</p>
+              <p className="makers-search-empty__hint">换个关键字再试试</p>
+            </div>
+          ) : (
+            wall(searchHits, '无匹配结果', { loading: searchLoading })
           )}
         </div>
       </AppPush>
     );
-  } else if (stack.kind === 'prefix' || stack.kind === 'facet') {
+  } else if (stack.kind === 'folderStudio') {
+    push = (
+      <AppPush
+        title={stack.studio}
+        scrollKey={`makers-folder-studio-${hubTab}-${stack.studio}`}
+        onBack={() => setStack({ kind: 'hub' })}
+        skipEnterAnimation
+      >
+        <div className="makers-library-panel">
+          <div
+            className="makers-drill-toolbar makers-sort-bar--push"
+            ref={sortSlotRef}
+          >
+            <p className="makers-drill-toolbar__meta allow-select">
+              {drillLoading && drillPrefixes.length === 0
+                ? '加载中…'
+                : `${drillTotal} 个前缀`}
+            </p>
+            {combinedSortBtn(true, 'makers-drill-sort')}
+            {sortDropdown}
+          </div>
+          {drillLoading && drillPrefixes.length === 0 ? (
+            <div className="makers-collage-grid makers-collage-grid--skel" aria-hidden>
+              {Array.from({ length: 6 }).map((_, i) => (
+                <span key={i} className="makers-collage-skel" />
+              ))}
+            </div>
+          ) : drillPrefixes.length === 0 ? (
+            <p className="media-empty makers-hub__empty allow-select">
+              暂无前缀
+            </p>
+          ) : (
+            <div className="makers-collage-grid">
+              {drillPrefixes.map((p) => (
+                <ScrapCollageCard
+                  key={p.prefix}
+                  title={p.prefix}
+                  count={p.count}
+                  posterApi={p.posterApi}
+                  posterApis={p.posterApis}
+                  onClick={() =>
+                    startTransition(() =>
+                      setStack({
+                        kind: 'folderPrefix',
+                        studio: stack.studio,
+                        prefix: p.prefix,
+                      }),
+                    )
+                  }
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </AppPush>
+    );
+  } else if (stack.kind === 'folderPrefix') {
+    push = (
+      <AppPush
+        title={stack.prefix}
+        scrollKey={`makers-folder-prefix-${hubTab}-${stack.studio}-${stack.prefix}`}
+        onBack={() =>
+          setStack({ kind: 'folderStudio', studio: stack.studio })
+        }
+        skipEnterAnimation
+      >
+        <div className="makers-library-panel">
+          <div
+            className="makers-drill-toolbar makers-sort-bar--push"
+            ref={sortSlotRef}
+          >
+            <p className="makers-drill-toolbar__meta allow-select">
+              {drillLoading && drillFacets.length === 0
+                ? '加载中…'
+                : `${stack.studio} · ${drillTotal} 位女优`}
+            </p>
+            {combinedSortBtn(true, 'makers-drill-sort')}
+            {sortDropdown}
+          </div>
+          {drillLoading && drillFacets.length === 0 ? (
+            <div
+              className="makers-actress-grid makers-actress-grid--skel"
+              aria-hidden
+            >
+              {Array.from({ length: 9 }).map((_, i) => (
+                <span key={i} className="makers-actress-skel" />
+              ))}
+            </div>
+          ) : drillFacets.length === 0 ? (
+            <p className="media-empty makers-hub__empty allow-select">
+              暂无女优
+            </p>
+          ) : (
+            <div className="makers-actress-grid">
+              {drillFacets.map((f) => (
+                <ScrapActressCard
+                  key={f.name}
+                  title={f.name}
+                  count={f.count}
+                  posterApi={f.posterApi}
+                  posterApis={f.posterApis}
+                  onClick={() =>
+                    startTransition(() =>
+                      setStack({
+                        kind: 'folderActress',
+                        studio: stack.studio,
+                        prefix: stack.prefix,
+                        actress: f.name,
+                      }),
+                    )
+                  }
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </AppPush>
+    );
+  } else if (stack.kind === 'folderActress' || stack.kind === 'facet') {
     const title =
-      stack.kind === 'prefix' ? stack.prefix : stack.value;
+      stack.kind === 'folderActress' ? stack.actress : stack.value;
     const onDrillBack = () => {
       if (stack.kind === 'facet' && stack.fromDetail) {
         setStack({
           kind: 'detail',
           item: stack.fromDetail,
           from: { kind: 'hub' },
+        });
+        return;
+      }
+      if (stack.kind === 'folderActress') {
+        setStack({
+          kind: 'folderPrefix',
+          studio: stack.studio,
+          prefix: stack.prefix,
         });
         return;
       }
@@ -1009,12 +1360,18 @@ export function MakersScreen() {
             ref={sortSlotRef}
           >
             <p className="makers-drill-toolbar__meta allow-select">
-              {loading ? '加载中…' : `共 ${total} 项`}
+              {loading && items.length === 0
+                ? '加载中…'
+                : stack.kind === 'folderActress'
+                  ? `${stack.studio} · ${stack.prefix} · ${total} 项`
+                  : `共 ${total} 项`}
             </p>
             {combinedSortBtn(true, 'makers-drill-sort')}
             {sortDropdown}
           </div>
-          {wall(items, '暂无匹配条目', { loading })}
+          {wall(items, '暂无匹配条目', {
+            loading: loading && items.length === 0,
+          })}
           {!loading && items.length > 0 && items.length < total ? (
             <div className="makers-library-more">
               <button
@@ -1046,7 +1403,7 @@ export function MakersScreen() {
           onFavoriteChange={() => setFavTick((n) => n + 1)}
           onOpenActress={(name) => openFacetFromDetail('tag', name)}
           onOpenGenre={(name) => openFacetFromDetail('genre', name)}
-          onOpenStudio={(name) => openFacetFromDetail('studio', name)}
+          onOpenStudio={(name) => openStudioFromDetail(name)}
           onOpenRelated={(next) =>
             startTransition(() =>
               setStack({

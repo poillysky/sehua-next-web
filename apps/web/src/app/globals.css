@@ -129,6 +129,9 @@
   html {
     @apply text-foreground font-sans;
     -webkit-tap-highlight-color: transparent;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
     color-scheme: light;
     /* iOS PWA：禁单独 height:100%，否则会静默退出 cover，底栏露出白缝 */
     --app-height: 100vh;

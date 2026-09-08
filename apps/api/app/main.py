@@ -11,6 +11,7 @@ from __future__ import annotations
 
 
 import logging
+import os
 
 from contextlib import asynccontextmanager
 
@@ -29,7 +30,6 @@ import psycopg
 
 
 from .auth_routes import (
-    get_optional_user,
     require_admin,
     require_user,
     router as auth_router,
@@ -51,6 +51,8 @@ from .ai_chat_routes import router as ai_chat_router
 from .ai_assistant_routes import router as ai_assistant_router
 from .ai_chat_preset_routes import router as ai_chat_preset_router
 from .magnet_routes import router as magnet_router
+from .pansou_routes import router as pansou_router
+from .cloudsaver_routes import router as cloudsaver_router
 from .translate_routes import router as translate_router
 from .cover_focus_routes import router as cover_focus_router
 from .media_routes import router as media_router
@@ -58,6 +60,7 @@ from .makers_catalog_routes import router as makers_catalog_router
 from .prefix_catalog_routes import router as prefix_catalog_router
 from .scrap_library_embed_routes import router as scrap_library_embed_router
 from .scrape_sources_routes import router as scrape_sources_router
+from .favorites_routes import router as favorites_router
 
 from . import (
     pg_data_backup,
@@ -135,6 +138,15 @@ async def lifespan(_app: FastAPI):
     close_meta_pool()
 
 
+
+def _cors_origins() -> list[str]:
+    """CORS 允许来源：默认通配（同源 rewrite 场景不需要 CORS）；可经 SNS_CORS_ORIGINS 收紧。"""
+    raw = os.environ.get("SNS_CORS_ORIGINS", "").strip()
+    if not raw:
+        return ["*"]
+    return [o.strip() for o in raw.split(",") if o.strip()]
+
+
 app = FastAPI(title="资源仓库 API", version="0.3.0", lifespan=lifespan)
 
 
@@ -143,7 +155,8 @@ app.add_middleware(
 
     CORSMiddleware,
 
-    allow_origins=["*"],
+    # 允许跨域来源（逗号分隔，如 SNS_CORS_ORIGINS=http://192.168.2.38:3020）
+    allow_origins=_cors_origins(),
 
     allow_credentials=False,
 
@@ -166,6 +179,8 @@ app.include_router(ai_assistant_router)
 app.include_router(ai_chat_preset_router)
 
 app.include_router(magnet_router)
+app.include_router(pansou_router)
+app.include_router(cloudsaver_router)
 
 app.include_router(translate_router)
 
@@ -175,6 +190,7 @@ app.include_router(makers_catalog_router)
 app.include_router(prefix_catalog_router)
 app.include_router(scrap_library_embed_router)
 app.include_router(scrape_sources_router)
+app.include_router(favorites_router)
 
 
 
@@ -206,7 +222,7 @@ def health() -> dict[str, Any]:
 
 def get_resource_db(
 
-    _user: dict[str, Any] | None = Depends(get_optional_user),
+    _user: dict[str, Any] = Depends(require_user),
 
 ) -> Envelope:
 
@@ -665,7 +681,7 @@ def _test_postgres_dsn(dsn: str, *, refused_hint: str) -> Envelope:
 
 @app.get("/settings/bitmagnet-db", response_model=Envelope)
 def get_bitmagnet_db(
-    _user: dict[str, Any] | None = Depends(get_optional_user),
+    _user: dict[str, Any] = Depends(require_user),
 ) -> Envelope:
     raw = settings_store.get_setting(settings_store.BITMAGNET_DB_KEY)
     cfg = BitmagnetDbConfig.model_validate(raw or {})

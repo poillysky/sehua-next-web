@@ -11,7 +11,6 @@ import { SEARCH_KEYWORD_LENGTH_MIN } from '@/config/search';
 import { fetchBrowse } from '@/lib/api';
 import type { ResourceItem } from '@/types/resource';
 import { AppPush } from '@/components/ui/AppPush';
-import { useTabNavigation } from '@/shell';
 import { ResourceCard } from '@/features/home/ResourceCard';
 import { ResourceDetailBody } from '@/features/home/ResourceDetailBody';
 
@@ -66,7 +65,6 @@ function BoardCard({
  * @param onClose 从仓库首页「板块」打开时传入，Hub 以 Push 展示并可返回
  */
 export function BoardsScreen({ onClose }: { onClose?: () => void } = {}) {
-  const tabCtx = useTabNavigation();
   const embedded = typeof onClose === 'function';
   const [view, setView] = useState<View>({ kind: 'hub' });
   const [detailHash, setDetailHash] = useState<string | null>(null);
@@ -82,18 +80,6 @@ export function BoardsScreen({ onClose }: { onClose?: () => void } = {}) {
   const [listHint, setListHint] = useState('');
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const listKeyRef = useRef('');
-
-  useEffect(() => {
-    if (embedded) return;
-    if (!tabCtx || tabCtx.activeTab !== '/boards') return;
-    if (tabCtx.tabReselect > 0) {
-      setView({ kind: 'hub' });
-      setDetailHash(null);
-      setBoardDraft('');
-      setBoardQuery('');
-      setListHint('');
-    }
-  }, [embedded, tabCtx?.tabReselect, tabCtx?.activeTab]);
 
   function resetToHub() {
     setView({ kind: 'hub' });

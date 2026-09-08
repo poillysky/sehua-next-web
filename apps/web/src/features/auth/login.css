@@ -101,7 +101,7 @@
 
 .login-layer--enter-push {
   animation: login-push-in 0.36s cubic-bezier(0.32, 0.72, 0, 1) both;
-  box-shadow: -12px 0 32px rgba(15, 40, 80, 0.08);
+  box-shadow: -12px 0 32px rgba(var(--shadow-color), 0.08);
 }
 
 .login-layer--exit-push {
@@ -115,7 +115,7 @@
 
 .login-layer--exit-pop {
   animation: login-pop-out 0.36s cubic-bezier(0.32, 0.72, 0, 1) both;
-  box-shadow: -12px 0 32px rgba(15, 40, 80, 0.08);
+  box-shadow: -12px 0 32px rgba(var(--shadow-color), 0.08);
   pointer-events: none;
 }
 
@@ -411,7 +411,7 @@
 }
 
 .login-screen .login-field input::placeholder {
-  color: #c8c8c8;
+  color: var(--placeholder);
 }
 
 .login-screen .login-password-row {

@@ -34,7 +34,7 @@ const PRESET_DEFAULTS = {
   repetitionPenalty: '',
   seed: '-1',
   n: '1',
-} as const;
+};
 
 type DetailTab = 'settings' | 'prompts';
 

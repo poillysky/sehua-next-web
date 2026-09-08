@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 import re
 import secrets
-import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from urllib.parse import urlencode
 
@@ -15,6 +15,12 @@ import httpx
 from .p115_client import encode_form, form_headers, headers, human_error, normalize_cookie
 
 log = logging.getLogger("p115-extract")
+
+# 有界执行器：突发 autoExtract 时限制并发轮询线程数，避免无界起线程
+_extract_pool = ThreadPoolExecutor(
+    max_workers=4,
+    thread_name_prefix="p115-extract",
+)
 
 POLL_INTERVAL_S = 3.0
 POLL_MAX_S = 30.0
@@ -528,9 +534,8 @@ def schedule_deferred_extract(job: dict[str, Any]) -> dict[str, str]:
         except Exception:
             log.exception("%s fail", job_id)
 
-    threading.Thread(target=runner, daemon=True, name=f"p115-extract-{job_id}").start()
-    log.info(
-        "scheduled poll-then-extract %s hashes=%s folderCid=%s",
+    _extract_pool.submit(runner)
+    log.info(        "scheduled poll-then-extract %s hashes=%s folderCid=%s",
         job_id,
         len(job.get("infoHashes") or []),
         job.get("folderCid"),

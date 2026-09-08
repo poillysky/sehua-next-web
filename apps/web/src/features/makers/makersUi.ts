@@ -17,11 +17,10 @@ export const MAKER_KIND_TABS: Array<{
   { id: 'western', label: '欧美' },
 ];
 
-/** Emby 库内二级菜单（顺序对齐 Emby） */
+/** Emby 库内二级菜单 */
 export type MakerLibraryView =
   | 'movies'
   | 'recommended'
-  | 'collections'
   | 'genres'
   | 'tags'
   | 'favorites'
@@ -33,7 +32,6 @@ export const MAKER_LIBRARY_VIEWS: Array<{
 }> = [
   { id: 'recommended', label: '推荐' },
   { id: 'movies', label: '影片' },
-  { id: 'collections', label: '厂牌' },
   { id: 'genres', label: '标签' },
   { id: 'tags', label: '女优' },
   { id: 'favorites', label: '收藏' },
@@ -77,7 +75,7 @@ export function makerSourceLabel(id: MakerCatalogSourceId): string {
   return MAKER_KIND_TABS.find((t) => t.id === id)?.label || id;
 }
 
-/** 片商详情跳仓库：双库同搜，优先展示色花堂 */
+/** 片商详情跳仓库：双库同搜，优先展示色花堂；115 落到「片商」目录 */
 export function openMakerHomeSearch(
   item: { code?: string | null; title?: string | null; id?: string },
   scrollToTab?: (tab: TabRoute) => void,
@@ -87,5 +85,8 @@ export function openMakerHomeSearch(
   const id = String(item.id || '').trim();
   const q = code || title || id;
   if (q.trim().length < SEARCH_KEYWORD_LENGTH_MIN) return false;
-  return openHomeSearch(q, scrollToTab, { source: 'sehua' });
+  return openHomeSearch(q, scrollToTab, {
+    source: 'sehua',
+    p115Source: 'makers',
+  });
 }

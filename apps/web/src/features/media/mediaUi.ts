@@ -1,6 +1,7 @@
 import type { MediaCategoryId, MediaItem, MediaSourceId } from '@/lib/api';
 import { SEARCH_KEYWORD_LENGTH_MIN } from '@/config/search';
 import type { TabRoute } from '@/shell';
+import { writeSaveSource } from '@/lib/p115Source';
 
 export const MEDIA_CATEGORY_MARK: Record<MediaCategoryId, string> = {
   movie: '影',
@@ -19,16 +20,16 @@ export type MediaHubShelf = {
 export function hubShelvesFor(source: MediaSourceId): MediaHubShelf[] {
   if (source === 'douban') {
     return [
-      { category: 'movie', chart: 'hot', title: '热门电影' },
-      { category: 'movie', chart: 'top250', title: '豆瓣 Top250' },
       { category: 'movie', chart: 'new', title: '新片' },
+      { category: 'movie', chart: 'hot', title: '热门电影' },
+      { category: 'tv', chart: 'hot', title: '热门剧集' },
       { category: 'movie', chart: 'cn', title: '华语电影' },
       { category: 'movie', chart: 'western', title: '欧美电影' },
-      { category: 'tv', chart: 'hot', title: '热门剧集' },
       { category: 'tv', chart: 'jp', title: '日剧' },
       { category: 'tv', chart: 'kr', title: '韩剧' },
       { category: 'anime', chart: 'hot', title: '日本动画' },
       { category: 'variety', chart: 'hot', title: '综艺' },
+      { category: 'movie', chart: 'top250', title: '豆瓣 Top250' },
     ];
   }
   if (source === 'bangumi') {
@@ -51,17 +52,17 @@ export function hubShelvesFor(source: MediaSourceId): MediaHubShelf[] {
     ];
   }
   return [
-    { category: 'movie', chart: 'trending', title: '本周趋势·电影' },
-    { category: 'movie', chart: 'now_playing', title: '正在热映' },
     { category: 'movie', chart: 'upcoming', title: '即将上映' },
+    { category: 'movie', chart: 'now_playing', title: '正在热映' },
     { category: 'movie', chart: 'popular', title: '热门电影' },
-    { category: 'movie', chart: 'top_rated', title: '高分电影' },
+    { category: 'tv', chart: 'popular', title: '热门剧集' },
+    { category: 'movie', chart: 'trending', title: '本周趋势·电影' },
     { category: 'tv', chart: 'trending', title: '本周趋势·剧集' },
     { category: 'tv', chart: 'on_the_air', title: '正在播出' },
-    { category: 'tv', chart: 'popular', title: '热门剧集' },
-    { category: 'tv', chart: 'top_rated', title: '高分剧集' },
     { category: 'anime', chart: 'popular', title: '热门动漫' },
     { category: 'variety', chart: 'popular', title: '热门综艺' },
+    { category: 'movie', chart: 'top_rated', title: '高分电影' },
+    { category: 'tv', chart: 'top_rated', title: '高分剧集' },
   ];
 }
 
@@ -75,21 +76,34 @@ export function mediaCategoryLabel(id: MediaCategoryId): string {
   return map[id] || id;
 }
 
-/** 影视跳 BT：中文 / 英文原名 / 别名全部保留，用顿号拼接；后端按词分别搜再 OR 合并。 */
+/** 是否适合进 BT 搜索：中文（汉字）或英文（拉丁），剔除日文假名 / 韩文等。 */
+function isZhEnSearchable(s: string): boolean {
+  if (/[\u3040-\u30ff\uac00-\ud7af]/.test(s)) return false;
+  if (/[\u4e00-\u9fff]/.test(s)) return true;
+  if (/[\u0590-\u05FF\u0600-\u06FF\u0E00-\u0E7F\u1780-\u17FF\u0400-\u04FF]/.test(s)) {
+    return false;
+  }
+  return /[A-Za-z]/.test(s);
+}
+
+/** 影视跳 BT：主名保留；原名/别名仅中英，用顿号拼接；后端按词分别搜再 OR 合并。 */
 export function buildMediaSearchTerms(
   item: Pick<MediaItem, 'title' | 'originalTitle' | 'aka'>,
   opts?: { maxTerms?: number; maxLen?: number },
 ): string[] {
-  const maxTerms = opts?.maxTerms ?? 6;
+  const maxTerms = opts?.maxTerms ?? 2;
   const maxLen = opts?.maxLen ?? 100;
   const seen = new Set<string>();
   const parts: string[] = [];
-  for (const raw of [item.title, item.originalTitle, ...(item.aka || [])]) {
-    let s = String(raw || '').trim();
+  const candidates = [item.title, item.originalTitle, ...(item.aka || [])];
+  for (let i = 0; i < candidates.length; i++) {
+    let s = String(candidates[i] || '').trim();
     if (!s) continue;
     // 过长别名截断，避免整串超限
     if (s.length > 60) s = s.slice(0, 60).trim();
     if (s.length < SEARCH_KEYWORD_LENGTH_MIN) continue;
+    // 主名恒保留；originalTitle / aka 仅中英
+    if (i > 0 && !isZhEnSearchable(s)) continue;
     const key = s.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
@@ -108,14 +122,23 @@ export function buildMediaSearchQuery(
   return buildMediaSearchTerms(item).join('，');
 }
 
-/** 影视跳转仓库：双库同搜，优先展示 Bitmagnet */
+/** 盘搜 / CloudSaver：优先中文词，其次主名。 */
+export function pickCloudSearchKeyword(
+  item: Pick<MediaItem, 'title' | 'originalTitle' | 'aka'>,
+): string {
+  const terms = buildMediaSearchTerms(item, { maxTerms: 4, maxLen: 80 });
+  const zh = terms.find((t) => /[\u4e00-\u9fff]/.test(t));
+  return (zh || terms[0] || String(item.title || '').trim()).trim();
+}
+
+/** 影视 / 片商跳转仓库：双库同搜 */
 export function openHomeSearch(
   names: string[] | string,
   scrollToTab?: (tab: TabRoute) => void,
   opts?: {
     source?: 'sehua' | 'bitmagnet';
-    /** 115 转存目录：电影 / 电视剧 */
-    p115Source?: 'movie' | 'tv';
+    /** 115 转存目录：电影 / 电视剧 / 片商 */
+    p115Source?: 'movie' | 'tv' | 'makers';
   },
 ): boolean {
   const list = Array.isArray(names) ? names : [names];
@@ -130,8 +153,12 @@ export function openHomeSearch(
     sessionStorage.setItem('nextweb:home-search', q.trim());
     sessionStorage.setItem('nextweb:home-search-source', source);
     sessionStorage.removeItem('nextweb:home-prefix-region');
-    if (opts?.p115Source === 'movie' || opts?.p115Source === 'tv') {
-      sessionStorage.setItem('nextweb:p115-save-source', opts.p115Source);
+    if (
+      opts?.p115Source === 'movie' ||
+      opts?.p115Source === 'tv' ||
+      opts?.p115Source === 'makers'
+    ) {
+      writeSaveSource(opts.p115Source);
     }
     window.dispatchEvent(new Event('nextweb:home-search'));
   } catch {

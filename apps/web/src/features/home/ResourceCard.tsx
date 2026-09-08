@@ -7,6 +7,9 @@ import { normalizeResourceView } from '@/lib/resourceView';
 import { copyText } from '@/lib/clipboard';
 import { COVER_LIST_THUMB_W, proxiedCoverUrl } from '@/lib/api';
 import { AppMsg } from '@/components/ui/AppMsg';
+import { ContextMenu } from '@/components/ui/ContextMenu';
+import { useLongPress } from '@/hooks/useLongPress';
+import { useHaptics } from '@/shell';
 import { getEd2kCopyText, normalizeLinkKind } from '@/lib/detailResource';
 
 const LINK_KIND_LABEL: Record<string, string> = {
@@ -268,6 +271,8 @@ export function ResourceCard({
   cropRegion?: string;
 }) {
   const [msg, setMsg] = useState('');
+  const [menuOpen, setMenuOpen] = useState(false);
+  const haptics = useHaptics();
   const view = normalizeResourceView(item);
   const title = view.title || view.name || view.hash;
   const kind = normalizeLinkKind(view.link_kind);
@@ -275,6 +280,13 @@ export function ResourceCard({
   const count = view.files_count || view.files?.length || 0;
   const copyTextAll = getEd2kCopyText(view);
   const previews = view.preview_images || [];
+
+  const cardRef = useLongPress<HTMLElement>(() => {
+    haptics.trigger('nudge');
+    setMenuOpen(true);
+  }, {
+    onHaptic: () => haptics.trigger('nudge'),
+  });
 
   async function onCopyLink(e: MouseEvent) {
     e.preventDefault();
@@ -295,8 +307,32 @@ export function ResourceCard({
     );
   }
 
+  async function copyFromMenu() {
+    if (!copyTextAll?.trim()) {
+      setMsg(kind === 'stub' ? '暂无可用链接' : '无链接可复制');
+      return;
+    }
+    const ok = await copyText(copyTextAll);
+    setMsg(ok ? '已复制链接' : '复制失败');
+  }
+
   return (
-    <article className="bm-card">
+    <article className="bm-card" ref={cardRef}>
+      <ContextMenu
+        open={menuOpen}
+        title={title}
+        onClose={() => setMenuOpen(false)}
+        actions={[
+          {
+            label: '打开详情',
+            onSelect: () => onOpen(view.hash),
+          },
+          {
+            label: copyTextAll?.trim() ? '复制链接' : '无链接可复制',
+            onSelect: () => void copyFromMenu(),
+          },
+        ]}
+      />
       {badge ? <span className="bm-card__badge">{badge}</span> : null}
       <header className={`bm-card__head${badge ? ' bm-card__head--badged' : ''}`}>
         <button

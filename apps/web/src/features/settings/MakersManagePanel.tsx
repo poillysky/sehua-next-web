@@ -250,7 +250,7 @@ export function MakersManagePanel({
     setStrmBrowseKind('strm');
     setStrmBrowseOpen(true);
     setStrmNewFolder('');
-    // 从已选目录的父层打开更顺手：已选 strm-library 则停在 data 根看到它
+    // 从已选目录的父层打开更顺手：已选 strm-library 则停在 media 根看到它
     const start =
       strmRoot.includes('/') || strmRoot.includes('\\')
         ? strmRoot.replace(/\\/g, '/').split('/').slice(0, -1).join('/')
@@ -278,11 +278,11 @@ export function MakersManagePanel({
       if (strmBrowseKind === 'scrap') {
         const s = await putScrapLibraryEmbedSettings(picked);
         setScrapRoot(s.root || picked);
-        setMsg(`已选择刮削库 · data/${s.root}`);
+        setMsg(`已选择刮削库 · media/${s.root}`);
       } else {
         const s = await putPrefixCatalogStrmSyncSettings(picked);
         setStrmRoot(s.root || picked);
-        setMsg(`已选择 · data/${s.root}`);
+        setMsg(`已选择 · media/${s.root}`);
       }
       setStrmBrowseOpen(false);
       onStatus('目录已保存', 'ok');
@@ -545,11 +545,11 @@ export function MakersManagePanel({
         if (strmBrowseKind === 'scrap') {
           const s = await putScrapLibraryEmbedSettings(path);
           setScrapRoot(s.root || path);
-          setMsg(`已选择刮削库 · data/${s.root}`);
+          setMsg(`已选择刮削库 · media/${s.root}`);
         } else {
           const s = await putPrefixCatalogStrmSyncSettings(path);
           setStrmRoot(s.root || path);
-          setMsg(`已选择 · data/${s.root}`);
+          setMsg(`已选择 · media/${s.root}`);
         }
         setStrmBrowseOpen(false);
         onStatus('目录已保存', 'ok');
@@ -784,7 +784,9 @@ export function MakersManagePanel({
     typeof scrapProgress?.total === 'number' &&
     scrapProgress.total > 0
       ? `${scrapProgress.done.toLocaleString()} / ${scrapProgress.total.toLocaleString()}`
-      : '';
+      : typeof scrapProgress?.done === 'number' && scrapProgress.done > 0
+        ? scrapProgress.done.toLocaleString()
+        : '';
 
   const catalogScrollKey =
     catalogNav?.level === 'prefix'
@@ -1033,8 +1035,8 @@ export function MakersManagePanel({
                   <span className="settings-nav__title">输出目录</span>
                   <span className="settings-nav__desc allow-select">
                     {strmRoot
-                      ? `data/${strmRoot}`
-                      : 'data/strm-library（默认）'}
+                      ? `media/${strmRoot}`
+                      : 'media/strm-library（默认）'}
                   </span>
                 </span>
                 <button
@@ -1132,8 +1134,8 @@ export function MakersManagePanel({
                   <span className="settings-nav__title">刮削目录</span>
                   <span className="settings-nav__desc allow-select">
                     {scrapRoot
-                      ? `data/${scrapRoot}`
-                      : 'data/scrap-library（默认）'}
+                      ? `media/${scrapRoot}`
+                      : 'media/scrap-library（默认）'}
                   </span>
                 </span>
                 <button
@@ -1197,9 +1199,13 @@ export function MakersManagePanel({
                           ? '写入'
                           : scrapProgress?.stage === 'scan'
                             ? '扫描'
-                            : scrapProgress?.stage === 'done'
-                              ? '完成'
-                              : '准备'
+                            : scrapProgress?.stage === 'diff'
+                              ? '比对'
+                              : scrapProgress?.stage === 'covers'
+                                ? '封面'
+                                : scrapProgress?.stage === 'done'
+                                  ? '完成'
+                                  : '准备'
                         : '已完成'}
                       {scrapCountLabel ? ` · ${scrapCountLabel}` : ''}
                     </span>

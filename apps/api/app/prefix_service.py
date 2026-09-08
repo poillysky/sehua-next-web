@@ -17,6 +17,7 @@ from .search_av import (
     parse_maker_code,
 )
 from .search_constants import escape_ilike
+from .ttl_cache import enforce_max, prune_by_age
 
 log = logging.getLogger(__name__)
 
@@ -28,6 +29,7 @@ PREFIX_SCAN_ROW_CAP_BUILD = PREFIX_SCAN_ROW_CAP
 PREFIX_SCAN_TIMEOUT = "20s"
 PREFIX_SCAN_TIMEOUT_BUILD = "90s"
 PREFIX_CACHE_TTL_S = 300
+PREFIX_CACHE_MAX = 256
 
 _scan_timeout_lock = threading.Lock()
 _scan_timeout_override: str | None = None
@@ -39,7 +41,11 @@ def set_prefix_scan_timeout(timeout: str | None) -> str | None:
     global _scan_timeout_override
     with _scan_timeout_lock:
         prev = _scan_timeout_override
-        _scan_timeout_override = (timeout or "").strip() or None
+        cleaned = (timeout or "").strip() or None
+        # 仅允许纯时长（毫秒/秒），防止拼 SQL 时注入
+        if cleaned is not None and not re.fullmatch(r"\d+(?:ms|s)?", cleaned):
+            raise ValueError(f"非法 statement_timeout: {cleaned!r}")
+        _scan_timeout_override = cleaned
         return prev
 
 
@@ -1007,6 +1013,7 @@ def _load_cached(
 ) -> dict[str, Any]:
     key = _cache_key(prefix, region)
     now = time.time()
+    prune_by_age(_cache, PREFIX_CACHE_TTL_S, now=now)
     if bust:
         _cache.pop(key, None)
     hit = _cache.get(key)
@@ -1014,6 +1021,7 @@ def _load_cached(
         return hit[1]
     data = _scan_prefix_code_index(prefix, region=region)
     _cache[key] = (now, data)
+    enforce_max(_cache, PREFIX_CACHE_MAX)
     return data
 
 

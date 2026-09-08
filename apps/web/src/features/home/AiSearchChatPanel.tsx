@@ -200,7 +200,7 @@ export function AiSearchChatPanel({ onBack }: { onBack: () => void }) {
     if (!text || busy) return;
     const userMsg: ChatMsg = { id: `u-${Date.now()}`, role: 'user', text };
     setDraft('');
-    setMsgs((prev) => [...prev, userMsg]);
+    setMsgs((prev) => [...prev, userMsg].slice(-80));
     setBusy(true);
     setStatusText('小花在想…');
     liveStepsRef.current = [];
@@ -216,6 +216,9 @@ export function AiSearchChatPanel({ onBack }: { onBack: () => void }) {
       content: m.text,
       summary: m.toolSummary,
     }));
+    const appendMsg = (msg: ChatMsg) => {
+      setMsgs((prev) => [...prev, msg].slice(-80));
+    };
 
     try {
       const r = await assistantChatStream(
@@ -228,10 +231,7 @@ export function AiSearchChatPanel({ onBack }: { onBack: () => void }) {
           },
           onCardsPartial: (cards) => setPartialCards(cards),
           onError: (message) => {
-            setMsgs((prev) => [
-              ...prev,
-              { id: `e-${Date.now()}`, role: 'assistant', text: message },
-            ]);
+            appendMsg({ id: `e-${Date.now()}`, role: 'assistant', text: message });
           },
         },
         ac.signal,
@@ -243,27 +243,22 @@ export function AiSearchChatPanel({ onBack }: { onBack: () => void }) {
         (r.toolSummary
           ? `已检索完成（${r.toolSummary}），但正文未生成，请再试一次。`
           : '这次没有生成有效答复，请再试一次。');
-      setMsgs((prev) => [
-        ...prev,
-        {
-          id: `a-${Date.now()}`,
-          role: 'assistant',
-          text: replyText,
-          cards: r.cards || [],
-          steps,
-          toolSummary: r.toolSummary,
-        },
-      ]);
+      appendMsg({
+        id: `a-${Date.now()}`,
+        role: 'assistant',
+        text: replyText,
+        cards: r.cards || [],
+        steps,
+        toolSummary: r.toolSummary,
+      });
     } catch (e) {
+      if (ac.signal.aborted) return;
       if ((e as Error)?.name === 'AbortError') return;
-      setMsgs((prev) => [
-        ...prev,
-        {
-          id: `e-${Date.now()}`,
-          role: 'assistant',
-          text: e instanceof Error ? e.message : '搜索失败',
-        },
-      ]);
+      appendMsg({
+        id: `e-${Date.now()}`,
+        role: 'assistant',
+        text: e instanceof Error ? e.message : '搜索失败',
+      });
     } finally {
       setBusy(false);
       setPartialCards([]);

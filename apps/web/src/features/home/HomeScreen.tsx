@@ -32,6 +32,11 @@ import { AppPush } from '@/components/ui/AppPush';
 import { AppMsg } from '@/components/ui/AppMsg';
 import { useTabNavigation } from '@/shell';
 import { useStackCover } from '@/hooks/useStackCover';
+import { clearSaveSource } from '@/lib/p115Source';
+import {
+  usePullToRefresh,
+  finishPullToRefresh,
+} from '@/hooks/usePullToRefresh';
 import { HomeSearchField } from './HomeSearchField';
 import { P115PastePanel } from './P115PastePanel';
 import { AiSearchChatPanel } from './AiSearchChatPanel';
@@ -113,7 +118,7 @@ function syncSearchUrl(opts: {
 }
 
 /**
- * 搜索页 — 一关键字双库并行；色花堂 / Bitmagnet 分来源展示
+ * 搜索页 — 色花堂 / Bitmagnet 分来源；仅当前来源发起搜索，切换后再搜另一库
  * 影视入口优先 Bitmagnet，片商入口优先色花堂
  */
 export function HomeScreen() {
@@ -154,6 +159,9 @@ export function HomeScreen() {
   const [magnetCostMs, setMagnetCostMs] = useState(0);
   const sehuaReqId = useRef(0);
   const magnetReqId = useRef(0);
+  /** 已完成的查询指纹：同条件切回来源时跳过重复请求 */
+  const sehuaDoneKeyRef = useRef('');
+  const magnetDoneKeyRef = useRef('');
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const overlayOpen = Boolean(detailHash || pasteOpen || chatOpen || boardsOpen);
   const mainCover = useStackCover(
@@ -164,6 +172,17 @@ export function HomeScreen() {
   const scrollBodyRef = useRef<HTMLDivElement | null>(null);
   const hydrated = useRef(false);
   const skipUrlWrite = useRef(false);
+
+  // iOS 下拉刷新：仅列表态（results）启用，刷新时重置分页重拉
+  usePullToRefresh({
+    scrollRef: scrollBodyRef,
+    disabled: mode !== 'results' || Boolean(detailHash),
+    onRefresh: () => {
+      setSehualPage(1);
+      setMagnetPage(1);
+      setReloadToken((n) => n + 1);
+    },
+  });
 
   const openSehualDetail = useCallback((hash: string) => {
     setDetailSource('sehua');
@@ -194,10 +213,14 @@ export function HomeScreen() {
     setMagnetError('');
     setCostMs(0);
     setMagnetCostMs(0);
+    sehuaDoneKeyRef.current = '';
+    magnetDoneKeyRef.current = '';
   }
 
   const onSearchSourceChange = useCallback((next: SearchSource) => {
     setSearchSource(next);
+    if (next === 'sehua') setSehualPage(1);
+    else setMagnetPage(1);
     scrollBodyRef.current?.scrollTo({ top: 0 });
   }, []);
 
@@ -213,7 +236,7 @@ export function HomeScreen() {
     resetLists();
     closeDetail();
     try {
-      sessionStorage.removeItem('nextweb:p115-save-source');
+      clearSaveSource();
     } catch {
       /* ignore */
     }
@@ -346,7 +369,7 @@ export function HomeScreen() {
       return;
     }
     try {
-      sessionStorage.removeItem('nextweb:p115-save-source');
+      clearSaveSource();
     } catch {
       /* ignore */
     }
@@ -363,7 +386,7 @@ export function HomeScreen() {
 
   function browseLatest() {
     try {
-      sessionStorage.removeItem('nextweb:p115-save-source');
+      clearSaveSource();
     } catch {
       /* ignore */
     }
@@ -389,10 +412,23 @@ export function HomeScreen() {
 
   const isKeywordSearch = !browsing && keyword.length >= SEARCH_KEYWORD_LENGTH_MIN;
 
-  // 色花堂
+  // 色花堂：浏览始终拉；关键词仅当前来源为色花堂时搜
   useEffect(() => {
     if (mode !== 'results') return;
     if (!browsing && keyword.length < SEARCH_KEYWORD_LENGTH_MIN) return;
+    if (isKeywordSearch && searchSource !== 'sehua') {
+      setSehualLoading(false);
+      setSehualLoadingMore(false);
+      return;
+    }
+    const queryKey = isKeywordSearch
+      ? `kw|${keyword}|${sehuaPage}|${sortType}|${matchMode}|${filterTime}|${filterSize}|${searchRegion || ''}|${reloadToken}`
+      : `browse|${sehuaPage}|${reloadToken}`;
+    if (sehuaPage === 1 && sehuaDoneKeyRef.current === queryKey) {
+      setSehualLoading(false);
+      setSehualLoadingMore(false);
+      return;
+    }
     const id = ++sehuaReqId.current;
     const ac = new AbortController();
     const append = sehuaPage > 1;
@@ -436,6 +472,7 @@ export function HomeScreen() {
           if (!append) {
             setSehualTotal(data.total_count);
             setCostMs(Math.round(performance.now() - t0));
+            sehuaDoneKeyRef.current = queryKey;
           }
           // 时间=全部时精确 COUNT 极慢；列表已有 has_more，延后/跳过总数
           if (!append && filterTime !== 'all') {
@@ -487,7 +524,10 @@ export function HomeScreen() {
           setSehualHasMore(
             Boolean(data.has_more) && loaded < BROWSE_LATEST_MAX,
           );
-          if (!append) setCostMs(Math.round(performance.now() - t0));
+          if (!append) {
+            setCostMs(Math.round(performance.now() - t0));
+            sehuaDoneKeyRef.current = queryKey;
+          }
         }
       } catch (e) {
         if (
@@ -501,11 +541,22 @@ export function HomeScreen() {
         if (!append) {
           setItems([]);
           setSehualTotal(0);
+          // 失败不写 doneKey，切回同一源时可重试
         }
         setSehualHasMore(false);
         const m = e instanceof Error ? e.message : '加载失败';
+        const softTimeout =
+          /statement timeout|canceling statement|搜索超时|色花堂搜索超时/i.test(
+            m,
+          );
         setError(m);
-        setMsg(m === 'Not Found' ? '搜索接口未就绪，请重启 API 后再试' : m);
+        setMsg(
+          softTimeout
+            ? '色花堂搜索超时，可换关键词或稍后再试'
+            : m === 'Not Found'
+              ? '搜索接口未就绪，请重启 API 后再试'
+              : m,
+        );
       } finally {
         if (id === sehuaReqId.current) {
           setSehualLoading(false);
@@ -527,11 +578,23 @@ export function HomeScreen() {
     filterSize,
     reloadToken,
     searchRegion,
+    searchSource,
   ]);
 
-  // Bitmagnet：关键词搜索时与色花堂并行拉取（分 Tab 展示，入口决定优先页签）
+  // Bitmagnet：仅当前来源为 Bt 时搜索
   useEffect(() => {
     if (mode !== 'results' || !isKeywordSearch) {
+      setMagnetLoading(false);
+      setMagnetLoadingMore(false);
+      return;
+    }
+    if (searchSource !== 'bitmagnet') {
+      setMagnetLoading(false);
+      setMagnetLoadingMore(false);
+      return;
+    }
+    const queryKey = `kw|${keyword}|${magnetPage}|${sortType}|${filterTime}|${filterSize}|${reloadToken}`;
+    if (magnetPage === 1 && magnetDoneKeyRef.current === queryKey) {
       setMagnetLoading(false);
       setMagnetLoadingMore(false);
       return;
@@ -575,6 +638,7 @@ export function HomeScreen() {
         if (!append) {
           setMagnetTotal(data.total ?? batch.length);
           setMagnetCostMs(data.costMs || Math.round(performance.now() - t0));
+          magnetDoneKeyRef.current = queryKey;
         }
       } catch (e) {
         if (
@@ -588,6 +652,7 @@ export function HomeScreen() {
         if (!append) {
           setMagnetItems([]);
           setMagnetTotal(0);
+          // 失败不写 doneKey，切回同一源时可重试
         }
         setMagnetHasMore(false);
         setMagnetError(e instanceof Error && e.message ? e.message : 'Bitmagnet 搜索失败');
@@ -609,6 +674,7 @@ export function HomeScreen() {
     filterTime,
     filterSize,
     reloadToken,
+    searchSource,
   ]);
 
   const activeSource: SearchSource = browsing ? 'sehua' : searchSource;
@@ -627,6 +693,16 @@ export function HomeScreen() {
     !(activeSource === 'sehua'
       ? sehuaLoading
       : isKeywordSearch && magnetLoading);
+
+  // 下拉刷新完成后收起指示器（首屏加载态结束即代表新数据已拉取）
+  useEffect(() => {
+    if (mode !== 'results') return;
+    const loading =
+      activeSource === 'sehua' ? sehuaLoading : magnetLoading;
+    if (!loading) {
+      finishPullToRefresh(scrollBodyRef);
+    }
+  }, [activeSource, sehuaLoading, magnetLoading, mode]);
 
   useEffect(() => {
     if (mode !== 'results' || detailHash) return;
@@ -660,25 +736,19 @@ export function HomeScreen() {
 
   const hint = isKeywordSearch
     ? (() => {
-        const sehuaPart =
-          sehuaLoading && sehuaTotal === 0 && items.length === 0
-            ? '色花堂…'
-            : `色花堂 ${sehuaTotal}`;
-        const bmPart =
-          magnetLoading && magnetTotal === 0 && magnetItems.length === 0
-            ? magnetError
-              ? 'Bt 不可用'
-              : 'Bt…'
-            : magnetError && magnetTotal === 0
-              ? 'Bt 不可用'
-              : `Bt ${magnetTotal}`;
-        // 优先来源写在前面
-        const dual =
-          searchSource === 'bitmagnet'
-            ? `${bmPart} · ${sehuaPart}`
-            : `${sehuaPart} · ${bmPart}`;
-        if (searchRegion) return `${dual} · 分区`;
-        return dual;
+        if (searchSource === 'bitmagnet') {
+          if (magnetLoading && magnetTotal === 0 && magnetItems.length === 0) {
+            return magnetError ? 'Bt 不可用' : 'Bt…';
+          }
+          return magnetError && magnetTotal === 0
+            ? 'Bt 不可用'
+            : `Bt ${magnetTotal}`;
+        }
+        if (sehuaLoading && sehuaTotal === 0 && items.length === 0) {
+          return '色花堂…';
+        }
+        const base = `色花堂 ${sehuaTotal}`;
+        return searchRegion ? `${base} · 分区` : base;
       })()
     : sehuaTotal > 0
       ? `最新 · ${Math.min(sehuaTotal, BROWSE_LATEST_MAX)} 条`

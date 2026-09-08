@@ -101,6 +101,8 @@ def _clear_session_cookie(response: Response) -> None:
 
         path="/",
 
+        httponly=True,
+
         samesite="lax",
 
         secure=_cookie_secure(),

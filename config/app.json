@@ -16,6 +16,12 @@
       "dsn": "",
       "note": "Bitmagnet 磁力索引资源库；与色花资源库分开配置"
     },
+    "pansou": {
+      "enabled": true,
+      "baseUrl": "http://192.168.2.38:8188",
+      "timeoutSec": 60,
+      "note": "PanSou 网盘搜索（Docker 外挂）"
+    },
     "forum.sehuatang": {
       "regionByKey": {
         "95:716": "other",

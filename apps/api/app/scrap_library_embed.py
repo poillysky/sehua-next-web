@@ -4,15 +4,17 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable
 
 from . import settings_store
 from .ai_config import resolve_embed_config
 from .ai_embed import encode_texts_sync
-from .db import data_dir, get_meta_pool, init_db, meta_dsn_label
+from .db import media_dir, get_meta_pool, init_db, meta_dsn_label
 from .scrap_library_nfo import (
     build_nfo_embed_text,
     content_sha,
@@ -84,7 +86,7 @@ def get_settings() -> dict[str, Any]:
 
 def put_settings(*, root: str) -> dict[str, Any]:
     text = str(root or "").strip() or DEFAULT_REL_ROOT
-    # 禁止逃出 data/
+    # 禁止逃出 media/
     resolve_root(text)
     saved = settings_store.put_setting(SETTINGS_KEY, {"root": text})
     out = get_settings()
@@ -100,7 +102,7 @@ def resolve_root(raw: str | None = None) -> Path:
     parts = [x for x in p.parts if x not in ("", ".")]
     if any(x == ".." for x in parts):
         raise ValueError("相对路径不能包含 ..")
-    base = data_dir()
+    base = media_dir()
     return (base / Path(*parts)).resolve() if parts else base.resolve()
 
 
@@ -303,82 +305,315 @@ def stats() -> dict[str, Any]:
     }
 
 
-def _data_rel(path: Path) -> str:
-    """绝对路径 → 相对 data/；失败则空。"""
+def _media_rel(path: Path, *, media_root: Path | None = None) -> str:
+    """绝对路径 → 相对 media/；失败则空。"""
     try:
-        return path.resolve().relative_to(data_dir().resolve()).as_posix()
+        base = media_root if media_root is not None else media_dir().resolve()
+        return path.resolve().relative_to(base).as_posix()
     except Exception:
         return ""
 
 
-def _pick_local_image(folder: Path, name: str) -> str:
-    """NFO 里的文件名或 http → 本地 data 相对路径。"""
+def _folder_file_names(folder: Path) -> dict[str, str]:
+    """目录内文件：lower(name) → 实际文件名（一次 scandir）。"""
+    out: dict[str, str] = {}
+    try:
+        with os.scandir(folder) as it:
+            for entry in it:
+                try:
+                    if entry.is_file(follow_symlinks=False):
+                        out[entry.name.casefold()] = entry.name
+                except OSError:
+                    continue
+    except OSError:
+        return {}
+    return out
+
+
+def _image_looks_blank(path: Path) -> bool:
+    """低色彩多样性 / 近灰白平铺 → 视为空封面。"""
+    try:
+        from PIL import Image
+
+        with Image.open(path) as im:
+            rgb = im.convert("RGB")
+            small = rgb.resize((24, 24), Image.Resampling.BILINEAR)
+            pixels = list(small.getdata())
+        if not pixels:
+            return True
+        uniq = len({(p[0] >> 3, p[1] >> 3, p[2] >> 3) for p in pixels})
+        if uniq <= 18:
+            return True
+        n = len(pixels)
+        means = [sum(p[i] for p in pixels) / n for i in range(3)]
+        var = sum((p[i] - means[i]) ** 2 for p in pixels for i in range(3)) / (n * 3)
+        if var < 220:
+            return True
+        # 灰白占位（NOW PRINTING 一类）
+        if min(means) > 175 and var < 900 and uniq <= 40:
+            return True
+    except Exception:
+        return False
+    return False
+
+
+def _is_blank_cover_file(path: Path) -> bool:
+    """本地封面文件是否为源站空图占位。"""
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return True
+    if size < 12_000:
+        return True
+    if size >= 80_000:
+        return False
+    return _image_looks_blank(path)
+
+
+# 拼贴选图缓存（rel → blank?）
+_blank_cover_cache: dict[str, bool] = {}
+
+
+def _is_blank_cover_rel(rel: str) -> bool:
+    r = str(rel or "").strip().replace("\\", "/")
+    if not r:
+        return True
+    hit = _blank_cover_cache.get(r)
+    if hit is not None:
+        return hit
+    try:
+        path = resolve_local_file(r)
+        blank = _is_blank_cover_file(path)
+    except Exception:
+        blank = True
+    if len(_blank_cover_cache) > 10_000:
+        _blank_cover_cache.clear()
+    _blank_cover_cache[r] = blank
+    return blank
+
+
+def _pick_collage_posters(
+    candidates: list[str] | tuple[str, ...] | None,
+    *,
+    limit: int = 4,
+    scan_limit: int = 24,
+) -> list[str]:
+    """从候选封面中挑真实海报，跳过空图 / 缺文件。"""
+    out: list[str] = []
+    seen: set[str] = set()
+    scanned = 0
+    for raw in candidates or []:
+        s = str(raw or "").strip().replace("\\", "/")
+        if not s or s in seen:
+            continue
+        seen.add(s)
+        scanned += 1
+        if _is_blank_cover_rel(s):
+            if scanned >= scan_limit:
+                break
+            continue
+        out.append(s)
+        if len(out) >= limit or scanned >= scan_limit:
+            break
+    return out
+
+
+def _pick_local_image(
+    folder: Path,
+    name: str,
+    *,
+    files: dict[str, str] | None = None,
+    media_root: Path | None = None,
+) -> str:
+    """NFO 里的文件名或 http → 本地 media 相对路径。"""
     raw = str(name or "").strip()
     if not raw or raw.startswith(("http://", "https://")):
         return ""
-    # 禁止路径逃逸
     clean = raw.replace("\\", "/").lstrip("/")
     if ".." in clean.split("/"):
         return ""
-    p = (folder / clean).resolve()
+    # 仅支持同目录文件名（刮削库惯例）；带子路径时仍做一次校验
+    if "/" in clean:
+        p = (folder / clean).resolve()
+        try:
+            p.relative_to(folder.resolve())
+        except ValueError:
+            return ""
+        if not p.is_file():
+            return ""
+        return _media_rel(p, media_root=media_root)
+    names = files if files is not None else _folder_file_names(folder)
+    real = names.get(clean.casefold())
+    if not real:
+        return ""
+    return _media_rel(folder / real, media_root=media_root)
+
+
+def _scan_workers() -> int:
+    cpus = os.cpu_count() or 4
+    return max(8, min(32, cpus * 2))
+
+
+def _scan_one_nfo(
+    nfo: Path,
+    *,
+    root: Path,
+    model: str,
+    dim: int,
+    media_root: Path,
+    scrap_rel: str,
+) -> dict[str, Any] | None:
     try:
-        p.relative_to(folder.resolve())
+        folder = nfo.parent
+        rel = folder.relative_to(root).as_posix()
     except ValueError:
+        return None
+    parts = [p for p in rel.split("/") if p]
+    region = parts[0] if len(parts) >= 1 else ""
+    prefix = parts[1] if len(parts) >= 2 else ""
+    code = parts[2] if len(parts) >= 3 else nfo.stem
+    meta = parse_nfo(nfo)
+    if not meta:
+        return None
+
+    files = _folder_file_names(folder)
+
+    def pick(*candidates: str) -> str:
+        for raw in candidates:
+            text = str(raw or "").strip()
+            if not text or text.startswith(("http://", "https://")):
+                continue
+            clean = text.replace("\\", "/").lstrip("/")
+            if ".." in clean.split("/") or "/" in clean:
+                got = _pick_local_image(
+                    folder, text, files=files, media_root=media_root
+                )
+                if got and not _is_blank_cover_rel(got):
+                    return got
+                continue
+            real = files.get(clean.casefold())
+            if not real:
+                continue
+            abs_file = folder / real
+            if _is_blank_cover_file(abs_file):
+                continue
+            if scrap_rel:
+                base = f"{scrap_rel}/{rel}" if rel else scrap_rel
+                return f"{base}/{real}"
+            got = _pick_local_image(
+                folder, real, files=files, media_root=media_root
+            )
+            if got and not _is_blank_cover_rel(got):
+                return got
         return ""
-    if not p.is_file():
-        return ""
-    return _data_rel(p)
+
+    poster_path = pick(str(meta.get("poster") or ""), "poster.jpg")
+    thumb_path = pick(str(meta.get("thumb") or ""), "thumb.jpg")
+    fanart_path = pick(str(meta.get("fanart") or ""), "fanart.jpg")
+    cover_url = str(meta.get("cover_url") or "").strip()
+    source_text = build_nfo_embed_text(meta, region=region, prefix=prefix)
+    return {
+        "item_id": item_id_from_rel(rel),
+        "region": region,
+        "prefix": prefix,
+        "code": str(meta.get("num") or code),
+        "rel_path": rel,
+        "title": str(meta.get("title") or ""),
+        "poster_path": poster_path,
+        "thumb_path": thumb_path,
+        "fanart_path": fanart_path,
+        "cover_url": cover_url,
+        "source_text": source_text,
+        "content_sha": content_sha(source_text, model=model, dim=dim),
+        "model": model,
+        "dim": dim,
+    }
 
 
-def _scan_items(root: Path) -> list[dict[str, Any]]:
+def _scan_items(
+    root: Path,
+    *,
+    on_progress: ProgressCb | None = None,
+) -> list[dict[str, Any]]:
     if not root.is_dir():
         raise FileNotFoundError(f"刮削库不存在: {root}")
+
+    cfg = resolve_embed_config()
+    model = str(cfg["model"])
+    dim = int(cfg["dim"])
+    media_root = media_dir().resolve()
+    root_resolved = root.resolve()
+    try:
+        scrap_rel = root_resolved.relative_to(media_root).as_posix()
+    except ValueError:
+        scrap_rel = ""
+
+    def tick(**kw: Any) -> None:
+        if on_progress:
+            on_progress(kw)
+
+    # 1) 先快速枚举路径（可显示发现数量），再并行解析
+    nfo_paths: list[Path] = []
+    for i, nfo in enumerate(root_resolved.rglob("*.nfo"), 1):
+        nfo_paths.append(nfo)
+        if i == 1 or i % 200 == 0:
+            tick(
+                stage="scan",
+                percent=min(7, 2 + i // 800),
+                label=f"发现 {i} 个 NFO…",
+                done=i,
+                total=None,
+            )
+
+    total_files = len(nfo_paths)
+    tick(
+        stage="scan",
+        percent=8,
+        label=f"解析 {total_files} 个 NFO…",
+        done=0,
+        total=total_files,
+    )
+    if total_files == 0:
+        return []
+
     items: list[dict[str, Any]] = []
-    for nfo in sorted(root.rglob("*.nfo")):
-        try:
-            rel = nfo.parent.relative_to(root).as_posix()
-        except ValueError:
-            continue
-        parts = [p for p in rel.split("/") if p]
-        region = parts[0] if len(parts) >= 1 else ""
-        prefix = parts[1] if len(parts) >= 2 else ""
-        code = parts[2] if len(parts) >= 3 else nfo.stem
-        meta = parse_nfo(nfo)
-        if not meta:
-            continue
-        folder = nfo.parent
-        poster_path = _pick_local_image(folder, str(meta.get("poster") or "poster.jpg"))
-        if not poster_path:
-            poster_path = _pick_local_image(folder, "poster.jpg")
-        thumb_path = _pick_local_image(folder, str(meta.get("thumb") or "thumb.jpg"))
-        if not thumb_path:
-            thumb_path = _pick_local_image(folder, "thumb.jpg")
-        fanart_path = _pick_local_image(folder, str(meta.get("fanart") or "fanart.jpg"))
-        if not fanart_path:
-            fanart_path = _pick_local_image(folder, "fanart.jpg")
-        cover_url = str(meta.get("cover_url") or "").strip()
-        source_text = build_nfo_embed_text(meta, region=region, prefix=prefix)
-        cfg = resolve_embed_config()
-        model = str(cfg["model"])
-        dim = int(cfg["dim"])
-        items.append(
-            {
-                "item_id": item_id_from_rel(rel),
-                "region": region,
-                "prefix": prefix,
-                "code": str(meta.get("num") or code),
-                "rel_path": rel,
-                "title": str(meta.get("title") or ""),
-                "poster_path": poster_path,
-                "thumb_path": thumb_path,
-                "fanart_path": fanart_path,
-                "cover_url": cover_url,
-                "source_text": source_text,
-                "content_sha": content_sha(source_text, model=model, dim=dim),
-                "model": model,
-                "dim": dim,
-            }
-        )
+    workers = _scan_workers()
+    done = 0
+    # 分块提交，避免一次性创建数十万 Future
+    chunk_size = 1500
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for start in range(0, total_files, chunk_size):
+            batch = nfo_paths[start : start + chunk_size]
+            futures = [
+                pool.submit(
+                    _scan_one_nfo,
+                    nfo,
+                    root=root_resolved,
+                    model=model,
+                    dim=dim,
+                    media_root=media_root,
+                    scrap_rel=scrap_rel,
+                )
+                for nfo in batch
+            ]
+            for fut in as_completed(futures):
+                try:
+                    item = fut.result()
+                except Exception as e:  # noqa: BLE001
+                    log.warning("scan nfo failed: %s", e)
+                    item = None
+                if item:
+                    items.append(item)
+                done += 1
+                if done == 1 or done % 100 == 0 or done == total_files:
+                    pct = 8 + int(12 * done / max(1, total_files))
+                    tick(
+                        stage="scan",
+                        percent=min(20, pct),
+                        label=f"解析 {done}/{total_files}",
+                        done=done,
+                        total=total_files,
+                    )
     return items
 
 
@@ -407,7 +642,7 @@ def _existing_shas(item_ids: list[str]) -> dict[str, str]:
 def ingest(
     *,
     root: str | None = None,
-    batch_size: int = 16,
+    batch_size: int = 32,
     force: bool = False,
     limit: int | None = None,
     on_progress: ProgressCb | None = None,
@@ -424,14 +659,35 @@ def ingest(
         if on_progress:
             on_progress(payload)
 
+    # 扫描与模型预热并行：避免「扫完才开始加载模型」的长时间假死
+    warmup_err: list[BaseException] = []
+
+    def _warmup_model() -> None:
+        try:
+            encode_texts_sync(["."], query=False)
+            _push_log("向量模型已预热")
+        except BaseException as e:  # noqa: BLE001
+            warmup_err.append(e)
+
+    warmup_thread = threading.Thread(
+        target=_warmup_model, name="scrap-embed-warmup", daemon=True
+    )
+    warmup_thread.start()
+
     prog("scan", percent=2, label="扫描 NFO…", done=0, total=None)
     _push_log(f"扫描 {abs_root}")
-    items = _scan_items(abs_root)
+
+    def _scan_prog(payload: dict[str, Any]) -> None:
+        stage = str(payload.get("stage") or "scan")
+        prog(stage, **{k: v for k, v in payload.items() if k != "stage"})
+
+    items = _scan_items(abs_root, on_progress=_scan_prog)
     if limit is not None and int(limit) > 0:
         items = items[: int(limit)]
     total = len(items)
     _push_log(f"发现 {total} 条 NFO · 元库 {meta_dsn_label()}")
     if total == 0:
+        warmup_thread.join(timeout=1)
         prog("done", percent=100, label="无 NFO", done=0, total=0)
         return {
             "written": 0,
@@ -442,6 +698,7 @@ def ingest(
             "dim": schema["dim"],
         }
 
+    prog("diff", percent=22, label="比对已有向量…", done=0, total=total)
     existing = {} if force else _existing_shas([it["item_id"] for it in items])
     pending = [
         it
@@ -457,7 +714,7 @@ def ingest(
     _push_log(f"待写入 {len(pending)} · 跳过未变 {skipped}")
     prog(
         "embed",
-        percent=8,
+        percent=24,
         label=f"待写入 {len(pending)}",
         done=0,
         total=len(pending),
@@ -504,18 +761,21 @@ def ingest(
         WHERE item_id = %s
     """
     if pending:
+        warmup_thread.join()
+        if warmup_err:
+            raise RuntimeError(f"向量模型预热失败: {warmup_err[0]}") from warmup_err[0]
         cfg = resolve_embed_config(include_secret=True)
         model_name = str(cfg["model"])
         dim = int(cfg["dim"])
         bs = max(1, min(64, int(batch_size)))
         prog(
             "embed",
-            percent=10,
-            label=f"加载模型 {model_name}",
+            percent=26,
+            label=f"编码写入 {len(pending)}",
             done=0,
             total=len(pending),
         )
-        _push_log(f"加载向量模型 {model_name}（首次会下载）")
+        _push_log(f"编码写入 {len(pending)} · batch={bs}")
         for i in range(0, len(pending), bs):
             chunk = pending[i : i + bs]
             vecs = encode_texts_sync([p["source_text"] for p in chunk], query=False)
@@ -523,32 +783,32 @@ def ingest(
                 raise RuntimeError(f"向量条数不匹配: {len(vecs)} != {len(chunk)}")
             if any(len(v) != dim for v in vecs):
                 raise RuntimeError(f"向量维度不是 {dim}")
+            rows = [
+                [
+                    p["item_id"],
+                    p["region"],
+                    p["prefix"],
+                    p["code"],
+                    p["rel_path"],
+                    p["title"],
+                    p["poster_path"],
+                    p["thumb_path"],
+                    p["fanart_path"],
+                    p["cover_url"],
+                    model_name,
+                    dim,
+                    p["content_sha"],
+                    p["source_text"],
+                    _vec_literal(vec),
+                ]
+                for p, vec in zip(chunk, vecs, strict=True)
+            ]
             with pool.connection() as conn:
                 with conn.cursor() as cur:
-                    for p, vec in zip(chunk, vecs, strict=True):
-                        cur.execute(
-                            insert_sql,
-                            [
-                                p["item_id"],
-                                p["region"],
-                                p["prefix"],
-                                p["code"],
-                                p["rel_path"],
-                                p["title"],
-                                p["poster_path"],
-                                p["thumb_path"],
-                                p["fanart_path"],
-                                p["cover_url"],
-                                model_name,
-                                dim,
-                                p["content_sha"],
-                                p["source_text"],
-                                _vec_literal(vec),
-                            ],
-                        )
+                    cur.executemany(insert_sql, rows)
                 conn.commit()
             written += len(chunk)
-            pct = 8 + int(84 * written / max(1, len(pending)))
+            pct = 26 + int(66 * written / max(1, len(pending)))
             prog(
                 "embed",
                 percent=min(92, pct),
@@ -558,28 +818,32 @@ def ingest(
             )
             if written == len(chunk) or written % max(bs * 4, 1) == 0:
                 _push_log(f"写入 {written}/{len(pending)}")
+    else:
+        warmup_thread.join(timeout=0.2)
 
     # 文本未变也刷新封面路径，方便后续直接调用
     if skipped_items:
         prog("covers", percent=94, label="更新封面路径…", done=written, total=len(pending))
         with pool.connection() as conn:
             with conn.cursor() as cur:
-                for p in skipped_items:
-                    cur.execute(
-                        cover_sql,
-                        [
-                            p["region"],
-                            p["prefix"],
-                            p["code"],
-                            p["rel_path"],
-                            p["title"],
-                            p["poster_path"],
-                            p["thumb_path"],
-                            p["fanart_path"],
-                            p["cover_url"],
-                            p["item_id"],
-                        ],
-                    )
+                cover_rows = [
+                    [
+                        p["region"],
+                        p["prefix"],
+                        p["code"],
+                        p["rel_path"],
+                        p["title"],
+                        p["poster_path"],
+                        p["thumb_path"],
+                        p["fanart_path"],
+                        p["cover_url"],
+                        p["item_id"],
+                    ]
+                    for p in skipped_items
+                ]
+                # 分批 executemany，避免超大事务
+                for i in range(0, len(cover_rows), 500):
+                    cur.executemany(cover_sql, cover_rows[i : i + 500])
             conn.commit()
         _push_log(f"封面路径已刷新 {len(skipped_items)}")
 
@@ -733,7 +997,7 @@ def list_regions() -> list[dict[str, Any]]:
     return out
 
 
-def list_prefixes(*, region: str = "") -> list[dict[str, Any]]:
+def list_prefixes(*, region: str = "", studio: str = "") -> list[dict[str, Any]]:
     ensure_schema()
     pool = get_meta_pool()
     clauses: list[str] = ["coalesce(prefix,'') <> ''"]
@@ -742,6 +1006,15 @@ def list_prefixes(*, region: str = "") -> list[dict[str, Any]]:
     if match:
         clauses.append("region = ANY(%s)")
         params.append(match)
+    studio_q = str(studio or "").strip()
+    if studio_q:
+        if studio_q in {"未标注厂牌", "未标注", "(unknown)"}:
+            clauses.append(
+                "(source_text !~ '片商：' OR NULLIF(substring(source_text from '片商：(.+?)(?:\\n|$)'), '') IS NULL)"
+            )
+        else:
+            clauses.append("source_text ILIKE %s")
+            params.append(f"%片商：%{studio_q}%")
     where = " AND ".join(clauses)
     with pool.connection() as conn:
         with conn.cursor() as cur:
@@ -771,14 +1044,15 @@ def list_prefixes(*, region: str = "") -> list[dict[str, Any]]:
         if not isinstance(row, dict):
             continue
         raw = row.get("posters") or []
-        paths: list[str] = []
+        candidates: list[str] = []
         if isinstance(raw, (list, tuple)):
             for p in raw:
-                s = str(p or "")
-                if s and s not in paths:
-                    paths.append(s)
-                if len(paths) >= 4:
+                s = str(p or "").strip()
+                if s and s not in candidates:
+                    candidates.append(s)
+                if len(candidates) >= 32:
                     break
+        paths = _pick_collage_posters(candidates, limit=4)
         primary = paths[0] if paths else ""
         out.append(
             {
@@ -800,6 +1074,7 @@ def list_items(
     genre: str = "",
     tag: str = "",
     studio: str = "",
+    actress: str = "",
     sort: str = "code",
     order: str = "asc",
     offset: int = 0,
@@ -814,6 +1089,7 @@ def list_items(
     genre_q = str(genre or "").strip()
     tag_q = str(tag or "").strip()
     studio_q = str(studio or "").strip()
+    actress_q = str(actress or "").strip()
     sort_key = str(sort or "code").strip().lower()
     ascending = str(order or "asc").strip().lower() not in {
         "desc",
@@ -843,8 +1119,21 @@ def list_items(
         clauses.append("(source_text ILIKE %s OR source_text ILIKE %s)")
         params.extend([f"%标签：%{tag_q}%", f"%女优：%{tag_q}%"])
     if studio_q:
-        clauses.append("source_text ILIKE %s")
-        params.append(f"%片商：%{studio_q}%")
+        if studio_q in {"未标注厂牌", "未标注", "(unknown)"}:
+            clauses.append(
+                "(source_text !~ '片商：' OR NULLIF(substring(source_text from '片商：(.+?)(?:\\n|$)'), '') IS NULL)"
+            )
+        else:
+            clauses.append("source_text ILIKE %s")
+            params.append(f"%片商：%{studio_q}%")
+    if actress_q:
+        if actress_q in {"未标注女优", "未标注", "(unknown)"}:
+            clauses.append(
+                "(source_text !~ '女优：' OR NULLIF(substring(source_text from '女优：(.+?)(?:\\n|$)'), '') IS NULL)"
+            )
+        else:
+            clauses.append("source_text ILIKE %s")
+            params.append(f"%女优：%{actress_q}%")
     where = " AND ".join(clauses)
 
     if sort_key in {"recent", "updated", "new", "dateadded"}:
@@ -940,7 +1229,13 @@ def _split_tokens(raw: str) -> list[str]:
     return out
 
 
-def list_facets(*, region: str = "", kind: str = "genre") -> list[dict[str, Any]]:
+def list_facets(
+    *,
+    region: str = "",
+    kind: str = "genre",
+    studio: str = "",
+    prefix: str = "",
+) -> list[dict[str, Any]]:
     """从 source_text 汇总流派 / 标签 / 片商。"""
     key = str(kind or "genre").strip().lower()
     if key in {"genres", "类型"}:
@@ -961,11 +1256,28 @@ def list_facets(*, region: str = "", kind: str = "genre") -> list[dict[str, Any]
     if match:
         clauses.append("region = ANY(%s)")
         params.append(match)
+    studio_q = str(studio or "").strip()
+    pref = str(prefix or "").strip().upper()
+    if studio_q:
+        if studio_q in {"未标注厂牌", "未标注", "(unknown)"}:
+            clauses.append(
+                "(source_text !~ '片商：' OR NULLIF(substring(source_text from '片商：(.+?)(?:\\n|$)'), '') IS NULL)"
+            )
+        else:
+            clauses.append("source_text ILIKE %s")
+            params.append(f"%片商：%{studio_q}%")
+    if pref:
+        clauses.append("upper(prefix) = %s")
+        params.append(pref)
     where = " AND ".join(clauses)
 
     pool = get_meta_pool()
     counts: dict[str, int] = {}
     posters: dict[str, list[str]] = {}
+    unknown_studio = 0
+    unknown_actress = 0
+    unknown_studio_posters: list[str] = []
+    unknown_actress_posters: list[str] = []
     with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -983,7 +1295,7 @@ def list_facets(*, region: str = "", kind: str = "genre") -> list[dict[str, Any]
                 poster = str(row.get("poster_path") or "").strip() or str(
                     row.get("thumb_path") or ""
                 ).strip()
-                prefix = str(row.get("prefix") or "").strip().upper()
+                prefix_val = str(row.get("prefix") or "").strip().upper()
                 actress_m = _FACET_LINE_RE["actress"].search(text)
                 actresses = set(
                     _split_tokens(actress_m.group(1)) if actress_m else []
@@ -999,8 +1311,16 @@ def list_facets(*, region: str = "", kind: str = "genre") -> list[dict[str, Any]
                 elif key == "studio":
                     m = _FACET_LINE_RE["studio"].search(text)
                     names = [m.group(1).strip()] if m and m.group(1).strip() else []
+                    if not names:
+                        unknown_studio += 1
+                        if poster and poster not in unknown_studio_posters:
+                            unknown_studio_posters.append(poster)
                 elif key == "actress":
                     names = list(actresses)
+                    if not names:
+                        unknown_actress += 1
+                        if poster and poster not in unknown_actress_posters:
+                            unknown_actress_posters.append(poster)
                 else:
                     m = _FACET_LINE_RE["genre"].search(text)
                     names = []
@@ -1014,7 +1334,7 @@ def list_facets(*, region: str = "", kind: str = "genre") -> list[dict[str, Any]
                         for token in _split_tokens(genre_raw):
                             if token in actresses:
                                 continue
-                            if prefix and token.upper() == prefix:
+                            if prefix_val and token.upper() == prefix_val:
                                 continue
                             if _CODEISH_RE.match(token):
                                 continue
@@ -1030,13 +1350,13 @@ def list_facets(*, region: str = "", kind: str = "genre") -> list[dict[str, Any]
                     counts[name] = counts.get(name, 0) + 1
                     if poster:
                         bucket = posters.setdefault(name, [])
-                        if poster not in bucket and len(bucket) < 4:
+                        if poster not in bucket and len(bucket) < 24:
                             bucket.append(poster)
 
     out: list[dict[str, Any]] = []
     out_kind = "tag" if key == "actress" else key
     for name, n in sorted(counts.items(), key=lambda x: (-x[1], x[0])):
-        paths = posters.get(name) or []
+        paths = _pick_collage_posters(posters.get(name) or [], limit=4)
         primary = paths[0] if paths else ""
         out.append(
             {
@@ -1048,17 +1368,54 @@ def list_facets(*, region: str = "", kind: str = "genre") -> list[dict[str, Any]
                 "posterApis": [local_file_api(p) for p in paths if p],
             }
         )
+    if key == "studio" and unknown_studio > 0:
+        paths = _pick_collage_posters(unknown_studio_posters, limit=4)
+        primary = paths[0] if paths else ""
+        out.append(
+            {
+                "name": "未标注厂牌",
+                "count": unknown_studio,
+                "kind": out_kind,
+                "posterPath": primary,
+                "posterApi": local_file_api(primary) if primary else "",
+                "posterApis": [local_file_api(p) for p in paths if p],
+            }
+        )
+    if key == "actress" and unknown_actress > 0:
+        paths = _pick_collage_posters(unknown_actress_posters, limit=4)
+        primary = paths[0] if paths else ""
+        out.append(
+            {
+                "name": "未标注女优",
+                "count": unknown_actress,
+                "kind": out_kind,
+                "posterPath": primary,
+                "posterApi": local_file_api(primary) if primary else "",
+                "posterApis": [local_file_api(p) for p in paths if p],
+            }
+        )
     return out
 
 
 def list_recommend(*, region: str = "") -> dict[str, Any]:
-    """Emby「推荐」：最新影片 + 流派 / 合集 / 文件夹预览。"""
+    """Emby「推荐」：最新影片 + 流派 / 文件夹(厂牌)预览。"""
     latest = list_items(region=region, sort="recent", offset=0, limit=18)
+    studios = list_facets(region=region, kind="studio")
     return {
         "latest": latest.get("items") or [],
         "genres": list_facets(region=region, kind="genre")[:12],
-        "collections": list_facets(region=region, kind="studio")[:12],
-        "folders": list_prefixes(region=region)[:12],
+        "collections": studios[:12],
+        # 文件夹入口改为厂牌，与库内「文件夹」钻取一致
+        "folders": [
+            {
+                "prefix": s["name"],
+                "count": s["count"],
+                "posterPath": s.get("posterPath") or "",
+                "posterApi": s.get("posterApi") or "",
+                "posterApis": s.get("posterApis") or [],
+            }
+            for s in studios[:12]
+        ],
         "total": int(latest.get("total") or 0),
     }
 
@@ -1114,14 +1471,14 @@ def local_file_api(rel: str) -> str:
 
 
 def resolve_local_file(rel: str) -> Path:
-    """把 data 相对路径解析为绝对文件；禁止逃逸。"""
+    """把 media 相对路径解析为绝对文件；禁止逃逸。"""
     text = str(rel or "").strip().replace("\\", "/")
     parts = [x for x in Path(text).parts if x not in ("", ".", "/")]
     if not parts or any(x == ".." for x in parts):
         raise ValueError("非法路径")
-    abs_path = (data_dir() / Path(*parts)).resolve()
+    abs_path = (media_dir() / Path(*parts)).resolve()
     try:
-        abs_path.relative_to(data_dir().resolve())
+        abs_path.relative_to(media_dir().resolve())
     except ValueError as e:
         raise ValueError("路径越界") from e
     if not abs_path.is_file():

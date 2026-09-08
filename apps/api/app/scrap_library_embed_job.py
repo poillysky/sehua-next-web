@@ -36,7 +36,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--root",
         default="",
-        help="相对 data/ 或绝对路径，默认 scrap-library",
+        help="相对 media/ 或绝对路径，默认 scrap-library",
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 

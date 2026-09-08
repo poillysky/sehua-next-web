@@ -98,10 +98,16 @@ def get_regions(_user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]
 @router.get("/embed/prefixes")
 def get_prefixes(
     region: str = Query(""),
+    studio: str = Query(""),
     _user: dict[str, Any] = Depends(require_user),
 ) -> dict[str, Any]:
     try:
-        return {"ok": True, "data": {"prefixes": svc.list_prefixes(region=region)}}
+        return {
+            "ok": True,
+            "data": {
+                "prefixes": svc.list_prefixes(region=region, studio=studio),
+            },
+        }
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, str(e)) from e
 
@@ -114,6 +120,7 @@ def get_items(
     genre: str = Query(""),
     tag: str = Query(""),
     studio: str = Query(""),
+    actress: str = Query(""),
     sort: str = Query("name"),
     order: str = Query("asc"),
     offset: int = Query(0, ge=0),
@@ -130,6 +137,7 @@ def get_items(
                 genre=genre,
                 tag=tag,
                 studio=studio,
+                actress=actress,
                 sort=sort,
                 order=order,
                 offset=offset,
@@ -144,12 +152,21 @@ def get_items(
 def get_facets(
     region: str = Query(""),
     kind: str = Query("genre"),
+    studio: str = Query(""),
+    prefix: str = Query(""),
     _user: dict[str, Any] = Depends(require_user),
 ) -> dict[str, Any]:
     try:
         return {
             "ok": True,
-            "data": {"facets": svc.list_facets(region=region, kind=kind)},
+            "data": {
+                "facets": svc.list_facets(
+                    region=region,
+                    kind=kind,
+                    studio=studio,
+                    prefix=prefix,
+                ),
+            },
         }
     except ValueError as e:
         raise HTTPException(400, str(e)) from e

@@ -11,7 +11,7 @@ import {
 import { useTabNavigation } from '@/shell';
 import { useOverlay } from '@/components/overlay/OverlayContext';
 import { openMakerHomeSearch } from './makersUi';
-import { isScrapFavorite, toggleScrapFavorite } from './scrapFavorites';
+import { isScrapFavorite, toggleScrapFavorite, ensureScrapFavoritesLoaded } from './scrapFavorites';
 import { parseScrapSourceText } from './scrapSourceMeta';
 import { ScrapPosterCard } from './ScrapPosterCard';
 
@@ -41,10 +41,26 @@ export function ScrapDetailBody({
   );
   const code = String(item.code || meta.code || '').trim();
   const title = String(item.title || meta.title || '').trim();
-  const displayTitle = title
-    .replace(new RegExp(`^${code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*`, 'i'), '')
-    .trim();
-  const poster = scrapLibraryCoverUrl(item, { prefer: 'poster', w: 480 });
+  const originalTitle = String(meta.originalTitle || '').trim();
+  const stripCodePrefix = (raw: string) => {
+    const s = raw.trim();
+    if (!s || !code) return s;
+    return s
+      .replace(
+        new RegExp(`^${code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*`, 'i'),
+        '',
+      )
+      .trim();
+  };
+  const titleZhOrJa = (() => {
+    const a = stripCodePrefix(title);
+    const b = stripCodePrefix(originalTitle);
+    const hasCjk = (s: string) => /[\u4e00-\u9fff]/.test(s);
+    if (a && hasCjk(a)) return a;
+    if (b && hasCjk(b)) return b;
+    return a || b;
+  })();
+  const displayTitle = titleZhOrJa;  const poster = scrapLibraryCoverUrl(item, { prefer: 'poster', w: 480 });
   const fanart = item.fanartApi
     ? scrapLibraryCoverUrl(
         { posterApi: item.fanartApi, coverUrl: '' },
@@ -61,12 +77,23 @@ export function ScrapDetailBody({
 
   const [imgGone, setImgGone] = useState(false);
   const [favorited, setFavorited] = useState(false);
+  const [favBusy, setFavBusy] = useState(false);
   const [related, setRelated] = useState<ScrapLibraryEmbedItem[]>([]);
   const [relatedLoading, setRelatedLoading] = useState(false);
 
   useEffect(() => {
     setImgGone(false);
-    setFavorited(isScrapFavorite(item.itemId));
+    let cancelled = false;
+    const id = String(item.itemId || '');
+    // 收藏真相在服务端：先确保缓存就绪再据其点亮状态
+    void (async () => {
+      await ensureScrapFavoritesLoaded();
+      if (cancelled) return;
+      setFavorited(isScrapFavorite(id));
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [item.itemId]);
 
   useEffect(() => {
@@ -153,15 +180,29 @@ export function ScrapDetailBody({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [item.itemId, item.region, item.prefix, regionProp, code, meta.actresses[0], meta.studio, meta.prefix]);
 
-  function onToggleFavorite() {
+  async function onToggleFavorite() {
     if (!item.itemId) {
       toast('无法收藏：缺少条目 ID', 'error');
       return;
     }
-    const next = toggleScrapFavorite(item, regionProp);
-    setFavorited(next);
-    onFavoriteChange?.(next);
-    toast(next ? '已加入收藏' : '已取消收藏', 'success');
+    if (favBusy) return;
+    setFavBusy(true);
+    try {
+      await ensureScrapFavoritesLoaded();
+      const prev = isScrapFavorite(item.itemId);
+      const next = await toggleScrapFavorite(item, regionProp);
+      setFavorited(next);
+      onFavoriteChange?.(next);
+      toast(next ? '已加入收藏' : '已取消收藏', 'success');
+    } catch (e) {
+      // 落库失败：按已加载缓存回滚提示
+      const prev = isScrapFavorite(item.itemId);
+      setFavorited(prev);
+      onFavoriteChange?.(prev);
+      toast(e instanceof Error ? `操作失败：${e.message}` : '操作失败', 'error');
+    } finally {
+      setFavBusy(false);
+    }
   }
 
   function onSearch() {
@@ -227,19 +268,6 @@ export function ScrapDetailBody({
             <p className="mkd-head__code allow-select">{code || '—'}</p>
             {displayTitle ? (
               <h2 className="mkd-head__title allow-select">{displayTitle}</h2>
-            ) : null}
-            {meta.originalTitle && meta.originalTitle !== title ? (
-              <p className="mkd-head__title allow-select" style={{ opacity: 0.85 }}>
-                {meta.originalTitle
-                  .replace(
-                    new RegExp(
-                      `^${code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*`,
-                      'i',
-                    ),
-                    '',
-                  )
-                  .trim()}
-              </p>
             ) : null}
 
             {facts.length > 0 ? (
@@ -315,15 +343,16 @@ export function ScrapDetailBody({
         <button
           type="button"
           className={favorited ? 'mkd-fav mkd-fav--on' : 'mkd-fav'}
-          onClick={onToggleFavorite}
+          onClick={() => void onToggleFavorite()}
           aria-pressed={favorited}
+          disabled={favBusy}
         >
           {favorited ? (
             <BookmarkCheck size={17} strokeWidth={2.25} aria-hidden />
           ) : (
             <Bookmark size={17} strokeWidth={2.25} aria-hidden />
           )}
-          {favorited ? '已收藏' : '收藏'}
+          {favBusy ? '…' : favorited ? '已收藏' : '收藏'}
         </button>
         <button
           type="button"

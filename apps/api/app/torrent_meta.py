@@ -24,6 +24,7 @@ _HASH_RE = re.compile(r"^[a-fA-F0-9]{40}$")
 _CACHE_TTL_OK_MEM = 24 * 3600
 _CACHE_TTL_MISS_MEM = 120  # 网络失败短抑流，允许稍后重试
 _CACHE_MAX = 1024
+_FETCH_LOCKS_MAX = 2048
 _FETCH_TIMEOUT = 8.0
 
 # infohash lower -> {ts, files|None}
@@ -281,11 +282,24 @@ def _mem_put(h: str, files: list[dict[str, Any]] | None) -> None:
 
 def _fetch_lock_for(h: str) -> threading.Lock:
     with _fetch_locks_guard:
+        if len(_fetch_locks) >= _FETCH_LOCKS_MAX:
+            for k, lk in list(_fetch_locks.items()):
+                if not lk.locked():
+                    _fetch_locks.pop(k, None)
+                    if len(_fetch_locks) <= _FETCH_LOCKS_MAX // 2:
+                        break
         lock = _fetch_locks.get(h)
         if lock is None:
             lock = threading.Lock()
             _fetch_locks[h] = lock
         return lock
+
+
+def _fetch_lock_release(h: str, lock: threading.Lock) -> None:
+    with _fetch_locks_guard:
+        cur = _fetch_locks.get(h)
+        if cur is lock and not lock.locked():
+            _fetch_locks.pop(h, None)
 
 
 def _download_torrent(h: str) -> bytes | None:
@@ -330,30 +344,33 @@ def files_from_infohash(info_hash: str) -> list[dict[str, Any]]:
         return list(disk)
 
     lock = _fetch_lock_for(h)
-    with lock:
-        # 双检：并行时可能已被其它线程写好
-        ok, cached = _mem_get(h)
-        if ok:
-            return list(cached or [])
-        disk = _disk_get(h)
-        if disk is not None:
-            _mem_put(h, disk)
-            return list(disk)
+    try:
+        with lock:
+            # 双检：并行时可能已被其它线程写好
+            ok, cached = _mem_get(h)
+            if ok:
+                return list(cached or [])
+            disk = _disk_get(h)
+            if disk is not None:
+                _mem_put(h, disk)
+                return list(disk)
 
-        raw = _download_torrent(h)
-        if not raw:
-            # 仅短时 miss，不落盘、不长期误判
-            _mem_put(h, None)
-            return []
-        try:
-            files = parse_torrent_files(raw, expect_hash=h)
-        except Exception as e:
-            log.debug("torrent parse fail %s: %s", h[:8], e)
-            _mem_put(h, None)
-            return []
-        _disk_put(h, files)
-        _mem_put(h, files)
-        return list(files)
+            raw = _download_torrent(h)
+            if not raw:
+                # 仅短时 miss，不落盘、不长期误判
+                _mem_put(h, None)
+                return []
+            try:
+                files = parse_torrent_files(raw, expect_hash=h)
+            except Exception as e:
+                log.debug("torrent parse fail %s: %s", h[:8], e)
+                _mem_put(h, None)
+                return []
+            _disk_put(h, files)
+            _mem_put(h, files)
+            return list(files)
+    finally:
+        _fetch_lock_release(h, lock)
 
 
 def prefetch_infohashes(info_hashes: list[str], *, workers: int = 4) -> None:

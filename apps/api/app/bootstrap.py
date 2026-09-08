@@ -26,6 +26,15 @@ def seed_admin_from_config() -> dict[str, Any]:
         reset_password=reset,
     )
 
+    # 安全告警：默认弱口令仅适用于本地开发。生产请用 SNS_ADMIN_PASSWORD 或 app.local.json 覆盖。
+    if password in ("admin123456", "admin", "123456", "password") and (
+        result.get("seeded") or result.get("password_reset")
+    ):
+        log.warning(
+            "管理员口令命中已知弱口令并已写入(seed/reset)。强烈建议通过环境变量 "
+            "SNS_ADMIN_PASSWORD 或 config/app.local.json 覆盖后再部署到公网/不可信网络"
+        )
+
     settings_store.put_setting(
         BOOTSTRAP_META_KEY,
         {

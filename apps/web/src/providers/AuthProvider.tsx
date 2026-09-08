@@ -16,6 +16,7 @@ import {
   authRegister,
 } from '@/lib/api';
 import type { AuthUser } from '@/types/resource';
+import { clearScrapFavoritesCache } from '@/features/makers/scrapFavorites';
 
 type Status = 'loading' | 'anonymous' | 'authenticated';
 
@@ -60,18 +61,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAdmin,
       refresh,
       async login(u, p) {
+        clearScrapFavoritesCache();
         const me = await authLogin(u, p);
         setUser(me);
         setStatus('authenticated');
       },
       async register(u, p) {
         // API 固定 is_admin=false
+        clearScrapFavoritesCache();
         const me = await authRegister(u, p);
         setUser(me);
         setStatus('authenticated');
       },
       async logout() {
         await authLogout();
+        clearScrapFavoritesCache();
         setUser(null);
         setStatus('anonymous');
       },

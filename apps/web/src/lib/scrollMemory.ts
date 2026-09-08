@@ -1,10 +1,18 @@
 /** 页面栈滚动记忆：滚动过程持续记录，返回时按 key 恢复 */
 
 const memory = new Map<string, number>();
+/** 防止深逛无限累积；LRU：写入时挪到末尾 */
+const MAX_ENTRIES = 200;
 
 export function saveScrollPosition(key: string, top: number): void {
   if (!key) return;
+  if (memory.has(key)) memory.delete(key);
   memory.set(key, Math.max(0, top));
+  while (memory.size > MAX_ENTRIES) {
+    const oldest = memory.keys().next().value;
+    if (oldest == null) break;
+    memory.delete(oldest);
+  }
 }
 
 export function clearScrollPosition(key: string): void {

@@ -12,6 +12,9 @@ from . import settings_store
 _pool: ConnectionPool | None = None
 _pool_dsn: str | None = None
 
+# 默认查询超时（毫秒）：bitmagnet 仅 name B-tree 索引，缺 pg_trgm 时子串检索可能全表扫
+_DEFAULT_STATEMENT_TIMEOUT_MS = 20_000
+
 
 class BitmagnetDbUnavailable(Exception):
     def __init__(self, message: str = "Bitmagnet 库未配置或不可用"):
@@ -49,11 +52,20 @@ def get_pool() -> ConnectionPool:
 
 
 def query(
-    sql: str, params: list[Any] | tuple[Any, ...] | None = None
+    sql: str,
+    params: list[Any] | tuple[Any, ...] | None = None,
+    *,
+    statement_timeout_ms: int = _DEFAULT_STATEMENT_TIMEOUT_MS,
 ) -> list[dict[str, Any]]:
     pool = get_pool()
     with pool.connection() as conn:
         with conn.cursor() as cur:
+            if statement_timeout_ms > 0:
+                # SET LOCAL 仅当前事务；pool.connection() 会开事务，防慢查询挂死连接池
+                cur.execute(
+                    "SELECT set_config('statement_timeout', %s, true)",
+                    [f"{int(statement_timeout_ms)}ms"],
+                )
             cur.execute(sql, params or [])
             if cur.description is None:
                 return []

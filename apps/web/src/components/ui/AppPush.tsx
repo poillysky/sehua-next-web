@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { ChevronLeft } from 'lucide-react';
 import { useUiPreferences } from '@/hooks/useUiPreferences';
+import { useEdgeSwipeBack } from '@/hooks/useEdgeSwipeBack';
 import {
   clearScrollPosition,
   restoreScrollPosition,
@@ -41,6 +42,9 @@ export function AppPush({
   const [{ restoreScrollOnBack }] = useUiPreferences();
   const memoryKey = (scrollKey || `push:${title}`).trim();
   const pinTop = scrollMode === 'top';
+
+  // iOS 边缘侧滑返回手势
+  useEdgeSwipeBack({ containerRef: rootRef, onBack });
 
   // 动画结束后去掉 transform，避免 iOS 键盘 + visualViewport 跟残留 transform 打架。
   useEffect(() => {

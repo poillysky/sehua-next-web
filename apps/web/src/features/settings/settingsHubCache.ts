@@ -9,6 +9,8 @@ export type SettingsHubEntryId =
   | 'p115'
   | 'network'
   | 'tmdb'
+  | 'pansou'
+  | 'cloudsaver'
   | 'ai'
   | 'forum'
   | 'makers';

@@ -16,6 +16,7 @@ from psycopg_pool import ConnectionPool
 
 ROOT = Path(__file__).resolve().parents[3]
 DATA_DIR = ROOT / "data"
+MEDIA_DIR = ROOT / "media"
 DEFAULT_META_DSN = "postgresql://postgres:postgres@192.168.2.38:5439/nextweb"
 
 logger = logging.getLogger("app.db")
@@ -57,6 +58,12 @@ def _raise_nofile_limit() -> None:
 def data_dir() -> Path:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     return DATA_DIR
+
+
+def media_dir() -> Path:
+    """片库类目录根（STRM / 刮削库等），与 data/ 运行时缓存分开。"""
+    MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+    return MEDIA_DIR
 
 
 def db_path() -> Path:
@@ -306,6 +313,24 @@ def init_db() -> None:
                   files_json TEXT NOT NULL,
                   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS scrap_favorites (
+                  user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                  item_id TEXT NOT NULL,
+                  hub_region TEXT NOT NULL DEFAULT '',
+                  payload_json TEXT NOT NULL DEFAULT '{}',
+                  favorited_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  PRIMARY KEY (user_id, item_id)
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_scrap_favorites_user_time
+                ON scrap_favorites (user_id, favorited_at DESC)
                 """
             )
             conn.commit()

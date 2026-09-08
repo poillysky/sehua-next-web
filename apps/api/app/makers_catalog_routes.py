@@ -17,6 +17,7 @@ from . import makers_settings
 from . import makers_providers_extra as makers_extra
 from . import site_mirror
 from .outbound_http import fetch_page, looks_blocked_html
+from .ttl_cache import enforce_max, prune_by_expiry
 
 log = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ _TIMEOUT_FAST = httpx.Timeout(8.0, connect=3.0)
 
 _cache: dict[str, tuple[float, Any]] = {}
 _CACHE_TTL = 2 * 3600
+_CACHE_MAX = 256
 
 SOURCES = (
     {"id": "javbus", "label": "JavBus"},
@@ -170,7 +172,9 @@ def _cache_get(key: str) -> Any | None:
 
 
 def _cache_set(key: str, payload: Any, ttl: float = _CACHE_TTL) -> None:
+    prune_by_expiry(_cache)
     _cache[key] = (time.time() + ttl, payload)
+    enforce_max(_cache, _CACHE_MAX)
 
 
 def _item(

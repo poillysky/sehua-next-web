@@ -22,6 +22,9 @@ logger = logging.getLogger("app.pg_data_backup")
 KIND_RESOURCE = "resource-db"
 KIND_BITMAGNET = "bitmagnet-db"
 
+# 上传备份 zip 的大小上限：防止超大文件写满磁盘（导入前即中断）
+_MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024
+
 # 色花资源库：只导资源数据，不含 auth_* 等
 RESOURCE_TABLES = (
     "ed2k_resources",
@@ -337,11 +340,17 @@ def save_uploaded_zip(kind: str, *, source, original_name: str = "") -> dict[str
     dest = root / canonical_zip_name(kind)
     tmp = root / f".upload_{_now_stamp()}.partial"
     try:
+        written = 0
         with open(tmp, "wb", buffering=8 * 1024 * 1024) as out:
             while True:
                 chunk = source.read(8 * 1024 * 1024)
                 if not chunk:
                     break
+                written += len(chunk)
+                if written > _MAX_UPLOAD_BYTES:
+                    raise ValueError(
+                        f"上传文件超过上限 {_MAX_UPLOAD_BYTES // (1024 * 1024)}MB，已中断"
+                    )
                 out.write(chunk)
         if tmp.stat().st_size < 64:
             raise ValueError("上传文件过小，不是有效备份")
@@ -388,6 +397,10 @@ def import_resource_zip(dsn: str, filename: str, *, kind: str = KIND_RESOURCE) -
         tables = [str(t.get("name") or "") for t in (manifest.get("tables") or []) if t.get("name")]
         if not tables:
             raise ValueError("备份没有表")
+        # 表名白名单校验：防止恶意 name 携带路径穿越到备份根目录之外
+        bad = [n for n in tables if not re.fullmatch(r"[A-Za-z0-9_]{1,120}", n)]
+        if bad:
+            raise ValueError(f"备份含非法表名: {bad[:3]}")
 
         # 抽出到临时目录再 COPY（大文件流式进 psycopg 更稳）
         work = backups_root(kind) / f".restore_{_now_stamp()}"

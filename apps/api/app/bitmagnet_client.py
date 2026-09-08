@@ -16,6 +16,9 @@ PAGE_SIZE = 10
 SEARCH_FILES_MAX = 8
 SEARCH_FILES_FETCH = 80
 DETAIL_FILES_MAX = 2000
+# 影视多别名最多 2 词（中+英）；过多 OR + COUNT 易 statement timeout
+_ALIAS_TERM_LIMIT = 2
+_SEARCH_TIMEOUT_MS = 25_000
 HASH_RE = re.compile(r"^[a-fA-F0-9]{40}$")
 _ALIAS_QUERY_SEP = re.compile(r"[,;，、；|｜/\n\r]+")
 PADDING_RE = re.compile(r"(_____padding_file_|\.pad/\d+)", re.I)
@@ -128,16 +131,26 @@ def _like_pattern(keyword: str) -> str:
     return f"%{escaped}%"
 
 
-def _split_alias_terms(q: str, *, limit: int = 8) -> list[str]:
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+# 纯拉丁单词（防 Reacher ⊂ Treacherous）；短词仍用子串以免过严
+_LATIN_WORD_RE = re.compile(r"^[A-Za-z][A-Za-z0-9']{3,79}$")
+
+
+def _normalize_search_term(term: str) -> str:
+    return (term or "").strip().strip(".,;:!?，、；")
+
+
+def _split_alias_terms(q: str, *, limit: int = _ALIAS_TERM_LIMIT) -> list[str]:
     s = (q or "").strip()
     if not s:
         return []
     if not _ALIAS_QUERY_SEP.search(s):
-        return [s]
+        t = _normalize_search_term(s)
+        return [t] if t else []
     out: list[str] = []
     seen: set[str] = set()
     for part in _ALIAS_QUERY_SEP.split(s):
-        t = str(part or "").strip()
+        t = _normalize_search_term(part)
         if len(t) < 2:
             continue
         key = t.casefold()
@@ -147,7 +160,68 @@ def _split_alias_terms(q: str, *, limit: int = 8) -> list[str]:
         out.append(t)
         if len(out) >= limit:
             break
-    return out or [s]
+    return out or ([_normalize_search_term(s)] if _normalize_search_term(s) else [])
+
+
+def _term_name_predicate(term: str) -> tuple[str, list[str]]:
+    """t.name 匹配条件。拉丁单词：ILIKE 走 gin + 词边界过滤误命中。"""
+    raw = _normalize_search_term(term)
+    if not raw:
+        return "FALSE", []
+    like = _like_pattern(raw)
+    if _LATIN_WORD_RE.fullmatch(raw) and not _CJK_RE.search(raw):
+        rx = rf"(^|[^[:alnum:]]){re.escape(raw)}([^[:alnum:]]|$)"
+        return (
+            "(t.name ILIKE %s ESCAPE '\\' AND t.name ~* %s)",
+            [like, rx],
+        )
+    return "t.name ILIKE %s ESCAPE '\\'", [like]
+
+
+def _is_statement_timeout(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+    return "statement timeout" in msg or "canceling statement" in msg
+
+
+def _attach_files_sql(ext_list: str) -> str:
+    return f"""
+            SELECT
+              encode(filtered.info_hash, 'hex') AS info_hash,
+              filtered.name,
+              filtered.size,
+              filtered.files_count,
+              filtered.files_status::text AS files_status,
+              filtered.extension,
+              filtered.created_at,
+              filtered.updated_at,
+              COALESCE(
+                (
+                  SELECT json_agg(json_build_object(
+                    'index', f.index,
+                    'path', f.path,
+                    'size', f.size,
+                    'extension', f.extension
+                  ) ORDER BY
+                    CASE WHEN lower(COALESCE(f.extension, '')) IN ({ext_list}) THEN 0 ELSE 1 END,
+                    COALESCE(f.size, 0) DESC,
+                    f.index
+                  )
+                  FROM (
+                    SELECT index, path, size, extension
+                    FROM torrent_files
+                    WHERE info_hash = filtered.info_hash
+                      AND path !~* '_____padding_file_|\\.pad/'
+                    ORDER BY
+                      CASE WHEN lower(COALESCE(extension, '')) IN ({ext_list}) THEN 0 ELSE 1 END,
+                      COALESCE(size, 0) DESC NULLS LAST,
+                      index
+                    LIMIT {int(SEARCH_FILES_FETCH)}
+                  ) f
+                ),
+                '[]'::json
+              ) AS files
+            FROM filtered
+    """
 
 
 def _as_int(v: Any, default: int = 0) -> int:
@@ -504,27 +578,17 @@ def search(
     time_sql = _TIME_SQL.get(filter_time) or ""
     size_sql = _SIZE_SQL.get(filter_size) or ""
     terms = _split_alias_terms(kw)
-    patterns = [_like_pattern(t) for t in terms]
-    name_where = " OR ".join(["t.name ILIKE %s ESCAPE '\\'"] * len(patterns))
+    if not terms:
+        raise BitmagnetError("请输入关键词")
+    term_preds = [_term_name_predicate(t) for t in terms]
     ext_list = ", ".join(f"'{e}'" for e in CORE_EXTS)
+    # 多取 1 条判断 hasMore，避免全表 COUNT(*)（~200万行 ILIKE 易超时）
+    fetch_n = PAGE_SIZE + 1
 
     try:
-        count_rows = bitmagnet_pg.query(
-            f"""
-            SELECT COUNT(*)::int AS total
-            FROM torrents t
-            WHERE ({name_where})
-            {time_sql}
-            {size_sql}
-            """,
-            patterns,
-        )
-        total = int(count_rows[0]["total"]) if count_rows else 0
-
-        # 对齐 BM-Next-Web：先 filtered 分页，再按 info_hash 拉文件（优先有后缀/大文件）
-        rows = bitmagnet_pg.query(
-            f"""
-            WITH filtered AS (
+        if len(term_preds) == 1:
+            where_sql, where_params = term_preds[0]
+            filtered_sql = f"""
               SELECT
                 t.info_hash,
                 t.name,
@@ -535,59 +599,120 @@ def search(
                 t.created_at,
                 t.updated_at
               FROM torrents t
-              WHERE ({name_where})
+              WHERE {where_sql}
               {time_sql}
               {size_sql}
               ORDER BY {order_sql}
               LIMIT %s OFFSET %s
+            """
+            rows = bitmagnet_pg.query(
+                f"""
+                WITH filtered AS (
+                  {filtered_sql}
+                )
+                {_attach_files_sql(ext_list)}
+                """,
+                [*where_params, fetch_n, offset],
+                statement_timeout_ms=_SEARCH_TIMEOUT_MS,
             )
-            SELECT
-              encode(filtered.info_hash, 'hex') AS info_hash,
-              filtered.name,
-              filtered.size,
-              filtered.files_count,
-              filtered.files_status::text AS files_status,
-              filtered.extension,
-              filtered.created_at,
-              filtered.updated_at,
-              COALESCE(
-                (
-                  SELECT json_agg(json_build_object(
-                    'index', f.index,
-                    'path', f.path,
-                    'size', f.size,
-                    'extension', f.extension
-                  ) ORDER BY
-                    CASE WHEN lower(COALESCE(f.extension, '')) IN ({ext_list}) THEN 0 ELSE 1 END,
-                    COALESCE(f.size, 0) DESC,
-                    f.index
-                  )
-                  FROM (
-                    SELECT index, path, size, extension
-                    FROM torrent_files
-                    WHERE info_hash = filtered.info_hash
-                      AND path !~* '_____padding_file_|\\.pad/'
-                    ORDER BY
-                      CASE WHEN lower(COALESCE(extension, '')) IN ({ext_list}) THEN 0 ELSE 1 END,
-                      COALESCE(size, 0) DESC NULLS LAST,
-                      index
-                    LIMIT {int(SEARCH_FILES_FETCH)}
-                  ) f
-                ),
-                '[]'::json
-              ) AS files
-            FROM filtered
-            """,
-            [*patterns, PAGE_SIZE, offset],
-        )
+        else:
+            # 各别名单独限量查再合并，避免多 ILIKE OR 拖垮超时
+            per = min(max(offset + fetch_n, 30), 80)
+            merged: dict[Any, dict[str, Any]] = {}
+            for where_sql, where_params in term_preds:
+                part = bitmagnet_pg.query(
+                    f"""
+                    SELECT
+                      t.info_hash,
+                      t.name,
+                      t.size,
+                      t.files_count,
+                      t.files_status,
+                      t.extension,
+                      t.created_at,
+                      t.updated_at
+                    FROM torrents t
+                    WHERE {where_sql}
+                    {time_sql}
+                    {size_sql}
+                    ORDER BY {order_sql}
+                    LIMIT %s
+                    """,
+                    [*where_params, per],
+                    statement_timeout_ms=_SEARCH_TIMEOUT_MS,
+                )
+                for r in part:
+                    h = r["info_hash"]
+                    if h not in merged:
+                        merged[h] = r
+
+            def _sort_key(row: dict[str, Any]) -> tuple:
+                if sort_type == "size":
+                    return (int(row.get("size") or 0),)
+                if sort_type == "count":
+                    return (int(row.get("files_count") or 0),)
+                if sort_type == "date":
+                    return (row.get("created_at") is not None, row.get("created_at"))
+                # default: newest first
+                return (row.get("created_at") is not None, row.get("created_at"))
+
+            reverse = sort_type != "date"
+            ranked = sorted(merged.values(), key=_sort_key, reverse=reverse)
+            page_rows = ranked[offset : offset + fetch_n]
+            if not page_rows:
+                rows = []
+            else:
+                # 用 VALUES 保序拉文件，避免再扫 name
+                values_sql = ", ".join(
+                    f"(decode(%s, 'hex'), %s::int)" for _ in page_rows
+                )
+                params: list[Any] = []
+                for i, r in enumerate(page_rows):
+                    ih = r["info_hash"]
+                    if isinstance(ih, (bytes, memoryview)):
+                        hex_h = bytes(ih).hex()
+                    else:
+                        hex_h = str(ih)
+                    params.extend([hex_h, i])
+                rows = bitmagnet_pg.query(
+                    f"""
+                    WITH filtered AS (
+                      SELECT
+                        t.info_hash,
+                        t.name,
+                        t.size,
+                        t.files_count,
+                        t.files_status,
+                        t.extension,
+                        t.created_at,
+                        t.updated_at,
+                        v.ord
+                      FROM (VALUES {values_sql}) AS v(info_hash, ord)
+                      JOIN torrents t ON t.info_hash = v.info_hash
+                      ORDER BY v.ord
+                    )
+                    {_attach_files_sql(ext_list)}
+                    ORDER BY filtered.ord
+                    """,
+                    params,
+                    statement_timeout_ms=_SEARCH_TIMEOUT_MS,
+                )
     except bitmagnet_pg.BitmagnetDbUnavailable as e:
         raise BitmagnetError(str(e)) from e
     except Exception as e:
         log.warning("bitmagnet search failed: %s", e)
+        if _is_statement_timeout(e):
+            raise BitmagnetError(
+                "BT 库搜索超时，请缩短关键词或稍后再试"
+            ) from e
         raise BitmagnetError(f"Bitmagnet 查询失败: {e}") from e
 
+    has_more = len(rows) > PAGE_SIZE
+    rows = rows[:PAGE_SIZE]
     items = [_item_from_row(r, files_cap=SEARCH_FILES_MAX) for r in rows]
     cost_ms = int((time.perf_counter() - t0) * 1000)
+    # 无精确 total：给 UI 一个下限估计
+    total = offset + len(items) + (PAGE_SIZE if has_more else 0)
     return {
         "keyword": kw,
         "keywords": terms,
@@ -597,7 +722,7 @@ def search(
         "openUrl": "",
         "items": items,
         "total": total,
-        "hasMore": offset + len(items) < total,
+        "hasMore": has_more,
         "costMs": cost_ms,
     }
 

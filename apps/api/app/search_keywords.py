@@ -25,21 +25,28 @@ _ALIAS_QUERY_SEP = re.compile(r"[,;，、；|｜/\n\r]+")
 
 # 纯字母厂牌/前缀（SONS、SSIS…）：避免 `%SONS%` 全表扫
 _MAKER_PREFIX_RE = re.compile(r"^[A-Za-z]{2,8}$")
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+# 拉丁单词词边界（防 Reacher ⊂ Treacherous）
+_LATIN_WORD_RE = re.compile(r"^[A-Za-z][A-Za-z0-9']{3,79}$")
 
 MatchField = Literal["both", "filename", "title"]
 
 
-def split_alias_query_terms(q: str, *, limit: int = 8) -> list[str]:
-    """逗号/顿号等拆成多个完整片名；不含强分隔时整段保留。"""
+def split_alias_query_terms(q: str, *, limit: int = 2) -> list[str]:
+    """逗号/顿号等拆成多个完整片名；不含强分隔时整段保留。
+
+    默认最多 2 词（中+英）：过多 OR ILIKE 易拖垮色花/BT 库超时。
+    """
     s = (q or "").strip()
     if not s:
         return []
     if not _ALIAS_QUERY_SEP.search(s):
-        return [s]
+        t = s.strip().strip(".,;:!?，、；")
+        return [t] if t else []
     out: list[str] = []
     seen: set[str] = set()
     for part in _ALIAS_QUERY_SEP.split(s):
-        t = str(part or "").strip()
+        t = str(part or "").strip().strip(".,;:!?，、；")
         if len(t) < 2:
             continue
         key = t.casefold()
@@ -145,7 +152,9 @@ def _like_contains(keyword: str) -> str:
 
 
 def _is_maker_prefix_token(keyword: str) -> bool:
-    return bool(_MAKER_PREFIX_RE.fullmatch(keyword.strip()))
+    """厂牌前缀多为全大写短码（SONS/SSIS）；Title Case 片名不走此分支。"""
+    s = keyword.strip()
+    return bool(_MAKER_PREFIX_RE.fullmatch(s) and s.isupper())
 
 
 def _maker_prefix_like_patterns(keyword: str) -> list[str]:
@@ -161,21 +170,48 @@ def _maker_prefix_like_patterns(keyword: str) -> list[str]:
     ]
 
 
+def _latin_word_boundary_clause(
+    keyword: str,
+    field: MatchField,
+) -> tuple[str, list[str]]:
+    """ILIKE 收候选 + 正则词边界，避免英文子串误命中。"""
+    like = _like_contains(keyword)
+    rx = rf"(^|[^[:alnum:]]){re.escape(keyword)}([^[:alnum:]]|$)"
+    if field == "filename":
+        return (
+            f"(r.filename ILIKE %s {_ILIKE_ESC} AND r.filename ~* %s)",
+            [like, rx],
+        )
+    if field == "title":
+        return (
+            f"(rs.title ILIKE %s {_ILIKE_ESC} AND rs.title ~* %s)",
+            [like, rx],
+        )
+    return (
+        f"((r.filename ILIKE %s {_ILIKE_ESC} AND r.filename ~* %s)"
+        f" OR (rs.title ILIKE %s {_ILIKE_ESC} AND rs.title ~* %s))",
+        [like, rx, like, rx],
+    )
+
+
 def _token_or_clause(
     keyword: str,
     field: MatchField,
 ) -> tuple[str, list[str]]:
-    """单 token → (sql片段, params)。厂牌前缀用边界模式，其余 contains。"""
+    """单 token → (sql片段, params)。厂牌前缀用边界模式；拉丁单词防子串误中。"""
+    kw = (keyword or "").strip().strip(".,;:!?，、；")
     clause = _token_match_clause(field)
-    if _is_maker_prefix_token(keyword):
-        patterns = _maker_prefix_like_patterns(keyword)
+    if _is_maker_prefix_token(kw):
+        patterns = _maker_prefix_like_patterns(kw)
         parts: list[str] = []
         params: list[str] = []
         for pat in patterns:
             parts.append(clause)
             params.extend(_params_for_like(pat, field))
         return "(" + " OR ".join(parts) + ")", params
-    like = _like_contains(keyword)
+    if _LATIN_WORD_RE.fullmatch(kw) and not _CJK_RE.search(kw):
+        return _latin_word_boundary_clause(kw, field)
+    like = _like_contains(kw)
     return clause, _params_for_like(like, field)
 
 

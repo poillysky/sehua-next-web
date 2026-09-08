@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException, Query
 from .translate_routes import get_tmdb_api_key
 from . import settings_store
 from . import media_bangumi_anilist as anime_src
+from .ttl_cache import enforce_max, prune_by_expiry
 
 log = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ _DOUBAN_MOBILE_UA = (
 # 内存缓存：key -> (expires_at, payload)
 _cache: dict[str, tuple[float, Any]] = {}
 _CACHE_TTL_S = 6 * 3600
+_CACHE_MAX = 512
 
 CATEGORIES = ("movie", "tv", "anime", "variety")
 TMDB_CHARTS = (
@@ -90,7 +92,9 @@ def _cache_get(key: str) -> Any | None:
 
 
 def _cache_set(key: str, payload: Any, ttl: float = _CACHE_TTL_S) -> None:
+    prune_by_expiry(_cache)
     _cache[key] = (time.time() + ttl, payload)
+    enforce_max(_cache, _CACHE_MAX)
 
 
 def _year_from(date_s: str | None) -> str | None:

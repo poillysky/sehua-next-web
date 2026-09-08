@@ -10,10 +10,13 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable
 
@@ -42,12 +45,18 @@ LONG_CODE_RE = re.compile(
 )
 
 
+@lru_cache(maxsize=8192)
 def clean_prefix(raw: str) -> str:
     return re.sub(r"[^A-Z0-9]", "", std_prefix(raw).replace("-", ""))
 
 
+@lru_cache(maxsize=8192)
+def _shape(pref: str) -> str:
+    return resolve_maker_shape(pref)
+
+
 def is_special(pref: str) -> bool:
-    if resolve_maker_shape(pref) in SPECIAL_SHAPES:
+    if _shape(pref) in SPECIAL_SHAPES:
         return True
     return clean_prefix(pref) in {clean_prefix(x) for x in pr.SKIP_PREFIXES}
 
@@ -105,7 +114,7 @@ def accept_std_code(pref: str, code: str) -> bool:
     c = str(code or "").strip().upper()
     if not c:
         return False
-    shape = resolve_maker_shape(pref)
+    shape = _shape(pref)
     if shape != "std":
         return True
     dm = DIGIT_HEAD_RE.match(pref)
@@ -190,12 +199,13 @@ def ingest_line(
     want_std: set[str],
     letter_aliases: dict[str, list[str]],
     long_std: set[str],
+    long_std_re: re.Pattern[str] | None,
     special_re: re.Pattern[str] | None,
     needle_to_prefs: dict[str, list[str]],
     prefix_regions: dict[str, list[str]],
     bucket: dict[str, dict[str, set[str]]],
 ) -> None:
-    if not text:
+    if not text or len(text) < 4:
         return
     upper = text.upper()
 
@@ -203,7 +213,7 @@ def ingest_line(
         c = str(code or "").strip().upper()
         if not c:
             return
-        shape = resolve_maker_shape(pref)
+        shape = _shape(pref)
         if shape == "std" and not accept_std_code(pref, c):
             return
         if shape in {"fc2", "fc2ppv"} and not accept_fc2_code(c):
@@ -249,11 +259,14 @@ def ingest_line(
                 add(cat, format_std(cat, n))
             else:
                 add(cat, real_code)
-    for pref in long_std:
-        if pref not in upper:
-            continue
-        for code in extract_maker_codes(text, pref):
-            add(pref, code)
+
+    # 超长厂牌前缀：合并正则一次命中，避免逐前缀扫全文
+    if long_std_re is not None:
+        hit_long = {m.group(0).upper() for m in long_std_re.finditer(upper)}
+        for pref in hit_long:
+            if pref in long_std:
+                for code in extract_maker_codes(text, pref):
+                    add(pref, code)
 
     if not special_re:
         return
@@ -268,7 +281,7 @@ def ingest_line(
 
 def filter_outlier_codes(pref: str, codes: list[str]) -> list[str]:
     """形态门闩 + robust 主簇砍离群高号（std）。"""
-    shape = resolve_maker_shape(pref)
+    shape = _shape(pref)
     codes = [c for c in codes if shape != "std" or accept_std_code(pref, c)]
     if shape != "std" or len(codes) < 8:
         return codes
@@ -297,7 +310,7 @@ def filter_outlier_codes(pref: str, codes: list[str]) -> list[str]:
 
 def codes_to_serials(pref: str, codes: list[str]) -> list[int]:
     out: set[int] = set()
-    shape = resolve_maker_shape(pref)
+    shape = _shape(pref)
     for c in codes:
         if shape in {"fc2", "fc2ppv"}:
             m = re.search(r"(\d{5,8})$", c)
@@ -316,6 +329,137 @@ def codes_to_serials(pref: str, codes: list[str]) -> list[int]:
                 except ValueError:
                     pass
     return sorted(out)
+
+
+def _merge_bucket(
+    dst: dict[str, dict[str, set[str]]],
+    src: dict[str, dict[str, set[str]]],
+) -> None:
+    for key, regs in src.items():
+        slot = dst[key]
+        for rid, codes in regs.items():
+            slot[rid] |= codes
+
+
+def _ingest_chunk(
+    texts: list[str],
+    want_std: set[str],
+    letter_aliases: dict[str, list[str]],
+    long_std: set[str],
+    long_std_re: re.Pattern[str] | None,
+    special_re: re.Pattern[str] | None,
+    needle_to_prefs: dict[str, list[str]],
+    prefix_regions: dict[str, list[str]],
+) -> dict[str, dict[str, set[str]]]:
+    bucket: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
+    for text in texts:
+        ingest_line(
+            text,
+            want_std,
+            letter_aliases,
+            long_std,
+            long_std_re,
+            special_re,
+            needle_to_prefs,
+            prefix_regions,
+            bucket,
+        )
+    # defaultdict → 普通 dict，便于跨线程合并
+    return {k: {rid: set(codes) for rid, codes in regs.items()} for k, regs in bucket.items()}
+
+
+def _fetch_sehua_texts() -> list[str]:
+    rows = pg.query(
+        """
+        SELECT COALESCE(r.filename,'') AS filename,
+               COALESCE(rs.title,'') AS title
+        FROM ed2k_resources r
+        LEFT JOIN LATERAL (
+          SELECT title FROM resource_sources
+          WHERE hash = r.hash ORDER BY created_at DESC LIMIT 1
+        ) rs ON TRUE
+        """
+    )
+    out: list[str] = []
+    for row in rows:
+        fn = str(row.get("filename") or "")
+        title = str(row.get("title") or "")
+        if fn or title:
+            out.append(f"{fn}\n{title}" if title else fn)
+    return out
+
+
+def _fetch_bitmagnet_texts(table: str, col: str, lim: int) -> list[str]:
+    brows = bitmagnet_pg.query(
+        f'SELECT COALESCE("{col}",\'\') AS txt FROM "{table}" LIMIT {int(lim)}'
+    )
+    return [str(row.get("txt") or "") for row in brows if row.get("txt")]
+
+
+def _process_texts_parallel(
+    texts: list[str],
+    *,
+    label: str,
+    stage: str,
+    pct_lo: float,
+    pct_hi: float,
+    want_std: set[str],
+    letter_aliases: dict[str, list[str]],
+    long_std: set[str],
+    long_std_re: re.Pattern[str] | None,
+    special_re: re.Pattern[str] | None,
+    needle_to_prefs: dict[str, list[str]],
+    prefix_regions: dict[str, list[str]],
+    bucket: dict[str, dict[str, set[str]]],
+    emit: Callable[..., None],
+) -> None:
+    n = len(texts)
+    if n == 0:
+        emit(f"{label} 0/0", stage=stage, done=0, total=0, percent=pct_lo)
+        return
+    emit(f"{label} 0/{n:,}", stage=stage, done=0, total=n, percent=pct_lo)
+    workers = max(4, min(12, (os.cpu_count() or 4)))
+    chunk = max(2_000, min(12_000, n // (workers * 2) or n))
+    chunks = [texts[i : i + chunk] for i in range(0, n, chunk)]
+    done = 0
+    last_t = 0.0
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        fut_sizes = {
+            pool.submit(
+                _ingest_chunk,
+                ch,
+                want_std,
+                letter_aliases,
+                long_std,
+                long_std_re,
+                special_re,
+                needle_to_prefs,
+                prefix_regions,
+            ): len(ch)
+            for ch in chunks
+        }
+        for fut in as_completed(fut_sizes):
+            part = fut.result()
+            _merge_bucket(bucket, part)
+            done += fut_sizes[fut]
+            now = time.monotonic()
+            if done >= n or now - last_t >= 0.6:
+                last_t = now
+                pct = pct_lo + (pct_hi - pct_lo) * (done / max(n, 1))
+                emit(
+                    f"{label} {done:,}/{n:,}",
+                    stage=stage,
+                    done=done,
+                    total=n,
+                    percent=pct,
+                )
+    emit(
+        f"{label} {n:,}/{n:,}",
+        stage=stage,
+        done=n,
+        total=n,
+        percent=pct_hi,
+    )
 
 
 def scan_all(
@@ -347,105 +491,105 @@ def scan_all(
         else:
             print(phase, flush=True)
 
-    bucket: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
-    emit("色花堂查询中…", stage="sehua", percent=2)
-    rows = pg.query(
-        """
-        SELECT COALESCE(r.filename,'') AS filename,
-               COALESCE(rs.title,'') AS title
-        FROM ed2k_resources r
-        LEFT JOIN LATERAL (
-          SELECT title FROM resource_sources
-          WHERE hash = r.hash ORDER BY created_at DESC LIMIT 1
-        ) rs ON TRUE
-        """
+    long_std_re = (
+        re.compile("|".join(re.escape(p) for p in sorted(long_std, key=len, reverse=True)))
+        if long_std
+        else None
     )
-    sehua_n = len(rows)
-    emit(
-        f"色花堂 0/{sehua_n:,}",
-        stage="sehua",
-        done=0,
-        total=sehua_n,
-        percent=3,
-    )
-    last_t = 0.0
-    for i, row in enumerate(rows, 1):
-        ingest_line(
-            f"{row.get('filename')}\n{row.get('title')}",
-            want_std,
-            letter_aliases,
-            long_std,
-            special_re,
-            needle_to_prefs,
-            prefix_regions,
-            bucket,
-        )
-        now = time.monotonic()
-        if i == sehua_n or i % 25_000 == 0 or now - last_t >= 0.8:
-            last_t = now
-            pct = 3 + 67 * (i / max(sehua_n, 1))
-            emit(
-                f"色花堂 {i:,}/{sehua_n:,}",
-                stage="sehua",
-                done=i,
-                total=sehua_n,
-                percent=pct,
-            )
 
-    emit("Bitmagnet 扫描中…", stage="bitmagnet", percent=72)
-    bit_n = 0
+    bucket: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
     bit_sources = (
         ("torrents", "name", 2_000_000),
         ("content", "title", 200_000),
         ("content", "original_title", 200_000),
     )
-    for src_i, (table, col, lim) in enumerate(bit_sources):
-        base_pct = 72 + (src_i / len(bit_sources)) * 20
-        emit(
-            f"Bitmagnet 查询 {table}.{col}…",
-            stage="bitmagnet",
-            percent=base_pct,
-        )
+
+    emit("色花堂查询中…", stage="sehua", percent=2)
+    # 色花查询与 Bitmagnet 三路查询并行，缩短总等待
+    with ThreadPoolExecutor(max_workers=4) as io_pool:
+        sehua_fut = io_pool.submit(_fetch_sehua_texts)
+        bit_futs = {
+            io_pool.submit(_fetch_bitmagnet_texts, table, col, lim): (table, col, lim)
+            for table, col, lim in bit_sources
+        }
         try:
-            brows = bitmagnet_pg.query(
-                f'SELECT COALESCE("{col}",\'\') AS txt FROM "{table}" LIMIT {int(lim)}'
-            )
+            sehua_texts = sehua_fut.result()
         except Exception as e:  # noqa: BLE001
-            emit(f"跳过 {table}.{col}: {e}", stage="bitmagnet", percent=base_pct)
-            continue
-        n = len(brows)
-        bit_n += n
+            emit(f"色花堂查询失败: {e}", stage="sehua", percent=3)
+            raise
+        sehua_n = len(sehua_texts)
         emit(
-            f"Bitmagnet {table}.{col} 0/{n:,}",
-            stage="bitmagnet",
+            f"色花堂已取 {sehua_n:,} 行 · 解析中…",
+            stage="sehua",
             done=0,
-            total=n,
-            percent=base_pct,
+            total=sehua_n,
+            percent=3,
         )
-        last_t = 0.0
-        for j, row in enumerate(brows, 1):
-            ingest_line(
-                str(row.get("txt") or ""),
-                want_std,
-                letter_aliases,
-                long_std,
-                special_re,
-                needle_to_prefs,
-                prefix_regions,
-                bucket,
-            )
-            now = time.monotonic()
-            if j == n or j % 25_000 == 0 or now - last_t >= 0.8:
-                last_t = now
-                span = 20 / len(bit_sources)
-                pct = base_pct + span * (j / max(n, 1))
-                emit(
-                    f"Bitmagnet {table}.{col} {j:,}/{n:,}",
+        _process_texts_parallel(
+            sehua_texts,
+            label="色花堂",
+            stage="sehua",
+            pct_lo=3,
+            pct_hi=70,
+            want_std=want_std,
+            letter_aliases=letter_aliases,
+            long_std=long_std,
+            long_std_re=long_std_re,
+            special_re=special_re,
+            needle_to_prefs=needle_to_prefs,
+            prefix_regions=prefix_regions,
+            bucket=bucket,
+            emit=emit,
+        )
+        del sehua_texts
+
+        emit("Bitmagnet 扫描中…", stage="bitmagnet", percent=72)
+        bit_n = 0
+        # 按完成顺序处理，谁先查完谁先解析
+        pending = dict(bit_futs)
+        src_total = len(pending)
+        finished = 0
+        while pending:
+            done_futs = [f for f in pending if f.done()]
+            if not done_futs:
+                # 等任意一个
+                for f in as_completed(pending):
+                    done_futs = [f]
+                    break
+            for fut in done_futs:
+                table, col, lim = pending.pop(fut)
+                base_pct = 72 + (finished / max(src_total, 1)) * 20
+                try:
+                    texts = fut.result()
+                except Exception as e:  # noqa: BLE001
+                    emit(
+                        f"跳过 {table}.{col}: {e}",
+                        stage="bitmagnet",
+                        percent=base_pct,
+                    )
+                    finished += 1
+                    continue
+                n = len(texts)
+                bit_n += n
+                span = 20 / max(src_total, 1)
+                _process_texts_parallel(
+                    texts,
+                    label=f"Bitmagnet {table}.{col}",
                     stage="bitmagnet",
-                    done=j,
-                    total=n,
-                    percent=pct,
+                    pct_lo=base_pct,
+                    pct_hi=base_pct + span,
+                    want_std=want_std,
+                    letter_aliases=letter_aliases,
+                    long_std=long_std,
+                    long_std_re=long_std_re,
+                    special_re=special_re,
+                    needle_to_prefs=needle_to_prefs,
+                    prefix_regions=prefix_regions,
+                    bucket=bucket,
+                    emit=emit,
                 )
+                finished += 1
+
     return bucket, sehua_n, bit_n
 
 
@@ -563,7 +707,7 @@ def run_local_db_index(on_progress: Callable[[Any], None] | None = None) -> dict
                         ),
                     }
                 )
-                shape = resolve_maker_shape(key)
+                shape = _shape(key)
                 if shape == "fc2ppv":
                     ent["format"] = "FC2-PPV-{num}"
                 elif shape == "fc2":
@@ -592,7 +736,7 @@ def run_local_db_index(on_progress: Callable[[Any], None] | None = None) -> dict
     store.save_catalog(doc)
     summary = store.public_summary(doc)
     report = {
-        "mode": "one_pass_v2_quality",
+        "mode": "one_pass_v3_parallel",
         "sehua_rows": sehua_n,
         "bitmagnet_rows": bit_n,
         "updated": updated,

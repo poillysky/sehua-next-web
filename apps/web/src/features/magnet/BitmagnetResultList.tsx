@@ -6,6 +6,9 @@ import { copyText } from '@/lib/clipboard';
 import { formatByteSize, formatDate, parseHighlight } from '@/lib/format';
 import { SEARCH_DISPLAY_FILES_MAX } from '@/config/search';
 import { AppMsg } from '@/components/ui/AppMsg';
+import { ContextMenu } from '@/components/ui/ContextMenu';
+import { useLongPress } from '@/hooks/useLongPress';
+import { useHaptics } from '@/shell';
 import { BitmagnetFileList } from './BitmagnetFileList';
 import { magnetHash } from '@/lib/mixedSearch';
 
@@ -35,9 +38,18 @@ export function MagnetCard({
   onOpen: (hash: string) => void;
 }) {
   const [msg, setMsg] = useState('');
+  const [menuOpen, setMenuOpen] = useState(false);
+  const haptics = useHaptics();
   const hash = magnetHash(item);
   const name = item.name || item.title || hash;
   const count = item.files_count ?? item.fileCount ?? item.files?.length ?? 0;
+
+  const cardRef = useLongPress<HTMLElement>(() => {
+    haptics.trigger('nudge');
+    setMenuOpen(true);
+  }, {
+    onHaptic: () => haptics.trigger('nudge'),
+  });
 
   async function onCopyMagnet(e: MouseEvent) {
     e.preventDefault();
@@ -51,8 +63,33 @@ export function MagnetCard({
     setMsg(ok ? '已复制磁力' : '复制失败');
   }
 
+  async function copyFromMenu() {
+    const magnet = magnetOf(item);
+    if (!magnet.startsWith('magnet:')) {
+      setMsg('无磁力链接');
+      return;
+    }
+    const ok = await copyText(magnet);
+    setMsg(ok ? '已复制磁力' : '复制失败');
+  }
+
   return (
-    <article className="bm-card">
+    <article className="bm-card" ref={cardRef}>
+      <ContextMenu
+        open={menuOpen}
+        title={name}
+        onClose={() => setMenuOpen(false)}
+        actions={[
+          {
+            label: '打开详情',
+            onSelect: () => onOpen(hash),
+          },
+          {
+            label: magnetOf(item).startsWith('magnet:') ? '复制磁力' : '无磁力链接',
+            onSelect: () => void copyFromMenu(),
+          },
+        ]}
+      />
       {badge ? <span className="bm-card__badge">{badge}</span> : null}
       <header className={`bm-card__head${badge ? ' bm-card__head--badged' : ''}`}>
         <button

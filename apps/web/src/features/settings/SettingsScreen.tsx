@@ -9,6 +9,7 @@ import {
   HardDrive,
   MessagesSquare,
   Building2,
+  Search,
   Sparkles,
   UserRound,
   Wifi,
@@ -26,6 +27,8 @@ import {
   getNetwork,
   getMakersCatalog,
   getScrapeSources,
+  getPansouSettings,
+  getCloudSaverSettings,
 } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { useStackCover } from '@/hooks/useStackCover';
@@ -38,6 +41,8 @@ import { ForumManagePanel } from './ForumManagePanel';
 import { AiModelsPanel, aiModelsHubStatus } from './AiModelsPanel';
 import { NetworkPanel } from './NetworkPanel';
 import { MakersManagePanel } from './MakersManagePanel';
+import { PansouPanel } from './PansouPanel';
+import { CloudSaverPanel } from './CloudSaverPanel';
 import {
   getCachedSettingsHubMeta,
   isSettingsHubMetaFresh,
@@ -53,6 +58,8 @@ type Panel =
   | 'p115'
   | 'network'
   | 'tmdb'
+  | 'pansou'
+  | 'cloudsaver'
   | 'forum'
   | 'ai'
   | 'makers';
@@ -132,6 +139,20 @@ const SECTIONS: Section[] = [
         Icon: Clapperboard,
         accent: 'blue',
       },
+      {
+        id: 'pansou',
+        title: '盘搜 PanSou',
+        desc: '网盘资源搜索 API',
+        Icon: Search,
+        accent: 'orange',
+      },
+      {
+        id: 'cloudsaver',
+        title: 'CloudSaver',
+        desc: '账号登录与资源搜索',
+        Icon: Cloud,
+        accent: 'green',
+      },
     ],
   },
   {
@@ -170,6 +191,8 @@ const emptyMeta: SettingsHubMeta = {
   p115: { text: '…', tone: 'mute' },
   network: { text: '…', tone: 'mute' },
   tmdb: { text: '…', tone: 'mute' },
+  pansou: { text: '…', tone: 'mute' },
+  cloudsaver: { text: '…', tone: 'mute' },
   ai: { text: '…', tone: 'mute' },
   forum: { text: '…', tone: 'mute' },
   makers: { text: '…', tone: 'mute' },
@@ -180,7 +203,7 @@ export function SettingsScreen() {
   const tabCtx = useTabNavigation();
   const [panel, setPanel] = useState<Panel>('hub');
   const [meta, setMeta] = useState<SettingsHubMeta>(
-    () => getCachedSettingsHubMeta() ?? emptyMeta,
+    () => ({ ...emptyMeta, ...(getCachedSettingsHubMeta() || {}) }),
   );
   const hubCover = useStackCover(panel !== 'hub', 'settings-hub', 'settings-hub');
 
@@ -289,6 +312,32 @@ export function SettingsScreen() {
       })(),
       (async () => {
         try {
+          const p = await withTimeout(getPansouSettings(), 12000);
+          if (p.enabled && p.baseUrl) setEntryStatus('pansou', '已启用', 'ok');
+          else if (p.baseUrl) setEntryStatus('pansou', '未启用', 'warn');
+          else setEntryStatus('pansou', '未配置', 'warn');
+        } catch (e) {
+          const f = failStatus(e);
+          setEntryStatus('pansou', f.text, f.tone);
+        }
+      })(),
+      (async () => {
+        try {
+          const c = await withTimeout(getCloudSaverSettings(), 12000);
+          if (c.enabled && c.username && c.hasPassword) {
+            setEntryStatus('cloudsaver', '已配置', 'ok');
+          } else if (c.username || c.hasPassword || c.baseUrl) {
+            setEntryStatus('cloudsaver', '未完整', 'warn');
+          } else {
+            setEntryStatus('cloudsaver', '未配置', 'warn');
+          }
+        } catch (e) {
+          const f = failStatus(e);
+          setEntryStatus('cloudsaver', f.text, f.tone);
+        }
+      })(),
+      (async () => {
+        try {
           const [llm, embed] = await withTimeout(Promise.all([getAiLlm(), getAiEmbed()]), 12000);
           const text = aiModelsHubStatus(llm, embed);
           setEntryStatus('ai', text, text === '未配置' ? 'warn' : 'ok');
@@ -356,7 +405,7 @@ export function SettingsScreen() {
               <ul className="settings-group">
                 {section.items.map((item) => {
                   const Icon = item.Icon;
-                  const st = meta[item.id];
+                  const st = meta[item.id] || { text: '…', tone: 'mute' as Tone };
                   return (
                     <li key={item.id}>
                       <button
@@ -433,6 +482,18 @@ export function SettingsScreen() {
         <TmdbPanel
           onBack={() => setPanel('hub')}
           onStatus={(text, tone) => setEntryStatus('tmdb', text, tone)}
+        />
+      ) : null}
+      {panel === 'pansou' ? (
+        <PansouPanel
+          onBack={() => setPanel('hub')}
+          onStatus={(text, tone) => setEntryStatus('pansou', text, tone)}
+        />
+      ) : null}
+      {panel === 'cloudsaver' ? (
+        <CloudSaverPanel
+          onBack={() => setPanel('hub')}
+          onStatus={(text, tone) => setEntryStatus('cloudsaver', text, tone)}
         />
       ) : null}
       {panel === 'forum' ? (

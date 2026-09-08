@@ -166,9 +166,13 @@ def build_nfo_embed_text(
 
 
 def content_sha(source_text: str, *, model: str | None = None, dim: int | None = None) -> str:
-    cfg = resolve_embed_config()
-    m = model or str(cfg["model"])
-    d = int(dim if dim is not None else cfg["dim"])
+    if model is None or dim is None:
+        cfg = resolve_embed_config()
+        m = model or str(cfg["model"])
+        d = int(dim if dim is not None else cfg["dim"])
+    else:
+        m = str(model)
+        d = int(dim)
     payload = f"{m}\n{d}\n{source_text}".encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
 

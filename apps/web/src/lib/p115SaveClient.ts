@@ -146,26 +146,36 @@ export async function runP115Save(opts: {
     });
     const json = (await res.json().catch(() => ({}))) as Envelope;
     if (!res.ok) {
-      return classifyFail(
-        envelopeMessage(
-          json,
-          res.status >= 500
-            ? "转存服务异常，请稍后重试或检查 115 Cookie"
-            : `转存失败（${res.status}）`,
-        ),
+      const offlineFail = envelopeMessage(
+        json,
+        res.status >= 500
+          ? "转存服务异常，请稍后重试或检查 115 Cookie"
+          : `转存失败（${res.status}）`,
       );
+      // 分享已成功时勿当成全失败，避免用户重复点转存
+      if (shareUrls.length) {
+        return {
+          ok: true,
+          shareCount: shareUrls.length,
+          message: `115 分享已转存 ${shareUrls.length} 个；离线任务失败：${offlineFail}`,
+        };
+      }
+      return classifyFail(offlineFail);
     }
 
     const extractScheduled = Boolean(json.data?.extractScheduled);
     const msg = envelopeMessage(json, "");
+    const shareHint = shareUrls.length
+      ? `115 分享 ${shareUrls.length} 个已转存；`
+      : "";
     return {
       ok: true,
       extractScheduled,
       offlineCount: offlineUrls.length,
       shareCount: shareUrls.length || undefined,
       message: extractScheduled
-        ? `已转存 ${offlineUrls.length} 条；后台轮询（约 30 秒内）完成后自动云解压`
-        : msg || `已转存 ${offlineUrls.length} 条到 115 云下载`,
+        ? `${shareHint}已转存 ${offlineUrls.length} 条；后台轮询（约 30 秒内）完成后自动云解压`
+        : msg || `${shareHint}已转存 ${offlineUrls.length} 条到 115 云下载`,
     };
   } catch (err) {
     const raw = err instanceof Error ? err.message : String(err || "");

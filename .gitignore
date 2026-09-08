@@ -41,6 +41,7 @@ apps/api/__pycache__/
 .cursor/
 .agents/
 .refs/
+.workbuddy/
 
 # vercel / ts
 .vercel
@@ -67,11 +68,16 @@ apps/web/next-env.d.ts
 /data/meta/
 /data/prefix_catalog/
 /data/presets/
-/data/scrap-library/
-/data/strm-library/
 /data/*.json
 !/data/.gitkeep
 !/data/README.md
+
+# media (STRM / 刮削库；体积大，勿提交)
+/media/scrap-library/
+/media/strm-library/
+/media/**
+!/media/.gitkeep
+!/media/README.md
 
 # local overrides
 /config/app.local.json

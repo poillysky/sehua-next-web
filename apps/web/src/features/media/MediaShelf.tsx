@@ -10,6 +10,13 @@ import {
 } from '@/lib/api';
 import { MediaPosterCard } from './MediaPosterCard';
 
+function shelfErrorLabel(raw: string): string {
+  const s = (raw || '').trim();
+  if (!s) return '加载失败';
+  if (s.includes('暂时关闭') || s.includes('stability')) return '暂不可用';
+  return s;
+}
+
 /** MoviePilot 式横滑海报架 */
 export function MediaShelf({
   source,
@@ -18,6 +25,7 @@ export function MediaShelf({
   title,
   onOpenAll,
   onOpenItem,
+  onLoadError,
 }: {
   source: MediaSourceId;
   category: MediaCategoryId;
@@ -25,6 +33,7 @@ export function MediaShelf({
   title: string;
   onOpenAll: () => void;
   onOpenItem: (item: MediaItem) => void;
+  onLoadError?: (message: string) => void;
 }) {
   const [items, setItems] = useState<MediaItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -47,7 +56,9 @@ export function MediaShelf({
       } catch (e) {
         if (cancelled) return;
         setItems([]);
-        setErr(e instanceof Error ? e.message : '加载失败');
+        const message = e instanceof Error ? e.message : '加载失败';
+        setErr(message);
+        onLoadError?.(message);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -55,7 +66,7 @@ export function MediaShelf({
     return () => {
       cancelled = true;
     };
-  }, [source, category, chart]);
+  }, [source, category, chart]); // onLoadError 故意不入依赖，避免父组件重渲染反复拉取
 
   return (
     <section className="media-shelf">
@@ -76,7 +87,7 @@ export function MediaShelf({
       ) : null}
 
       {!loading && err ? (
-        <p className="media-shelf__err allow-select">{err}</p>
+        <p className="media-shelf__err allow-select">{shelfErrorLabel(err)}</p>
       ) : null}
 
       {!loading && !err && items.length === 0 ? (

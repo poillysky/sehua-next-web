@@ -10,9 +10,10 @@ import {
 } from 'lucide-react';
 import { AppPush } from '@/components/ui/AppPush';
 import { AppMsg } from '@/components/ui/AppMsg';
-import { getP115 } from '@/lib/api';
+import { getP115, type P115Config, type P115SaveSource } from '@/lib/api';
 import { extractPasteLinks, extractPastePassword } from '@/lib/p115Paste';
 import { runP115Save } from '@/lib/p115SaveClient';
+import { readInheritedSaveSource, P115_SOURCE_LABEL } from '@/lib/p115Source';
 import { isArchiveDownloadLink, linkKindOf } from '@/lib/detailResource';
 import { useTabNavigation } from '@/shell';
 
@@ -22,6 +23,37 @@ type FolderHint = {
   folderName: string;
 };
 
+/** 四个可存目录来源（粘贴面板允许手动选落点，默认继承影视/片商跳转上下文） */
+const PASTE_SOURCES: Array<{ id: P115SaveSource; label: string }> = [
+  { id: 'warehouse', label: '仓库' },
+  { id: 'movie', label: '电影' },
+  { id: 'tv', label: '电视剧' },
+  { id: 'makers', label: '片商' },
+];
+
+/** 从 115 配置里取某来源的目录（warehouse 兼容顶层旧字段） */
+function folderFor(
+  data: P115Config,
+  source: P115SaveSource,
+): FolderHint | null {
+  const configured = Boolean(data.configured);
+  if (source === 'warehouse') {
+    const t = data.targets?.warehouse;
+    return {
+      configured,
+      folderCid: String(t?.folderCid || data.folderCid || '0'),
+      folderName: String(t?.folderName || data.folderName || ''),
+    };
+  }
+  const t = data.targets?.[source];
+  if (!t) return { configured, folderCid: '0', folderName: '' };
+  return {
+    configured,
+    folderCid: String(t.folderCid || '0'),
+    folderName: String(t.folderName || ''),
+  };
+}
+
 /** 粘贴转存 115 — 全屏 push，非弹窗（仓库入口） */
 export function P115PastePanel({ onBack }: { onBack: () => void }) {
   const tabCtx = useTabNavigation();
@@ -30,22 +62,19 @@ export function P115PastePanel({ onBack }: { onBack: () => void }) {
   const [loading, setLoading] = useState(false);
   const [folder, setFolder] = useState<FolderHint | null>(null);
   const [msg, setMsg] = useState('');
+  // 落点来源：默认继承影视(movie/tv)/片商(makers)跳转上下文（惰性初始化，SSR 安全）；
+  // 否则回退仓库。避免从影视/片商"在资源库搜索"跳转而来时补粘磁力误存仓库。
+  const [source, setSource] = useState<P115SaveSource>(
+    () => readInheritedSaveSource() ?? 'warehouse',
+  );
 
+  // 载入当前来源目录并展示（含挂载与切换来源时）
   useEffect(() => {
-    setPaste('');
-    setPassword('');
-    setLoading(false);
-    setMsg('');
     let cancelled = false;
     void getP115()
       .then((data) => {
         if (cancelled) return;
-        const t = data.targets?.warehouse;
-        setFolder({
-          configured: Boolean(data.configured),
-          folderCid: String(t?.folderCid || data.folderCid || '0'),
-          folderName: String(t?.folderName || data.folderName || ''),
-        });
+        setFolder(folderFor(data, source));
       })
       .catch(() => {
         if (!cancelled) setFolder(null);
@@ -53,7 +82,7 @@ export function P115PastePanel({ onBack }: { onBack: () => void }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [source]);
 
   const links = useMemo(() => extractPasteLinks(paste), [paste]);
   const inferredPassword = useMemo(() => extractPastePassword(paste), [paste]);
@@ -65,10 +94,17 @@ export function P115PastePanel({ onBack }: { onBack: () => void }) {
     (Boolean(effectivePassword) ||
       links.some((u) => linkKindOf(u) !== '115share' && isArchiveDownloadLink(u)));
 
-  const folderOk = Boolean(folder?.configured);
-  const folderLabel = folderOk
-    ? folder!.folderName ||
-      (folder!.folderCid === '0' ? '根目录' : `CID ${folder!.folderCid}`)
+  const hasCookie = Boolean(folder?.configured);
+  // 非仓库来源若未单独配目录，后端会回退到仓库目录——这里如实提示
+  const srcConfigured =
+    source === 'warehouse'
+      ? hasCookie
+      : hasCookie && Boolean(folder?.folderName);
+  const folderOk = srcConfigured;
+  const fallbackToWarehouse = source !== 'warehouse' && !srcConfigured && hasCookie;
+  const folderLabel = hasCookie
+    ? folder?.folderName ||
+      (folder?.folderCid === '0' ? '根目录' : `CID ${folder?.folderCid}`)
     : '未配置';
 
   const onSubmit = useCallback(async () => {
@@ -81,7 +117,7 @@ export function P115PastePanel({ onBack }: { onBack: () => void }) {
       const result = await runP115Save({
         urls: links,
         password: effectivePassword || undefined,
-        source: 'warehouse',
+        source,
       });
       if (!result.ok) {
         setMsg(result.message);
@@ -100,12 +136,28 @@ export function P115PastePanel({ onBack }: { onBack: () => void }) {
     } finally {
       setLoading(false);
     }
-  }, [effectivePassword, links, onBack, tabCtx]);
+  }, [effectivePassword, links, onBack, tabCtx, source]);
 
   return (
     <AppPush title="115 转存" onBack={onBack}>
       <div className="p115-paste-page">
         {msg ? <AppMsg onDismiss={() => setMsg('')}>{msg}</AppMsg> : null}
+
+        <p className="p115-paste__section">保存到</p>
+        <div className="p115-paste__src" role="radiogroup" aria-label="115 保存目录">
+          {PASTE_SOURCES.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              role="radio"
+              aria-checked={source === s.id}
+              className={`p115-paste__src-btn${source === s.id ? ' is-active' : ''}`}
+              onClick={() => setSource(s.id)}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
 
         <p className="p115-paste__section">目标目录</p>
         <div className={`p115-paste__card${folderOk ? '' : ' is-warn'}`}>
@@ -119,11 +171,13 @@ export function P115PastePanel({ onBack }: { onBack: () => void }) {
             <div className="p115-paste__dir-main">
               <span className="p115-paste__dir-title">{folderLabel}</span>
               <span className="p115-paste__dir-sub">
-                {folderOk
-                  ? willExtract
-                    ? '仓库目录 · 转存后自动云解压'
-                    : '仓库入口目录 · 离线 / 分享转存'
-                  : '请到更多 → 115 填写 Cookie / 目录'}
+                {!hasCookie
+                  ? '请到更多 → 115 填写 Cookie / 目录'
+                  : fallbackToWarehouse
+                    ? '未单独配置，将沿用「仓库」目录'
+                    : willExtract
+                      ? `${P115_SOURCE_LABEL[source]}目录 · 转存后自动云解压`
+                      : `${P115_SOURCE_LABEL[source]}目录 · 离线 / 分享转存`}
               </span>
             </div>
             <span className={`p115-paste__badge${folderOk ? ' is-ok' : ' is-warn'}`}>
@@ -206,7 +260,11 @@ export function P115PastePanel({ onBack }: { onBack: () => void }) {
               <CloudUpload size={18} strokeWidth={2.2} aria-hidden />
             )}
             <span>
-              {loading ? '转存中…' : willExtract ? '转存并云解压' : '转存到 115'}
+              {loading
+                ? '转存中…'
+                : willExtract
+                  ? `转存到 ${P115_SOURCE_LABEL[source]}并云解压`
+                  : `转存到 ${P115_SOURCE_LABEL[source]}`}
             </span>
           </button>
         </div>

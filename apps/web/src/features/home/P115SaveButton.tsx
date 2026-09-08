@@ -12,7 +12,8 @@ import {
 } from '@/lib/detailResource';
 import { runP115Save } from '@/lib/p115SaveClient';
 import type { P115SaveSource } from '@/lib/api';
-import { useTabNavigation, type TabRoute } from '@/shell';
+import { readSaveSource } from '@/lib/p115Source';
+import { useTabNavigation } from '@/shell';
 
 type ItemPick = Pick<
   ResourceItem,
@@ -26,33 +27,18 @@ type ItemPick = Pick<
   | 'link_kind'
 >;
 
-const P115_SAVE_SOURCE_KEY = 'nextweb:p115-save-source';
-
-function readSessionSaveSource(): P115SaveSource | null {
-  try {
-    const s = sessionStorage.getItem(P115_SAVE_SOURCE_KEY);
-    if (s === 'movie' || s === 'tv' || s === 'makers' || s === 'warehouse') {
-      return s;
-    }
-    if (s === 'media') return 'movie';
-  } catch {
-    /* ignore */
-  }
-  return null;
-}
-
-function sourceFromTab(tab: TabRoute | undefined): P115SaveSource {
-  if (tab === '/makers') return 'makers';
-  if (tab === '/media') return 'movie';
-  return 'warehouse';
-}
-
+/**
+ * 该按钮只渲染在仓库详情（Resource/BitmagnetDetailBody，均处于仓库 Tab，
+ * activeTab 恒为 '/'）。因此"落点目录"由「当前继承来源」决定：
+ *  - override（显式传入，极少用）> session 继承的 movie/tv/makers > warehouse。
+ * P115SaveButton 不会出现在 /media、/makers Tab，故无需按 tab 映射来源。
+ */
 function resolveSaveSource(
-  tab: TabRoute | undefined,
   override?: P115SaveSource,
 ): P115SaveSource {
   if (override) return override;
-  return readSessionSaveSource() || sourceFromTab(tab);
+  // session 里可能为 movie/tv/makers（影视/片商跳转写入），否则落到仓库目录
+  return readSaveSource('warehouse');
 }
 
 export function P115SaveButton({
@@ -81,7 +67,7 @@ export function P115SaveButton({
     : offlineUrls.some((u) => isArchiveDownloadLink(u));
   const wantExtract = !isShareOnly && (Boolean(password) || isArchive);
   const kind = normalizeLinkKind(item.link_kind || linkKindOf(urls[0]));
-  const saveSource = resolveSaveSource(tabCtx?.activeTab, source);
+  const saveSource = resolveSaveSource(source);
 
   if (!urls.length) return null;
 
