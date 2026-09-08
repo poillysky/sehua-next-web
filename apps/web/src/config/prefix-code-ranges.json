@@ -1850,13 +1850,6 @@
       "source": "db_max=27 → to=40",
       "db_max": 27
     },
-    "PURETABOO": {
-      "from": 1,
-      "to": 2230,
-      "pad": 3,
-      "source": "db_max=2160 → to=2230",
-      "db_max": 2160
-    },
     "PXD": {
       "from": 1,
       "to": 40,

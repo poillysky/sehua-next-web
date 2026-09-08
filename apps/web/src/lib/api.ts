@@ -1276,6 +1276,7 @@ export type ScrapLibraryEmbedPrefix = {
   posterPath?: string;
   posterApi?: string;
   posterApis?: string[];
+  coverUrl?: string;
 };
 
 export type ScrapLibraryEmbedFacet = {
@@ -1285,9 +1286,18 @@ export type ScrapLibraryEmbedFacet = {
   posterPath?: string;
   posterApi?: string;
   posterApis?: string[];
+  coverUrl?: string;
+};
+
+export type ScrapLibraryEmbedRecommendShelf = {
+  region: string;
+  label: string;
+  latest: ScrapLibraryEmbedItem[];
+  total?: number;
 };
 
 export type ScrapLibraryEmbedRecommend = {
+  shelves?: ScrapLibraryEmbedRecommendShelf[];
   latest: ScrapLibraryEmbedItem[];
   genres: ScrapLibraryEmbedFacet[];
   collections: ScrapLibraryEmbedFacet[];
@@ -1367,30 +1377,42 @@ export async function listScrapLibraryEmbedFacets(opts?: {
   kind?: 'genre' | 'tag' | 'studio' | 'actress' | string;
   studio?: string;
   prefix?: string;
-}): Promise<ScrapLibraryEmbedFacet[]> {
+  sort?: 'name' | 'count' | string;
+  order?: 'asc' | 'desc' | string;
+  offset?: number;
+  limit?: number;
+}): Promise<{ facets: ScrapLibraryEmbedFacet[]; total: number }> {
   const q = new URLSearchParams();
   if (opts?.region) q.set('region', opts.region);
   if (opts?.kind) q.set('kind', opts.kind);
   if (opts?.studio) q.set('studio', opts.studio);
   if (opts?.prefix) q.set('prefix', opts.prefix);
+  if (opts?.sort) q.set('sort', opts.sort);
+  if (opts?.order) q.set('order', opts.order);
+  if (opts?.offset != null) q.set('offset', String(opts.offset));
+  if (opts?.limit != null) q.set('limit', String(opts.limit));
   const res = await apiFetch(
     `/scrap-library/embed/facets${q.toString() ? `?${q}` : ''}`,
   );
   if (!res.ok) throw new Error(await parseError(res));
-  return (
-    ((await res.json()) as Envelope<{ facets: ScrapLibraryEmbedFacet[] }>).data
-      .facets || []
-  );
+  const data = (
+    (await res.json()) as Envelope<{
+      facets: ScrapLibraryEmbedFacet[];
+      total?: number;
+    }>
+  ).data;
+  const facets = data.facets || [];
+  return {
+    facets,
+    total: typeof data.total === 'number' ? data.total : facets.length,
+  };
 }
 
 export async function listScrapLibraryEmbedRecommend(
-  region = '',
+  _region = '',
 ): Promise<ScrapLibraryEmbedRecommend> {
-  const q = new URLSearchParams();
-  if (region) q.set('region', region);
-  const res = await apiFetch(
-    `/scrap-library/embed/recommend${q.toString() ? `?${q}` : ''}`,
-  );
+  // 推荐页为七区货架，不再按单区过滤
+  const res = await apiFetch('/scrap-library/embed/recommend');
   if (!res.ok) throw new Error(await parseError(res));
   return ((await res.json()) as Envelope<ScrapLibraryEmbedRecommend>).data;
 }
@@ -1465,8 +1487,12 @@ export async function removeScrapFavoriteServer(itemId: string): Promise<void> {
   if (!res.ok) throw new Error(await parseError(res));
 }
 
-/** 列表卡片预览最长边；详情/大图不传 w / prefer poster */
+/** 影视列表缩略最长边 */
 export const COVER_LIST_THUMB_W = 360;
+/** 片商列表：保持清晰（约 2x 屏） */
+export const SCRAP_LIST_THUMB_W = 360;
+/** 拼贴 / 货架：竖图清晰度 */
+export const SCRAP_COLLAGE_THUMB_W = 320;
 
 /** 刮削库本地封面 → 可请求的 /api URL（列表优先竖版 poster，横 thumb 由服务端裁右侧） */
 export function scrapLibraryCoverUrl(
@@ -1482,7 +1508,7 @@ export function scrapLibraryCoverUrl(
   const w =
     typeof opts?.w === 'number'
       ? opts.w
-      : COVER_LIST_THUMB_W;
+      : SCRAP_LIST_THUMB_W;
   if (local) {
     const via = proxiedCoverUrl(local, { w, rp: opts?.rp });
     if (via) return via;
@@ -1492,7 +1518,7 @@ export function scrapLibraryCoverUrl(
     }
     return url;
   }
-  return proxiedCoverUrl(item.coverUrl, { w }) || '';
+  return proxiedCoverUrl(item.coverUrl, { w, rp: opts?.rp }) || '';
 }
 
 export type AiChatSearchResult = {

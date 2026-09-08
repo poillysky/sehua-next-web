@@ -240,8 +240,8 @@ def _fetch_bytes_unlocked(url: str) -> tuple[bytes, str]:
     raise HTTPException(status_code=502, detail=f"拉图失败 {last_status or 403}")
 
 
-def _cache_key(url: str, w: int | None) -> str:
-    raw = f"{url}|w={w or 0}".encode("utf-8")
+def _cache_key(url: str, w: int | None, *, rp: bool = False) -> str:
+    raw = f"{url}|w={w or 0}|rp={1 if rp else 0}".encode("utf-8")
     return hashlib.sha1(raw).hexdigest()
 
 
@@ -361,6 +361,7 @@ def _resize_cover(
             im = _crop_right_portrait(im)
         cropped = im.size != before
 
+        # 列表小图也用 LANCZOS，避免发糊
         if im.width > max_w or im.height > max_w:
             im.thumbnail((max_w, max_w), Image.Resampling.LANCZOS)
         elif not cropped:
@@ -371,7 +372,7 @@ def _resize_cover(
         elif im.mode == "L":
             im = im.convert("RGB")
         buf = io.BytesIO()
-        im.save(buf, format="JPEG", quality=72, optimize=True)
+        im.save(buf, format="JPEG", quality=78, optimize=False)
         out = buf.getvalue()
         if not out:
             return None
@@ -383,8 +384,8 @@ def _resize_cover(
         return None
 
 
-def _get_cover(url: str, w: int | None) -> tuple[bytes, str]:
-    key = _cache_key(url, w)
+def _get_cover(url: str, w: int | None, *, rp: bool = False) -> tuple[bytes, str]:
+    key = _cache_key(url, w, rp=rp)
     hit = _mem_get(key)
     if hit is not None:
         return hit
@@ -403,7 +404,7 @@ def _get_cover(url: str, w: int | None) -> tuple[bytes, str]:
 
     data, ctype = full
     if w and w > 0:
-        resized = _resize_cover(data, w)
+        resized = _resize_cover(data, w, right_portrait=rp)
         if resized is not None:
             data, ctype = resized
 
@@ -421,12 +422,18 @@ def cover_proxy(
         le=1280,
         description="列表缩略最长边像素；省略则原图",
     ),
+    rp: int | None = Query(
+        None,
+        ge=0,
+        le=1,
+        description="1=横图裁右侧竖幅（列表厂牌/女优）",
+    ),
     _user: dict[str, Any] = Depends(require_user),
 ) -> Response:
     """同源代理封面图（防盗链）；可选 w 输出列表缩略。"""
     safe = _safe_image_url(url)
     try:
-        data, ctype = _get_cover(safe, w)
+        data, ctype = _get_cover(safe, w, rp=bool(rp))
     except HTTPException:
         raise
     except Exception as e:

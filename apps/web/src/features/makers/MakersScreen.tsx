@@ -71,20 +71,6 @@ type Stack =
 
 const PAGE_SIZE = 36;
 
-function sortFacets<T extends { name: string; count: number }>(
-  rows: T[],
-  sortId: MakerFacetSortId,
-  order: 'asc' | 'desc',
-): T[] {
-  const mul = order === 'asc' ? 1 : -1;
-  return [...rows].sort((a, b) => {
-    if (sortId === 'count') {
-      return (a.count - b.count) * mul || a.name.localeCompare(b.name, 'zh');
-    }
-    return a.name.localeCompare(b.name, 'zh') * mul;
-  });
-}
-
 function sortPrefixes(
   rows: ScrapLibraryEmbedPrefix[],
   sortId: MakerFacetSortId,
@@ -107,9 +93,9 @@ export function MakersScreen() {
   const [hubTab, setHubTab] =
     useState<MakerCatalogSourceId>('japan_censored');
   const [libraryView, setLibraryView] = useState<MakerLibraryView>('recommended');
-  const [itemSort, setItemSort] = useState<MakerSortId>('name');
-  const [facetSort, setFacetSort] = useState<MakerFacetSortId>('name');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [itemSort, setItemSort] = useState<MakerSortId>('recent');
+  const [facetSort, setFacetSort] = useState<MakerFacetSortId>('count');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const sortSlotRef = useRef<HTMLDivElement | null>(null);
   const [msg, setMsg] = useState('');
@@ -165,6 +151,9 @@ export function MakersScreen() {
   const [searchDone, setSearchDone] = useState(false);
   const [favTick, setFavTick] = useState(0);
   const loadSeq = useRef(0);
+  const hubSentinelRef = useRef<HTMLDivElement | null>(null);
+  const drillSentinelRef = useRef<HTMLDivElement | null>(null);
+  const pagingLockRef = useRef(false);
 
   const hubCover = useStackCover(
     stack.kind !== 'hub',
@@ -226,6 +215,10 @@ export function MakersScreen() {
 
   const loadItems = useCallback(
     async (offset: number, append: boolean) => {
+      if (append) {
+        if (pagingLockRef.current) return;
+        pagingLockRef.current = true;
+      }
       const seq = ++loadSeq.current;
       if (append) setLoadingMore(true);
       else setLoading(true);
@@ -256,6 +249,7 @@ export function MakersScreen() {
         }
         setMsg(e instanceof Error ? e.message : '刮削库加载失败');
       } finally {
+        if (append) pagingLockRef.current = false;
         if (seq === loadSeq.current) {
           setLoading(false);
           setLoadingMore(false);
@@ -274,9 +268,88 @@ export function MakersScreen() {
     ],
   );
 
-  const loadHubView = useCallback(async () => {
+  const hubFacetKind =
+    libraryView === 'folders'
+      ? 'studio'
+      : libraryView === 'genres'
+        ? 'genre'
+        : libraryView === 'tags'
+          ? 'actress'
+          : null;
+
+  const loadFacets = useCallback(
+    async (offset: number, append: boolean) => {
+      if (!hubFacetKind) return;
+      if (append) {
+        if (pagingLockRef.current) return;
+        pagingLockRef.current = true;
+      }
+      const seq = ++loadSeq.current;
+      if (append) setLoadingMore(true);
+      else setLoading(true);
+      setMsg('');
+      try {
+        const page = await listScrapLibraryEmbedFacets({
+          region: hubTab,
+          kind: hubFacetKind,
+          sort: facetSort,
+          order: sortOrder,
+          offset,
+          limit: PAGE_SIZE,
+        });
+        if (seq !== loadSeq.current) return;
+        setTotal(page.total);
+        setFacets((prev) =>
+          append ? [...prev, ...(page.facets || [])] : page.facets || [],
+        );
+      } catch (e) {
+        if (seq !== loadSeq.current) return;
+        if (!append) {
+          setFacets([]);
+          setTotal(0);
+        }
+        setMsg(e instanceof Error ? e.message : '刮削库加载失败');
+      } finally {
+        if (append) pagingLockRef.current = false;
+        if (seq === loadSeq.current) {
+          setLoading(false);
+          setLoadingMore(false);
+        }
+      }
+    },
+    [hubTab, hubFacetKind, facetSort, sortOrder],
+  );
+
+  const loadRecommend = useCallback(async () => {
     const seq = ++loadSeq.current;
+    pagingLockRef.current = false;
     setLoading(true);
+    setLoadingMore(false);
+    setMsg('');
+    setItems([]);
+    setPrefixes([]);
+    setFacets([]);
+    setTotal(0);
+    try {
+      const data = await listScrapLibraryEmbedRecommend();
+      if (seq !== loadSeq.current) return;
+      setRecommend(data);
+      setTotal(data.total || 0);
+    } catch (e) {
+      if (seq !== loadSeq.current) return;
+      setRecommend(null);
+      setMsg(e instanceof Error ? e.message : '加载失败');
+    } finally {
+      if (seq === loadSeq.current) setLoading(false);
+    }
+  }, []);
+
+  const loadHubView = useCallback(async () => {
+    if (libraryView === 'recommended') return;
+    const seq = ++loadSeq.current;
+    pagingLockRef.current = false;
+    setLoading(true);
+    setLoadingMore(false);
     setMsg('');
     setItems([]);
     setRecommend(null);
@@ -295,36 +368,28 @@ export function MakersScreen() {
         if (seq !== loadSeq.current) return;
         setItems(page.items || []);
         setTotal(page.total);
-      } else if (libraryView === 'recommended') {
-        const data = await listScrapLibraryEmbedRecommend(hubTab);
-        if (seq !== loadSeq.current) return;
-        setRecommend(data);
-        setTotal(data.total || 0);
-      } else if (libraryView === 'folders') {
-        // 文件夹根：厂牌
-        const rows = await listScrapLibraryEmbedFacets({
+      } else if (
+        libraryView === 'folders' ||
+        libraryView === 'genres' ||
+        libraryView === 'tags'
+      ) {
+        const kind =
+          libraryView === 'folders'
+            ? 'studio'
+            : libraryView === 'genres'
+              ? 'genre'
+              : 'actress';
+        const page = await listScrapLibraryEmbedFacets({
           region: hubTab,
-          kind: 'studio',
+          kind,
+          sort: facetSort,
+          order: sortOrder,
+          offset: 0,
+          limit: PAGE_SIZE,
         });
         if (seq !== loadSeq.current) return;
-        setFacets(sortFacets(rows, facetSort, sortOrder));
-        setTotal(rows.length);
-      } else if (libraryView === 'genres') {
-        const rows = await listScrapLibraryEmbedFacets({
-          region: hubTab,
-          kind: 'genre',
-        });
-        if (seq !== loadSeq.current) return;
-        setFacets(sortFacets(rows, facetSort, sortOrder));
-        setTotal(rows.length);
-      } else if (libraryView === 'tags') {
-        const rows = await listScrapLibraryEmbedFacets({
-          region: hubTab,
-          kind: 'actress',
-        });
-        if (seq !== loadSeq.current) return;
-        setFacets(sortFacets(rows, facetSort, sortOrder));
-        setTotal(rows.length);
+        setFacets(page.facets || []);
+        setTotal(page.total);
       } else if (libraryView === 'favorites') {
         await ensureScrapFavoritesLoaded();
         if (seq !== loadSeq.current) return;
@@ -339,6 +404,32 @@ export function MakersScreen() {
     }
   }, [hubTab, libraryView, itemSort, facetSort, sortOrder]);
 
+  const loadMoreHub = useCallback(() => {
+    if (loading || loadingMore) return;
+    if (libraryView === 'movies') {
+      if (items.length <= 0 || items.length >= total) return;
+      void loadItems(items.length, true);
+      return;
+    }
+    if (
+      libraryView === 'folders' ||
+      libraryView === 'genres' ||
+      libraryView === 'tags'
+    ) {
+      if (facets.length <= 0 || facets.length >= total) return;
+      void loadFacets(facets.length, true);
+    }
+  }, [
+    loading,
+    loadingMore,
+    libraryView,
+    items.length,
+    facets.length,
+    total,
+    loadItems,
+    loadFacets,
+  ]);
+
   useEffect(() => {
     if (!tabCtx || tabCtx.activeTab !== '/makers') return;
     if (tabCtx.tabReselect > 0) {
@@ -348,10 +439,80 @@ export function MakersScreen() {
   }, [tabCtx?.tabReselect, tabCtx?.activeTab]);
 
   // Hub 数据：不要依赖 stack.kind，否则详情返回会整页重载（闪烁 + 丢滚动）
-  // favTick 不进这里：收藏页走 favoriteItems，避免详情里点收藏清空下层 hub
+  // 推荐页与七区无关，切换区时不要重拉
   useEffect(() => {
+    if (libraryView === 'recommended') return;
     void loadHubView();
   }, [hubTab, libraryView, itemSort, facetSort, sortOrder, loadHubView]);
+
+  useEffect(() => {
+    if (libraryView !== 'recommended') return;
+    void loadRecommend();
+  }, [libraryView, loadRecommend]);
+
+  useEffect(() => {
+    if (stack.kind !== 'hub') return;
+    const paginated =
+      libraryView === 'movies' ||
+      libraryView === 'folders' ||
+      libraryView === 'genres' ||
+      libraryView === 'tags';
+    if (!paginated) return;
+    const el = hubSentinelRef.current;
+    if (!el) return;
+    const root =
+      (el.closest('.makers-hub__scroll') as Element | null) ||
+      (el.closest('.app-hub__scroll') as Element | null);
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) loadMoreHub();
+      },
+      { root, rootMargin: '160px' },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [
+    stack.kind,
+    libraryView,
+    loadMoreHub,
+    items.length,
+    facets.length,
+    total,
+    loading,
+    loadingMore,
+  ]);
+
+  const loadMoreDrillItems = useCallback(() => {
+    if (loading || loadingMore) return;
+    if (items.length <= 0 || items.length >= total) return;
+    void loadItems(items.length, true);
+  }, [loading, loadingMore, items.length, total, loadItems]);
+
+  useEffect(() => {
+    const drillItems =
+      stack.kind === 'folderActress' || stack.kind === 'facet';
+    if (!drillItems) return;
+    const el = drillSentinelRef.current;
+    if (!el) return;
+    const root =
+      (el.closest('.app-push__body') as Element | null) ||
+      (el.closest('.app-hub__scroll') as Element | null);
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) loadMoreDrillItems();
+      },
+      { root, rootMargin: '160px' },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [
+    stack.kind,
+    loadMoreDrillItems,
+    items.length,
+    total,
+    loading,
+    loadingMore,
+  ]);
 
   // 文件夹中间层：厂牌下前缀 / 前缀下女优
   const folderMidKey = useMemo(() => {
@@ -407,18 +568,20 @@ export function MakersScreen() {
           setDrillFacets(payload.facets);
           setDrillTotal(payload.total);
         } else {
-          const rows = await listScrapLibraryEmbedFacets({
+          const page = await listScrapLibraryEmbedFacets({
             region: hubTab,
             kind: 'actress',
             studio: folderStudio,
             prefix: folderPrefix,
+            sort: facetSort,
+            order: sortOrder,
           });
           if (cancelled) return;
-          const facets = sortFacets(rows, facetSort, sortOrder);
+          const facets = page.facets || [];
           const payload = {
             prefixes: [] as ScrapLibraryEmbedPrefix[],
             facets,
-            total: rows.length,
+            total: page.total,
           };
           putDrillCache(folderMidKey, payload);
           setDrillPrefixes(payload.prefixes);
@@ -664,6 +827,14 @@ export function MakersScreen() {
   }
 
   function openItem(item: ScrapLibraryEmbedItem) {
+    const rid = String(item.region || '').trim();
+    if (
+      rid &&
+      MAKER_KIND_TABS.some((t) => t.id === rid) &&
+      rid !== hubTab
+    ) {
+      setHubTab(rid as typeof hubTab);
+    }
     startTransition(() =>
       setStack({ kind: 'detail', item, from: currentDrill() }),
     );
@@ -709,10 +880,11 @@ export function MakersScreen() {
       ) : null}
       {!opts?.loading && wallItems.length > 0 ? (
         <div className="media-wall makers-hub__wall">
-          {wallItems.map((item) => (
+          {wallItems.map((item, i) => (
             <ScrapPosterCard
               key={String(item.itemId || item.code)}
               item={item}
+              eager={i < 18}
               onClick={() => openItem(item)}
             />
           ))}
@@ -721,17 +893,35 @@ export function MakersScreen() {
     </>
   );
 
-  const loadMoreBtn =
-    !loading && items.length > 0 && items.length < total ? (
-      <div className="makers-library-more">
-        <button
-          type="button"
-          className="app-btn-secondary"
-          disabled={loadingMore}
-          onClick={() => void loadItems(items.length, true)}
-        >
-          {loadingMore ? '加载中…' : `加载更多 · ${items.length}/${total}`}
-        </button>
+  const hubHasMore =
+    !loading &&
+    total > 0 &&
+    ((libraryView === 'movies' && items.length > 0 && items.length < total) ||
+      ((libraryView === 'folders' ||
+        libraryView === 'genres' ||
+        libraryView === 'tags') &&
+        facets.length > 0 &&
+        facets.length < total));
+
+  const hubInfinite =
+    libraryView === 'movies' ||
+    libraryView === 'folders' ||
+    libraryView === 'genres' ||
+    libraryView === 'tags' ? (
+      <div className="home-infinite">
+        {hubHasMore || loadingMore ? (
+          <div
+            ref={hubSentinelRef}
+            className="home-infinite__sentinel"
+            aria-hidden
+          />
+        ) : null}
+        {loadingMore ? (
+          <p className="home-infinite__end">加载中…</p>
+        ) : hubHasMore ? null : total > 0 &&
+          (items.length > 0 || facets.length > 0) ? (
+          <p className="home-infinite__end">已全部加载</p>
+        ) : null}
       </div>
     ) : null;
 
@@ -768,13 +958,13 @@ export function MakersScreen() {
     if (loading) return `${base} · 加载中…`;
     switch (libraryView) {
       case 'recommended':
-        return `${base} · 推荐`;
+        return loading ? '推荐 · 加载中…' : '推荐 · 七区最新';
       case 'folders':
-        return `${base} · ${facets.length} 个厂牌`;
+        return `${base} · ${total} 个厂牌`;
       case 'genres':
-        return `${base} · ${facets.length} 个标签`;
+        return `${base} · ${total} 个标签`;
       case 'tags':
-        return `${base} · ${facets.length} 位女优`;
+        return `${base} · ${total} 位女优`;
       case 'favorites':
         return `${base} · ${favoriteItems.length} 项收藏`;
       default:
@@ -810,7 +1000,7 @@ export function MakersScreen() {
       if (loading) {
         return (
           <div className="makers-hub__shelves" aria-hidden>
-            {Array.from({ length: 2 }).map((_, i) => (
+            {Array.from({ length: 3 }).map((_, i) => (
               <div key={i} className="media-shelf__rail media-shelf__rail--skel">
                 {Array.from({ length: 5 }).map((__, j) => (
                   <span key={j} className="makers-poster-skel" />
@@ -820,73 +1010,56 @@ export function MakersScreen() {
           </div>
         );
       }
-      if (!recommend) {
+      const shelves =
+        recommend?.shelves && recommend.shelves.length > 0
+          ? [...recommend.shelves].sort((a, b) => {
+              const ai = MAKER_KIND_TABS.findIndex((t) => t.id === a.region);
+              const bi = MAKER_KIND_TABS.findIndex((t) => t.id === b.region);
+              return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
+            })
+          : recommend?.latest?.length
+            ? [
+                {
+                  region: hubTab,
+                  label: makerSourceLabel(hubTab),
+                  latest: recommend.latest,
+                },
+              ]
+            : [];
+      if (shelves.length === 0) {
         return (
-          <p className="media-empty makers-hub__empty allow-select">暂无推荐内容</p>
+          <p className="media-empty makers-hub__empty allow-select">
+            暂无推荐内容
+          </p>
         );
       }
       return (
         <div className="makers-hub__shelves">
-          {recommend.latest.length > 0
-            ? shelfRail(
-                '最新影片',
-                recommend.latest.map((item) => (
-                  <ScrapPosterCard
-                    key={String(item.itemId || item.code)}
-                    item={item}
-                    onClick={() => openItem(item)}
-                  />
-                )),
-                () => setLibraryView('movies'),
-              )
-            : null}
-          {recommend.genres.length > 0
-            ? shelfRail(
-                '标签',
-                recommend.genres.map((f) => (
-                  <ScrapCollageCard
-                    key={f.name}
-                    title={f.name}
-                    posterApi={f.posterApi}
-                    posterApis={f.posterApis}
-                    overlay
-                    onClick={() =>
-                      startTransition(() =>
-                        setStack({
-                          kind: 'facet',
-                          facet: 'genre',
-                          value: f.name,
-                        }),
-                      )
-                    }
-                  />
-                )),
-                () => setLibraryView('genres'),
-              )
-            : null}
-          {recommend.folders.length > 0
-            ? shelfRail(
-                '文件夹',
-                recommend.folders.map((p) => (
-                  <ScrapCollageCard
-                    key={p.prefix}
-                    title={p.prefix}
-                    count={p.count}
-                    posterApi={p.posterApi}
-                    posterApis={p.posterApis}
-                    onClick={() =>
-                      startTransition(() =>
-                        setStack({
-                          kind: 'folderStudio',
-                          studio: p.prefix,
-                        }),
-                      )
-                    }
-                  />
-                )),
-                () => setLibraryView('folders'),
-              )
-            : null}
+          {shelves.map((shelf) => {
+            const title =
+              MAKER_KIND_TABS.find((t) => t.id === shelf.region)?.label ||
+              shelf.label ||
+              shelf.region;
+            const items = shelf.latest || [];
+            if (items.length === 0) return null;
+            return shelfRail(
+              `${title} · 最新`,
+              items.map((item, i) => (
+                <ScrapPosterCard
+                  key={`${shelf.region}-${String(item.itemId || item.code)}`}
+                  item={item}
+                  eager={i < 6}
+                  onClick={() => openItem(item)}
+                />
+              )),
+              () => {
+                if (MAKER_KIND_TABS.some((t) => t.id === shelf.region)) {
+                  setHubTab(shelf.region as typeof hubTab);
+                }
+                setLibraryView('movies');
+              },
+            );
+          })}
         </div>
       );
     }
@@ -908,22 +1081,25 @@ export function MakersScreen() {
         );
       }
       return (
-        <div className="makers-collage-grid">
-          {facets.map((f) => (
-            <ScrapCollageCard
-              key={f.name}
-              title={f.name}
-              count={f.count}
-              posterApi={f.posterApi}
-              posterApis={f.posterApis}
-              onClick={() =>
-                startTransition(() =>
-                  setStack({ kind: 'folderStudio', studio: f.name }),
-                )
-              }
-            />
-          ))}
-        </div>
+        <>
+          <div className="makers-collage-grid">
+            {facets.map((f) => (
+              <ScrapCollageCard
+                key={f.name}
+                title={f.name}
+                count={f.count}
+                posterApi={f.posterApi}
+                coverUrl={f.coverUrl}
+                onClick={() =>
+                  startTransition(() =>
+                    setStack({ kind: 'folderStudio', studio: f.name }),
+                  )
+                }
+              />
+            ))}
+          </div>
+          {hubInfinite}
+        </>
       );
     }
     if (libraryView === 'genres') {
@@ -942,26 +1118,29 @@ export function MakersScreen() {
         );
       }
       return (
-        <div className="makers-collage-grid">
-          {facets.map((f) => (
-            <ScrapCollageCard
-              key={f.name}
-              title={f.name}
-              posterApi={f.posterApi}
-              posterApis={f.posterApis}
-              overlay
-              onClick={() =>
-                startTransition(() =>
-                  setStack({
-                    kind: 'facet',
-                    facet: 'genre',
-                    value: f.name,
-                  }),
-                )
-              }
-            />
-          ))}
-        </div>
+        <>
+          <div className="makers-collage-grid">
+            {facets.map((f) => (
+              <ScrapCollageCard
+                key={f.name}
+                title={f.name}
+                count={f.count}
+                posterApi={f.posterApi}
+                coverUrl={f.coverUrl}
+                onClick={() =>
+                  startTransition(() =>
+                    setStack({
+                      kind: 'facet',
+                      facet: 'genre',
+                      value: f.name,
+                    }),
+                  )
+                }
+              />
+            ))}
+          </div>
+          {hubInfinite}
+        </>
       );
     }
     if (libraryView === 'tags') {
@@ -983,26 +1162,30 @@ export function MakersScreen() {
         );
       }
       return (
-        <div className="makers-actress-grid">
-          {facets.map((f) => (
-            <ScrapActressCard
-              key={f.name}
-              title={f.name}
-              count={f.count}
-              posterApi={f.posterApi}
-              posterApis={f.posterApis}
-              onClick={() =>
-                startTransition(() =>
-                  setStack({
-                    kind: 'facet',
-                    facet: 'tag',
-                    value: f.name,
-                  }),
-                )
-              }
-            />
-          ))}
-        </div>
+        <>
+          <div className="makers-actress-grid">
+            {facets.map((f) => (
+              <ScrapActressCard
+                key={f.name}
+                title={f.name}
+                count={f.count}
+                posterApi={f.posterApi}
+                posterApis={f.posterApis}
+                coverUrl={f.coverUrl}
+                onClick={() =>
+                  startTransition(() =>
+                    setStack({
+                      kind: 'facet',
+                      facet: 'tag',
+                      value: f.name,
+                    }),
+                  )
+                }
+              />
+            ))}
+          </div>
+          {hubInfinite}
+        </>
       );
     }
     return (
@@ -1012,7 +1195,7 @@ export function MakersScreen() {
           `「${makerSourceLabel(hubTab)}」刮削库暂无条目，请先在设置同步向量`,
           { loading },
         )}
-        {loadMoreBtn}
+        {hubInfinite}
       </>
     );
   };
@@ -1246,7 +1429,7 @@ export function MakersScreen() {
                   title={p.prefix}
                   count={p.count}
                   posterApi={p.posterApi}
-                  posterApis={p.posterApis}
+                  coverUrl={p.coverUrl}
                   onClick={() =>
                     startTransition(() =>
                       setStack({
@@ -1308,6 +1491,7 @@ export function MakersScreen() {
                   count={f.count}
                   posterApi={f.posterApi}
                   posterApis={f.posterApis}
+                  coverUrl={f.coverUrl}
                   onClick={() =>
                     startTransition(() =>
                       setStack({
@@ -1372,18 +1556,20 @@ export function MakersScreen() {
           {wall(items, '暂无匹配条目', {
             loading: loading && items.length === 0,
           })}
-          {!loading && items.length > 0 && items.length < total ? (
-            <div className="makers-library-more">
-              <button
-                type="button"
-                className="app-btn-secondary"
-                disabled={loadingMore}
-                onClick={() => void loadItems(items.length, true)}
-              >
-                {loadingMore ? '加载中…' : `加载更多 · ${items.length}/${total}`}
-              </button>
-            </div>
-          ) : null}
+          <div className="home-infinite">
+            {!loading && items.length > 0 && items.length < total ? (
+              <div
+                ref={drillSentinelRef}
+                className="home-infinite__sentinel"
+                aria-hidden
+              />
+            ) : null}
+            {loadingMore ? (
+              <p className="home-infinite__end">加载中…</p>
+            ) : !loading && items.length > 0 && items.length >= total ? (
+              <p className="home-infinite__end">已全部加载</p>
+            ) : null}
+          </div>
         </div>
       </AppPush>
     );

@@ -18,6 +18,7 @@ from bs4 import BeautifulSoup  # noqa: E402
 from app import outbound_http as o  # noqa: E402
 from app import prefix_catalog_store as store  # noqa: E402
 from app.region_meta import REGION_META, REGION_ORDER, std_prefix  # noqa: E402
+from app.search_av import is_western_studio_prefix  # noqa: E402
 
 SEED = ROOT / "apps" / "web" / "src" / "config" / "prefix-catalog.seed.json"
 FORUM_TS = ROOT / "apps" / "web" / "src" / "config" / "sehuatangForum.ts"
@@ -283,6 +284,8 @@ def harvest_censored_list(pages: int = 5) -> Counter[str]:
 def region_for_list_prefix(p: str) -> str:
     if p.startswith("FC2"):
         return "fc2"
+    if is_western_studio_prefix(p):
+        return "western"
     if re.match(r"^\d{2,3}[A-Z]", p):
         return "japan_amateur"
     if p in {"SIRO", "LUXU", "MAAN", "MIUM", "GANA", "NTK", "JAC", "ORE", "SCUTE", "ARA"}:

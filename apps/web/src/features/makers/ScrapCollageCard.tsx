@@ -1,16 +1,57 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Folder } from 'lucide-react';
-import { scrapLibraryCoverUrl } from '@/lib/api';
+import { scrapLibraryCoverUrl, SCRAP_COLLAGE_THUMB_W } from '@/lib/api';
 
-function resolvePosters(posterApi?: string, posterApis?: string[]) {
+const COVER_OPTS = { w: SCRAP_COLLAGE_THUMB_W, rp: true as const };
+
+function resolvePosters(
+  posterApi: string | undefined,
+  posterApis: string[] | undefined,
+  maxPosters: number,
+  coverUrl?: string,
+) {
   const list = (posterApis || [])
-    .map((p) => scrapLibraryCoverUrl({ posterApi: p }))
+    .map((p) =>
+      scrapLibraryCoverUrl(
+        { posterApi: p },
+        // 横图 → 右裁竖幅，统一竖封面
+        COVER_OPTS,
+      ),
+    )
     .filter(Boolean);
-  if (list.length) return list.slice(0, 4);
-  const one = scrapLibraryCoverUrl({ posterApi });
+  if (list.length) return list.slice(0, maxPosters);
+  const one = scrapLibraryCoverUrl(
+    { posterApi, coverUrl },
+    COVER_OPTS,
+  );
   return one ? [one] : [];
+}
+
+function useCoverSrc(
+  posterApi: string | undefined,
+  posterApis: string[] | undefined,
+  coverUrl: string | undefined,
+) {
+  const primary = resolvePosters(posterApi, posterApis, 1, coverUrl)[0] || '';
+  const remoteOnly =
+    scrapLibraryCoverUrl({ coverUrl }, COVER_OPTS) || '';
+  const [src, setSrc] = useState(primary);
+
+  useEffect(() => {
+    setSrc(primary);
+  }, [primary]);
+
+  const onError = () => {
+    if (remoteOnly && src !== remoteOnly) {
+      setSrc(remoteOnly);
+      return;
+    }
+    setSrc('');
+  };
+
+  return { src, onError };
 }
 
 /** Emby 式 2×2 拼贴封面（厂牌 / 标签） */
@@ -19,18 +60,24 @@ export function ScrapCollageCard({
   count,
   posterApi,
   posterApis,
+  coverUrl,
   overlay,
   onClick,
+  /** 推荐货架默认单图，显著减少首屏请求；文件夹全页可开 mosaic */
+  mosaic = false,
 }: {
   title: string;
   count?: number;
   posterApi?: string;
   posterApis?: string[];
+  coverUrl?: string;
   /** 标题叠在封面上（标签） */
   overlay?: boolean;
   onClick: () => void;
+  mosaic?: boolean;
 }) {
-  const posters = resolvePosters(posterApi, posterApis);
+  const posters = resolvePosters(posterApi, posterApis, mosaic ? 4 : 1, coverUrl);
+  const { src, onError } = useCoverSrc(posterApi, posterApis, coverUrl);
   const [gone, setGone] = useState<Record<number, boolean>>({});
 
   return (
@@ -43,25 +90,29 @@ export function ScrapCollageCard({
       }
       onClick={onClick}
     >
-      <span className="makers-collage__frame" aria-hidden>
-        {posters.length === 0 ? (
-          <span className="makers-collage__ph">{title.slice(0, 1)}</span>
-        ) : posters.length === 1 ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            className="makers-collage__full"
-            src={posters[0]}
-            alt=""
-            loading="lazy"
-            decoding="async"
-            referrerPolicy="no-referrer"
-            onError={() => setGone({ 0: true })}
-          />
+      <span className="makers-collage__frame">
+        {!mosaic || posters.length <= 1 ? (
+          src ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              className="makers-collage__full"
+              src={src}
+              alt=""
+              loading="lazy"
+              decoding="async"
+              referrerPolicy="no-referrer"
+              onError={onError}
+            />
+          ) : (
+            <span className="makers-collage__ph" aria-hidden>
+              {title.slice(0, 1)}
+            </span>
+          )
         ) : (
-          <span className="makers-collage__mosaic">
+          <span className="makers-collage__mosaic" aria-hidden>
             {Array.from({ length: 4 }).map((_, i) => {
-              const src = posters[i] || posters[i % posters.length];
-              if (!src || gone[i]) {
+              const cell = posters[i] || posters[i % posters.length];
+              if (!cell || gone[i]) {
                 return (
                   <span
                     key={i}
@@ -74,7 +125,7 @@ export function ScrapCollageCard({
                 <img
                   key={i}
                   className="makers-collage__cell"
-                  src={src}
+                  src={cell}
                   alt=""
                   loading="lazy"
                   decoding="async"
@@ -89,14 +140,13 @@ export function ScrapCollageCard({
           <span className="makers-collage__label allow-select">{title}</span>
         ) : null}
       </span>
-      {!overlay ? (
-        <span className="makers-collage__caption">
-          <span className="makers-collage__title allow-select">{title}</span>
-          {count != null ? (
-            <span className="makers-collage__count">{count} 项</span>
-          ) : null}
-        </span>
-      ) : null}
+      {/* 标签也保留封面下说明，避免叠加层被图盖住时看不到字 */}
+      <span className="makers-collage__caption">
+        <span className="makers-collage__title allow-select">{title}</span>
+        {count != null ? (
+          <span className="makers-collage__count">{count} 项</span>
+        ) : null}
+      </span>
     </button>
   );
 }
@@ -107,30 +157,30 @@ export function ScrapActressCard({
   count,
   posterApi,
   posterApis,
+  coverUrl,
   onClick,
 }: {
   title: string;
   count: number;
   posterApi?: string;
   posterApis?: string[];
+  coverUrl?: string;
   onClick: () => void;
 }) {
-  const posters = resolvePosters(posterApi, posterApis);
-  const [gone, setGone] = useState(false);
-  const cover = posters[0];
+  const { src, onError } = useCoverSrc(posterApi, posterApis, coverUrl);
 
   return (
     <button type="button" className="makers-actress" onClick={onClick}>
       <span className="makers-actress__frame">
-        {cover && !gone ? (
+        {src ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={cover}
+            src={src}
             alt=""
             loading="lazy"
             decoding="async"
             referrerPolicy="no-referrer"
-            onError={() => setGone(true)}
+            onError={onError}
           />
         ) : (
           <span className="makers-actress__ph">{title.slice(0, 1)}</span>
@@ -150,30 +200,30 @@ export function ScrapFolderCard({
   count,
   posterApi,
   posterApis,
+  coverUrl,
   onClick,
 }: {
   title: string;
   count: number;
   posterApi?: string;
   posterApis?: string[];
+  coverUrl?: string;
   onClick: () => void;
 }) {
-  const posters = resolvePosters(posterApi, posterApis);
-  const [gone, setGone] = useState(false);
-  const cover = posters[0];
+  const { src, onError } = useCoverSrc(posterApi, posterApis, coverUrl);
 
   return (
     <button type="button" className="makers-folder" onClick={onClick}>
       <span className="makers-folder__frame">
-        {cover && !gone ? (
+        {src ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={cover}
+            src={src}
             alt=""
             loading="lazy"
             decoding="async"
             referrerPolicy="no-referrer"
-            onError={() => setGone(true)}
+            onError={onError}
           />
         ) : (
           <span className="makers-folder__ph">

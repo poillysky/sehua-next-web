@@ -4,17 +4,26 @@ import { useState } from 'react';
 import {
   scrapLibraryCoverUrl,
   type ScrapLibraryEmbedItem,
+  SCRAP_LIST_THUMB_W,
 } from '@/lib/api';
 
 export function ScrapPosterCard({
   item,
   onClick,
+  eager = false,
 }: {
   item: ScrapLibraryEmbedItem;
   onClick: () => void;
+  /** iOS：Tab transform 容器内 lazy 常不触发加载，首屏建议 eager */
+  eager?: boolean;
 }) {
   const [gone, setGone] = useState(false);
-  const poster = scrapLibraryCoverUrl(item);
+  // poster 已是竖图；rp=0 避免列表默认右裁
+  const poster = scrapLibraryCoverUrl(item, {
+    w: SCRAP_LIST_THUMB_W,
+    // 横图右裁竖幅；竖 poster 服务端 no-op
+    rp: true,
+  });
   const code = String(item.code || '').trim();
   const title = String(item.title || '').trim();
   const displayTitle = title
@@ -33,8 +42,9 @@ export function ScrapPosterCard({
           <img
             src={poster}
             alt=""
-            loading="lazy"
+            loading={eager ? 'eager' : 'lazy'}
             decoding="async"
+            fetchPriority={eager ? 'high' : 'auto'}
             referrerPolicy="no-referrer"
             onError={() => setGone(true)}
           />

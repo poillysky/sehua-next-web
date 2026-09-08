@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable
@@ -21,6 +22,7 @@ from .scrap_library_nfo import (
     item_id_from_rel,
     parse_nfo,
 )
+from .ttl_cache import enforce_max, prune_by_age
 
 log = logging.getLogger(__name__)
 
@@ -1008,13 +1010,7 @@ def list_prefixes(*, region: str = "", studio: str = "") -> list[dict[str, Any]]
         params.append(match)
     studio_q = str(studio or "").strip()
     if studio_q:
-        if studio_q in {"未标注厂牌", "未标注", "(unknown)"}:
-            clauses.append(
-                "(source_text !~ '片商：' OR NULLIF(substring(source_text from '片商：(.+?)(?:\\n|$)'), '') IS NULL)"
-            )
-        else:
-            clauses.append("source_text ILIKE %s")
-            params.append(f"%片商：%{studio_q}%")
+        _append_studio_clause(clauses, params, studio_q)
     where = " AND ".join(clauses)
     with pool.connection() as conn:
         with conn.cursor() as cur:
@@ -1024,12 +1020,14 @@ def list_prefixes(*, region: str = "", studio: str = "") -> list[dict[str, Any]]
                        array_agg(
                          COALESCE(
                            NULLIF(poster_path, ''),
-                           NULLIF(thumb_path, '')
+                           NULLIF(thumb_path, ''),
+                           NULLIF(cover_url, '')
                          )
                          ORDER BY code ASC
                        ) FILTER (
                          WHERE coalesce(poster_path,'') <> ''
                             OR coalesce(thumb_path,'') <> ''
+                            OR coalesce(cover_url,'') <> ''
                        ) AS posters
                 FROM {TABLE}
                 WHERE {where}
@@ -1050,17 +1048,23 @@ def list_prefixes(*, region: str = "", studio: str = "") -> list[dict[str, Any]]
                 s = str(p or "").strip()
                 if s and s not in candidates:
                     candidates.append(s)
-                if len(candidates) >= 32:
+                if len(candidates) >= 8:
                     break
-        paths = _pick_collage_posters(candidates, limit=4)
-        primary = paths[0] if paths else ""
+        # 列表页单封面：优先本地，否则外链 coverUrl
+        poster_api, _, cover_url = _facet_media_refs(candidates[:4])
+        primary = ""
+        for c in candidates:
+            if c and not str(c).startswith(("http://", "https://")):
+                primary = str(c)
+                break
         out.append(
             {
                 "prefix": str(row.get("prefix") or ""),
                 "count": int(row.get("n") or 0),
                 "posterPath": primary,
-                "posterApi": local_file_api(primary) if primary else "",
-                "posterApis": [local_file_api(p) for p in paths],
+                "posterApi": poster_api,
+                "posterApis": [],
+                "coverUrl": cover_url,
             }
         )
     return out
@@ -1119,21 +1123,9 @@ def list_items(
         clauses.append("(source_text ILIKE %s OR source_text ILIKE %s)")
         params.extend([f"%标签：%{tag_q}%", f"%女优：%{tag_q}%"])
     if studio_q:
-        if studio_q in {"未标注厂牌", "未标注", "(unknown)"}:
-            clauses.append(
-                "(source_text !~ '片商：' OR NULLIF(substring(source_text from '片商：(.+?)(?:\\n|$)'), '') IS NULL)"
-            )
-        else:
-            clauses.append("source_text ILIKE %s")
-            params.append(f"%片商：%{studio_q}%")
+        _append_studio_clause(clauses, params, studio_q)
     if actress_q:
-        if actress_q in {"未标注女优", "未标注", "(unknown)"}:
-            clauses.append(
-                "(source_text !~ '女优：' OR NULLIF(substring(source_text from '女优：(.+?)(?:\\n|$)'), '') IS NULL)"
-            )
-        else:
-            clauses.append("source_text ILIKE %s")
-            params.append(f"%女优：%{actress_q}%")
+        _append_actress_clause(clauses, params, actress_q)
     where = " AND ".join(clauses)
 
     if sort_key in {"recent", "updated", "new", "dateadded"}:
@@ -1219,6 +1211,142 @@ _FACET_LINE_RE = {
 }
 _CODEISH_RE = re.compile(r"^[A-Za-z]{1,12}-?\d{0,6}[A-Za-z]?$")
 
+# 片商 / 女优行精确抽取（勿用 ILIKE '%片商：%名%'：会跨行误匹配）
+_STUDIO_LINE_SQL = "NULLIF(substring(source_text from '片商：(.+?)(?:\\n|$)'), '')"
+_ACTRESS_LINE_SQL = "NULLIF(substring(source_text from '女优：(.+?)(?:\\n|$)'), '')"
+_STUDIO_ANNOT_RE = re.compile(
+    r"[（(\[<＜【].*?[）)\]>＞】]|［.*?］"
+)
+_STUDIO_SEP_RE = re.compile(r"[\s\-_.·・/／\\]+")
+
+
+def _studio_display_name(name: str) -> str:
+    """展示用：NFKC、去掉括号注音、收紧空白。"""
+    import unicodedata
+
+    s = unicodedata.normalize("NFKC", str(name or "")).strip()
+    s = _STUDIO_ANNOT_RE.sub("", s).strip()
+    s = re.sub(r"\s+", " ", s)
+    s = s.rstrip(".")
+    return s or str(name or "").strip()
+
+
+def _studio_match_key(name: str) -> str:
+    """合并别名键：First Star / FirstStar、K.M.P / K.M.P. → 同一键。"""
+    import unicodedata
+
+    s = unicodedata.normalize("NFKC", str(name or "")).strip()
+    s = _STUDIO_ANNOT_RE.sub("", s)
+    s = s.casefold()
+    s = _STUDIO_SEP_RE.sub("", s)
+    return s
+
+
+def _studio_norm_sql(expr: str) -> str:
+    """SQL 侧与 _studio_match_key 对齐的规范化表达式。"""
+    # 去掉常见括号注音 + 空白/标点（PostgreSQL lower ≈ ASCII；日文原样保留）
+    return (
+        "regexp_replace("
+        "regexp_replace("
+        f"lower(trim(coalesce({expr}, ''))),"
+        r" '[（(\\[＜<【［][^）)\\]>＞】］]*[）)\\]>＞】］]', '', 'g'"
+        "),"
+        r" '[\s\-_.·・/／\\]+', '', 'g'"
+        ")"
+    )
+
+
+def _append_studio_clause(
+    clauses: list[str], params: list[Any], studio: str
+) -> None:
+    studio_q = str(studio or "").strip()
+    if not studio_q:
+        return
+    if studio_q in {"未标注厂牌", "未标注", "(unknown)"}:
+        clauses.append(f"({_STUDIO_LINE_SQL} IS NULL)")
+        return
+    key = _studio_match_key(studio_q)
+    if not key:
+        clauses.append(f"trim({_STUDIO_LINE_SQL}) = %s")
+        params.append(studio_q)
+        return
+    clauses.append(f"{_studio_norm_sql(_STUDIO_LINE_SQL)} = %s")
+    params.append(key)
+
+
+def _merge_studio_facets(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """合并厂牌别名，选出现次数最多的名字作为展示名。"""
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        raw_name = str(row.get("name") or "").strip()
+        if raw_name in {"未标注厂牌", "未标注", "(unknown)"}:
+            key = f"__unknown__:{raw_name}"
+        else:
+            key = _studio_match_key(raw_name) or f"__raw__:{raw_name.casefold()}"
+        groups.setdefault(key, []).append(row)
+
+    out: list[dict[str, Any]] = []
+    for items in groups.values():
+        items_sorted = sorted(
+            items,
+            key=lambda r: (
+                -int(r.get("count") or 0),
+                0 if " " in str(r.get("name") or "") else 1,
+                -len(str(r.get("name") or "")),
+            ),
+        )
+        primary = dict(items_sorted[0])
+        total = sum(int(i.get("count") or 0) for i in items_sorted)
+        display = _studio_display_name(str(primary.get("name") or ""))
+        # 合并封面候选：优先主条目，再补其它
+        poster_api = str(primary.get("posterApi") or "")
+        cover_url = str(primary.get("coverUrl") or "")
+        poster_apis = list(primary.get("posterApis") or [])
+        for extra in items_sorted[1:]:
+            if not poster_api and extra.get("posterApi"):
+                poster_api = str(extra.get("posterApi") or "")
+            if not cover_url and extra.get("coverUrl"):
+                cover_url = str(extra.get("coverUrl") or "")
+            for p in extra.get("posterApis") or []:
+                s = str(p or "")
+                if s and s not in poster_apis:
+                    poster_apis.append(s)
+                if len(poster_apis) >= 4:
+                    break
+        primary.update(
+            {
+                "name": display or str(primary.get("name") or ""),
+                "count": total,
+                "posterApi": poster_api,
+                "posterApis": poster_apis[:4],
+                "coverUrl": cover_url,
+            }
+        )
+        out.append(primary)
+    return out
+
+
+def _append_actress_clause(
+    clauses: list[str], params: list[Any], actress: str
+) -> None:
+    actress_q = str(actress or "").strip()
+    if not actress_q:
+        return
+    if actress_q in {"未标注女优", "未标注", "(unknown)"}:
+        clauses.append(f"({_ACTRESS_LINE_SQL} IS NULL)")
+        return
+    # 女优行可多名：整行分词后精确命中
+    clauses.append(
+        f"""EXISTS (
+          SELECT 1
+          FROM unnest(
+            regexp_split_to_array(trim({_ACTRESS_LINE_SQL}), E'[\\s/|、，,]+')
+          ) AS tok
+          WHERE trim(tok) = %s
+        )"""
+    )
+    params.append(actress_q)
+
 
 def _split_tokens(raw: str) -> list[str]:
     out: list[str] = []
@@ -1229,25 +1357,297 @@ def _split_tokens(raw: str) -> list[str]:
     return out
 
 
-def list_facets(
+_FACETS_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+_FACETS_CACHE_TTL_S = 600.0
+_FACETS_CACHE_MAX = 48
+
+
+def _normalize_facet_kind(kind: str) -> str:
+    key = str(kind or "genre").strip().lower()
+    if key in {"genres", "类型"}:
+        return "genre"
+    if key in {"tags", "标签"}:
+        return "tag"
+    if key in {"studios", "maker", "片商", "合集"}:
+        return "studio"
+    if key in {"actress", "actor", "女优"}:
+        return "actress"
+    if key not in {"genre", "tag", "studio", "actress"}:
+        raise ValueError("kind 仅支持 genre / tag / studio / actress")
+    return key
+
+
+def _facet_media_refs(paths: list[str]) -> tuple[str, list[str], str]:
+    """本地路径 → posterApi；外链始终带回 coverUrl，供前端加载失败回退。"""
+    apis: list[str] = []
+    cover = ""
+    for raw in paths:
+        s = str(raw or "").strip()
+        if not s:
+            continue
+        if s.startswith(("http://", "https://")):
+            if not cover:
+                cover = s
+            continue
+        api = local_file_api(s.replace("\\", "/").lstrip("/"))
+        if api and api not in apis:
+            apis.append(api)
+    return (apis[0] if apis else ""), apis[:4], cover
+
+
+def _facet_row(
+    *,
+    name: str,
+    count: int,
+    kind: str,
+    poster_paths: list[str],
+    validate_covers: bool = False,
+) -> dict[str, Any]:
+    if validate_covers:
+        paths = _pick_collage_posters(poster_paths, limit=4)
+    else:
+        locals_: list[str] = []
+        covers_: list[str] = []
+        seen: set[str] = set()
+        for raw in poster_paths or []:
+            s = str(raw or "").strip()
+            if not s or s in seen:
+                continue
+            seen.add(s)
+            if s.startswith(("http://", "https://")):
+                if len(covers_) < 4:
+                    covers_.append(s)
+            elif len(locals_) < 4:
+                locals_.append(s)
+        paths = locals_ + covers_
+    poster_api, poster_apis, cover_url = _facet_media_refs(paths)
+    primary = next(
+        (p for p in paths if not p.startswith(("http://", "https://"))),
+        "",
+    )
+    return {
+        "name": name,
+        "count": count,
+        "kind": kind,
+        "posterPath": primary,
+        "posterApi": poster_api,
+        "posterApis": poster_apis,
+        "coverUrl": cover_url,
+    }
+
+
+def _build_facets_sql_line_tokens(
+    *,
+    region: str,
+    line_label: str,
+    unknown_name: str,
+    out_kind: str,
+    studio: str = "",
+    prefix: str = "",
+    split_tokens: bool = True,
+) -> list[dict[str, Any]]:
+    """用 Postgres 抽取「女优：/片商：」行并汇总（比 Python 扫表快一个数量级）。"""
+    ensure_schema()
+    match = _region_match_values(region)
+    clauses = ["TRUE"]
+    params: list[Any] = []
+    if match:
+        clauses.append("region = ANY(%s)")
+        params.append(match)
+    studio_q = str(studio or "").strip()
+    pref = str(prefix or "").strip().upper()
+    if studio_q:
+        _append_studio_clause(clauses, params, studio_q)
+    if pref:
+        clauses.append("upper(prefix) = %s")
+        params.append(pref)
+    where = " AND ".join(clauses)
+    # 与 _split_tokens 一致：空白 / | 、，,
+    split_re = r"[\s/|、，,]+"
+    label_re = f"{re.escape(line_label)}：(.+?)(?:\\n|$)"
+
+    pool = get_meta_pool()
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            if split_tokens:
+                cur.execute(
+                    f"""
+                    WITH base AS (
+                      SELECT
+                        ctid,
+                        NULLIF(
+                          substring(source_text from %s),
+                          ''
+                        ) AS line,
+                        COALESCE(
+                          NULLIF(poster_path, ''),
+                          NULLIF(thumb_path, '')
+                        ) AS local_poster,
+                        NULLIF(cover_url, '') AS cover
+                      FROM {TABLE}
+                      WHERE {where}
+                    ),
+                    tokens AS (
+                      SELECT DISTINCT ON (b.ctid, trim(tok))
+                        trim(tok) AS name,
+                        b.local_poster,
+                        b.cover
+                      FROM base b
+                      CROSS JOIN LATERAL unnest(
+                        regexp_split_to_array(b.line, %s)
+                      ) AS tok
+                      WHERE b.line IS NOT NULL AND trim(tok) <> ''
+                    )
+                    SELECT
+                      name,
+                      count(*)::int AS cnt,
+                      (array_agg(local_poster) FILTER (
+                        WHERE local_poster IS NOT NULL AND local_poster <> ''
+                      ))[1:16] AS posters,
+                      (array_agg(cover) FILTER (
+                        WHERE cover IS NOT NULL AND cover <> ''
+                      ))[1:8] AS covers
+                    FROM tokens
+                    GROUP BY name
+                    """,
+                    [label_re, *params, split_re],
+                )
+            else:
+                cur.execute(
+                    f"""
+                    SELECT
+                      trim(line) AS name,
+                      count(*)::int AS cnt,
+                      (array_agg(local_poster) FILTER (
+                        WHERE local_poster IS NOT NULL AND local_poster <> ''
+                      ))[1:16] AS posters,
+                      (array_agg(cover) FILTER (
+                        WHERE cover IS NOT NULL AND cover <> ''
+                      ))[1:8] AS covers
+                    FROM (
+                      SELECT
+                        NULLIF(
+                          substring(source_text from %s),
+                          ''
+                        ) AS line,
+                        COALESCE(
+                          NULLIF(poster_path, ''),
+                          NULLIF(thumb_path, '')
+                        ) AS local_poster,
+                        NULLIF(cover_url, '') AS cover
+                      FROM {TABLE}
+                      WHERE {where}
+                    ) base
+                    WHERE line IS NOT NULL AND trim(line) <> ''
+                    GROUP BY trim(line)
+                    """,
+                    [label_re, *params],
+                )
+            rows = list(cur.fetchall())
+            cur.execute(
+                f"""
+                SELECT count(*)::int AS n,
+                       (array_agg(local_poster) FILTER (
+                         WHERE local_poster IS NOT NULL AND local_poster <> ''
+                       ))[1:16] AS posters,
+                       (array_agg(cover) FILTER (
+                         WHERE cover IS NOT NULL AND cover <> ''
+                       ))[1:8] AS covers
+                FROM (
+                  SELECT
+                    COALESCE(
+                      NULLIF(poster_path, ''),
+                      NULLIF(thumb_path, '')
+                    ) AS local_poster,
+                    NULLIF(cover_url, '') AS cover
+                  FROM {TABLE}
+                  WHERE {where}
+                    AND (
+                      source_text !~ %s
+                      OR NULLIF(
+                        substring(source_text from %s),
+                        ''
+                      ) IS NULL
+                    )
+                ) missing
+                """,
+                [*params, re.escape(line_label) + "：", label_re],
+            )
+            unknown = cur.fetchone() or {}
+
+    def _merge_paths(row: dict[str, Any]) -> list[str]:
+        out: list[str] = []
+        seen: set[str] = set()
+        for key in ("posters", "covers"):
+            for p in row.get(key) or []:
+                s = str(p or "").strip()
+                if not s or s in seen:
+                    continue
+                seen.add(s)
+                out.append(s)
+        return out
+
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("name") or "").strip()
+        if not name:
+            continue
+        out.append(
+            _facet_row(
+                name=name,
+                count=int(row.get("cnt") or 0),
+                kind=out_kind,
+                poster_paths=_merge_paths(row),
+                validate_covers=False,
+            )
+        )
+    unknown_n = int(unknown.get("n") or 0) if isinstance(unknown, dict) else 0
+    if unknown_n > 0:
+        out.append(
+            _facet_row(
+                name=unknown_name,
+                count=unknown_n,
+                kind=out_kind,
+                poster_paths=_merge_paths(
+                    unknown if isinstance(unknown, dict) else {}
+                ),
+                validate_covers=False,
+            )
+        )
+    return out
+
+
+def _build_facets_all(
     *,
     region: str = "",
     kind: str = "genre",
     studio: str = "",
     prefix: str = "",
 ) -> list[dict[str, Any]]:
-    """从 source_text 汇总流派 / 标签 / 片商。"""
-    key = str(kind or "genre").strip().lower()
-    if key in {"genres", "类型"}:
-        key = "genre"
-    elif key in {"tags", "标签"}:
-        key = "tag"
-    elif key in {"studios", "maker", "片商", "合集"}:
-        key = "studio"
-    elif key in {"actress", "actor", "女优"}:
-        key = "actress"
-    if key not in {"genre", "tag", "studio", "actress"}:
-        raise ValueError("kind 仅支持 genre / tag / studio / actress")
+    """从 source_text 汇总流派 / 标签 / 片商（全量，未排序切片）。"""
+    key = _normalize_facet_kind(kind)
+    if key == "actress":
+        return _build_facets_sql_line_tokens(
+            region=region,
+            line_label="女优",
+            unknown_name="未标注女优",
+            out_kind="tag",
+            studio=studio,
+            prefix=prefix,
+            split_tokens=True,
+        )
+    if key == "studio":
+        return _build_facets_sql_line_tokens(
+            region=region,
+            line_label="片商",
+            unknown_name="未标注厂牌",
+            out_kind="studio",
+            studio=studio,
+            prefix=prefix,
+            split_tokens=False,
+        )
 
     ensure_schema()
     match = _region_match_values(region)
@@ -1259,13 +1659,7 @@ def list_facets(
     studio_q = str(studio or "").strip()
     pref = str(prefix or "").strip().upper()
     if studio_q:
-        if studio_q in {"未标注厂牌", "未标注", "(unknown)"}:
-            clauses.append(
-                "(source_text !~ '片商：' OR NULLIF(substring(source_text from '片商：(.+?)(?:\\n|$)'), '') IS NULL)"
-            )
-        else:
-            clauses.append("source_text ILIKE %s")
-            params.append(f"%片商：%{studio_q}%")
+        _append_studio_clause(clauses, params, studio_q)
     if pref:
         clauses.append("upper(prefix) = %s")
         params.append(pref)
@@ -1274,15 +1668,11 @@ def list_facets(
     pool = get_meta_pool()
     counts: dict[str, int] = {}
     posters: dict[str, list[str]] = {}
-    unknown_studio = 0
-    unknown_actress = 0
-    unknown_studio_posters: list[str] = []
-    unknown_actress_posters: list[str] = []
     with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 f"""
-                SELECT source_text, poster_path, thumb_path, prefix
+                SELECT source_text, poster_path, thumb_path, cover_url, prefix
                 FROM {TABLE}
                 WHERE {where}
                 """,
@@ -1292,9 +1682,11 @@ def list_facets(
                 if not isinstance(row, dict):
                     continue
                 text = str(row.get("source_text") or "")
-                poster = str(row.get("poster_path") or "").strip() or str(
-                    row.get("thumb_path") or ""
-                ).strip()
+                poster = (
+                    str(row.get("poster_path") or "").strip()
+                    or str(row.get("thumb_path") or "").strip()
+                    or str(row.get("cover_url") or "").strip()
+                )
                 prefix_val = str(row.get("prefix") or "").strip().upper()
                 actress_m = _FACET_LINE_RE["actress"].search(text)
                 actresses = set(
@@ -1308,19 +1700,6 @@ def list_facets(
                         if m_tag
                         else list(actresses)
                     )
-                elif key == "studio":
-                    m = _FACET_LINE_RE["studio"].search(text)
-                    names = [m.group(1).strip()] if m and m.group(1).strip() else []
-                    if not names:
-                        unknown_studio += 1
-                        if poster and poster not in unknown_studio_posters:
-                            unknown_studio_posters.append(poster)
-                elif key == "actress":
-                    names = list(actresses)
-                    if not names:
-                        unknown_actress += 1
-                        if poster and poster not in unknown_actress_posters:
-                            unknown_actress_posters.append(poster)
                 else:
                     m = _FACET_LINE_RE["genre"].search(text)
                     names = []
@@ -1353,70 +1732,126 @@ def list_facets(
                         if poster not in bucket and len(bucket) < 24:
                             bucket.append(poster)
 
-    out: list[dict[str, Any]] = []
-    out_kind = "tag" if key == "actress" else key
-    for name, n in sorted(counts.items(), key=lambda x: (-x[1], x[0])):
-        paths = _pick_collage_posters(posters.get(name) or [], limit=4)
-        primary = paths[0] if paths else ""
-        out.append(
-            {
-                "name": name,
-                "count": n,
-                "kind": out_kind,
-                "posterPath": primary,
-                "posterApi": local_file_api(primary) if primary else "",
-                "posterApis": [local_file_api(p) for p in paths if p],
-            }
+    out_kind = key
+    return [
+        _facet_row(
+            name=name,
+            count=n,
+            kind=out_kind,
+            poster_paths=posters.get(name) or [],
+            validate_covers=False,
         )
-    if key == "studio" and unknown_studio > 0:
-        paths = _pick_collage_posters(unknown_studio_posters, limit=4)
-        primary = paths[0] if paths else ""
-        out.append(
-            {
-                "name": "未标注厂牌",
-                "count": unknown_studio,
-                "kind": out_kind,
-                "posterPath": primary,
-                "posterApi": local_file_api(primary) if primary else "",
-                "posterApis": [local_file_api(p) for p in paths if p],
-            }
+        for name, n in counts.items()
+    ]
+
+
+def _sort_facets(
+    rows: list[dict[str, Any]],
+    *,
+    sort: str = "count",
+    order: str = "desc",
+) -> list[dict[str, Any]]:
+    sort_key = str(sort or "count").strip().lower()
+    ascending = str(order or "desc").strip().lower() not in {
+        "desc",
+        "descending",
+        "down",
+    }
+
+    def name_of(row: dict[str, Any]) -> str:
+        return str(row.get("name") or "")
+
+    if sort_key == "name":
+        return sorted(rows, key=name_of, reverse=not ascending)
+
+    def count_name(row: dict[str, Any]) -> tuple[int, str]:
+        c = int(row.get("count") or 0)
+        return (c if ascending else -c, name_of(row))
+
+    return sorted(rows, key=count_name)
+
+
+def list_facets(
+    *,
+    region: str = "",
+    kind: str = "genre",
+    studio: str = "",
+    prefix: str = "",
+    sort: str = "count",
+    order: str = "desc",
+    offset: int = 0,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    """从 source_text 汇总流派 / 标签 / 片商；支持排序与分页。"""
+    key = _normalize_facet_kind(kind)
+    studio_q = str(studio or "").strip()
+    pref = str(prefix or "").strip().upper()
+    cache_key = f"{region}|{key}|{studio_q}|{pref}"
+
+    now = time.monotonic()
+    prune_by_age(_FACETS_CACHE, _FACETS_CACHE_TTL_S, now=now)
+    hit = _FACETS_CACHE.get(cache_key)
+    if hit and now - hit[0] < _FACETS_CACHE_TTL_S:
+        rows = list(hit[1])
+    else:
+        rows = _build_facets_all(
+            region=region, kind=key, studio=studio_q, prefix=pref
         )
-    if key == "actress" and unknown_actress > 0:
-        paths = _pick_collage_posters(unknown_actress_posters, limit=4)
-        primary = paths[0] if paths else ""
-        out.append(
-            {
-                "name": "未标注女优",
-                "count": unknown_actress,
-                "kind": out_kind,
-                "posterPath": primary,
-                "posterApi": local_file_api(primary) if primary else "",
-                "posterApis": [local_file_api(p) for p in paths if p],
-            }
-        )
-    return out
+        _FACETS_CACHE[cache_key] = (now, list(rows))
+        enforce_max(_FACETS_CACHE, _FACETS_CACHE_MAX)
+
+    if key == "studio":
+        rows = _merge_studio_facets(rows)
+
+    sorted_rows = _sort_facets(rows, sort=sort, order=order)
+    total = len(sorted_rows)
+    off = max(0, int(offset or 0))
+    if limit is None:
+        page = sorted_rows[off:]
+    else:
+        lim = max(1, min(100, int(limit)))
+        page = sorted_rows[off : off + lim]
+    return {"facets": page, "total": total}
 
 
 def list_recommend(*, region: str = "") -> dict[str, Any]:
-    """Emby「推荐」：最新影片 + 流派 / 文件夹(厂牌)预览。"""
-    latest = list_items(region=region, sort="recent", offset=0, limit=18)
-    studios = list_facets(region=region, kind="studio")
-    return {
-        "latest": latest.get("items") or [],
-        "genres": list_facets(region=region, kind="genre")[:12],
-        "collections": studios[:12],
-        # 文件夹入口改为厂牌，与库内「文件夹」钻取一致
-        "folders": [
+    """Emby「推荐」：七区各自一条「最新影片」横向货架。
+
+    region 参数保留兼容；推荐页始终返回全部有内容的区。
+    """
+    from .region_meta import REGION_META, REGION_ORDER
+
+    shelves: list[dict[str, Any]] = []
+    total_all = 0
+    for rid in REGION_ORDER:
+        page = list_items(region=rid, sort="recent", offset=0, limit=12)
+        items = page.get("items") or []
+        if not items:
+            continue
+        n = int(page.get("total") or 0)
+        total_all += n
+        label = str((REGION_META.get(rid) or {}).get("label") or rid)
+        shelves.append(
             {
-                "prefix": s["name"],
-                "count": s["count"],
-                "posterPath": s.get("posterPath") or "",
-                "posterApi": s.get("posterApi") or "",
-                "posterApis": s.get("posterApis") or [],
+                "region": rid,
+                "label": label,
+                "latest": items,
+                "total": n,
             }
-            for s in studios[:12]
-        ],
-        "total": int(latest.get("total") or 0),
+        )
+    # 兼容旧字段：取当前/第一区
+    focus = str(region or "").strip()
+    focus_shelf = next((s for s in shelves if s["region"] == focus), None)
+    if focus_shelf is None and shelves:
+        focus_shelf = shelves[0]
+    latest = list((focus_shelf or {}).get("latest") or [])
+    return {
+        "shelves": shelves,
+        "latest": latest,
+        "genres": [],
+        "collections": [],
+        "folders": [],
+        "total": total_all,
     }
 
 

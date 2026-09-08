@@ -1,43 +1,77 @@
-# NAS 部署 — 单镜像（web + api），Postgres 独立（不进本 compose）
-#
-# Web+API 单镜像；刮削/片商浏览已从本仓库移除。
+# NAS 部署 — Web+API 单镜像 + Postgres（pgvector）
 #
 # 目录:
 #   /vol1/1000/Docker/sehua-next-web/
 #     docker-compose.yml
-#     data/              → /app/data（本地缓存等；元数据在外部 Postgres）
-#     media/             → /app/media（STRM / 刮削库）
-#     library/           → /app/data/library（MDC-ng 片库，单独挂载便于备份/共享）
+#     data/              → /app/data（本地缓存等）
+#     media/             → /app/media（strm-library / scrap-library）
+#     postgres/          → Postgres 数据（库名 nextweb）
 #     config/
 #       app.json / app.local.json
 #
 # 启动:
-#   mkdir -p /vol1/1000/Docker/sehua-next-web/{data,media,library,config}
+#   mkdir -p /vol1/1000/Docker/sehua-next-web/{data,media,postgres,config}
 #   cd /vol1/1000/Docker/sehua-next-web && docker compose pull && docker compose up -d
 # 访问: http://NAS_IP:3020
+# Postgres 对外: NAS_IP:5439（库名 nextweb）
 #
-# 说明: library 挂到 /app/data/library 会覆盖 data 卷内的同名子目录（Docker 嵌套挂载）。
+# 片商刮削库: media/scrap-library/
 
 name: sehua-next-web
 
 services:
+  postgres:
+    image: pgvector/pgvector:0.8.6-pg16
+    container_name: sehua-next-web-postgres
+    restart: always
+    ports:
+      - "5439:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: nextweb
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
+      PGDATA: /var/lib/postgresql/data/pgdata
+      TZ: Asia/Shanghai
+    volumes:
+      - /vol1/1000/Docker/sehua-next-web/postgres:/var/lib/postgresql/data
+    shm_size: 1g
+    sysctls:
+      - kernel.shmmax=1073741824
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d nextweb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+
   app:
-    image: poillysky/sehua-next-web:1.2.0
+    image: poillysky/sehua-next-web:1.2.1
     container_name: sehua-next-web
     restart: always
     mem_limit: 1g
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "3020:3020"
     environment:
       TZ: Asia/Shanghai
       SNS_COOKIE_SECURE: "0"
-      SNS_META_DSN: postgresql://postgres:postgres@192.168.2.38:5439/nextweb
+      SNS_META_DSN: postgresql://postgres:postgres@postgres:5432/nextweb
       API_INTERNAL_BASE: http://127.0.0.1:8020
       WEB_PORT: "3020"
     volumes:
       - /vol1/1000/Docker/sehua-next-web/data:/app/data
       - /vol1/1000/Docker/sehua-next-web/media:/app/media
-      - /vol1/1000/Docker/sehua-next-web/library:/app/data/library
       - /vol1/1000/Docker/sehua-next-web/config:/app/config
     dns:
       - 223.5.5.5

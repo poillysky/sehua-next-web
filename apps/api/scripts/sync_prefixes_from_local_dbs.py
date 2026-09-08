@@ -16,6 +16,7 @@ from app import bitmagnet_pg  # noqa: E402
 from app import pg  # noqa: E402
 from app import prefix_catalog_store as store  # noqa: E402
 from app import prefix_ranges as pr  # noqa: E402
+from app.search_av import is_western_studio_prefix  # noqa: E402
 from app.region_meta import REGION_META, REGION_ORDER, std_prefix  # noqa: E402
 
 SEED = ROOT / "apps" / "web" / "src" / "config" / "prefix-catalog.seed.json"
@@ -321,20 +322,25 @@ def guess_region(pref: str, kind_map: dict[str, str]) -> str:
         return "china"
     if re.match(r"^\d{2,3}[A-Z]{2,8}$", pref):
         return "japan_amateur"
-    if pref in pr.SKIP_PREFIXES or (pref.isalpha() and len(pref) >= 6 and pref in {
-        "BRAZZERS",
-        "BLACKED",
-        "TUSHY",
-        "VIXEN",
-        "DEEPER",
-        "BANGBROS",
-        "ONLYFANS",
-        "LEGALPORNO",
-        "EVILANGEL",
-        "REALITYKINGS",
-        "NAUGHTYAMERICA",
-        "DIGITALPLAYGROUND",
-    }):
+    if is_western_studio_prefix(pref) or pref in pr.SKIP_PREFIXES or (
+        pref.isalpha()
+        and len(pref) >= 6
+        and pref
+        in {
+            "BRAZZERS",
+            "BLACKED",
+            "TUSHY",
+            "VIXEN",
+            "DEEPER",
+            "BANGBROS",
+            "ONLYFANS",
+            "LEGALPORNO",
+            "EVILANGEL",
+            "REALITYKINGS",
+            "NAUGHTYAMERICA",
+            "DIGITALPLAYGROUND",
+        }
+    ):
         return "western"
     return "japan_censored"
 

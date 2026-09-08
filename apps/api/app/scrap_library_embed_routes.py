@@ -24,7 +24,8 @@ from . import scrap_library_embed as svc
 router = APIRouter(prefix="/scrap-library", tags=["scrap-library-embed"])
 
 _CACHE_HEADERS = {
-    "Cache-Control": "private, max-age=604800",
+    # 本地文件 + ETag；public 便于浏览器磁盘缓存，二次打开更快
+    "Cache-Control": "public, max-age=604800, immutable",
 }
 
 
@@ -154,19 +155,25 @@ def get_facets(
     kind: str = Query("genre"),
     studio: str = Query(""),
     prefix: str = Query(""),
+    sort: str = Query("count"),
+    order: str = Query("desc"),
+    offset: int = Query(0, ge=0),
+    limit: int | None = Query(None, ge=1, le=100),
     _user: dict[str, Any] = Depends(require_user),
 ) -> dict[str, Any]:
     try:
         return {
             "ok": True,
-            "data": {
-                "facets": svc.list_facets(
-                    region=region,
-                    kind=kind,
-                    studio=studio,
-                    prefix=prefix,
-                ),
-            },
+            "data": svc.list_facets(
+                region=region,
+                kind=kind,
+                studio=studio,
+                prefix=prefix,
+                sort=sort,
+                order=order,
+                offset=offset,
+                limit=limit,
+            ),
         }
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
@@ -228,8 +235,17 @@ def get_local_file(
         raise HTTPException(404, str(e)) from e
 
     width = int(w) if w else 0
-    # 列表缩略默认裁右侧；详情 fanart 传 rp=0
-    do_rp = bool(rp) if rp is not None else width > 0
+    # 列表缩略：仅显式 rp=1，或文件名像 thumb/fanart 时才右裁；
+    # poster.jpg 等竖图不要因 ?w= 默认右裁。
+    do_rp = bool(rp) if rp is not None else False
+    if rp is None and width > 0:
+        low = str(path or "").replace("\\", "/").lower()
+        name = low.rsplit("/", 1)[-1]
+        do_rp = (
+            ("thumb" in name)
+            or ("fanart" in name)
+            or name.startswith("landscape")
+        )
     etag = _local_file_etag(abs_path, width or None, rp=do_rp)
     if_none = (request.headers.get("if-none-match") or "").strip()
     if if_none and if_none == etag:

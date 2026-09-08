@@ -3414,17 +3414,6 @@
           "dmm_digit": "",
           "notes": "权威站:javbus"
         },
-        "PURETABOO": {
-          "maker": "",
-          "pad": 3,
-          "format": "{prefix}-{num}",
-          "sources": [
-            "trusted"
-          ],
-          "serials": [],
-          "dmm_digit": "",
-          "notes": "片商表/ranges/DMM/权威站"
-        },
         "PXD": {
           "maker": "プレミアム",
           "pad": 3,

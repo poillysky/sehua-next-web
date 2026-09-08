@@ -28,6 +28,7 @@ from app import pg  # noqa: E402
 from app import prefix_catalog_store as store  # noqa: E402
 from app import prefix_ranges as pr  # noqa: E402
 from app.region_meta import REGION_ORDER, std_prefix  # noqa: E402
+from app.search_av import is_western_studio_prefix  # noqa: E402
 from app.search_av import (  # noqa: E402
     _clamp_std_code_digits,
     code_sort_key,
@@ -153,7 +154,11 @@ def guess_code_regions(
     """多区同前缀时，按文本语境决定写入哪些区。"""
     if len(candidate_regions) <= 1:
         return list(candidate_regions)
-    home = PREFIX_HOME_REGION.get(clean_prefix(pref))
+    key = clean_prefix(pref)
+    # 欧美厂牌双挂时只写 western，避免 PURETABOO 等进日本有码
+    if is_western_studio_prefix(key) and "western" in candidate_regions:
+        return ["western"]
+    home = PREFIX_HOME_REGION.get(key)
     china_hit = bool(CHINA_CTX_RE.search(text or ""))
     japan_hit = bool(JAPAN_CTX_RE.search(text or ""))
     out: list[str] = []

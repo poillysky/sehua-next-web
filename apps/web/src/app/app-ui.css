@@ -17260,6 +17260,11 @@ a.scrape-src-card__url:active {
   object-fit: cover;
   object-position: center center;
   display: block;
+  /* Safari：父级 Tab transform 下强制合成，避免封面黑块 */
+  -webkit-transform: translateZ(0);
+  transform: translateZ(0);
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
 }
 
 .media-poster__ph {
@@ -19616,9 +19621,9 @@ a.scrape-src-card__url:active {
   display: flex;
   align-items: stretch;
   justify-content: flex-end;
-  /* 原约 5.75rem，缩 40% 让出给胶囊 */
-  min-width: 3.45rem;
-  width: 3.45rem;
+  /* 容纳「最近添加」等四字文案 + 方向图标 */
+  min-width: 5.5rem;
+  width: auto;
   margin-left: 2px;
 }
 
@@ -19627,14 +19632,14 @@ a.scrape-src-card__url:active {
   align-items: center;
   justify-content: center;
   gap: 2px;
-  flex: 1 1 auto;
-  width: 100%;
-  min-width: 0;
-  max-width: 100%;
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 5.5rem;
+  max-width: none;
   min-height: 0;
   height: auto;
   align-self: stretch;
-  padding: 0 6px;
+  padding: 0 8px;
   border: 0;
   border-radius: 11px;
   background: rgba(120, 120, 128, 0.12);
@@ -19648,8 +19653,8 @@ a.scrape-src-card__url:active {
 }
 
 .makers-hub .makers-view-row__sort > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow: visible;
+  text-overflow: clip;
   white-space: nowrap;
 }
 
@@ -19893,7 +19898,7 @@ a.scrape-src-card__url:active {
   aspect-ratio: 2 / 3;
 }
 
-/* Emby 推荐货架 */
+/* Emby 推荐货架：横向滚动 */
 .makers-hub__shelves {
   display: flex;
   flex-direction: column;
@@ -19903,18 +19908,16 @@ a.scrape-src-card__url:active {
   animation: makers-hub-in 420ms cubic-bezier(0.25, 1, 0.5, 1) both;
 }
 
-.makers-hub .makers-shelf .makers-poster {
+.makers-hub .makers-shelf .makers-poster,
+.makers-hub .makers-shelf .makers-collage,
+.makers-hub .makers-shelf .makers-folder,
+.makers-hub .makers-shelf .makers-actress {
   width: 112px;
   flex: 0 0 auto;
+  min-width: 112px;
 }
 
-.makers-hub .makers-shelf .makers-collage,
-.makers-hub .makers-shelf .makers-folder {
-  width: 168px;
-  flex: 0 0 auto;
-}
-
-.makers-shelf__rail {
+.makers-hub .makers-shelf__rail {
   display: flex;
   gap: 12px;
   overflow-x: auto;
@@ -19924,15 +19927,26 @@ a.scrape-src-card__url:active {
   scrollbar-width: none;
 }
 
-.makers-shelf__rail::-webkit-scrollbar {
+.makers-hub .makers-shelf__rail::-webkit-scrollbar {
   display: none;
 }
 
-/* Emby 合集 / 流派拼贴 */
+.makers-hub .makers-shelf__rail.media-shelf__rail--skel {
+  pointer-events: none;
+}
+
+.makers-hub .makers-shelf__rail.media-shelf__rail--skel .makers-poster-skel {
+  width: 112px;
+  flex: 0 0 auto;
+  aspect-ratio: 2 / 3;
+  border-radius: 12px;
+}
+
+/* 合集 / 流派 / 文件夹 / 钻取：竖图一行 3 个 */
 .makers-collage-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px 10px;
 }
 
 .makers-collage-grid--skel {
@@ -19941,7 +19955,7 @@ a.scrape-src-card__url:active {
 
 .makers-collage-skel {
   display: block;
-  aspect-ratio: 16 / 10;
+  aspect-ratio: 2 / 3;
   border-radius: 12px;
   background: rgba(120, 120, 128, 0.12);
 }
@@ -19963,11 +19977,13 @@ a.scrape-src-card__url:active {
 .makers-collage__frame {
   position: relative;
   display: block;
-  aspect-ratio: 16 / 10;
+  aspect-ratio: 2 / 3;
   border-radius: 12px;
   overflow: hidden;
   background: rgba(28, 28, 30, 0.9);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  -webkit-transform: translateZ(0);
+  transform: translateZ(0);
 }
 
 .makers-collage__mosaic {
@@ -19985,8 +20001,10 @@ a.scrape-src-card__url:active {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  object-position: right center; /* 有码横 thumb：露出右侧竖封面 */
+  object-position: right center;
   display: block;
+  -webkit-transform: translateZ(0);
+  transform: translateZ(0);
 }
 
 .makers-collage__ph {
@@ -19998,13 +20016,14 @@ a.scrape-src-card__url:active {
   color: rgba(255, 255, 255, 0.55);
   font-size: 22px;
   font-weight: 600;
-  background: linear-gradient(145deg, #3a3a3c, #1c1c1e);
+  background: linear-gradient(160deg, #5b6578, #232833);
 }
 
 .makers-collage__label {
   position: absolute;
   inset: auto 0 0 0;
-  padding: 28px 12px 12px;
+  z-index: 2;
+  padding: 28px 10px 10px;
   background: linear-gradient(
     to top,
     rgba(0, 0, 0, 0.78) 0%,
@@ -20012,11 +20031,12 @@ a.scrape-src-card__url:active {
     transparent 100%
   );
   color: #fff;
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 650;
   letter-spacing: -0.01em;
   line-height: 1.25;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
 }
 
 .makers-collage__caption {
@@ -20047,13 +20067,13 @@ a.scrape-src-card__url:active {
 /* Emby 文件夹 */
 .makers-folder-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px 10px;
 }
 
 .makers-folder-skel {
   display: block;
-  aspect-ratio: 16 / 11;
+  aspect-ratio: 2 / 3;
   border-radius: 12px;
   background: rgba(120, 120, 128, 0.12);
 }
@@ -20073,7 +20093,7 @@ a.scrape-src-card__url:active {
 
 .makers-folder__frame {
   position: relative;
-  aspect-ratio: 16 / 11;
+  aspect-ratio: 2 / 3;
   border-radius: 12px;
   overflow: hidden;
   background: #2c2c2e;
@@ -20084,6 +20104,7 @@ a.scrape-src-card__url:active {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: center center;
   display: block;
   opacity: 0.92;
 }
@@ -20304,28 +20325,45 @@ a.scrape-src-card__url:active {
 }
 
 .makers-hub .makers-poster.media-poster--sm {
-  width: 132px;
+  width: 100%;
+  min-width: 0;
+}
+
+.makers-hub .makers-shelf .makers-poster.media-poster--sm {
+  width: 112px;
+  min-width: 112px;
+  flex: 0 0 auto;
 }
 
 .makers-hub .makers-poster.media-poster--lg {
-  width: 148px;
+  width: 100%;
+  min-width: 0;
 }
 
 .makers-poster__frame {
   aspect-ratio: 3 / 4;
   border-radius: 16px;
+  /* 未加载时不要接近纯黑，避免 iOS lazy 未触发时整墙发黑 */
   background:
-    linear-gradient(165deg, #5b6578 0%, #232833 58%, #14171d 100%);
+    linear-gradient(165deg, #d8dde6 0%, #b4bcc8 55%, #8e97a5 100%);
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.22) inset,
     0 1px 2px rgba(15, 20, 30, 0.05),
     0 10px 28px rgba(15, 30, 60, 0.12);
+  /* iOS：圆角 + overflow + 父级 transform 时强制独立层，避免封面画成黑块 */
+  -webkit-transform: translateZ(0);
+  transform: translateZ(0);
+  isolation: isolate;
 }
 
 .makers-poster__frame img {
   opacity: 1;
   object-fit: cover;
-  object-position: right center;
+  object-position: center center;
+  -webkit-transform: translateZ(0);
+  transform: translateZ(0);
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
 }
 
 .makers-poster__year {
@@ -20376,10 +20414,10 @@ a.scrape-src-card__url:active {
 }
 
 .makers-poster-skel {
-  width: 132px;
-  aspect-ratio: 3 / 4;
+  width: 100%;
+  aspect-ratio: 2 / 3;
   border-radius: 16px;
-  flex: 0 0 auto;
+  min-width: 0;
 }
 
 .makers-hub .media-wall > .makers-poster {
@@ -20416,6 +20454,8 @@ a.scrape-src-card__url:active {
 }
 
 .dark .makers-poster__frame {
+  background:
+    linear-gradient(165deg, #3a3f4a 0%, #2a2e36 55%, #1c1f26 100%);
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.08) inset,
     0 10px 28px rgba(0, 0, 0, 0.35);
@@ -20703,8 +20743,19 @@ a.scrape-src-card__url:active {
 }
 
 .mkd-related .makers-shelf__rail {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
   margin: 0 -4px;
   padding: 0 4px 4px;
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.mkd-related .makers-shelf__rail .makers-poster {
+  width: 112px;
+  flex: 0 0 auto;
 }
 
 .mkd-actions {
