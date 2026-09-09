@@ -95,6 +95,7 @@ _PROVIDER_SPEC: dict[str, str | DetailFn] = {
     "madou": _legacy_madou,
     # ported modules (filled as files land)
     "r18dev": "r18dev",
+    "avwikidb": "avwikidb",
     "libredmm": "libredmm",
     "javday": "javday",
     "carib": "carib",

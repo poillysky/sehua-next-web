@@ -1526,20 +1526,33 @@ def list_prefixes(*, region: str = "", studio: str = "") -> list[dict[str, Any]]
         params.append(match)
     studio_q = str(studio or "").strip()
     if studio_q:
-        _append_studio_clause(clauses, params, studio_q)
+        _append_studio_clause(clauses, params, studio_q, region=region)
     where = " AND ".join(clauses)
     with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 f"""
                 SELECT prefix, count(*)::int AS n,
+                       max(code) AS latest_code,
+                       max(
+                         NULLIF(
+                           substring(source_text from '年份：([0-9]{{4}})'),
+                           ''
+                         )
+                       ) AS latest_year,
+                       max(updated_at) AS latest_at,
                        array_agg(
                          COALESCE(
                            NULLIF(thumb_path, ''),
                            NULLIF(poster_path, ''),
                            NULLIF(cover_url, '')
                          )
-                         ORDER BY code ASC
+                         ORDER BY
+                           NULLIF(
+                             substring(source_text from '年份：([0-9]{{4}})'),
+                             ''
+                           ) DESC NULLS LAST,
+                           code DESC
                        ) FILTER (
                          WHERE coalesce(poster_path,'') <> ''
                             OR coalesce(thumb_path,'') <> ''
@@ -1548,7 +1561,15 @@ def list_prefixes(*, region: str = "", studio: str = "") -> list[dict[str, Any]]
                 FROM {TABLE}
                 WHERE {where}
                 GROUP BY prefix
-                ORDER BY prefix ASC
+                ORDER BY
+                  max(
+                    NULLIF(
+                      substring(source_text from '年份：([0-9]{{4}})'),
+                      ''
+                    )
+                  ) DESC NULLS LAST,
+                  max(updated_at) DESC NULLS LAST,
+                  prefix ASC
                 """,
                 params,
             )
@@ -1573,17 +1594,58 @@ def list_prefixes(*, region: str = "", studio: str = "") -> list[dict[str, Any]]
             if c and not str(c).startswith(("http://", "https://")):
                 primary = str(c)
                 break
+        year_raw = row.get("latest_year")
+        try:
+            latest_year = int(year_raw) if year_raw not in (None, "") else 0
+        except (TypeError, ValueError):
+            latest_year = 0
+        latest_at = row.get("latest_at")
+        latest_at_s = ""
+        if latest_at is not None:
+            try:
+                latest_at_s = latest_at.isoformat()  # datetime
+            except AttributeError:
+                latest_at_s = str(latest_at)
+        pref = str(row.get("prefix") or "")
+        blurb = _prefix_blurb(pref)
+        from .prefix_maker_names import prefix_line_rank
+
         out.append(
             {
-                "prefix": str(row.get("prefix") or ""),
+                "prefix": pref,
                 "count": int(row.get("n") or 0),
+                "latestCode": str(row.get("latest_code") or "").strip().upper(),
+                "latestYear": latest_year,
+                "latestAt": latest_at_s,
+                "lineRank": prefix_line_rank(pref, blurb),
                 "posterPath": primary,
                 "posterApi": poster_api,
                 "posterApis": [],
                 "coverUrl": cover_url,
-                "blurb": _prefix_blurb(str(row.get("prefix") or "")),
+                "blurb": blurb,
             }
         )
+
+    def _at_ts(raw: Any) -> float:
+        s = str(raw or "").strip()
+        if not s:
+            return 0.0
+        try:
+            from datetime import datetime
+
+            return datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp()
+        except Exception:  # noqa: BLE001
+            return 0.0
+
+    # 主力线优先，同档再按发行年 / 入库时间新→旧
+    out.sort(
+        key=lambda r: (
+            int(r.get("lineRank") or 99),
+            -int(r.get("latestYear") or 0),
+            -_at_ts(r.get("latestAt")),
+            str(r.get("prefix") or ""),
+        )
+    )
     return out
 
 
@@ -1664,7 +1726,7 @@ def list_items(
             )
             params.extend([tag_q, tag_q])
     if studio_q:
-        _append_studio_clause(clauses, params, studio_q)
+        _append_studio_clause(clauses, params, studio_q, region=region)
     if actress_q:
         _append_actress_clause(clauses, params, actress_q)
     where = " AND ".join(clauses)
@@ -1804,9 +1866,13 @@ def _studio_norm_sql(expr: str) -> str:
 
 
 def _append_studio_clause(
-    clauses: list[str], params: list[Any], studio: str
+    clauses: list[str],
+    params: list[Any],
+    studio: str,
+    *,
+    region: str = "",
 ) -> None:
-    """厂牌筛选：优先按「前缀→厂牌」标准表，不依赖 NFO 片商字段。"""
+    """厂牌筛选：优先按「前缀→厂牌」标准表（catalog 分区优先），不依赖 NFO 片商字段。"""
     from .studio_display_names import (
         all_mapped_prefixes,
         prefixes_for_studio_query,
@@ -1817,7 +1883,7 @@ def _append_studio_clause(
     if not studio_q:
         return
     if studio_q in {"未标注厂牌", "未标注", "(unknown)"}:
-        mapped = all_mapped_prefixes()
+        mapped = all_mapped_prefixes(region)
         if mapped:
             clauses.append(
                 "(coalesce(prefix, '') = '' OR upper(prefix) <> ALL(%s))"
@@ -1827,7 +1893,7 @@ def _append_studio_clause(
             clauses.append("coalesce(prefix, '') = ''")
         return
 
-    prefs = prefixes_for_studio_query(studio_q)
+    prefs = prefixes_for_studio_query(studio_q, region=region)
     if prefs:
         clauses.append("upper(coalesce(prefix, '')) = ANY(%s)")
         params.append(prefs)
@@ -1902,7 +1968,7 @@ def _build_studio_facets_by_prefix(*, region: str = "") -> list[dict[str, Any]]:
                 paths.append(s)
             if len(paths) >= 8:
                 break
-        studio = resolve_studio_for_prefix(pref)
+        studio = resolve_studio_for_prefix(pref, region=region)
         if not studio:
             unknown_n += n
             unknown_paths.extend(paths)
@@ -2104,7 +2170,7 @@ def _reattribute_unlabeled_studios(
         paths = list(b.get("paths") or [])
         if n <= 0:
             continue
-        studio_disp = resolve_studio_for_prefix(pref)
+        studio_disp = resolve_studio_for_prefix(pref, region=region)
         if not studio_disp:
             leftover += n
             leftover_paths.extend(paths)
@@ -2179,7 +2245,8 @@ _FACETS_CACHE_MAX = 48
 
 # 磁盘快照：厂牌/标签/女优等全库聚合很慢，落盘后重启仍可秒开
 _FACETS_SNAP_DIR = "scrap_facets_snap"
-_FACETS_SNAP_VERSION = 1
+# v2：studio 分面改用 prefix_catalog 分区映射
+_FACETS_SNAP_VERSION = 2
 _FACETS_SNAP_KINDS = ("genre", "actress", "studio", "tag")
 _facets_snap_lock = threading.Lock()
 
@@ -2279,7 +2346,7 @@ def _build_facets_sql_line_tokens(
     studio_q = str(studio or "").strip()
     pref = str(prefix or "").strip().upper()
     if studio_q:
-        _append_studio_clause(clauses, params, studio_q)
+        _append_studio_clause(clauses, params, studio_q, region=region)
     if pref:
         clauses.append("upper(prefix) = %s")
         params.append(pref)
@@ -2474,7 +2541,7 @@ def _build_facets_all(
     studio_q = str(studio or "").strip()
     pref = str(prefix or "").strip().upper()
     if studio_q:
-        _append_studio_clause(clauses, params, studio_q)
+        _append_studio_clause(clauses, params, studio_q, region=region)
     if pref:
         clauses.append("upper(prefix) = %s")
         params.append(pref)
@@ -2640,7 +2707,7 @@ def _purge_facets_memory_cache(*, region: str = "", kind: str = "") -> None:
     region_s = str(region or "")
     dead: list[str] = []
     for k in _FACETS_CACHE:
-        # key: v7|{region}|{kind}|{studio}|{pref}
+        # key: v8|{region}|{kind}|{studio}|{pref}
         parts = k.split("|")
         if len(parts) < 3:
             continue
@@ -2705,7 +2772,7 @@ def refresh_facets_snapshot(
         now = time.monotonic()
         for key in ordered:
             hit_rows = _load_facets_snapshot(region, key) or []
-            _FACETS_CACHE[f"v7|{region}|{key}||"] = (now, list(hit_rows))
+            _FACETS_CACHE[f"v8|{region}|{key}||"] = (now, list(hit_rows))
         enforce_max(_FACETS_CACHE, _FACETS_CACHE_MAX)
     return {
         "region": str(region or ""),
@@ -2732,7 +2799,7 @@ def list_facets(
     key = _normalize_facet_kind(kind)
     studio_q = str(studio or "").strip()
     pref = str(prefix or "").strip().upper()
-    cache_key = f"v7|{region}|{key}|{studio_q}|{pref}"
+    cache_key = f"v8|{region}|{key}|{studio_q}|{pref}"
     hub_level = not studio_q and not pref
 
     now = time.monotonic()

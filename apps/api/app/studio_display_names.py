@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from functools import lru_cache
+from typing import Any
 
 from .prefix_maker_names import MAKER_I18N
 
@@ -673,8 +674,8 @@ PREFIX_STUDIO_MAP: dict[str, str] = {
     "NHDTC": "ナチュラルハイ",
     "NSPS": "ながえSTYLE",
     "NASS": "なでしこ",
-    "NASH": "なでしこ",
-    "NATR": "なでしこ",
+    "NASH": "クリスタル映像",
+    "NATR": "ビッグモーカル",
     "NADE": "なでしこ",
     "SDDE": "SOD Create",
     "SDMT": "SOD Create",
@@ -682,7 +683,7 @@ PREFIX_STUDIO_MAP: dict[str, str] = {
     "STARS": "SOD Create",
     "SAVR": "SOD Create",
     "DSVR": "SOD Create",
-    "SACE": "SOD Create",
+    "SACE": "MAX-A",
     "KFNE": "SOD Create",
     "KDMN": "SOD Create",
     "VRKM": "KMP",
@@ -772,7 +773,7 @@ def _maker_key_from_triple(zh: str, ja: str, en: str) -> str:
 
 @lru_cache(maxsize=1)
 def _prefix_to_maker() -> dict[str, str]:
-    """upper(prefix) → 厂牌主名（用于展示/归位）。"""
+    """upper(prefix) → 厂牌主名（fallback：av-makers / PREFIX_I18N / 硬编码）。"""
     from .prefix_maker_names import PREFIX_I18N, load_prefix_maker_base
 
     out: dict[str, str] = {}
@@ -801,28 +802,124 @@ def _prefix_to_maker() -> dict[str, str]:
     return out
 
 
-def resolve_studio_for_prefix(prefix: str) -> str:
-    """前缀 → 厂牌展示名；无法映射则空串。"""
+def _catalog_maker_key(ent: dict[str, Any]) -> str:
+    """从 catalog 前缀条目抽出可归位的厂牌主名。"""
+    for field in ("maker_en", "maker", "maker_zh", "maker_ja"):
+        raw = str(ent.get(field) or "").strip()
+        if not raw:
+            continue
+        # 合成展示「A / B」取左侧主名
+        first = raw.split("/")[0].strip() if "/" in raw else raw
+        for cand in (raw, first):
+            c = str(cand or "").strip()
+            if not c:
+                continue
+            if c in MAKER_I18N or c in STUDIO_ALIASES or c in STUDIO_CARD_LABEL:
+                return STUDIO_ALIASES.get(c, c)
+            # 别名 / 展示名反查
+            ck = resolve_studio_canon_key(c)
+            if ck:
+                # 尽量回到 MAKER_I18N 主 key
+                for mk in MAKER_I18N:
+                    if studio_norm_key(mk) == ck:
+                        return mk
+                disp = resolve_studio_display(c)
+                if disp:
+                    for mk, label in STUDIO_CARD_LABEL.items():
+                        if label == disp or studio_norm_key(label) == ck:
+                            return mk
+                return c
+    return ""
+
+
+# region_id → (catalog_mtime, prefix→maker_key)
+_region_prefix_maps: dict[str, tuple[float | None, dict[str, str]]] = {}
+
+
+def _normalize_region_id(region: str) -> str:
+    from .region_meta import REGION_META, REGION_ORDER, resolve_fs_region
+
+    raw = str(region or "").strip()
+    if not raw:
+        return ""
+    rid = resolve_fs_region(raw) or raw
+    if rid in REGION_META:
+        return rid
+    # 中文区名 / 库内 label
+    for key in REGION_ORDER:
+        meta = REGION_META[key]
+        if raw == key or raw == meta.get("label") or raw == meta.get("db_region"):
+            return key
+    return rid
+
+
+def prefix_to_maker_for_region(region: str = "") -> dict[str, str]:
+    """upper(prefix) → 厂牌主名。
+
+    有 region 时：prefix_catalog 优先，未命中再 fallback 全局表。
+    无 region 时：仅全局 fallback（兼容旧调用）。
+    """
+    from . import prefix_catalog_store as store
+
+    rid = _normalize_region_id(region)
+    fallback = _prefix_to_maker()
+    if not rid:
+        return dict(fallback)
+
+    try:
+        mtime = store.catalog_path().stat().st_mtime
+    except OSError:
+        mtime = None
+    cached = _region_prefix_maps.get(rid)
+    if cached and cached[0] == mtime and cached[1]:
+        return cached[1]
+
+    out = dict(fallback)
+    try:
+        doc = store.load_catalog()
+        bucket = (doc.get("regions") or {}).get(rid, {}).get("prefixes") or {}
+    except Exception:  # noqa: BLE001
+        bucket = {}
+    for pref, ent in bucket.items():
+        p = str(pref or "").strip().upper()
+        if not p or not isinstance(ent, dict):
+            continue
+        mk = _catalog_maker_key(ent)
+        if mk:
+            out[p] = STUDIO_ALIASES.get(mk, mk)
+
+    _region_prefix_maps[rid] = (mtime, out)
+    return out
+
+
+def invalidate_region_prefix_maps() -> None:
+    """catalog 写回后可调用，丢掉 region 缓存。"""
+    _region_prefix_maps.clear()
+    _prefix_to_maker.cache_clear()
+
+
+def resolve_studio_for_prefix(prefix: str, region: str = "") -> str:
+    """前缀 → 厂牌展示名；无法映射则空串。region 命中 catalog 分区映射。"""
     p = str(prefix or "").strip().upper()
     if not p:
         return ""
-    maker = _prefix_to_maker().get(p, "")
+    maker = prefix_to_maker_for_region(region).get(p, "")
     if not maker:
         return ""
     return resolve_studio_display(maker) or preferred_studio_label(maker) or maker
 
 
-def prefixes_for_studio_query(studio_q: str) -> list[str]:
-    """某厂牌下应用于「缺片商」回填的前缀列表。"""
+def prefixes_for_studio_query(studio_q: str, region: str = "") -> list[str]:
+    """某厂牌下的前缀列表（catalog 分区优先）。"""
     canon = resolve_studio_canon_key(studio_q)
     if not canon:
         return []
     out: list[str] = []
-    for pref, maker in _prefix_to_maker().items():
+    for pref, maker in prefix_to_maker_for_region(region).items():
         if resolve_studio_canon_key(maker) == canon:
             out.append(pref)
     return sorted(set(out))
 
 
-def all_mapped_prefixes() -> list[str]:
-    return sorted(_prefix_to_maker().keys())
+def all_mapped_prefixes(region: str = "") -> list[str]:
+    return sorted(prefix_to_maker_for_region(region).keys())

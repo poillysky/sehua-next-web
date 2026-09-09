@@ -70,6 +70,7 @@ MAKER_I18N: dict[str, tuple[str, str, str]] = {
     "SCOOP": ("SCOOP", "スクープ", "SCOOP"),
     "REAL": ("REAL", "レアル", "REAL"),
     "DOC": ("DOC", "ドック", "DOC"),
+    "Mr.Michiru": ("Mr.Michiru / 美汁流", "ミスターミチル", "Mr.Michiru"),
     "ROYD": ("ROYD", "ロイド", "ROYD"),
     "Materiall": ("Materiall", "マテリアル", "Materiall"),
     "LUNATICS": ("LUNATICS", "ルナティックス", "LUNATICS"),
@@ -862,17 +863,26 @@ def _guess_triple(raw: str) -> tuple[str, str, str]:
 
 
 def load_prefix_maker_base() -> dict[str, str]:
-    """prefix → av-makers 原始 maker 字符串。"""
+    """prefix → av-makers 原始 maker 字符串。
+
+    日本表优先：国产/欧美与有码撞前缀时（如 MDL）不覆盖日本映射。
+    """
     out: dict[str, str] = {}
     cfg = ROOT / "apps" / "web" / "src" / "config"
-    for name in ("av-makers.japan.json", "av-makers.china.json", "av-makers.western.json"):
+    # china/western 先填；japan 后写且不丢已有冲突键的日本值——改为 japan 最后覆盖
+    for name in ("av-makers.china.json", "av-makers.western.json", "av-makers.japan.json"):
         path = cfg / name
         if not path.exists():
             continue
         for row in json.loads(path.read_text(encoding="utf-8")):
             maker = str(row.get("maker") or "").strip()
             for p in row.get("prefixes") or []:
-                out[std_prefix(p)] = maker
+                key = std_prefix(p)
+                if not key or not maker:
+                    continue
+                # japan 文件最后加载，允许覆盖同名前缀的跨区冲突
+                if name.endswith("japan.json") or key not in out:
+                    out[key] = maker
     return out
 
 
@@ -1027,6 +1037,48 @@ def resolve_maker_intro_for_prefix(prefix: str) -> str:
                 if hit:
                     return hit
     return ""
+
+
+def prefix_line_rank(prefix: str, blurb: str = "") -> int:
+    """前缀货架优先级：越小越靠前（现行主力 < 上一代 < 旁支 < VR/合集）。"""
+    pref = std_prefix(prefix)
+    notes = ""
+    try:
+        path = ROOT / "apps" / "web" / "src" / "config" / "av-makers.japan.json"
+        if path.exists():
+            for row in json.loads(path.read_text(encoding="utf-8")):
+                pn_map = row.get("prefix_notes") or {}
+                pn = pn_map.get(pref) or pn_map.get(pref.upper())
+                if pn:
+                    notes = str(pn)
+                    break
+    except Exception:  # noqa: BLE001
+        notes = ""
+    text = f"{blurb or ''} {PREFIX_INTRO.get(pref, '')} {notes}"
+
+    if re.search(r"现行主力|现行主线|现行专属", text):
+        return 0
+    if re.search(r"较新主力|较新专属|较新主线", text):
+        return 1
+    if re.search(r"上一代主力|上一代主线", text):
+        return 2
+    if re.search(r"主力专属|主力线|主力：|主力巨乳|专属女优主力|剧情主力", text):
+        return 3
+    if re.search(r"经典专属|经典.*线|全盛", text):
+        return 4
+    if re.search(r"较早|早期|草创|历史主线|更早主线|旧专属", text):
+        return 5
+    if re.search(r"过渡", text):
+        return 6
+    if re.search(r"出道", text):
+        return 7
+    if re.search(r"旁支|企划", text) and not re.search(r"合集|精选", text):
+        return 8
+    if re.search(r"(?i)(?:^|[^a-z])vr(?:[^a-z]|$)", text):
+        return 9
+    if re.search(r"合集|精选|特别篇|祭典", text):
+        return 10
+    return 5
 
 
 def resolve_maker_intro_for_studio(studio_name: str) -> str:

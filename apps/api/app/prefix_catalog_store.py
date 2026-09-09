@@ -249,6 +249,12 @@ def save_catalog(doc: dict[str, Any]) -> Path:
             _cache_mtime = path.stat().st_mtime
         except OSError:
             _cache_mtime = None
+        try:
+            from .studio_display_names import invalidate_region_prefix_maps
+
+            invalidate_region_prefix_maps()
+        except Exception:  # noqa: BLE001
+            pass
         return path
 
 
@@ -340,6 +346,80 @@ def list_prefixes(
             "verified_at": ent.get("verified_at") or "",
         }
         out.append(row)
+    return out
+
+
+def list_makers(region_id: str, *, q: str = "") -> list[dict[str, Any]]:
+    """按厂牌聚合前缀（与文件夹归位同一套 catalog 映射）。"""
+    from .studio_display_names import (
+        preferred_studio_label,
+        resolve_studio_canon_key,
+        resolve_studio_display,
+        resolve_studio_for_prefix,
+    )
+
+    doc = load_catalog()
+    reg = doc["regions"].get(region_id)
+    if not reg:
+        return []
+    needle = str(q or "").strip().casefold()
+    buckets: dict[str, dict[str, Any]] = {}
+    for pref, ent in (reg.get("prefixes") or {}).items():
+        p = std_prefix(pref)
+        if not p:
+            continue
+        label = resolve_studio_for_prefix(p, region=region_id)
+        if not label:
+            raw = str(ent.get("maker") or ent.get("maker_en") or p).strip()
+            label = (
+                resolve_studio_display(raw)
+                or preferred_studio_label(raw)
+                or raw
+                or p
+            )
+        canon = resolve_studio_canon_key(label) or label.casefold()
+        cur = buckets.get(canon)
+        code_n = effective_code_count(ent)
+        if not cur:
+            buckets[canon] = {
+                "maker": label,
+                "label": label,
+                "canon": canon,
+                "prefixes": [p],
+                "prefix_count": 1,
+                "catalog_code_count": code_n,
+                "maker_zh": str(ent.get("maker_zh") or ""),
+                "maker_ja": str(ent.get("maker_ja") or ""),
+                "maker_en": str(ent.get("maker_en") or ""),
+            }
+        else:
+            cur["prefixes"].append(p)
+            cur["prefix_count"] = len(cur["prefixes"])
+            cur["catalog_code_count"] = int(cur["catalog_code_count"] or 0) + code_n
+            if not cur.get("maker_zh") and ent.get("maker_zh"):
+                cur["maker_zh"] = ent["maker_zh"]
+            if not cur.get("maker_ja") and ent.get("maker_ja"):
+                cur["maker_ja"] = ent["maker_ja"]
+            if not cur.get("maker_en") and ent.get("maker_en"):
+                cur["maker_en"] = ent["maker_en"]
+
+    out: list[dict[str, Any]] = []
+    for row in buckets.values():
+        row["prefixes"] = sorted(set(row["prefixes"]))
+        row["prefix_count"] = len(row["prefixes"])
+        blob = " ".join(
+            [
+                str(row.get("maker") or ""),
+                str(row.get("maker_zh") or ""),
+                str(row.get("maker_ja") or ""),
+                str(row.get("maker_en") or ""),
+                " ".join(row["prefixes"]),
+            ]
+        ).casefold()
+        if needle and needle not in blob:
+            continue
+        out.append(row)
+    out.sort(key=lambda r: (-int(r.get("catalog_code_count") or 0), str(r.get("maker") or "")))
     return out
 
 

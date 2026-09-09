@@ -181,6 +181,16 @@ SOURCE_CATALOG: list[dict[str, Any]] = [
         "implemented": True,
         "notes": "JSON API · 番号补零 · 免 CF",
     },
+    {
+        "id": "avwikidb",
+        "label": "AVWikiDB",
+        "group": "av",
+        "defaultUrl": "https://avwikidb.com",
+        "probePath": "/",
+        "access": "proxy_adaptive",
+        "implemented": True,
+        "notes": "FANZA 索引 · 厂牌/品番映射强 · 自适应（curl 优先）",
+    },
     # —— 综合 ——
     {
         "id": "javday",
@@ -400,6 +410,7 @@ MIRROR_SEEDS: dict[str, list[str]] = {
     "lulubar": ["https://lulubar.co"],
     "avsex": ["https://avsex.cc"],
     "r18dev": ["https://r18.dev"],
+    "avwikidb": ["https://avwikidb.com", "https://www.avwikidb.com"],
     "hscangku": ["http://hsck.net"],
     "theporndb": ["https://theporndb.net"],
     "avheat": ["https://avheat.shop"],

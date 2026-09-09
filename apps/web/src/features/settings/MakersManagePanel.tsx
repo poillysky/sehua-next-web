@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ChevronRight, Folder, FolderPlus, RefreshCw } from 'lucide-react';
 import {
   browsePrefixCatalogStrmDirs,
+  getPrefixCatalogHarvestStatus,
   getPrefixCatalogLocalIndexStatus,
   getPrefixCatalogPrefixDetail,
   getPrefixCatalogPrefixes,
@@ -17,6 +18,7 @@ import {
   mkdirPrefixCatalogStrmDir,
   putPrefixCatalogStrmSyncSettings,
   putScrapLibraryEmbedSettings,
+  startPrefixCatalogAvwikidbSync,
   startPrefixCatalogLocalIndex,
   startPrefixCatalogStrmSync,
   startScrapLibraryEmbed,
@@ -37,7 +39,7 @@ import { EnrichStrategyPanel } from '@/features/settings/EnrichStrategyPanel';
 
 const CODES_PAGE_SIZE = 50;
 
-type ScanLogModal = 'local' | 'strm' | 'scrap' | 'enrich' | null;
+type ScanLogModal = 'local' | 'avwikidb' | 'strm' | 'scrap' | 'enrich' | null;
 
 type CatalogNav =
   | { level: 'regions' }
@@ -77,6 +79,11 @@ export function MakersManagePanel({
   const [localIndexLog, setLocalIndexLog] = useState<string[]>([]);
   const localIndexPollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const localIndexPollingRef = useRef(false);
+  const [avwikiBusy, setAvwikiBusy] = useState(false);
+  const [avwikiPhase, setAvwikiPhase] = useState('');
+  const [avwikiLog, setAvwikiLog] = useState<string[]>([]);
+  const avwikiPollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const avwikiPollingRef = useRef(false);
   const [strmRoot, setStrmRoot] = useState('');
   const [strmBusy, setStrmBusy] = useState(false);
   const [strmPhase, setStrmPhase] = useState('');
@@ -142,6 +149,7 @@ export function MakersManagePanel({
   useEffect(() => {
     return () => {
       if (localIndexPollRef.current) clearTimeout(localIndexPollRef.current);
+      if (avwikiPollRef.current) clearTimeout(avwikiPollRef.current);
       if (strmPollRef.current) clearTimeout(strmPollRef.current);
       if (scrapPollRef.current) clearTimeout(scrapPollRef.current);
       if (enrichPollRef.current) clearTimeout(enrichPollRef.current);
@@ -196,7 +204,7 @@ export function MakersManagePanel({
   }
 
   async function onLocalIndexScan() {
-    if (localIndexBusy || catalogBusy || strmBusy) return;
+    if (localIndexBusy || avwikiBusy || catalogBusy || strmBusy) return;
     setMsg('');
     setLocalIndexBusy(true);
     setLocalIndexPhase('starting');
@@ -215,6 +223,66 @@ export function MakersManagePanel({
       setLocalIndexPhase('');
       setLocalIndexProgress(null);
       const text = e instanceof Error ? e.message : '启动双库扫描失败';
+      setMsg(text);
+      onStatus(text, 'warn');
+    }
+  }
+
+  async function pollAvwikiUntilDone() {
+    if (avwikiPollingRef.current) return;
+    avwikiPollingRef.current = true;
+    try {
+      for (;;) {
+        const st = await getPrefixCatalogHarvestStatus();
+        setAvwikiBusy(st.running);
+        setAvwikiPhase(st.phase || (st.running ? '同步中…' : ''));
+        setAvwikiLog(Array.isArray(st.log) ? st.log.slice(-40) : []);
+        if (!st.running) {
+          if (st.error) {
+            setMsg(st.error);
+            onStatus('AVWikiDB 同步失败', 'warn');
+          } else if (st.result) {
+            const added = st.result.added ?? 0;
+            const refreshed = st.result.refreshed ?? st.result.checked ?? 0;
+            const prefixes = st.result.summary?.prefix_total;
+            setMsg(
+              prefixes != null
+                ? `厂牌映射完成 · 核对 ${refreshed} · 新增前缀 ${added} · 合计 ${prefixes}`
+                : `厂牌映射完成 · 核对 ${refreshed} · 新增前缀 ${added}`,
+            );
+            onStatus('AVWikiDB 厂牌映射完成', 'ok');
+            await refreshCatalogSummary();
+          }
+          setAvwikiPhase('');
+          return;
+        }
+        await new Promise<void>((resolve) => {
+          avwikiPollRef.current = setTimeout(resolve, 600);
+        });
+      }
+    } finally {
+      avwikiPollingRef.current = false;
+    }
+  }
+
+  async function onAvwikiSync() {
+    if (avwikiBusy || localIndexBusy || catalogBusy || strmBusy) return;
+    setMsg('');
+    setAvwikiBusy(true);
+    setAvwikiPhase('starting');
+    setAvwikiLog([]);
+    onStatus('AVWikiDB 厂牌映射中…', 'mute');
+    try {
+      await startPrefixCatalogAvwikidbSync({
+        region: 'japan_censored',
+        expand: true,
+        minMovieCount: 5,
+      });
+      await pollAvwikiUntilDone();
+    } catch (e) {
+      setAvwikiBusy(false);
+      setAvwikiPhase('');
+      const text = e instanceof Error ? e.message : '启动 AVWikiDB 同步失败';
       setMsg(text);
       onStatus(text, 'warn');
     }
@@ -1095,7 +1163,7 @@ export function MakersManagePanel({
                 <button
                   type="button"
                   className="makers-manage__probe-btn"
-                  disabled={localIndexBusy || catalogBusy || strmBusy || scrapBusy}
+                  disabled={localIndexBusy || avwikiBusy || catalogBusy || strmBusy || scrapBusy}
                   onClick={() => void onLocalIndexScan()}
                 >
                   {localIndexBusy
@@ -1155,6 +1223,57 @@ export function MakersManagePanel({
                           type="button"
                           className="makers-manage__log-btn"
                           onClick={() => setScanLogModal('local')}
+                        >
+                          日志
+                        </button>
+                      ) : null}
+                    </span>
+                  </div>
+                </div>
+              ) : null}
+            </li>
+            <li>
+              <div className="settings-nav makers-manage__status">
+                <span className="settings-nav__main">
+                  <span className="settings-nav__title">AVWikiDB 厂牌映射</span>
+                  <span className="settings-nav__desc">
+                    {avwikiBusy
+                      ? avwikiPhase || '同步中…'
+                      : '回填日文厂牌 · 按已有厂牌补缺前缀（日本有码）'}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  className="makers-manage__probe-btn"
+                  disabled={
+                    avwikiBusy ||
+                    localIndexBusy ||
+                    catalogBusy ||
+                    strmBusy ||
+                    scrapBusy
+                  }
+                  onClick={() => void onAvwikiSync()}
+                >
+                  {avwikiBusy ? '同步中…' : '开始同步'}
+                </button>
+              </div>
+              {avwikiBusy || avwikiLog.length > 0 ? (
+                <div
+                  className="makers-manage__scan-progress"
+                  aria-live="polite"
+                >
+                  <div className="makers-manage__scan-meta">
+                    <span className="allow-select">
+                      {avwikiBusy
+                        ? avwikiPhase || '同步中…'
+                        : '已完成'}
+                    </span>
+                    <span className="makers-manage__scan-meta-actions">
+                      {avwikiLog.length > 0 ? (
+                        <button
+                          type="button"
+                          className="makers-manage__log-btn"
+                          onClick={() => setScanLogModal('avwikidb')}
                         >
                           日志
                         </button>
@@ -1591,7 +1710,9 @@ export function MakersManagePanel({
               ? '刮削库同步日志'
               : scanLogModal === 'enrich'
                 ? '元数据补齐日志'
-                : '双库扫描日志'
+                : scanLogModal === 'avwikidb'
+                  ? 'AVWikiDB 厂牌映射日志'
+                  : '双库扫描日志'
         }
         onClose={() => setScanLogModal(null)}
         cardClassName="makers-manage__log-modal"
@@ -1603,7 +1724,9 @@ export function MakersManagePanel({
               ? scrapLog
               : scanLogModal === 'enrich'
                 ? enrichLog
-                : localIndexLog
+                : scanLogModal === 'avwikidb'
+                  ? avwikiLog
+                  : localIndexLog
           ).map((line, i) => (
             <li key={`${scanLogModal}-${i}-${line}`}>{line}</li>
           ))}
@@ -1613,7 +1736,9 @@ export function MakersManagePanel({
               ? scrapLog
               : scanLogModal === 'enrich'
                 ? enrichLog
-                : localIndexLog
+                : scanLogModal === 'avwikidb'
+                  ? avwikiLog
+                  : localIndexLog
           ).length === 0 ? (
             <li className="makers-manage__scan-log-modal--empty">暂无日志</li>
           ) : null}

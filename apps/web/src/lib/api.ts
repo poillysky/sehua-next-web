@@ -1658,6 +1658,14 @@ export type ScrapLibraryEmbedRegion = {
 export type ScrapLibraryEmbedPrefix = {
   prefix: string;
   count: number;
+  /** 该前缀库内最新番号 */
+  latestCode?: string;
+  /** 该前缀库内最新发行年份（先后排序） */
+  latestYear?: number;
+  /** 该前缀最近入库/更新时间 ISO */
+  latestAt?: string;
+  /** 主力线优先级，越小越靠前 */
+  lineRank?: number;
   blurb?: string;
   posterPath?: string;
   posterApi?: string;
@@ -3230,6 +3238,30 @@ export async function getPrefixCatalogPrefixes(
   return ((await res.json()) as Envelope<PrefixCatalogPrefixRow[]>).data;
 }
 
+export type PrefixCatalogMakerRow = {
+  maker: string;
+  label: string;
+  canon: string;
+  prefixes: string[];
+  prefix_count: number;
+  catalog_code_count: number;
+  maker_zh?: string;
+  maker_ja?: string;
+  maker_en?: string;
+};
+
+export async function getPrefixCatalogMakers(
+  regionId: string,
+  q = '',
+): Promise<PrefixCatalogMakerRow[]> {
+  const qs = q.trim() ? `?q=${encodeURIComponent(q.trim())}` : '';
+  const res = await apiFetch(
+    `/prefix-catalog/regions/${encodeURIComponent(regionId)}/makers${qs}`,
+  );
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<PrefixCatalogMakerRow[]>).data;
+}
+
 export async function getPrefixCatalogPrefixDetail(
   regionId: string,
   prefix: string,
@@ -3281,6 +3313,60 @@ export async function getPrefixCatalogLocalIndexStatus(): Promise<PrefixCatalogL
   const res = await apiFetch('/prefix-catalog/local-index/status');
   if (!res.ok) throw new Error(await parseError(res));
   return ((await res.json()) as Envelope<PrefixCatalogLocalIndexStatus>).data;
+}
+
+export type PrefixCatalogHarvestStatus = {
+  running: boolean;
+  phase: string;
+  log: string[];
+  result: {
+    region?: string;
+    mode?: string;
+    checked?: number;
+    refreshed?: number;
+    miss?: number;
+    error?: number;
+    makers?: number;
+    added?: number;
+    summary?: PrefixCatalogSummary;
+  } | null;
+  error: string | null;
+};
+
+/** AVWikiDB 厂牌↔前缀同步（回填 maker_ja，并可按已有厂牌扩前缀） */
+export async function startPrefixCatalogAvwikidbSync(opts?: {
+  region?: string;
+  expand?: boolean;
+  minMovieCount?: number;
+  limit?: number;
+  prefixes?: string[];
+}): Promise<{ started: boolean; region: string; mode: string }> {
+  const res = await apiFetch('/prefix-catalog/harvest', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      region: opts?.region || 'japan_censored',
+      mode: 'avwikidb',
+      expand: opts?.expand !== false,
+      min_movie_count: opts?.minMovieCount ?? 5,
+      limit: opts?.limit ?? 0,
+      prefixes: opts?.prefixes || [],
+    }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return (
+    (await res.json()) as Envelope<{
+      started: boolean;
+      region: string;
+      mode: string;
+    }>
+  ).data;
+}
+
+export async function getPrefixCatalogHarvestStatus(): Promise<PrefixCatalogHarvestStatus> {
+  const res = await apiFetch('/prefix-catalog/harvest/status');
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<PrefixCatalogHarvestStatus>).data;
 }
 
 export type PrefixCatalogStrmSyncSettings = {

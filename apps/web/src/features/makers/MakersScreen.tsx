@@ -33,9 +33,11 @@ import {
   MAKER_FACET_SORT_OPTS,
   MAKER_KIND_TABS,
   MAKER_LIBRARY_VIEWS,
+  MAKER_PREFIX_SORT_OPTS,
   MAKER_SORT_OPTS,
   type MakerFacetSortId,
   type MakerLibraryView,
+  type MakerPrefixSortId,
   type MakerSortId,
 } from './makersUi';
 import { ScrapPosterCard } from './ScrapPosterCard';
@@ -72,9 +74,17 @@ type Stack =
 
 const PAGE_SIZE = 45;
 
+function prefixCodeRank(code: string): number {
+  const m = String(code || '')
+    .trim()
+    .toUpperCase()
+    .match(/(\d+)\s*$/);
+  return m ? Number.parseInt(m[1], 10) : 0;
+}
+
 function sortPrefixes(
   rows: ScrapLibraryEmbedPrefix[],
-  sortId: MakerFacetSortId,
+  sortId: MakerPrefixSortId,
   order: 'asc' | 'desc',
 ): ScrapLibraryEmbedPrefix[] {
   const mul = order === 'asc' ? 1 : -1;
@@ -83,6 +93,22 @@ function sortPrefixes(
       return (
         (a.count - b.count) * mul || a.prefix.localeCompare(b.prefix, 'zh')
       );
+    }
+    if (sortId === 'code') {
+      // 先后：主力线永远优先，再比发行年 / 入库时间
+      const la = Number(a.lineRank ?? 99);
+      const lb = Number(b.lineRank ?? 99);
+      if (la !== lb) return la - lb;
+      const ya = Number(a.latestYear || 0);
+      const yb = Number(b.latestYear || 0);
+      if (ya !== yb) return (ya - yb) * mul;
+      const ta = Date.parse(String(a.latestAt || '')) || 0;
+      const tb = Date.parse(String(b.latestAt || '')) || 0;
+      if (ta !== tb) return (ta - tb) * mul;
+      const ra = prefixCodeRank(a.latestCode || '');
+      const rb = prefixCodeRank(b.latestCode || '');
+      if (ra !== rb) return (ra - rb) * mul;
+      return a.prefix.localeCompare(b.prefix, 'zh');
     }
     return a.prefix.localeCompare(b.prefix, 'zh') * mul;
   });
@@ -96,6 +122,8 @@ export function MakersScreen() {
   const [libraryView, setLibraryView] = useState<MakerLibraryView>('recommended');
   const [itemSort, setItemSort] = useState<MakerSortId>('year');
   const [facetSort, setFacetSort] = useState<MakerFacetSortId>('count');
+  /** 厂牌→前缀：默认按发行先后（新→旧） */
+  const [prefixSort, setPrefixSort] = useState<MakerPrefixSortId>('code');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const sortSlotRef = useRef<HTMLDivElement | null>(null);
@@ -224,6 +252,9 @@ export function MakersScreen() {
     stack.kind === 'facet' ||
     (stack.kind === 'detail' &&
       (stack.from.kind === 'folderActress' || stack.from.kind === 'facet'));
+  const isPrefixSortView =
+    stack.kind === 'folderStudio' ||
+    (stack.kind === 'detail' && stack.from.kind === 'folderStudio');
 
   const loadItems = useCallback(
     async (offset: number) => {
@@ -452,19 +483,19 @@ export function MakersScreen() {
   // 文件夹中间层：厂牌下前缀 / 前缀下女优
   const folderMidKey = useMemo(() => {
     if (stack.kind === 'folderStudio') {
-      return `fs|${hubTab}|${stack.studio}|${facetSort}|${sortOrder}`;
+      return `fs|${hubTab}|${stack.studio}|${prefixSort}|${sortOrder}`;
     }
     if (stack.kind === 'folderPrefix') {
       return `fp|${hubTab}|${stack.studio}|${stack.prefix}|${facetSort}|${sortOrder}`;
     }
     if (stack.kind === 'detail' && stack.from.kind === 'folderStudio') {
-      return `fs|${hubTab}|${stack.from.studio}|${facetSort}|${sortOrder}`;
+      return `fs|${hubTab}|${stack.from.studio}|${prefixSort}|${sortOrder}`;
     }
     if (stack.kind === 'detail' && stack.from.kind === 'folderPrefix') {
       return `fp|${hubTab}|${stack.from.studio}|${stack.from.prefix}|${facetSort}|${sortOrder}`;
     }
     return '';
-  }, [stack, hubTab, facetSort, sortOrder]);
+  }, [stack, hubTab, facetSort, prefixSort, sortOrder]);
 
   useEffect(() => {
     drillCacheRef.current.clear();
@@ -492,7 +523,7 @@ export function MakersScreen() {
           const studio = folderStudio || '';
           const rows = await listScrapLibraryEmbedPrefixes(hubTab, { studio });
           if (cancelled) return;
-          const prefixes = sortPrefixes(rows, facetSort, sortOrder);
+          const prefixes = sortPrefixes(rows, prefixSort, sortOrder);
           const payload = {
             prefixes,
             facets: [] as ScrapLibraryEmbedFacet[],
@@ -542,6 +573,7 @@ export function MakersScreen() {
     folderStudio,
     folderPrefix,
     facetSort,
+    prefixSort,
     sortOrder,
     putDrillCache,
   ]);
@@ -586,7 +618,9 @@ export function MakersScreen() {
 
   const sortLabel = isItemSortView
     ? MAKER_SORT_OPTS.find((o) => o.id === itemSort)?.label || '名称'
-    : MAKER_FACET_SORT_OPTS.find((o) => o.id === facetSort)?.label || '名称';
+    : isPrefixSortView
+      ? MAKER_PREFIX_SORT_OPTS.find((o) => o.id === prefixSort)?.label || '先后'
+      : MAKER_FACET_SORT_OPTS.find((o) => o.id === facetSort)?.label || '名称';
 
   const OrderIcon = sortOrder === 'asc' ? ArrowUp : ArrowDown;
 
@@ -619,6 +653,14 @@ export function MakersScreen() {
       }
       setItemSort(next);
       setSortOrder(next === 'recent' || next === 'year' ? 'desc' : 'asc');
+    } else if (isPrefixSortView) {
+      const next = id as MakerPrefixSortId;
+      if (prefixSort === next) {
+        setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'));
+        return;
+      }
+      setPrefixSort(next);
+      setSortOrder(next === 'name' ? 'asc' : 'desc');
     } else {
       const next = id as MakerFacetSortId;
       if (facetSort === next) {
@@ -631,8 +673,16 @@ export function MakersScreen() {
     setSortMenuOpen(false);
   }
 
-  const sortOpts = isItemSortView ? MAKER_SORT_OPTS : MAKER_FACET_SORT_OPTS;
-  const activeSortId = isItemSortView ? itemSort : facetSort;
+  const sortOpts = isItemSortView
+    ? MAKER_SORT_OPTS
+    : isPrefixSortView
+      ? MAKER_PREFIX_SORT_OPTS
+      : MAKER_FACET_SORT_OPTS;
+  const activeSortId = isItemSortView
+    ? itemSort
+    : isPrefixSortView
+      ? prefixSort
+      : facetSort;
 
   const sortDropdown = sortMenuOpen ? (
     <div className="makers-sort-dropdown" role="listbox" aria-label="排序">

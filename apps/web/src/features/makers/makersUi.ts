@@ -72,6 +72,18 @@ export const MAKER_FACET_SORT_OPTS: Array<{
   { id: 'count', label: '数量' },
 ];
 
+/** 厂牌下前缀列表排序（文件夹下钻） */
+export type MakerPrefixSortId = 'code' | 'name' | 'count';
+
+export const MAKER_PREFIX_SORT_OPTS: Array<{
+  id: MakerPrefixSortId;
+  label: string;
+}> = [
+  { id: 'code', label: '先后' },
+  { id: 'count', label: '数量' },
+  { id: 'name', label: '名称' },
+];
+
 export function makerSourceLabel(id: MakerCatalogSourceId): string {
   return MAKER_KIND_TABS.find((t) => t.id === id)?.label || id;
 }

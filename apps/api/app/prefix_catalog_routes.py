@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from . import prefix_catalog_avwikidb as avwikidb
 from . import prefix_catalog_harvest as harvest
 from . import prefix_catalog_local_index as local_index
 from . import prefix_catalog_store as store
@@ -132,7 +133,9 @@ class HarvestBody(BaseModel):
     hi_cap: int = 800
     full_scan_limit: int = 80
     pages: int = 2
-    mode: str = "quick"  # quick | dense | latest
+    mode: str = "quick"  # quick | dense | latest | avwikidb
+    expand: bool = True
+    min_movie_count: int = 5
 
 
 class PrefixUpsertBody(BaseModel):
@@ -180,6 +183,16 @@ def get_region_prefixes(
     if region_id not in REGION_ORDER:
         raise HTTPException(404, f"unknown region: {region_id}")
     return {"ok": True, "data": store.list_prefixes(region_id, q=q)}
+
+
+@router.get("/regions/{region_id}/makers")
+def get_region_makers(
+    region_id: str,
+    q: str = Query(""),
+) -> dict[str, Any]:
+    if region_id not in REGION_ORDER:
+        raise HTTPException(404, f"unknown region: {region_id}")
+    return {"ok": True, "data": store.list_makers(region_id, q=q)}
 
 
 @router.get("/regions/{region_id}/prefixes/{prefix}")
@@ -252,17 +265,20 @@ def harvest_status() -> dict[str, Any]:
 def post_harvest(body: HarvestBody) -> dict[str, Any]:
     mode = (body.mode or "quick").strip().lower() or "quick"
     allowed = {
-        "japan_censored": {"quick", "dense", "latest"},
-        "japan_gravure": {"latest"},
-        "japan_amateur": {"latest"},
+        "japan_censored": {"quick", "dense", "latest", "avwikidb"},
+        "japan_gravure": {"latest", "avwikidb"},
+        "japan_amateur": {"latest", "avwikidb"},
+        "japan_uncensored": {"avwikidb"},
         "china": {"latest"},
         "western": {"latest"},
     }
     if body.region not in allowed or mode not in allowed[body.region]:
         raise HTTPException(
             400,
-            "支持：japan_censored(quick|dense|latest)；"
-            "japan_gravure/japan_amateur/china/western(latest=搜索排序)",
+            "支持：japan_censored(quick|dense|latest|avwikidb)；"
+            "japan_gravure/japan_amateur(latest|avwikidb)；"
+            "japan_uncensored(avwikidb)；"
+            "china/western(latest)",
         )
     with _job_lock:
         if _job["running"]:
@@ -279,7 +295,16 @@ def post_harvest(body: HarvestBody) -> dict[str, Any]:
 
     def run() -> None:
         try:
-            if mode == "latest":
+            if mode == "avwikidb":
+                result = avwikidb.sync_maker_prefix_map(
+                    region=body.region,
+                    prefixes=body.prefixes or None,
+                    limit=body.limit,
+                    expand=bool(body.expand),
+                    min_movie_count=max(1, int(body.min_movie_count or 5)),
+                    on_progress=_job_log,
+                )
+            elif mode == "latest":
                 result = harvest.harvest_latest_via_search(
                     body.region,
                     prefixes=body.prefixes or None,
