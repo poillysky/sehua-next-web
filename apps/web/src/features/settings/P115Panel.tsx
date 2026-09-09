@@ -1119,7 +1119,7 @@ export function P115Panel({
                             : '未选：默认片商根下「字幕」'}
                           <span className="p115-target-hint">
                             {' '}
-                            · 仅中文 · 命名 ABC-123.chi.srt · 多源评分选优
+                            · 仅中文 · 命名 ABC-123.srt · 多源评分选优
                           </span>
                         </span>
                       </span>
@@ -1144,8 +1144,8 @@ export function P115Panel({
                         <span className="settings-nav__title">按分区分层</span>
                         <span className="settings-nav__desc allow-select">
                           {subsLayered
-                            ? '开启：字幕根/日本有码/SSIS-949.chi.srt'
-                            : '关闭：字幕根/SSIS-949.chi.srt'}
+                            ? '开启：字幕根/日本有码/SSIS-949.srt'
+                            : '关闭：字幕根/SSIS-949.srt'}
                         </span>
                       </span>
                       <button

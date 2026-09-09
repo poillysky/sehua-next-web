@@ -35,14 +35,11 @@ def _safe_code_filename(code: str) -> str:
 
 
 def upload_filename_for_code(code: str, path: Path | str) -> str:
-    """115 上传名：ABC-123.chi.srt（Emby 认作「汉语」，比 .chs 简中更稳）。"""
+    """115 上传名：ABC-123.srt（番号 + 扩展名，不加语言后缀）。"""
     ext = Path(path).suffix.lower() or ".srt"
     if ext not in _SUB_EXTS:
         ext = ".srt"
     base = _safe_code_filename(code)
-    # 简中标记用 .chs 时部分客户端选「简中」无画面；统一 .chi
-    if ext == ".srt":
-        return f"{base}.chi{ext}"
     return f"{base}{ext}"
 
 
@@ -202,7 +199,7 @@ def save_subtitle_bytes(
     lang: str = "zh",
     preferred_name: str = "",
 ) -> Path:
-    """保存为 ABC-123.chi.srt（只要中文；Emby「汉语」标记更稳）。"""
+    """保存为 ABC-123.srt（只要中文；不加 .chi / .chs 语言后缀）。"""
     if not subtitlecat.is_chinese_lang(lang) and not subtitlecat.looks_chinese_subtitle(
         data, filename=preferred_name
     ):
@@ -218,9 +215,24 @@ def save_subtitle_bytes(
     payload = data
     if ext == ".srt":
         payload = normalize_srt_bytes(data)
-        dest = folder / f"{base}.chi{ext}"
-    else:
-        dest = folder / f"{base}{ext}"
+    dest = folder / f"{base}{ext}"
+    # 清掉旧的语言后缀文件，避免同目录 ABC-123.chi.srt 残留
+    for legacy in folder.glob(f"{base}.*{ext}"):
+        if legacy.name.lower() == dest.name.lower():
+            continue
+        stem = legacy.name[: -len(ext)].lower()
+        if stem.startswith(base.lower() + ".") and stem[len(base) + 1 :] in {
+            "chi",
+            "chs",
+            "cht",
+            "zh",
+            "zh-cn",
+            "cn",
+        }:
+            try:
+                legacy.unlink(missing_ok=True)
+            except OSError:
+                pass
     tmp = dest.with_suffix(dest.suffix + ".part")
     tmp.write_bytes(payload)
     tmp.replace(dest)
