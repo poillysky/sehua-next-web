@@ -245,7 +245,7 @@ html[data-shell='native'] .bg-effect--static {
   overscroll-behavior: none;
   /* 让内部模版 h-dvh 相对手机框高度，而不是桌面视口 */
   height: 100%;
-  background: transparent;
+  background-color: var(--app-bg-solid, #f2f2f7);
   border-radius: inherit;
 }
 
@@ -255,6 +255,7 @@ html[data-shell='native'] .bg-effect--static {
   height: 100%;
   min-height: 0;
   overflow: hidden;
+  background-color: var(--app-bg-solid, #f2f2f7);
 }
 
 .media-hub__top,

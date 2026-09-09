@@ -55,7 +55,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         isTabbed ? 'h-dvh' : 'min-h-dvh',
       )}
       style={{
-        background: 'var(--app-bg)',
+        backgroundColor: 'var(--app-bg-solid, #f2f2f7)',
+        backgroundImage: 'var(--app-bg)',
         height: isTabbed ? 'var(--app-height, 100vh)' : undefined,
         maxHeight: isTabbed ? 'var(--app-height, 100vh)' : undefined,
       }}

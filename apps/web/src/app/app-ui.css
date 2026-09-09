@@ -65,6 +65,9 @@
 
   --surface-fill: rgba(120, 120, 128, 0.1);
 
+  /* 实色底：真机 WebKit 合成层缝默认透黑，无实色会整屏出现横向黑细线 */
+  --app-bg-solid: #f2f2f7;
+
   /* 背景氛围略收，避免抢内容层级 */
   --app-bg:
     radial-gradient(ellipse 120% 68% at 50% -10%, rgba(0, 122, 255, 0.07), transparent 56%),
@@ -151,9 +154,11 @@
 
     --shadow-modal: 0 18px 48px rgba(0, 0, 0, 0.55);
 
+    --app-bg-solid: #05070c;
+
     --app-bg:
       radial-gradient(ellipse 120% 68% at 50% -10%, rgba(10, 132, 255, 0.1), transparent 56%),
-      linear-gradient(180deg, #05070c 0%, #000 52%, #000 100%);
+      linear-gradient(180deg, #05070c 0%, #05070c 52%, #05070c 100%);
 
     --selection-bg: color-mix(in srgb, var(--login-blue) 34%, transparent);
 
@@ -1837,6 +1842,9 @@ html[data-keyboard='1'] .toast-stack {
 
   touch-action: pan-y;
 
+  /* 与壳同色实底，挡住 Tab transform 合成缝 */
+  background-color: var(--app-bg-solid, #f2f2f7);
+
 }
 
 
@@ -1849,10 +1857,15 @@ html[data-keyboard='1'] .toast-stack {
 
   width: max-content;
 
-  will-change: transform;
-
+  /* 勿常驻 will-change：真机易触发整屏横向合成黑线 */
   transition: none;
 
+  background-color: var(--app-bg-solid, #f2f2f7);
+
+}
+
+.app-tab-pane {
+  background-color: var(--app-bg-solid, #f2f2f7);
 }
 
 
@@ -2127,9 +2140,11 @@ html[data-keyboard='1'] .toast-stack {
 
   --chrome-bar-shine: rgba(255, 255, 255, 0.06);
 
+  --app-bg-solid: #05070c;
+
   --app-bg:
     radial-gradient(ellipse 120% 68% at 50% -10%, rgba(10, 132, 255, 0.1), transparent 56%),
-    linear-gradient(180deg, #05070c 0%, #000 52%, #000 100%);
+    linear-gradient(180deg, #05070c 0%, #05070c 52%, #05070c 100%);
 
   --selection-bg: color-mix(in srgb, var(--login-blue) 34%, transparent);
 
@@ -2327,7 +2342,9 @@ textarea {
 
   overflow: hidden;
 
-  background: var(--app-bg);
+  background-color: var(--app-bg-solid, #f2f2f7);
+
+  background-image: var(--app-bg);
 
   color: var(--ink);
 
@@ -16951,7 +16968,8 @@ a.scrape-src-card__url:active {
   --media-radius-poster: 14px;
   --media-radius-control: 12px;
   --media-title-track: -0.022em;
-  background: var(--app-bg);
+  background-color: var(--app-bg-solid, #f2f2f7);
+  background-image: var(--app-bg);
   font-family:
     -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
     "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
@@ -16964,7 +16982,8 @@ a.scrape-src-card__url:active {
 }
 
 .media-stack .app-push__body {
-  background: var(--app-bg);
+  background-color: var(--app-bg-solid, #f2f2f7);
+  background-image: var(--app-bg);
 }
 
 .media-hub {
@@ -18373,6 +18392,7 @@ a.scrape-src-card__url:active {
   line-height: 1.55;
   letter-spacing: -0.01em;
   color: var(--ink);
+  white-space: pre-wrap;
 }
 
 .media-detail__cta {
@@ -18820,7 +18840,8 @@ a.scrape-src-card__url:active {
   --media-shadow-poster:
     0 1px 2px rgba(0, 0, 0, 0.35),
     0 10px 28px rgba(0, 0, 0, 0.4);
-  background: var(--app-bg);
+  background-color: var(--app-bg-solid, #05070c);
+  background-image: var(--app-bg);
 }
 
 .dark .media-stack .app-push {
@@ -19547,6 +19568,38 @@ a.scrape-src-card__url:active {
   margin-left: auto;
 }
 
+.makers-hub__top-actions {
+  position: relative;
+  z-index: 1;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.makers-hub .media-hub__top-row > .makers-hub__top-actions {
+  margin-left: auto;
+}
+
+.makers-hub .media-hub__top-row > .makers-hub__top-actions .media-hub__search-btn {
+  margin-left: 0;
+}
+
+.makers-hub__refresh-btn:disabled {
+  opacity: 0.72;
+}
+
+.makers-hub__refresh-spin {
+  animation: makers-hub-refresh-spin 0.85s linear infinite;
+}
+
+@keyframes makers-hub-refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .makers-hub .makers-kind-switch {
   width: 100%;
   max-width: 100%;
@@ -19980,10 +20033,9 @@ a.scrape-src-card__url:active {
   aspect-ratio: 2 / 3;
   border-radius: 12px;
   overflow: hidden;
-  background: rgba(28, 28, 30, 0.9);
+  /* 浅底：合成缝透出时不显黑 */
+  background: linear-gradient(165deg, #d8dde6 0%, #b4bcc8 55%, #8e97a5 100%);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
-  -webkit-transform: translateZ(0);
-  transform: translateZ(0);
 }
 
 .makers-collage__mosaic {
@@ -19992,22 +20044,33 @@ a.scrape-src-card__url:active {
   grid-template-rows: 1fr 1fr;
   width: 100%;
   height: 100%;
-  gap: 1px;
-  background: rgba(0, 0, 0, 0.35);
+  gap: 0;
+  background: transparent;
 }
 
 .makers-collage__cell,
 .makers-collage__full {
-  width: 100%;
-  height: 100%;
+  position: absolute;
+  /* 外扩 1px 盖住圆角亚像素缝，避免 scale/translateZ 制造整屏合成黑线 */
+  inset: -1px;
+  width: calc(100% + 2px);
+  height: calc(100% + 2px);
+  max-width: none;
   object-fit: cover;
   object-position: right center;
   display: block;
-  -webkit-transform: translateZ(0);
-  transform: translateZ(0);
+}
+
+.makers-collage__mosaic .makers-collage__cell {
+  position: relative;
+  inset: auto;
+  width: 100%;
+  height: 100%;
 }
 
 .makers-collage__ph {
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -20017,6 +20080,11 @@ a.scrape-src-card__url:active {
   font-size: 22px;
   font-weight: 600;
   background: linear-gradient(160deg, #5b6578, #232833);
+}
+
+.makers-collage__mosaic .makers-collage__ph {
+  position: relative;
+  inset: auto;
 }
 
 .makers-collage__label {
@@ -20055,13 +20123,47 @@ a.scrape-src-card__url:active {
   white-space: nowrap;
 }
 
+.makers-collage__blurb {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  color: rgba(60, 60, 67, 0.62);
+}
+
+.dark .makers-collage__blurb {
+  color: rgba(235, 235, 245, 0.48);
+}
+
 .makers-collage__count {
-  font-size: 12px;
-  color: rgba(60, 60, 67, 0.55);
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: #fff;
+  background: rgba(28, 28, 30, 0.62);
+  -webkit-backdrop-filter: saturate(160%) blur(10px);
+  backdrop-filter: saturate(160%) blur(10px);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.22);
+  pointer-events: none;
 }
 
 .dark .makers-collage__count {
-  color: rgba(235, 235, 245, 0.45);
+  background: rgba(0, 0, 0, 0.55);
 }
 
 /* Emby 文件夹 */
@@ -20350,20 +20452,20 @@ a.scrape-src-card__url:active {
     0 1px 0 rgba(255, 255, 255, 0.22) inset,
     0 1px 2px rgba(15, 20, 30, 0.05),
     0 10px 28px rgba(15, 30, 60, 0.12);
-  /* iOS：圆角 + overflow + 父级 transform 时强制独立层，避免封面画成黑块 */
-  -webkit-transform: translateZ(0);
-  transform: translateZ(0);
-  isolation: isolate;
 }
 
 .makers-poster__frame img {
   opacity: 1;
   object-fit: cover;
   object-position: center center;
-  -webkit-transform: translateZ(0);
-  transform: translateZ(0);
-  -webkit-backface-visibility: hidden;
-  backface-visibility: hidden;
+  /* 外扩盖缝，勿再用 translateZ+scale（真机会叠出整屏横黑线） */
+  inset: -1px;
+  width: calc(100% + 2px);
+  height: calc(100% + 2px);
+  max-width: none;
+  max-height: none;
+  -webkit-transform: none;
+  transform: none;
 }
 
 .makers-poster__year {
@@ -20677,6 +20779,64 @@ a.scrape-src-card__url:active {
   color: var(--ink);
 }
 
+.mkd-section__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 0 10px;
+}
+
+.mkd-section__head .mkd-section__h.media-detail__h {
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.mkd-translate-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(0, 122, 255, 0.08);
+  color: #007aff;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  -webkit-tap-highlight-color: transparent;
+  cursor: pointer;
+  transition: background 140ms ease, opacity 140ms ease;
+}
+
+.mkd-translate-btn:active {
+  opacity: 0.72;
+}
+
+.mkd-translate-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.mkd-translate-btn.is-active {
+  background: rgba(0, 122, 255, 0.14);
+  cursor: default;
+  pointer-events: none;
+}
+
+.dark .mkd-translate-btn {
+  background: rgba(10, 132, 255, 0.16);
+  color: #0a84ff;
+}
+
+.dark .mkd-translate-btn.is-active {
+  background: rgba(10, 132, 255, 0.24);
+}
+
 .mkd-chips {
   display: flex;
   flex-wrap: wrap;
@@ -20927,6 +21087,13 @@ a.scrape-src-card__url:active {
   cursor: default;
   min-height: 56px;
   pointer-events: auto;
+}
+
+.settings-screen-root .makers-manage__status-actions {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
 }
 
 .settings-screen-root .makers-manage__scan-progress {

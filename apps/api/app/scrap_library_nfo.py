@@ -12,7 +12,8 @@ from typing import Any
 from .ai_config import resolve_embed_config
 
 _WS_RE = re.compile(r"\s+")
-_MAX_EMBED_CHARS = 900
+# 剧情译中后需完整进 source_text，详情「再打开」才能读到全文（向量仍可接受 ~2k）
+_MAX_EMBED_CHARS = 2400
 _MAX_LIST = 12
 
 
@@ -155,7 +156,8 @@ def build_nfo_embed_text(
     if tags:
         lines.append(f"标签：{' '.join(tags[:10])}")
     if plot:
-        lines.append(f"剧情：{_clip(plot, 280)}")
+        # 详情页从 source_text 解析剧情；过短会截断译中结果
+        lines.append(f"剧情：{_clip(plot, 1800)}")
 
     text = "\n".join(lines).strip()
     if not text:

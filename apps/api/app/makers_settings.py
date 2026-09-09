@@ -446,15 +446,32 @@ def madou_enabled() -> bool:
 
 
 def provider_access(source_id: str | None) -> str:
-    """片商源 access：proxy_adaptive | proxy_flare | proxy_only（默认 adaptive）。"""
+    """片商/数据源 access：与 SOURCE_CATALOG 测链一致（proxy_adaptive | proxy_flare | proxy_only）。"""
     sid = str(source_id or "").strip().lower()
     if sid in ("miss_av", "miss-av"):
         sid = "missav"
     if sid in ("sevenmmtv", "7mm"):
         sid = "7mmtv"
-    # JavBus 固定不过盾，即使配置里写了 adaptive/flare
-    if sid == "javbus":
-        return "proxy_only"
+    # 优先数据源目录（与设置→数据源测链同一套）
+    try:
+        from . import scrape_source_catalog as scrape_catalog
+
+        cid = scrape_catalog.canonicalize_id(sid)
+        # catalog 用 miss_av / sevenmmtv
+        if sid == "missav":
+            cid = "miss_av"
+        if sid == "7mmtv":
+            cid = "sevenmmtv"
+        meta = scrape_catalog.catalog_by_id().get(cid) or {}
+        a = str(meta.get("access") or "").strip().lower()
+        if a == "proxy_flare":
+            return "proxy_flare"
+        if a in {"proxy_only", "proxy_curl", "curl", "direct"}:
+            return "proxy_only"
+        if a:
+            return "proxy_adaptive"
+    except Exception:
+        pass
     for item in resolve_makers_catalog().get("sources") or []:
         if not isinstance(item, dict):
             continue

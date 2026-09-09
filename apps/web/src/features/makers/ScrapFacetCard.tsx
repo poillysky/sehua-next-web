@@ -1,21 +1,28 @@
 'use client';
 
-import { useState } from 'react';
-import { scrapLibraryCoverUrl } from '@/lib/api';
+import { useScrapLocalCover, SCRAP_POSTER_COVER_OPTS } from './useScrapLocalCover';
 
 export function ScrapFacetCard({
   title,
   count,
   posterApi,
+  coverUrl,
+  itemId,
   onClick,
 }: {
   title: string;
   count: number;
   posterApi?: string;
+  coverUrl?: string;
+  itemId?: string;
   onClick: () => void;
 }) {
-  const [gone, setGone] = useState(false);
-  const poster = scrapLibraryCoverUrl({ posterApi });
+  const { src, onError } = useScrapLocalCover({
+    posterApi,
+    coverUrl,
+    itemId,
+    ...SCRAP_POSTER_COVER_OPTS,
+  });
 
   return (
     <button
@@ -24,15 +31,15 @@ export function ScrapFacetCard({
       onClick={onClick}
     >
       <span className="media-poster__frame makers-poster__frame makers-facet__frame">
-        {poster && !gone ? (
+        {src ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={poster}
+            src={src}
             alt=""
             loading="lazy"
             decoding="async"
             referrerPolicy="no-referrer"
-            onError={() => setGone(true)}
+            onError={onError}
           />
         ) : (
           <span className="media-poster__ph">

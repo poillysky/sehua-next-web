@@ -260,11 +260,30 @@ def _fetch_html(url: str, *, referer: str | None = None, fast: bool = False) -> 
         host = (urlparse(url).hostname or "").lower()
     except Exception:
         host = ""
-    cookie = None
+    sid = _infer_source_id(host)
+    # 与数据源测链一致
+    try:
+        from . import scrape_sources_settings as scrape_src
+
+        access = (
+            scrape_src.catalog_access(sid)
+            if sid
+            else makers_settings.provider_access(sid)
+        )
+    except Exception:
+        access = makers_settings.provider_access(sid) if sid else "proxy_adaptive"
+    # Cookie：javbus 用配置 Cookie；其它源也尝试数据源页 Cookie
     if makers_settings.is_javbus_host(host):
         cookie = makers_settings.javbus_cookie() or None
-    sid = _infer_source_id(host)
-    access = makers_settings.provider_access(sid) if sid else "proxy_adaptive"
+    elif sid:
+        try:
+            from . import scrape_sources_settings as scrape_src
+
+            cookie = scrape_src.provider_settings(sid).get("cookie") or None
+        except Exception:
+            cookie = None
+    else:
+        cookie = None
     timeout = _TIMEOUT_FAST if fast else _TIMEOUT
     try:
         page = fetch_page(
@@ -720,18 +739,42 @@ def _javbus_star(star_id: str, page: int) -> dict[str, Any]:
     return payload
 
 
-def _javbus_detail(code: str) -> dict[str, Any]:
+def _javbus_detail(
+    code: str, *, base_url: str = "", cookie: str = ""
+) -> dict[str, Any]:
     code = code.strip().upper()
     key = f"javbus:detail:v4:{code}"
     hit = _cache_get(key)
     if hit is not None:
         return hit
     last_err: Exception | None = None
-    for base in _javbus_bases():
+    bases = list(_javbus_bases())
+    pref = (base_url or "").strip().rstrip("/")
+    if pref:
+        bases = [pref] + [b for b in bases if str(b).rstrip("/") != pref]
+    # cookie 由 _fetch_html → javbus_cookie / 数据源配置读取；此处仅保证测通链接置顶
+    del cookie
+    for base in bases:
         try:
             html = _fetch_html(f"{base}/{code}", referer=f"{base}/", fast=True)
+            # 对齐 MDCS parseJavbusDetailHtml：404 页明确报未找到
+            if re.search(
+                r"404|找不到頁面|找不到页面|Page Not Found", html or "", re.I
+            ) and not re.search(
+                r"bigImage|movie-title|class=[\"'][^\"']*container", html or "", re.I
+            ):
+                last_err = RuntimeError("未找到影片")
+                continue
+            if re.search(r"Age Verification|年齡驗證|年龄验证", html or "", re.I) and not re.search(
+                r"bigImage", html or "", re.I
+            ):
+                last_err = RuntimeError(
+                    "需要年龄验证 Cookie（默认 existmag=all; age=verified; dv=1）"
+                )
+                continue
             soup = BeautifulSoup(html, "lxml")
             if not soup.select_one(".bigImage, .movie .info"):
+                last_err = RuntimeError("未找到影片")
                 continue
             h3 = soup.select_one("h3")
             title = (h3.get_text(" ", strip=True) if h3 else "") or code
@@ -1089,13 +1132,26 @@ def _iqqtv_search(q: str, page: int) -> dict[str, Any]:
     return payload
 
 
-def _iqqtv_detail(id_: str) -> dict[str, Any]:
+def _iqqtv_detail(
+    id_: str, *, base_url: str = "", cookie: str = ""
+) -> dict[str, Any]:
     id_ = id_.strip()
     key = f"iqqtv:detail:{id_}"
     hit = _cache_get(key)
     if hit is not None:
         return hit
-    root = _resolve_iqqtv_root()
+    del cookie
+    if base_url.strip():
+        root = re.sub(r"/(cn|ja|en|zh)/?$", "", base_url.strip().rstrip("/"), flags=re.I).rstrip("/")
+        if root:
+            try:
+                site_mirror.remember("iqqtv", root, discovered_from=root)
+            except Exception:
+                pass
+        else:
+            root = _resolve_iqqtv_root()
+    else:
+        root = _resolve_iqqtv_root()
     candidates = [
         f"{root}/cn/player.php?uuid={id_}",
         f"{root}/cn/h/{id_}.html",
@@ -1110,8 +1166,24 @@ def _iqqtv_detail(id_: str) -> dict[str, Any]:
             soup = BeautifulSoup(html, "lxml")
             h1 = soup.select_one("h1, .title, .video-title")
             title = (h1.get_text(" ", strip=True) if h1 else "") or id_
+            title_l = title.casefold()
+            if any(
+                m in title_l
+                for m in (
+                    "会员登入",
+                    "會員登入",
+                    "会员登录",
+                    "請先登入",
+                    "请先登录",
+                    "login",
+                    "sign in",
+                )
+            ):
+                raise RuntimeError(f"iqqtv login wall: {title}")
             img = soup.select_one(".video-pic img, .detail img, .cover img, img.poster")
             poster = _abs(root, img.get("src") or img.get("data-src")) if img else None
+            if not poster and not soup.select_one(".movie, .video-detail, .detail, #player"):
+                raise RuntimeError("iqqtv detail page missing content")
             code_m = re.search(r"([A-Za-z]{2,15}-\d{2,5})", title) or re.search(
                 r"([A-Za-z]{2,15}-\d{2,5})", id_
             )

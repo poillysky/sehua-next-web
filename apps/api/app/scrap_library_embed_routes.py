@@ -69,6 +69,104 @@ def get_stats(_user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
         raise HTTPException(400, str(e)) from e
 
 
+@router.get("/embed/quality")
+def get_quality(
+    region: str = Query("japan_censored"),
+    _user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    try:
+        return {"ok": True, "data": svc.quality_stats(region=region)}
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, str(e)) from e
+
+
+@router.get("/embed/quality/items")
+def get_quality_items(
+    kind: str = Query("no_local"),
+    region: str = Query("japan_censored"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    _user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    try:
+        items = svc.quality_items(
+            region=region, kind=kind, limit=limit, offset=offset
+        )
+        return {"ok": True, "data": {"items": items, "kind": kind, "region": region}}
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, str(e)) from e
+
+
+class EnrichBody(BaseModel):
+    region: str = "japan_censored"
+    # 空 = 服务端默认完整补齐（封面+女优/片商/剧情/标题）
+    kinds: list[str] = Field(default_factory=list)
+    # 0 = 全量缺口；预览可由前端传小样本
+    limit: int = Field(default=0, ge=0, le=20_000)
+    dryRun: bool = False
+
+
+class EnrichStrategyBody(BaseModel):
+    mode: str = "parallel_all"
+    adaptiveWorkers: int = Field(default=0, ge=0, le=64)
+    flareWorkers: int = Field(default=0, ge=0, le=64)
+    includeFlare: bool = True
+    perSourceTimeoutSec: int = Field(default=45, ge=10, le=120)
+    regionGroups: dict[str, list[str]] = Field(default_factory=dict)
+
+
+@router.get("/embed/enrich/strategy")
+def get_enrich_strategy(
+    _user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    from . import scrap_enrich_strategy as strat
+
+    return {"ok": True, "data": strat.strategy_public()}
+
+
+@router.put("/embed/enrich/strategy")
+def put_enrich_strategy(
+    body: EnrichStrategyBody,
+    _user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    from . import scrap_enrich_strategy as strat
+
+    saved = strat.put_strategy(body.model_dump())
+    return {"ok": True, "data": strat.strategy_public(saved)}
+
+
+@router.post("/embed/enrich")
+def start_enrich(
+    body: EnrichBody,
+    _user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    from . import scrap_library_enrich as enrich_svc
+
+    try:
+        data = enrich_svc.start_enrich_job(
+            region=body.region,
+            kinds=list(body.kinds or []),
+            limit=int(body.limit),
+            dry_run=bool(body.dryRun),
+        )
+    except RuntimeError as e:
+        raise HTTPException(409, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return {"ok": True, "data": data}
+
+
+@router.get("/embed/enrich/status")
+def get_enrich_status(
+    _user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    from . import scrap_library_enrich as enrich_svc
+
+    return {"ok": True, "data": enrich_svc.get_enrich_status()}
+
+
 @router.get("/embed/status")
 def get_status(_user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
     return {"ok": True, "data": svc.get_job_status()}
@@ -91,14 +189,49 @@ def start_ingest(
 @router.post("/embed/ensure-poster")
 def ensure_poster(
     itemId: str = Query("", alias="itemId"),
+    coverUrl: str = Query("", alias="coverUrl"),
     _user: dict[str, Any] = Depends(require_user),
 ) -> dict[str, Any]:
     """缺本地海报时把 NFO cover 外链下载到番号目录 poster.jpg。"""
     iid = str(itemId or "").strip()
-    if not iid:
-        raise HTTPException(400, "itemId required")
+    cover = str(coverUrl or "").strip()
+    if not iid and not cover:
+        raise HTTPException(400, "itemId or coverUrl required")
     try:
-        data = svc.ensure_local_poster(item_id=iid)
+        if iid:
+            data = svc.ensure_local_poster(item_id=iid, cover_url=cover)
+        else:
+            data = svc.ensure_local_poster_by_cover(cover_url=cover)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, str(e)) from e
+    return {"ok": True, "data": data}
+
+
+class PlotSaveBody(BaseModel):
+    itemId: str = Field(default="", alias="itemId")
+    plot: str = ""
+
+    model_config = {"populate_by_name": True}
+
+
+@router.post("/embed/plot")
+def save_plot(
+    body: PlotSaveBody,
+    _user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    """保存中文剧情到 NFO 并重嵌入（详情页一键翻译落库）。"""
+    from . import scrap_library_enrich as enrich_svc
+
+    iid = str(body.itemId or "").strip()
+    plot = str(body.plot or "").strip()
+    if not iid:
+        raise HTTPException(400, "itemId 必填")
+    if len(plot) < 2:
+        raise HTTPException(400, "剧情太短")
+    try:
+        data = enrich_svc.save_item_plot(item_id=iid, plot=plot)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, str(e)) from e
     return {"ok": True, "data": data}
@@ -299,6 +432,38 @@ def get_facets(
         raise HTTPException(400, str(e)) from e
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, str(e)) from e
+
+
+class FacetsRefreshBody(BaseModel):
+    region: str = ""
+    kinds: list[str] | None = None
+
+
+@router.get("/embed/facets/snapshot")
+def get_facets_snapshot_meta(
+    region: str = Query(""),
+    _user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    return {"ok": True, "data": svc.facets_snapshot_meta(region=region)}
+
+
+@router.post("/embed/facets/refresh")
+def refresh_facets_snapshot(
+    body: FacetsRefreshBody | None = None,
+    _user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    """重建厂牌 / 标签 / 女优磁盘快照（当前区）。"""
+    payload = body or FacetsRefreshBody()
+    try:
+        data = svc.refresh_facets_snapshot(
+            region=str(payload.region or ""),
+            kinds=payload.kinds,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, str(e)) from e
+    return {"ok": True, "data": data}
 
 
 @router.get("/embed/recommend")

@@ -19,6 +19,18 @@ from .db import data_dir
 
 log = logging.getLogger(__name__)
 
+# 线程级：补全关掉「包含过盾」时，禁止自适应源遇盾后再打 FlareSolverr
+_tls = threading.local()
+
+
+def set_thread_allow_flare(allowed: bool) -> None:
+    _tls.allow_flare = bool(allowed)
+
+
+def thread_allow_flare() -> bool:
+    return bool(getattr(_tls, "allow_flare", True))
+
+
 _DEFAULT_FLARE_PORT = 8191
 _DEFAULT_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -210,6 +222,15 @@ def _sehuatang_like_host(host: str) -> bool:
 
 _JAVBUS_HOST_RE = re.compile(r"(?:^|\.)(?:javbus|seejav)\b", re.I)
 
+# 对齐 MDCS flaresolverr NEVER_REGISTER_FLARE_RE：稳定 curl/代理源，勿吸入过盾通道
+_NEVER_FLARE_HOST_RE = re.compile(
+    r"(?:^|\.)("
+    r"madouqu|madou\.club|theporndb|javbus|seejav|caribbeancom|"
+    r"jav321|freejavbt|libredmm|contents\.fc2|dmm\.co\.jp|xchina|iqq[0-9]"
+    r")\b",
+    re.I,
+)
+
 
 def _javbus_like_host(host: str) -> bool:
     """JavBus 走 curl/代理即可，禁止 FlareSolverr 过盾。"""
@@ -218,8 +239,38 @@ def _javbus_like_host(host: str) -> bool:
 
 
 def _skip_flare_host(host: str) -> bool:
-    """这些站 curl（+ 站点 Cookie）即可，勿进 Flare 队列。"""
-    return _sehuatang_like_host(host) or _javbus_like_host(host)
+    """这些站 curl（+ 站点 Cookie）即可，勿进 Flare 队列（对齐 MDCS）。"""
+    h = (host or "").lower().lstrip(".")
+    return (
+        _sehuatang_like_host(host)
+        or _javbus_like_host(host)
+        or bool(_NEVER_FLARE_HOST_RE.search(h))
+    )
+
+
+# 最近一次 curl/httpx 未采纳原因（供错误文案；按 host）
+_last_http_miss: dict[str, dict[str, Any]] = {}
+_last_http_miss_lock = threading.Lock()
+
+
+def _note_http_miss(url: str, *, status: int | None = None, reason: str = "") -> None:
+    host = _host_key(url)
+    if not host:
+        return
+    with _last_http_miss_lock:
+        _last_http_miss[host] = {
+            "status": status,
+            "reason": reason,
+            "at": time.time(),
+        }
+
+
+def _take_http_miss(url: str) -> dict[str, Any] | None:
+    host = _host_key(url)
+    if not host:
+        return None
+    with _last_http_miss_lock:
+        return _last_http_miss.pop(host, None)
 
 
 def _ensure_safe_gate_cookies(url: str, cookie_header: str | None) -> str:
@@ -983,6 +1034,30 @@ def curl_request(
     return creq.request(method.upper(), url, **kwargs)
 
 
+def _accept_http_body(
+    url: str,
+    *,
+    status: int,
+    html: str,
+    final_url: str,
+    via: str,
+) -> tuple[str, str, str] | None:
+    """对齐 MDCS：≥400 默认丢弃；但 404 站点模板页交给上层解析「未找到」。"""
+    if looks_blocked_html(html):
+        _note_http_miss(url, status=status, reason="blocked")
+        return None
+    if status >= 400:
+        # 软 404：完整站点 404 页（如 JavBus），供 parse 报「未找到影片」
+        if status == 404 and len(html) >= 400:
+            return html, final_url, via
+        _note_http_miss(url, status=status, reason="http_error")
+        return None
+    if len(html) < 200:
+        _note_http_miss(url, status=status, reason="thin")
+        return None
+    return html, final_url, via
+
+
 def _http_get_once(
     url: str,
     *,
@@ -1005,15 +1080,14 @@ def _http_get_once(
         if proxy:
             kwargs["proxy"] = proxy
         r = creq.get(url, **kwargs)
-        if int(getattr(r, "status_code", 500) or 500) >= 400:
-            return None
+        status = int(getattr(r, "status_code", 500) or 500)
         html = str(getattr(r, "text", "") or "")
-        if len(html) < 200:
-            return None
-        if looks_blocked_html(html):
-            return None
         final = str(getattr(r, "url", "") or url)
-        return html, final, "curl"
+        hit = _accept_http_body(
+            url, status=status, html=html, final_url=final, via="curl"
+        )
+        if hit:
+            return hit
     except Exception as e:
         log.debug("curl-impersonate miss %s: %s", _host_key(url), e)
 
@@ -1028,16 +1102,20 @@ def _http_get_once(
     try:
         with httpx.Client(**opts) as client:
             r2 = client.get(url, headers=headers)
-        if r2.status_code >= 400:
-            return None
+        status = int(r2.status_code or 500)
         html = r2.text or ""
-        if len(html) < 200:
-            return None
-        if looks_blocked_html(html):
-            return None
-        return html, str(r2.url or url), "httpx"
+        hit = _accept_http_body(
+            url,
+            status=status,
+            html=html,
+            final_url=str(r2.url or url),
+            via="httpx",
+        )
+        if hit:
+            return hit
     except Exception:
-        return None
+        _note_http_miss(url, reason="exception")
+    return None
 
 
 def fetch_page(
@@ -1116,16 +1194,17 @@ def _fetch_page_unlocked(
         headers["Cookie"] = merged_cookie
 
     proxy = resolve_scrape_proxy_url()
-    # proxy_flare 且无凭证：少烧直连，尽快过盾
-    # preferFlare：Flare 凭证对 curl 无效（如 LuluBar），直接复用 FS 会话
-    # 色花堂 / JavBus：curl 即可，禁止 preferFlare 跳过直连、也不走 Flare
-    skip_direct = flare_on and not fresh_probe and (
-        (mode == "proxy_flare" and not has_clearance)
-        or (prefer_flare and has_clearance)
+    # 对齐 MDCS download.fetchPage：
+    # - 全源优先 impersonate curl（含 proxy_flare），失败再 Flare
+    # - 勿因 proxy_flare / preferFlare 跳过 curl（否则「全部走 Flare」）
+    # - NEVER_FLARE / proxy_only：禁过盾
+    skip_direct = False
+    no_flare = (
+        mode == "proxy_only"
+        or _skip_flare_host(host)
+        or not thread_allow_flare()
     )
-    no_flare = mode == "proxy_only" or _skip_flare_host(host)
     if no_flare:
-        skip_direct = False
         prefer_flare = False
         flare_on = False
 
@@ -1179,12 +1258,12 @@ def _fetch_page_unlocked(
             if key in seen:
                 continue
             seen.add(key)
-            # adaptive：有 clearance 时超时略放宽
-            direct_to = to
+            # 对齐 MDCS curlOpts：至少 15s（有 clearance 12s+），勿把 adaptive 压成 8s 导致误进 Flare
+            base_read = float(getattr(to, "read", 22) or 22)
             if has_clearance:
-                direct_to = httpx.Timeout(max(12.0, float(getattr(to, "read", 22) or 22)), connect=8.0)
-            elif mode == "proxy_adaptive":
-                direct_to = httpx.Timeout(min(8.0, float(getattr(to, "read", 22) or 22)), connect=6.0)
+                direct_to = httpx.Timeout(max(12.0, base_read), connect=8.0)
+            else:
+                direct_to = httpx.Timeout(max(15.0, base_read), connect=8.0)
             hit = _http_get_once(
                 url,
                 headers=headers,
@@ -1216,13 +1295,34 @@ def _fetch_page_unlocked(
                     if no_flare:
                         mark_prefer_flare(url, False)
                     return accepted
-        last_err = RuntimeError("curl/直连失败或遇盾")
-        if has_clearance and not no_flare:
-            # Flare 下发的 clearance 对 curl TLS 指纹无效 → 下次直走 Flare
+        miss = _take_http_miss(url)
+        st = int((miss or {}).get("status") or 0)
+        if st == 404:
+            last_err = RuntimeError("未找到影片 (HTTP 404)")
+        elif st in (401, 403):
+            last_err = RuntimeError(f"拒绝访问 (HTTP {st})")
+        elif st >= 500:
+            last_err = RuntimeError(f"站点错误 (HTTP {st})")
+        elif (miss or {}).get("reason") == "blocked":
+            last_err = RuntimeError("curl/直连遇盾")
+        else:
+            last_err = RuntimeError("curl/直连失败或遇盾")
+        # 404/5xx 不是盾：不要 sticky preferFlare，也不必为 404 烧 Flare
+        if has_clearance and not no_flare and (miss or {}).get("reason") == "blocked":
             mark_prefer_flare(url, True)
             log.info("clearance-curl-miss host=%s → preferFlare", _host_key(url))
 
+    # HTTP 404：直接失败，禁止回落 Flare（对齐「未找到」语义）
+    if isinstance(last_err, RuntimeError) and "HTTP 404" in str(last_err):
+        raise last_err
+
     if flare_on:
+        log.info(
+            "curl-miss → flare host=%s access=%s err=%s",
+            _host_key(url),
+            mode,
+            str(last_err)[:80] if last_err else "",
+        )
         try:
             flare_timeout = int(
                 max(

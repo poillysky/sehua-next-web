@@ -195,22 +195,63 @@ export async function fetchSearch(opts: {
   return ((await res.json()) as Envelope<SearchResult>).data;
 }
 
-export async function fetchTranslate(text: string): Promise<{
+export async function fetchTranslate(
+  text: string,
+  opts?: { target?: 'en' | 'zh' | string },
+): Promise<{
   text: string;
   alreadyEnglish: boolean;
+  alreadyChinese?: boolean;
   engine?: string;
+  target?: string;
 }> {
   const res = await apiFetch('/translate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({
+      text,
+      target: opts?.target || 'en',
+    }),
   });
   if (!res.ok) throw new Error(await parseError(res));
   return (
     (await res.json()) as Envelope<{
       text: string;
       alreadyEnglish: boolean;
+      alreadyChinese?: boolean;
       engine?: string;
+      target?: string;
+    }>
+  ).data;
+}
+
+export async function saveScrapLibraryPlot(opts: {
+  itemId: string;
+  plot: string;
+}): Promise<{
+  ok: boolean;
+  itemId?: string;
+  code?: string;
+  title?: string;
+  sourceText?: string;
+  plot?: string;
+}> {
+  const res = await apiFetch('/scrap-library/embed/plot', {
+    method: 'POST',
+    body: JSON.stringify({
+      itemId: opts.itemId,
+      plot: opts.plot,
+    }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return (
+    (await res.json()) as Envelope<{
+      ok: boolean;
+      itemId?: string;
+      code?: string;
+      title?: string;
+      sourceText?: string;
+      plot?: string;
     }>
   ).data;
 }
@@ -1290,11 +1331,184 @@ export async function startScrapLibraryEmbed(body?: {
   return ((await res.json()) as Envelope<{ started: boolean }>).data;
 }
 
+export type ScrapLibraryQualityStats = {
+  region?: string | null;
+  total?: number;
+  incomplete?: number;
+  counts?: {
+    no_local?: number;
+    no_media?: number;
+    no_actress?: number;
+    no_studio?: number;
+    no_plot?: number;
+    thin_title?: number;
+  };
+};
+
+export type ScrapLibraryQualityItem = {
+  itemId?: string;
+  region?: string;
+  prefix?: string;
+  code?: string;
+  title?: string;
+  relPath?: string;
+  gaps?: string[];
+};
+
+export type ScrapLibraryEnrichJobStatus = {
+  running: boolean;
+  phase?: string;
+  progress?: PrefixCatalogLocalIndexProgress | null;
+  log?: string[];
+  result?: {
+    dryRun?: boolean;
+    region?: string;
+    kinds?: string[];
+    queued?: number;
+    ok?: number;
+    failed?: number;
+    sources?: string[];
+    items?: Array<{
+      code?: string;
+      ok?: boolean;
+      error?: string;
+      dryRun?: boolean;
+      detailTitle?: string;
+    }>;
+  } | null;
+  error?: string | null;
+};
+
+export async function getScrapLibraryQuality(
+  region = 'japan_censored',
+): Promise<ScrapLibraryQualityStats> {
+  const q = new URLSearchParams();
+  if (region) q.set('region', region);
+  const res = await apiFetch(
+    `/scrap-library/embed/quality${q.toString() ? `?${q}` : ''}`,
+  );
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<ScrapLibraryQualityStats>).data;
+}
+
+export async function getScrapLibraryQualityItems(opts?: {
+  region?: string;
+  kind?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<{ items: ScrapLibraryQualityItem[]; kind?: string; region?: string }> {
+  const q = new URLSearchParams();
+  if (opts?.region) q.set('region', opts.region);
+  if (opts?.kind) q.set('kind', opts.kind);
+  if (opts?.limit != null) q.set('limit', String(opts.limit));
+  if (opts?.offset != null) q.set('offset', String(opts.offset));
+  const res = await apiFetch(
+    `/scrap-library/embed/quality/items${q.toString() ? `?${q}` : ''}`,
+  );
+  if (!res.ok) throw new Error(await parseError(res));
+  return (
+    (await res.json()) as Envelope<{
+      items: ScrapLibraryQualityItem[];
+      kind?: string;
+      region?: string;
+    }>
+  ).data;
+}
+
+export async function startScrapLibraryEnrich(body?: {
+  region?: string;
+  kinds?: string[];
+  limit?: number;
+  dryRun?: boolean;
+}): Promise<{ started: boolean }> {
+  const res = await apiFetch('/scrap-library/embed/enrich', {
+    method: 'POST',
+    body: JSON.stringify({
+      region: body?.region ?? 'japan_censored',
+      // 空数组走服务端默认：完整元数据 + 封面
+      kinds: body?.kinds ?? [
+        'no_local',
+        'no_media',
+        'no_actress',
+        'no_studio',
+        'no_plot',
+        'thin_title',
+      ],
+      limit: body?.limit ?? 0,
+      dryRun: Boolean(body?.dryRun),
+    }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<{ started: boolean }>).data;
+}
+
+export async function getScrapLibraryEnrichStatus(): Promise<ScrapLibraryEnrichJobStatus> {
+  const res = await apiFetch('/scrap-library/embed/enrich/status');
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<ScrapLibraryEnrichJobStatus>).data;
+}
+
+export type EnrichStrategyMode =
+  | 'parallel_all'
+  | 'adaptive_first'
+  | 'adaptive_only';
+
+export type ScrapEnrichStrategy = {
+  mode: EnrichStrategyMode | string;
+  modeLabel?: string;
+  adaptiveWorkers: number;
+  flareWorkers: number;
+  includeFlare: boolean;
+  perSourceTimeoutSec: number;
+  regionGroups: Record<string, string[]>;
+  modes?: { value: string; label: string }[];
+  groupOptions?: { id: string; label: string }[];
+  regions?: { id: string; label: string; groups: string[] }[];
+};
+
+export async function getScrapEnrichStrategy(): Promise<ScrapEnrichStrategy> {
+  const res = await apiFetch('/scrap-library/embed/enrich/strategy');
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<ScrapEnrichStrategy>).data;
+}
+
+export async function putScrapEnrichStrategy(
+  body: Partial<ScrapEnrichStrategy>,
+): Promise<ScrapEnrichStrategy> {
+  const res = await apiFetch('/scrap-library/embed/enrich/strategy', {
+    method: 'PUT',
+    body: JSON.stringify({
+      mode: body.mode ?? 'parallel_all',
+      adaptiveWorkers: body.adaptiveWorkers ?? 0,
+      flareWorkers: body.flareWorkers ?? 0,
+      includeFlare: body.includeFlare !== false,
+      perSourceTimeoutSec: body.perSourceTimeoutSec ?? 45,
+      regionGroups: body.regionGroups ?? {},
+    }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<ScrapEnrichStrategy>).data;
+}
+
 /** 缺本地海报时，把远程 cover 落到番号目录 poster.jpg */
-export async function ensureScrapLibraryPoster(itemId: string) {
-  const id = String(itemId || '').trim();
-  if (!id) return null;
-  const q = new URLSearchParams({ itemId: id });
+export async function ensureScrapLibraryPoster(
+  itemIdOrOpts:
+    | string
+    | {
+        itemId?: string;
+        coverUrl?: string;
+      },
+) {
+  const opts =
+    typeof itemIdOrOpts === 'string'
+      ? { itemId: itemIdOrOpts, coverUrl: '' }
+      : itemIdOrOpts || {};
+  const id = String(opts.itemId || '').trim();
+  const coverUrl = String(opts.coverUrl || '').trim();
+  if (!id && !coverUrl) return null;
+  const q = new URLSearchParams();
+  if (id) q.set('itemId', id);
+  if (coverUrl) q.set('coverUrl', coverUrl);
   const res = await apiFetch(`/scrap-library/embed/ensure-poster?${q}`, {
     method: 'POST',
   });
@@ -1422,6 +1636,8 @@ export type ScrapLibraryEmbedItem = {
   code?: string;
   title?: string;
   sourceText?: string;
+  year?: string;
+  actresses?: string[];
   relPath?: string;
   posterPath?: string;
   thumbPath?: string;
@@ -1442,6 +1658,7 @@ export type ScrapLibraryEmbedRegion = {
 export type ScrapLibraryEmbedPrefix = {
   prefix: string;
   count: number;
+  blurb?: string;
   posterPath?: string;
   posterApi?: string;
   posterApis?: string[];
@@ -1452,6 +1669,7 @@ export type ScrapLibraryEmbedFacet = {
   name: string;
   count: number;
   kind: 'genre' | 'tag' | 'studio' | string;
+  blurb?: string;
   posterPath?: string;
   posterApi?: string;
   posterApis?: string[];
@@ -1577,6 +1795,31 @@ export async function listScrapLibraryEmbedFacets(opts?: {
   };
 }
 
+export async function refreshScrapLibraryEmbedFacetsSnapshot(opts?: {
+  region?: string;
+  kinds?: Array<'genre' | 'tag' | 'studio' | 'actress' | string>;
+}): Promise<{
+  region: string;
+  kinds: Record<string, number>;
+  updatedAt: number;
+}> {
+  const res = await apiFetch('/scrap-library/embed/facets/refresh', {
+    method: 'POST',
+    body: JSON.stringify({
+      region: opts?.region || '',
+      kinds: opts?.kinds,
+    }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return (
+    (await res.json()) as Envelope<{
+      region: string;
+      kinds: Record<string, number>;
+      updatedAt: number;
+    }>
+  ).data;
+}
+
 export async function listScrapLibraryEmbedRecommend(
   _region = '',
 ): Promise<ScrapLibraryEmbedRecommend> {
@@ -1663,10 +1906,18 @@ export const SCRAP_LIST_THUMB_W = 360;
 /** 拼贴 / 货架：竖图清晰度 */
 export const SCRAP_COLLAGE_THUMB_W = 320;
 
-/** 刮削库本地封面 → 可请求的 /api URL（列表优先竖版 poster，横 thumb 由服务端裁右侧） */
+/** 刮削库本地封面 → 可请求的 /api URL。
+ * 列表/货架：prefer=thumb（横图右裁竖图）；详情：prefer=poster 高清。
+ * 默认不回退远程 coverUrl；需要外链时显式传 allowRemote: true。
+ */
 export function scrapLibraryCoverUrl(
   item: Pick<ScrapLibraryEmbedItem, 'posterApi' | 'thumbApi' | 'coverUrl'>,
-  opts?: { w?: number; prefer?: 'thumb' | 'poster'; rp?: boolean },
+  opts?: {
+    w?: number;
+    prefer?: 'thumb' | 'poster';
+    rp?: boolean;
+    allowRemote?: boolean;
+  },
 ): string {
   const preferThumb = opts?.prefer === 'thumb';
   const local = String(
@@ -1687,6 +1938,7 @@ export function scrapLibraryCoverUrl(
     }
     return url;
   }
+  if (!opts?.allowRemote) return '';
   return proxiedCoverUrl(item.coverUrl, { w, rp: opts?.rp }) || '';
 }
 

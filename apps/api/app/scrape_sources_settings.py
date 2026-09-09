@@ -323,6 +323,252 @@ def _homepage_url(sid: str, cfg: dict[str, Any], meta: dict[str, Any]) -> str:
     return ""
 
 
+# 刮削库元数据补全：有详情拉页实现的数据源（catalog id → detail key）
+# 与 scrape_details.registry 对齐；值为 detailKey（多数与 id 相同）
+ENRICH_DETAIL_PROVIDERS: dict[str, str] = {
+    "javbus": "javbus",
+    "javdb": "javdb",
+    "dmm": "dmm",
+    "libredmm": "libredmm",
+    "airav": "airav",
+    "airav_io": "airav_io",
+    "avmoo": "avmoo",
+    "jav321": "jav321",
+    "javlibrary": "javlibrary",
+    "avbase": "avbase",
+    "mgstage": "mgstage",
+    "freejavbt": "freejavbt",
+    "sevenmmtv": "7mmtv",
+    "iqqtv": "iqqtv",
+    "avsex": "avsex",
+    "r18dev": "r18dev",
+    "javday": "javday",
+    "miss_av": "missav",
+    "njav": "njav",
+    "lulubar": "lulubar",
+    "avsox": "avsox",
+    "carib": "carib",
+    "fc2_hub": "fc2_hub",
+    "fc2": "fc2",
+    "fd2ppv": "fd2ppv",
+    "madou": "madou",
+    "madouqu": "madouqu",
+    "xiao_huang_shu": "xiao_huang_shu",
+    "hscangku": "hscangku",
+    "theporndb": "theporndb",
+    "avheat": "avheat",
+}
+
+# 七区 → 可用数据源分组（仅开关打开的源会参与级联）
+# 有码/写真/素人/无码 → 有码 AV + 无码 AV + 综合
+# FC2 → FC2 + 综合；国产 → 国产 + 综合；欧美 → 欧美 + 综合
+REGION_ENRICH_GROUPS: dict[str, tuple[str, ...]] = {
+    "japan_censored": ("av", "uncensored", "general"),
+    "japan_gravure": ("av", "uncensored", "general"),
+    "japan_amateur": ("av", "uncensored", "general"),
+    "japan_uncensored": ("av", "uncensored", "general"),
+    "fc2": ("fc2", "general"),
+    "china": ("chinese", "general"),
+    "western": ("western", "general"),
+}
+
+
+def resolve_enrich_region_id(region: str | None) -> str | None:
+    """刮削库 region / 七区 id / 中文标签 → 稳定七区 id。"""
+    from .region_meta import REGION_META, resolve_fs_region
+
+    raw = str(region or "").strip()
+    if not raw:
+        return None
+    rid = resolve_fs_region(raw)
+    if rid:
+        return rid
+    low = raw.casefold()
+    aliases = {
+        "有码": "japan_censored",
+        "日本有码": "japan_censored",
+        "写真": "japan_gravure",
+        "日本写真": "japan_gravure",
+        "素人": "japan_amateur",
+        "日本素人": "japan_amateur",
+        "无码": "japan_uncensored",
+        "日本无码": "japan_uncensored",
+        "国产": "china",
+        "国产无码": "china",
+        "欧美": "western",
+        "欧美无码": "western",
+        "fc2": "fc2",
+    }
+    if raw in aliases:
+        return aliases[raw]
+    if low in aliases:
+        return aliases[low]
+    for kid, meta in REGION_META.items():
+        label = str(meta.get("label") or "")
+        if raw == kid or raw == label or low == label.casefold():
+            return kid
+    return None
+
+
+def enrich_groups_for_region(region: str | None) -> tuple[str, ...]:
+    rid = resolve_enrich_region_id(region)
+    if not rid:
+        return ()
+    try:
+        from . import scrap_enrich_strategy as strat
+
+        override = strat.region_groups_override(rid)
+        if override:
+            return override
+    except Exception:
+        pass
+    return REGION_ENRICH_GROUPS.get(rid, ())
+
+
+def effective_display_url(source_id: str) -> str:
+    """与数据源列表 displayUrl 一致：activeBase → 测通缓存 → baseUrl → defaultUrl。"""
+    sid = catalog.canonicalize_id(source_id)
+    meta = catalog.catalog_by_id().get(sid) or {}
+    cfg = provider_settings(sid)
+    live = _live_cache()
+    live_row = live.get(sid) or {}
+    if not isinstance(live_row, dict):
+        live_row = {}
+    # legacy mirror keys
+    if not live_row:
+        legacy = {"miss_av": "missav", "sevenmmtv": "7mmtv"}.get(sid)
+        if legacy:
+            live_row = live.get(legacy) if isinstance(live.get(legacy), dict) else {}
+    live_base = _norm_url(str(live_row.get("base") or ""))
+    for raw in (
+        cfg.get("activeBase"),
+        live_base,
+        cfg.get("baseUrl"),
+        meta.get("defaultUrl"),
+    ):
+        u = _norm_url(str(raw or ""))
+        if u:
+            return u
+    return ""
+
+
+def enabled_enrich_sources(*, region: str = "") -> list[dict[str, Any]]:
+    """按数据源目录顺序：七区对应分组 ∩ 已启用 ∩ 有详情补全实现。"""
+    groups = enrich_groups_for_region(region)
+    if region and not groups:
+        return []
+    allowed = set(groups) if groups else None
+    rid = resolve_enrich_region_id(region)
+    out: list[dict[str, Any]] = []
+    for meta in catalog.list_catalog_public():
+        sid = str(meta.get("id") or "")
+        detail_key = ENRICH_DETAIL_PROVIDERS.get(sid)
+        if not detail_key:
+            continue
+        group = str(meta.get("group") or "")
+        if allowed is not None and group not in allowed:
+            continue
+        cfg = provider_settings(sid)
+        if not cfg.get("enabled", True):
+            continue
+        base = effective_display_url(sid)
+        out.append(
+            {
+                "id": sid,
+                "detailKey": detail_key,
+                "group": group,
+                "label": str(meta.get("label") or sid),
+                "baseUrl": base,
+                "cookie": str(cfg.get("cookie") or ""),
+                "apiKey": str(cfg.get("apiKey") or ""),
+                "access": catalog_access(sid),
+                "region": rid,
+            }
+        )
+    return out
+
+
+def catalog_access(source_id: str) -> str:
+    """与数据源测链相同的 access（来自 SOURCE_CATALOG）。"""
+    sid = catalog.canonicalize_id(source_id)
+    meta = catalog.catalog_by_id().get(sid) or {}
+    a = str(meta.get("access") or "proxy_adaptive").strip().lower()
+    if a == "proxy_flare":
+        return "proxy_flare"
+    if a in {"proxy_only", "proxy_curl", "curl", "direct"}:
+        return "proxy_only"
+    return "proxy_adaptive"
+
+
+def resolve_fetch_context(source_id: str) -> dict[str, Any]:
+    """写库拉页上下文：与数据源测链/列表链接逻辑对齐。
+
+    - 仅已启用
+    - 链接：displayUrl（activeBase → 测通缓存 → baseUrl → defaultUrl）
+    - Cookie / API Key：数据源页配置
+    - access：目录 access（自适应/过盾/代理）
+    """
+    sid = catalog.canonicalize_id(source_id)
+    meta = catalog.catalog_by_id().get(sid) or {}
+    if not meta:
+        raise KeyError(f"unknown source: {sid}")
+    cfg = provider_settings(sid)
+    if not cfg.get("enabled", True):
+        raise RuntimeError(f"{sid} 已禁用")
+    home = _homepage_url(sid, cfg, meta)
+    display = effective_display_url(sid)
+    base = display or home
+    if not base:
+        raise RuntimeError(f"{sid} 无可用链接")
+    return {
+        "id": sid,
+        "label": str(meta.get("label") or sid),
+        "group": str(meta.get("group") or ""),
+        "baseUrl": base,
+        "homeUrl": home,
+        "cookie": str(cfg.get("cookie") or ""),
+        "apiKey": str(cfg.get("apiKey") or ""),
+        "access": catalog_access(sid),
+        "enabled": True,
+    }
+
+
+def apply_provider_link_for_fetch(source_id: str) -> dict[str, Any]:
+    """把数据源页生效链接写入 makers.catalog + site_mirror，供 detail 拉页。"""
+    ctx = resolve_fetch_context(source_id)
+    sid = str(ctx["id"])
+    base = str(ctx["baseUrl"])
+    row = {
+        "enabled": True,
+        "baseUrl": _norm_url(str(provider_settings(sid).get("baseUrl") or "")) or base,
+        "activeBase": base,
+        "cookie": ctx["cookie"],
+        "apiKey": ctx["apiKey"],
+        "lastProbe": provider_settings(sid).get("lastProbe"),
+    }
+    if not row["baseUrl"]:
+        row["baseUrl"] = base
+    _sync_legacy_makers(sid, row)
+
+    origin = base
+    if sid in ("iqqtv", "miss_av", "njav", "airav_io"):
+        origin = re.sub(r"/(cn|ja|en|zh)/?$", "", base, flags=re.I).rstrip("/") or base
+    elif sid == "sevenmmtv":
+        origin = re.sub(r"/zh/?$", "", base, flags=re.I).rstrip("/") or base
+    _remember_live(sid, origin, discovered_from=origin)
+    return {
+        "id": sid,
+        "baseUrl": base,
+        "origin": origin,
+        "detailKey": ENRICH_DETAIL_PROVIDERS.get(sid, sid),
+        "cookie": ctx["cookie"],
+        "apiKey": ctx["apiKey"],
+        "access": ctx["access"],
+        "label": ctx["label"],
+        "group": ctx["group"],
+    }
+
+
 # 主页身份线索（host 子串 / 正文或 title 子串，满足其一即可）
 _PROBE_MARKERS: dict[str, tuple[str, str]] = {
     "javbus": ("javbus", "javbus"),

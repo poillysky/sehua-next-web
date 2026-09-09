@@ -1,11 +1,13 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Bookmark, BookmarkCheck, Captions, Search } from 'lucide-react';
+import { Bookmark, BookmarkCheck, Captions, Languages, Search } from 'lucide-react';
 import {
   fetchScrapLibrarySubtitles,
+  fetchTranslate,
   listScrapLibraryEmbedItems,
   listScrapLibrarySubtitles,
+  saveScrapLibraryPlot,
   searchScrapLibraryEmbed,
   scrapLibraryCoverUrl,
   type ScrapLibraryEmbedItem,
@@ -17,6 +19,7 @@ import { openMakerHomeSearch } from './makersUi';
 import { isScrapFavorite, toggleScrapFavorite, ensureScrapFavoritesLoaded } from './scrapFavorites';
 import { parseScrapSourceText } from './scrapSourceMeta';
 import { ScrapPosterCard } from './ScrapPosterCard';
+import { useScrapLocalCover, SCRAP_DETAIL_COVER_OPTS } from './useScrapLocalCover';
 
 export function ScrapDetailBody({
   item,
@@ -26,6 +29,7 @@ export function ScrapDetailBody({
   onOpenGenre,
   onOpenStudio,
   onOpenRelated,
+  onItemPatch,
 }: {
   item: ScrapLibraryEmbedItem;
   /** 当前片商分区，优先于 item.region */
@@ -35,6 +39,8 @@ export function ScrapDetailBody({
   onOpenGenre?: (name: string) => void;
   onOpenStudio?: (name: string) => void;
   onOpenRelated?: (next: ScrapLibraryEmbedItem) => void;
+  /** 剧情译中落库后回写条目 */
+  onItemPatch?: (patch: Partial<ScrapLibraryEmbedItem>) => void;
 }) {
   const tabCtx = useTabNavigation();
   const { toast } = useOverlay();
@@ -63,13 +69,24 @@ export function ScrapDetailBody({
     if (b && hasCjk(b)) return b;
     return a || b;
   })();
-  const displayTitle = titleZhOrJa;  const poster = scrapLibraryCoverUrl(item, { prefer: 'poster', w: 480 });
+  const displayTitle = titleZhOrJa;
+  const {
+    src: poster,
+    onError: onPosterError,
+  } = useScrapLocalCover({
+    posterApi: item.posterApi,
+    thumbApi: item.thumbApi,
+    coverUrl: item.coverUrl,
+    itemId: item.itemId,
+    ...SCRAP_DETAIL_COVER_OPTS,
+  });
   const fanart = item.fanartApi
     ? scrapLibraryCoverUrl(
         { posterApi: item.fanartApi, coverUrl: '' },
         { prefer: 'poster', w: 720, rp: false },
       )
     : '';
+  // 背景洗图可用横 thumb；主海报已是高清 poster
   const thumbWide = item.thumbApi
     ? scrapLibraryCoverUrl(
         { posterApi: item.thumbApi, coverUrl: '' },
@@ -83,12 +100,35 @@ export function ScrapDetailBody({
   const [favBusy, setFavBusy] = useState(false);
   const [subBusy, setSubBusy] = useState(false);
   const [subReady, setSubReady] = useState(false);
+  const [plotZh, setPlotZh] = useState('');
+  const [plotSaved, setPlotSaved] = useState(false);
+  const [plotBusy, setPlotBusy] = useState(false);
   const [related, setRelated] = useState<ScrapLibraryEmbedItem[]>([]);
   const [relatedLoading, setRelatedLoading] = useState(false);
+
+  const plotLooksChinese = useMemo(() => {
+    const p = String(meta.plot || '');
+    // 有假名就是日文（夹汉字也不能当中文），否则会跳过翻译、界面仍显示日文
+    if (/[\u3040-\u309f\u30a0-\u30ff]/.test(p)) return false;
+    const cjk = (p.match(/[\u4e00-\u9fff]/g) || []).length;
+    return cjk >= 8;
+  }, [meta.plot]);
+
+  const displayPlot = useMemo(() => {
+    const raw = String(plotZh || meta.plot || '');
+    return raw
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/\r\n/g, '\n')
+      .trim();
+  }, [plotZh, meta.plot]);
 
   useEffect(() => {
     setImgGone(false);
     setSubReady(false);
+    setPlotZh('');
+    setPlotSaved(false);
+    setPlotBusy(false);
     let cancelled = false;
     const id = String(item.itemId || '');
     // 收藏真相在服务端：先确保缓存就绪再据其点亮状态
@@ -232,6 +272,90 @@ export function ScrapDetailBody({
     else toast('已跳转资源库搜索', 'success');
   }
 
+  async function onTranslatePlot() {
+    const raw = String(meta.plot || '')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/&nbsp;/gi, ' ')
+      .trim();
+    if (!raw || plotBusy) return;
+    const hasKana = /[\u3040-\u309f\u30a0-\u30ff]/.test(raw);
+    if ((plotLooksChinese || plotSaved) && !hasKana) {
+      toast('剧情已是中文', 'info');
+      return;
+    }
+    const iid = String(item.itemId || '').trim();
+    if (!iid) {
+      toast('无法保存：缺少条目 ID', 'error');
+      return;
+    }
+    setPlotBusy(true);
+    try {
+      const data = await fetchTranslate(raw, { target: 'zh' });
+      const out = String(data.text || '').trim();
+      if (!out) {
+        toast('翻译结果为空', 'error');
+        return;
+      }
+      const outHasKana = /[\u3040-\u309f\u30a0-\u30ff]/.test(out);
+      if (data.alreadyChinese && !hasKana && !outHasKana) {
+        setPlotZh(out);
+        setPlotSaved(true);
+        toast('剧情已是中文', 'info');
+        return;
+      }
+      if (outHasKana && hasKana) {
+        toast('翻译仍是日文，请稍后重试或检查大模型', 'error');
+        return;
+      }
+      // 先上屏中文，避免保存/重嵌入失败时界面仍停在日文
+      setPlotZh(out);
+      try {
+        const saved = await saveScrapLibraryPlot({ itemId: iid, plot: out });
+        const fullPlot = String(saved.plot || out).trim() || out;
+        let sourceText = String(saved.sourceText || '').trim();
+        if (sourceText && fullPlot) {
+          if (/^剧情：/m.test(sourceText)) {
+            sourceText = sourceText.replace(
+              /^剧情：[\s\S]+?(?=\n[^\s][^：\n]*：|$)/m,
+              `剧情：${fullPlot}`,
+            );
+          } else {
+            sourceText = `${sourceText}\n剧情：${fullPlot}`;
+          }
+        }
+        setPlotZh(fullPlot);
+        setPlotSaved(true);
+        if (sourceText) {
+          onItemPatch?.({ sourceText });
+        } else {
+          const prev = String(item.sourceText || '');
+          const next = prev.replace(
+            /^剧情：[\s\S]+?(?=\n[^\s][^：\n]*：|$)/m,
+            `剧情：${fullPlot}`,
+          );
+          onItemPatch?.({
+            sourceText: next.includes('剧情：')
+              ? next
+              : `${prev}\n剧情：${fullPlot}`,
+          });
+        }
+        toast('已翻译并保存', 'success');
+      } catch (saveErr) {
+        setPlotSaved(false);
+        toast(
+          saveErr instanceof Error
+            ? `已译出中文，但保存失败：${saveErr.message}`
+            : '已译出中文，但保存失败',
+          'error',
+        );
+      }
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '翻译失败', 'error');
+    } finally {
+      setPlotBusy(false);
+    }
+  }
+
   async function onFetchSubtitle() {
     if (subBusy) return;
     if (!code && !item.itemId) {
@@ -322,7 +446,7 @@ export function ScrapDetailBody({
 
         <div className="mkd-head__row">
           <div className="media-detail__poster mkd-head__poster" aria-hidden>
-            {poster && !imgGone ? (
+            {poster ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={poster}
@@ -331,7 +455,7 @@ export function ScrapDetailBody({
                 decoding="async"
                 fetchPriority="high"
                 referrerPolicy="no-referrer"
-                onError={() => setImgGone(true)}
+                onError={onPosterError}
               />
             ) : (
               <span className="media-detail__poster-ph">
@@ -408,10 +532,29 @@ export function ScrapDetailBody({
         </section>
       ) : null}
 
-      {meta.plot ? (
+      {meta.plot || plotZh ? (
         <section className="mkd-section">
-          <h3 className="media-detail__h mkd-section__h">剧情</h3>
-          <p className="media-detail__overview allow-select">{meta.plot}</p>
+          <div className="mkd-section__head">
+            <h3 className="media-detail__h mkd-section__h">剧情</h3>
+            {!plotLooksChinese && !plotSaved ? (
+              <button
+                type="button"
+                className="mkd-translate-btn"
+                onClick={() => void onTranslatePlot()}
+                disabled={plotBusy}
+                title="翻译为中文并保存"
+              >
+                <Languages size={14} strokeWidth={2.25} aria-hidden />
+                {plotBusy ? '翻译中…' : '翻译'}
+              </button>
+            ) : (
+              <span className="mkd-translate-btn is-active" aria-hidden>
+                <Languages size={14} strokeWidth={2.25} />
+                中文
+              </span>
+            )}
+          </div>
+          <p className="media-detail__overview allow-select">{displayPlot}</p>
         </section>
       ) : null}
 

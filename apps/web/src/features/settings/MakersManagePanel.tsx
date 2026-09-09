@@ -12,27 +12,32 @@ import {
   getPrefixCatalogSummary,
   getScrapLibraryEmbedSettings,
   getScrapLibraryEmbedStatus,
+  getScrapLibraryEnrichStatus,
+  getScrapLibraryQuality,
   mkdirPrefixCatalogStrmDir,
   putPrefixCatalogStrmSyncSettings,
   putScrapLibraryEmbedSettings,
   startPrefixCatalogLocalIndex,
   startPrefixCatalogStrmSync,
   startScrapLibraryEmbed,
+  startScrapLibraryEnrich,
   type PrefixCatalogLocalIndexProgress,
   type PrefixCatalogPrefixDetail,
   type PrefixCatalogPrefixRow,
   type PrefixCatalogStrmBrowse,
   type PrefixCatalogSummary,
+  type ScrapLibraryQualityStats,
 } from '@/lib/api';
 import { MAKER_KIND_TABS } from '@/features/makers/makersUi';
 import { AppPush } from '@/components/ui/AppPush';
 import { AppCenterModal } from '@/components/ui/AppCenterModal';
 import { AppMsg } from '@/components/ui/AppMsg';
 import { ScrapeSourcesSection } from '@/features/settings/ScrapeSourcesSection';
+import { EnrichStrategyPanel } from '@/features/settings/EnrichStrategyPanel';
 
 const CODES_PAGE_SIZE = 50;
 
-type ScanLogModal = 'local' | 'strm' | 'scrap' | null;
+type ScanLogModal = 'local' | 'strm' | 'scrap' | 'enrich' | null;
 
 type CatalogNav =
   | { level: 'regions' }
@@ -64,6 +69,7 @@ export function MakersManagePanel({
   const [catalogBusy, setCatalogBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [sourcesOpen, setSourcesOpen] = useState(false);
+  const [enrichStrategyOpen, setEnrichStrategyOpen] = useState(false);
   const [localIndexBusy, setLocalIndexBusy] = useState(false);
   const [localIndexPhase, setLocalIndexPhase] = useState('');
   const [localIndexProgress, setLocalIndexProgress] =
@@ -95,6 +101,15 @@ export function MakersManagePanel({
   const [scrapLog, setScrapLog] = useState<string[]>([]);
   const scrapPollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrapPollingRef = useRef(false);
+  const [scrapQuality, setScrapQuality] =
+    useState<ScrapLibraryQualityStats | null>(null);
+  const [enrichBusy, setEnrichBusy] = useState(false);
+  const [enrichPhase, setEnrichPhase] = useState('');
+  const [enrichProgress, setEnrichProgress] =
+    useState<PrefixCatalogLocalIndexProgress | null>(null);
+  const [enrichLog, setEnrichLog] = useState<string[]>([]);
+  const enrichPollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const enrichPollingRef = useRef(false);
   const [scanLogModal, setScanLogModal] = useState<ScanLogModal>(null);
 
   useEffect(() => {
@@ -116,6 +131,11 @@ export function MakersManagePanel({
       } catch {
         setScrapRoot('scrap-library');
       }
+      try {
+        setScrapQuality(await getScrapLibraryQuality('japan_censored'));
+      } catch {
+        setScrapQuality(null);
+      }
     })();
   }, []);
 
@@ -124,6 +144,7 @@ export function MakersManagePanel({
       if (localIndexPollRef.current) clearTimeout(localIndexPollRef.current);
       if (strmPollRef.current) clearTimeout(strmPollRef.current);
       if (scrapPollRef.current) clearTimeout(scrapPollRef.current);
+      if (enrichPollRef.current) clearTimeout(enrichPollRef.current);
     };
   }, []);
 
@@ -312,7 +333,7 @@ export function MakersManagePanel({
   }
 
   async function onStrmSync() {
-    if (strmBusy || localIndexBusy || catalogBusy || scrapBusy) return;
+    if (strmBusy || localIndexBusy || catalogBusy || scrapBusy || enrichBusy) return;
     const root = strmRoot.trim() || 'strm-library';
     setMsg('');
     setStrmBusy(true);
@@ -371,7 +392,7 @@ export function MakersManagePanel({
   }
 
   async function onScrapEmbedSync() {
-    if (strmBusy || localIndexBusy || catalogBusy || scrapBusy) return;
+    if (strmBusy || localIndexBusy || catalogBusy || scrapBusy || enrichBusy) return;
     const root = scrapRoot.trim() || 'scrap-library';
     setMsg('');
     setScrapBusy(true);
@@ -387,6 +408,84 @@ export function MakersManagePanel({
       setScrapPhase('');
       setScrapProgress(null);
       const text = e instanceof Error ? e.message : '启动刮削库同步失败';
+      setMsg(text);
+      onStatus(text, 'warn');
+    }
+  }
+
+  async function pollEnrichUntilDone() {
+    if (enrichPollingRef.current) return;
+    enrichPollingRef.current = true;
+    try {
+      for (;;) {
+        const st = await getScrapLibraryEnrichStatus();
+        setEnrichBusy(st.running);
+        setEnrichPhase(st.phase || (st.running ? '补全中…' : ''));
+        setEnrichProgress(st.progress || null);
+        setEnrichLog(Array.isArray(st.log) ? st.log.slice(-40) : []);
+        if (!st.running) {
+          if (st.error) {
+            setMsg(st.error);
+            onStatus('元数据补齐失败', 'warn');
+            setEnrichBusy(false);
+            return;
+          }
+          if (st.result) {
+            const ok = st.result.ok ?? 0;
+            const failed = st.result.failed ?? 0;
+            const queued = st.result.queued ?? 0;
+            const prefix = st.result.dryRun ? '预览' : '补全';
+            setMsg(`${prefix}完成 · 成功 ${ok}/${queued}${failed ? ` · 失败 ${failed}` : ''}`);
+            onStatus(st.result.dryRun ? '元数据补齐预览完成' : '元数据与封面补齐完成', 'ok');
+            try {
+              setScrapQuality(await getScrapLibraryQuality('japan_censored'));
+            } catch {
+              /* keep */
+            }
+          }
+          setEnrichPhase('');
+          setEnrichProgress(null);
+          return;
+        }
+        await new Promise<void>((resolve) => {
+          enrichPollRef.current = setTimeout(resolve, 450);
+        });
+      }
+    } finally {
+      enrichPollingRef.current = false;
+    }
+  }
+
+  async function onScrapEnrich(dryRun: boolean) {
+    if (strmBusy || localIndexBusy || catalogBusy || scrapBusy || enrichBusy) return;
+    setMsg('');
+    setEnrichBusy(true);
+    setEnrichPhase('starting');
+    setEnrichProgress({ stage: 'prepare', percent: 0, label: 'starting' });
+    setEnrichLog([]);
+    onStatus(dryRun ? '元数据补齐预览中…' : '元数据与封面补齐中…', 'mute');
+    try {
+      await startScrapLibraryEnrich({
+        region: 'japan_censored',
+        // 完整补齐：封面 + 女优/片商/剧情/标题
+        kinds: [
+          'no_local',
+          'no_media',
+          'no_actress',
+          'no_studio',
+          'no_plot',
+          'thin_title',
+        ],
+        // 0=全量缺口；预览仍抽样 30
+        limit: dryRun ? 30 : 0,
+        dryRun,
+      });
+      await pollEnrichUntilDone();
+    } catch (e) {
+      setEnrichBusy(false);
+      setEnrichPhase('');
+      setEnrichProgress(null);
+      const text = e instanceof Error ? e.message : '启动元数据补齐失败';
       setMsg(text);
       onStatus(text, 'warn');
     }
@@ -517,6 +616,15 @@ export function MakersManagePanel({
     return (
       <ScrapeSourcesSection
         onBack={() => setSourcesOpen(false)}
+        onStatus={onStatus}
+      />
+    );
+  }
+
+  if (enrichStrategyOpen) {
+    return (
+      <EnrichStrategyPanel
+        onBack={() => setEnrichStrategyOpen(false)}
         onStatus={onStatus}
       />
     );
@@ -787,6 +895,37 @@ export function MakersManagePanel({
       : typeof scrapProgress?.done === 'number' && scrapProgress.done > 0
         ? scrapProgress.done.toLocaleString()
         : '';
+  const enrichPct =
+    typeof enrichProgress?.percent === 'number'
+      ? Math.max(0, Math.min(100, enrichProgress.percent))
+      : enrichBusy
+        ? 0
+        : null;
+  const enrichCountLabel =
+    typeof enrichProgress?.done === 'number' &&
+    typeof enrichProgress?.total === 'number' &&
+    enrichProgress.total > 0
+      ? `${enrichProgress.done.toLocaleString()} / ${enrichProgress.total.toLocaleString()}`
+      : typeof enrichProgress?.done === 'number' && enrichProgress.done > 0
+        ? enrichProgress.done.toLocaleString()
+        : '';
+  const qualityDesc = (() => {
+    if (!scrapQuality) return '补齐标题 / 女优 / 片商 / 剧情 / 封面';
+    const c = scrapQuality.counts || {};
+    const parts: string[] = [];
+    if (c.no_local) parts.push(`封面 ${c.no_local}`);
+    if (c.no_media) parts.push(`无外链 ${c.no_media}`);
+    if (c.no_actress) parts.push(`女优 ${c.no_actress}`);
+    if (c.no_studio) parts.push(`片商 ${c.no_studio}`);
+    if (c.no_plot) parts.push(`剧情 ${c.no_plot}`);
+    if (c.thin_title) parts.push(`标题 ${c.thin_title}`);
+    const incomplete = scrapQuality.incomplete ?? 0;
+    if (!incomplete && parts.length === 0) return '元数据与封面已齐';
+    if (parts.length) {
+      return `待补齐 ${incomplete.toLocaleString()}（${parts.join(' · ')}）`;
+    }
+    return `待补齐 ${incomplete.toLocaleString()}`;
+  })();
 
   const catalogScrollKey =
     catalogNav?.level === 'prefix'
@@ -1141,7 +1280,7 @@ export function MakersManagePanel({
                 <button
                   type="button"
                   className="makers-manage__probe-btn"
-                  disabled={strmBusy || localIndexBusy || scrapBusy}
+                  disabled={strmBusy || localIndexBusy || scrapBusy || enrichBusy}
                   onClick={() => void openScrapBrowse()}
                 >
                   选择
@@ -1161,7 +1300,13 @@ export function MakersManagePanel({
                 <button
                   type="button"
                   className="makers-manage__probe-btn"
-                  disabled={strmBusy || localIndexBusy || catalogBusy || scrapBusy}
+                  disabled={
+                    strmBusy ||
+                    localIndexBusy ||
+                    catalogBusy ||
+                    scrapBusy ||
+                    enrichBusy
+                  }
                   onClick={() => void onScrapEmbedSync()}
                 >
                   {scrapBusy
@@ -1220,6 +1365,105 @@ export function MakersManagePanel({
                           type="button"
                           className="makers-manage__log-btn"
                           onClick={() => setScanLogModal('scrap')}
+                        >
+                          日志
+                        </button>
+                      ) : null}
+                    </span>
+                  </div>
+                </div>
+              ) : null}
+            </li>
+            <li>
+              <div className="settings-nav makers-manage__status">
+                <span className="settings-nav__main">
+                  <span className="settings-nav__title">元数据与封面补齐</span>
+                  <span className="settings-nav__desc">
+                    {enrichBusy ? enrichPhase || '补全中…' : qualityDesc}
+                  </span>
+                </span>
+                <span className="makers-manage__status-actions">
+                  <button
+                    type="button"
+                    className="makers-manage__probe-btn"
+                    disabled={
+                      strmBusy ||
+                      localIndexBusy ||
+                      catalogBusy ||
+                      scrapBusy ||
+                      enrichBusy
+                    }
+                    onClick={() => void onScrapEnrich(true)}
+                  >
+                    预览
+                  </button>
+                  <button
+                    type="button"
+                    className="makers-manage__probe-btn"
+                    disabled={
+                      strmBusy ||
+                      localIndexBusy ||
+                      catalogBusy ||
+                      scrapBusy ||
+                      enrichBusy
+                    }
+                    onClick={() => void onScrapEnrich(false)}
+                  >
+                    {enrichBusy
+                      ? enrichPct != null
+                        ? `${Math.round(enrichPct)}%`
+                        : '补全中…'
+                      : '开始补全'}
+                  </button>
+                </span>
+              </div>
+              {enrichBusy || enrichProgress || enrichLog.length > 0 ? (
+                <div
+                  className="makers-manage__scan-progress"
+                  aria-live="polite"
+                >
+                  {enrichBusy || enrichProgress ? (
+                    <div
+                      className="makers-manage__scan-bar"
+                      role="progressbar"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={
+                        enrichPct != null ? Math.round(enrichPct) : 0
+                      }
+                      aria-label="元数据与封面补齐进度"
+                    >
+                      <span
+                        style={{
+                          width: `${enrichPct != null ? enrichPct : 0}%`,
+                        }}
+                      />
+                    </div>
+                  ) : null}
+                  <div className="makers-manage__scan-meta">
+                    <span>
+                      {enrichBusy || enrichProgress
+                        ? enrichProgress?.stage === 'enrich'
+                          ? '补全'
+                          : enrichProgress?.stage === 'queue'
+                            ? '筛选'
+                            : enrichProgress?.stage === 'done'
+                              ? '完成'
+                              : '准备'
+                        : '已完成'}
+                      {enrichCountLabel ? ` · ${enrichCountLabel}` : ''}
+                    </span>
+                    <span className="makers-manage__scan-meta-actions">
+                      {enrichPct != null && (enrichBusy || enrichProgress) ? (
+                        <span className="makers-manage__scan-pct">
+                          {`${Math.round(enrichPct)}%`}
+                        </span>
+                      ) : null}
+                      {enrichLog.length > 0 ? (
+                        <button
+                          type="button"
+                          className="makers-manage__log-btn"
+                          onClick={() => setScanLogModal('enrich')}
                         >
                           日志
                         </button>
@@ -1310,6 +1554,26 @@ export function MakersManagePanel({
                 />
               </button>
             </li>
+            <li>
+              <button
+                type="button"
+                className="settings-nav makers-manage__catalog-row"
+                onClick={() => setEnrichStrategyOpen(true)}
+              >
+                <span className="settings-nav__main">
+                  <span className="settings-nav__title">补全并发策略</span>
+                  <span className="settings-nav__desc">
+                    七区分组 · 自适应/过盾并发 · 调度模式
+                  </span>
+                </span>
+                <ChevronRight
+                  className="settings-nav__chev"
+                  size={17}
+                  strokeWidth={2.4}
+                  aria-hidden
+                />
+              </button>
+            </li>
           </ul>
 
           <AppMsg allowSelect onDismiss={() => setMsg('')}>
@@ -1325,7 +1589,9 @@ export function MakersManagePanel({
             ? 'STRM 同步日志'
             : scanLogModal === 'scrap'
               ? '刮削库同步日志'
-              : '双库扫描日志'
+              : scanLogModal === 'enrich'
+                ? '元数据补齐日志'
+                : '双库扫描日志'
         }
         onClose={() => setScanLogModal(null)}
         cardClassName="makers-manage__log-modal"
@@ -1335,7 +1601,9 @@ export function MakersManagePanel({
             ? strmLog
             : scanLogModal === 'scrap'
               ? scrapLog
-              : localIndexLog
+              : scanLogModal === 'enrich'
+                ? enrichLog
+                : localIndexLog
           ).map((line, i) => (
             <li key={`${scanLogModal}-${i}-${line}`}>{line}</li>
           ))}
@@ -1343,7 +1611,9 @@ export function MakersManagePanel({
             ? strmLog
             : scanLogModal === 'scrap'
               ? scrapLog
-              : localIndexLog
+              : scanLogModal === 'enrich'
+                ? enrichLog
+                : localIndexLog
           ).length === 0 ? (
             <li className="makers-manage__scan-log-modal--empty">暂无日志</li>
           ) : null}

@@ -1,66 +1,21 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Folder } from 'lucide-react';
-import { scrapLibraryCoverUrl, SCRAP_COLLAGE_THUMB_W } from '@/lib/api';
-
-const COVER_OPTS = { w: SCRAP_COLLAGE_THUMB_W, rp: true as const };
-
-function resolvePosters(
-  posterApi: string | undefined,
-  posterApis: string[] | undefined,
-  maxPosters: number,
-  coverUrl?: string,
-) {
-  const list = (posterApis || [])
-    .map((p) =>
-      scrapLibraryCoverUrl(
-        { posterApi: p },
-        // 横图 → 右裁竖幅，统一竖封面
-        COVER_OPTS,
-      ),
-    )
-    .filter(Boolean);
-  if (list.length) return list.slice(0, maxPosters);
-  const one = scrapLibraryCoverUrl(
-    { posterApi, coverUrl },
-    COVER_OPTS,
-  );
-  return one ? [one] : [];
-}
-
-function useCoverSrc(
-  posterApi: string | undefined,
-  posterApis: string[] | undefined,
-  coverUrl: string | undefined,
-) {
-  const primary = resolvePosters(posterApi, posterApis, 1, coverUrl)[0] || '';
-  const remoteOnly =
-    scrapLibraryCoverUrl({ coverUrl }, COVER_OPTS) || '';
-  const [src, setSrc] = useState(primary);
-
-  useEffect(() => {
-    setSrc(primary);
-  }, [primary]);
-
-  const onError = () => {
-    if (remoteOnly && src !== remoteOnly) {
-      setSrc(remoteOnly);
-      return;
-    }
-    setSrc('');
-  };
-
-  return { src, onError };
-}
+import {
+  SCRAP_COLLAGE_COVER_OPTS,
+  useScrapLocalCover,
+} from './useScrapLocalCover';
 
 /** Emby 式 2×2 拼贴封面（厂牌 / 标签） */
 export function ScrapCollageCard({
   title,
   count,
+  blurb,
   posterApi,
   posterApis,
   coverUrl,
+  itemId,
   overlay,
   onClick,
   /** 推荐货架默认单图，显著减少首屏请求；文件夹全页可开 mosaic */
@@ -68,17 +23,27 @@ export function ScrapCollageCard({
 }: {
   title: string;
   count?: number;
+  /** 厂牌/前缀短介绍（中日英名等） */
+  blurb?: string;
   posterApi?: string;
   posterApis?: string[];
   coverUrl?: string;
+  itemId?: string;
   /** 标题叠在封面上（标签） */
   overlay?: boolean;
   onClick: () => void;
   mosaic?: boolean;
 }) {
-  const posters = resolvePosters(posterApi, posterApis, mosaic ? 4 : 1, coverUrl);
-  const { src, onError } = useCoverSrc(posterApi, posterApis, coverUrl);
+  const { src, posters, onError } = useScrapLocalCover({
+    posterApi,
+    posterApis,
+    coverUrl,
+    itemId,
+    maxPosters: mosaic ? 4 : 1,
+    ...SCRAP_COLLAGE_COVER_OPTS,
+  });
   const [gone, setGone] = useState<Record<number, boolean>>({});
+  const intro = String(blurb || '').trim();
 
   return (
     <button
@@ -136,6 +101,11 @@ export function ScrapCollageCard({
             })}
           </span>
         )}
+        {count != null ? (
+          <span className="makers-collage__count" aria-label={`${count} 项`}>
+            {count.toLocaleString()}
+          </span>
+        ) : null}
         {overlay ? (
           <span className="makers-collage__label allow-select">{title}</span>
         ) : null}
@@ -143,8 +113,8 @@ export function ScrapCollageCard({
       {/* 标签也保留封面下说明，避免叠加层被图盖住时看不到字 */}
       <span className="makers-collage__caption">
         <span className="makers-collage__title allow-select">{title}</span>
-        {count != null ? (
-          <span className="makers-collage__count">{count} 项</span>
+        {intro ? (
+          <span className="makers-collage__blurb">{intro}</span>
         ) : null}
       </span>
     </button>
@@ -158,6 +128,7 @@ export function ScrapActressCard({
   posterApi,
   posterApis,
   coverUrl,
+  itemId,
   onClick,
 }: {
   title: string;
@@ -165,9 +136,16 @@ export function ScrapActressCard({
   posterApi?: string;
   posterApis?: string[];
   coverUrl?: string;
+  itemId?: string;
   onClick: () => void;
 }) {
-  const { src, onError } = useCoverSrc(posterApi, posterApis, coverUrl);
+  const { src, onError } = useScrapLocalCover({
+    posterApi,
+    posterApis,
+    coverUrl,
+    itemId,
+    ...SCRAP_COLLAGE_COVER_OPTS,
+  });
 
   return (
     <button type="button" className="makers-actress" onClick={onClick}>
@@ -201,6 +179,7 @@ export function ScrapFolderCard({
   posterApi,
   posterApis,
   coverUrl,
+  itemId,
   onClick,
 }: {
   title: string;
@@ -208,9 +187,16 @@ export function ScrapFolderCard({
   posterApi?: string;
   posterApis?: string[];
   coverUrl?: string;
+  itemId?: string;
   onClick: () => void;
 }) {
-  const { src, onError } = useCoverSrc(posterApi, posterApis, coverUrl);
+  const { src, onError } = useScrapLocalCover({
+    posterApi,
+    posterApis,
+    coverUrl,
+    itemId,
+    ...SCRAP_COLLAGE_COVER_OPTS,
+  });
 
   return (
     <button type="button" className="makers-folder" onClick={onClick}>

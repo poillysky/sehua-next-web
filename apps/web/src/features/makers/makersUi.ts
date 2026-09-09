@@ -51,13 +51,13 @@ export type MakerSortId =
   | 'random';
 
 export const MAKER_SORT_OPTS: Array<{ id: MakerSortId; label: string }> = [
-  { id: 'name', label: '名称' },
+  { id: 'year', label: '发行日期' },
   { id: 'code', label: '番号' },
+  { id: 'name', label: '名称' },
   { id: 'prefix', label: '前缀' },
   { id: 'studio', label: '片商' },
   { id: 'actress', label: '女优' },
   { id: 'recent', label: '最近添加' },
-  { id: 'year', label: '发行日期' },
   { id: 'random', label: '随机' },
 ];
 
