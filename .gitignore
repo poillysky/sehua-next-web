@@ -41,6 +41,7 @@ apps/api/_*.png
 apps/api/_*.webp
 apps/api/_*.log
 apps/api/_gap_reports/
+apps/api/_local_refs/
 apps/api/__pycache__/
 
 # mistaken / unused duplicate of repo-root data/

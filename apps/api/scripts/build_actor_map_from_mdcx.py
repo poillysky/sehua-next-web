@@ -23,8 +23,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]  # sehua-next-web
 API = Path(__file__).resolve().parents[1]
-DEFAULT_XML = API / "_gap_reports" / "_mdcx_mapping_actor.xml"
-DEFAULT_DB = API / "_gap_reports" / "_mdcx_Actress-20250220.db"
+DEFAULT_XML = API / "_local_refs" / "mdcx" / "mapping_actor.xml"
+DEFAULT_DB = API / "_local_refs" / "mdcx" / "Actress-20250220.db"
+# 兼容旧探针目录（若尚未整理）
+_LEGACY_XML = API / "_gap_reports" / "_mdcx_mapping_actor.xml"
+_LEGACY_DB = API / "_gap_reports" / "_mdcx_Actress-20250220.db"
+if not DEFAULT_XML.is_file() and _LEGACY_XML.is_file():
+    DEFAULT_XML = _LEGACY_XML
+if not DEFAULT_DB.is_file() and _LEGACY_DB.is_file():
+    DEFAULT_DB = _LEGACY_DB
 SEED = API / "app" / "scrape_maps_seed" / "actors.zh-CN.json"
 OUT = ROOT / "data" / "scrape_maps" / "actors.zh-CN.json"
 
