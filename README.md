@@ -1,25 +1,31 @@
 # NextWeb
 
-模版壳 iOS PWA + FastAPI。业务参考 sehua，**前端不在根目录**。内置刮削 / 片商 / 板块浏览已下线；仓库搜索、影视、设置保留。
+模版壳 iOS PWA + FastAPI。业务参考 sehua，**前端不在根目录**。
 
 ## 目录分类
 
 ```
-NextWeb/
+sehua-next-web/
 ├── apps/
-│   ├── web/          # 前端 — Next.js PWA（模版壳）      :3020
-│   └── api/          # 后端 — FastAPI（认证/资源/设置）  :8020
-├── config/
-│   └── app.json      # 管理员种子等
+│   ├── web/          # 前端 — Next.js PWA              :3020
+│   └── api/          # 后端 — FastAPI                  :8020
+├── config/           # 管理员种子 / 默认 settings
+├── data/             # 本机运行时（映射、快照、catalog…）
+├── media/            # 刮削库 / STRM（大文件，勿提交）
+├── docs/             # 仓库文档
+├── backups/          # 本机备份（勿提交）
 ├── package.json      # 根脚本（转发到各 app）
 └── README.md
 ```
+
+更完整的约定与评估见 **[docs/](./docs/README.md)**（目录布局、映射表、本机数据）。
 
 | 分类 | 路径 | 端口 | 说明 |
 |------|------|------|------|
 | 前端 | `apps/web` | **3020** `0.0.0.0` | 模版 shell + features |
 | 后端 | `apps/api` | **8020** | `/api` 由 Web rewrite 代理 |
 | 数据 | Postgres | **5439** | 元库 + 资源库 DSN（默认 `nextweb`）；`data/` 仅本地缓存 |
+| 片库 | `media/` | — | STRM / 刮削产物 |
 
 ## 启动
 
