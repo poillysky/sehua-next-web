@@ -36,18 +36,6 @@ SOURCE_CATALOG: list[dict[str, Any]] = [
         "notes": "有码/无码列表与详情 · 需年龄 Cookie",
     },
     {
-        "id": "javdb",
-        "label": "JavDB",
-        "group": "av",
-        "defaultUrl": "https://javdb.com",
-        "probePath": "/",
-        "access": "proxy_flare",
-        "defaultCooldownSec": 10,
-        "defaultCookie": "over18=1; locale=zh",
-        "implemented": True,
-        "notes": "强 CF；批量易超时 · 换出口或稳 Flare",
-    },
-    {
         "id": "dmm",
         "label": "DMM",
         "group": "av",
@@ -108,11 +96,11 @@ SOURCE_CATALOG: list[dict[str, Any]] = [
         "id": "javlibrary",
         "label": "JavLibrary",
         "group": "av",
-        "defaultUrl": "https://www.javlibrary.com",
-        "probePath": "/cn/vl_searchbyid.php?keyword=SONE-001",
+        "defaultUrl": "https://www.javlibrary.com/tw/main.php",
+        "probePath": "/tw/main.php",
         "access": "proxy_adaptive",
         "implemented": True,
-        "notes": "仅日本有码 · 镜像 CN 搜索 · adaptive（镜像须 Flare）",
+        "notes": "仅日本有码 · 默认 tw 繁体站 · adaptive（镜像须 Flare）",
     },
     {
         "id": "avbase",
@@ -229,9 +217,9 @@ SOURCE_CATALOG: list[dict[str, Any]] = [
         "group": "general",
         "defaultUrl": "https://lulubar.co",
         "probePath": "/",
-        "access": "proxy_flare",
+        "access": "proxy_adaptive",
         "implemented": True,
-        "notes": "强 CF；Flare 凭证不可 curl 复用 · 复用 FS 会话",
+        "notes": "强 CF；自适应 curl→Flare；封面 CDN 常须 Referer",
     },
     # —— 无码 ——
     {
@@ -253,16 +241,6 @@ SOURCE_CATALOG: list[dict[str, Any]] = [
         "implemented": True,
     },
     # —— FC2 ——
-    {
-        "id": "fc2_hub",
-        "label": "FC2 Hub",
-        "group": "fc2",
-        "defaultUrl": "https://javten.com",
-        "probePath": "/en",
-        "access": "proxy_flare",
-        "implemented": True,
-        "notes": "封面仅 fancybox；旧片 storage 可能 404",
-    },
     {
         "id": "fc2",
         "label": "FC2",
@@ -373,11 +351,6 @@ MIRROR_SEEDS: dict[str, list[str]] = {
     ],
     "avmoo": ["https://avmoo.shop", "https://www.avmoo.shop"],
     "avsox": ["https://avsox.click", "https://www.avsox.click"],
-    "javdb": [
-        "https://javdb.com",
-        "https://www.javdb.com",
-        "https://javdb368.com",
-    ],
     "javlibrary": [
         "https://www.f101w.com",
         "https://www.c97k.com",
@@ -385,7 +358,6 @@ MIRROR_SEEDS: dict[str, list[str]] = {
         "https://www.javlibrary.com",
     ],
     "avbase": ["https://www.avbase.net", "https://avbase.net"],
-    "fc2_hub": ["https://javten.com", "https://www.javten.com"],
     "fd2ppv": ["https://fd2ppv.cc", "https://www.fd2ppv.cc"],
     "freejavbt": ["https://freejavbt.com", "https://www.freejavbt.com"],
     "madou": ["https://madou.club", "https://www.madou.club"],
@@ -422,6 +394,124 @@ LEGACY_ID_MAP: dict[str, str] = {
     "7mmtv": "sevenmmtv",
 }
 
+# 源基础可信度（0–100）：合并字段时 + 值质量分 选最优
+SOURCE_TRUST: dict[str, int] = {
+    # 官方 / 准官方
+    "dmm": 96,
+    "mgstage": 95,
+    "r18dev": 93,
+    "carib": 95,
+    "fc2": 92,
+    "theporndb": 90,
+    # 元数据强
+    "libredmm": 88,
+    "javlibrary": 86,
+    "javbus": 84,
+    "avwikidb": 82,
+    "jav321": 78,
+    "avbase": 76,
+    "avmoo": 74,
+    "avsox": 72,
+    # 中文聚合（剧情/标题偏置另加）
+    "airav_io": 70,
+    "airav": 68,
+    "iqqtv": 68,
+    "avsex": 62,
+    # 厂牌/国产
+    "madou": 78,
+    "madouqu": 72,
+    # 综合镜像
+    "freejavbt": 62,
+    "sevenmmtv": 60,
+    "javday": 56,
+    "miss_av": 55,
+    "njav": 55,
+    "fd2ppv": 64,
+    "lulubar": 52,
+    "xiao_huang_shu": 58,
+    "hscangku": 54,
+    "avheat": 58,
+}
+
+# 字段偏置：每源每字段加成 → field_trust = SOURCE_TRUST + bias
+# 合并时：标题/剧情/片商/日期/封面/标签 各取该字段得分最高的源入库
+#
+# 封面优先级约定（高→低）：
+#   官方 CDN（DMM / MGStage / Carib）> R18/LibreDMM > JavBus 等镜像
+#   > 综合站；中文聚合站封面常水印/CDN 差，大幅降权
+SOURCE_FIELD_BIAS: dict[str, dict[str, int]] = {
+    # 官方：片商 / 日期 / 封面最强
+    "dmm": {
+        "studio": 14,
+        "maker": 14,
+        "date": 12,
+        "year": 10,
+        "poster": 32,
+        "title": 4,
+        "tags": -4,
+        "overview": -6,
+    },
+    "mgstage": {
+        "studio": 14,
+        "maker": 14,
+        "date": 12,
+        "year": 10,
+        "title": 5,
+        "actors": 4,
+        "poster": 28,
+        "tags": 2,
+        "overview": -4,
+    },
+    "r18dev": {
+        "studio": 12,
+        "maker": 12,
+        "date": 12,
+        "year": 10,
+        "actors": 10,
+        "title": 4,
+        "poster": 20,
+        "tags": 4,
+    },
+    "libredmm": {
+        "studio": 10,
+        "maker": 10,
+        "title": 6,
+        "date": 8,
+        "poster": 18,
+        "tags": 2,
+    },
+    # 女优强；封面中等（常转 DMM 图，但不如官方直链稳）
+    "javlibrary": {"actors": 16, "title": 8, "studio": 4, "tags": 6, "poster": 2},
+    "javbus": {"actors": 14, "studio": 8, "maker": 8, "title": 6, "tags": 8, "poster": 6},
+    "avwikidb": {"studio": 12, "maker": 12, "title": 4, "tags": 4, "poster": 2},
+    "jav321": {"actors": 8, "title": 6, "tags": 10, "poster": 2},
+    "avbase": {"actors": 6, "title": 4, "tags": 6, "poster": 2},
+    "avmoo": {"actors": 4, "tags": 4, "poster": 0},
+    "avsox": {"actors": 4, "tags": 4, "poster": 0},
+    "carib": {
+        "studio": 12,
+        "overview": 8,
+        "actors": 8,
+        "poster": 26,
+        "date": 8,
+        "tags": 4,
+    },
+    "fc2": {"title": 10, "overview": 8, "date": 8, "poster": 8, "tags": 2},
+    # 中文聚合：剧情/标题/标签强；封面大幅降权
+    "airav": {"overview": 32, "title": 28, "tags": 34, "actors": 8, "poster": -24},
+    "airav_io": {"overview": 32, "title": 28, "tags": 34, "actors": 8, "poster": -24},
+    "iqqtv": {"overview": 28, "title": 24, "tags": 30, "actors": 6, "poster": -20},
+    "avsex": {"overview": 28, "title": 22, "tags": 28, "actors": 4, "poster": -30},
+    "miss_av": {"title": 14, "tags": 22, "overview": 12, "poster": -8, "actors": 4},
+    "sevenmmtv": {"title": 10, "tags": 18, "overview": 8, "poster": -10},
+    "freejavbt": {"title": 6, "tags": 14, "poster": -8},
+    "njav": {"title": 6, "tags": 8, "poster": -10},
+    "javday": {"title": 4, "tags": 6, "poster": -10},
+    "theporndb": {"actors": 12, "studio": 10, "title": 8, "date": 8, "tags": 6, "poster": 8},
+    "madou": {"title": 10, "overview": 8, "studio": 6, "tags": 8, "poster": 6},
+    "madouqu": {"title": 8, "overview": 6, "tags": 6, "poster": 2},
+}
+
 
 def catalog_by_id() -> dict[str, dict[str, Any]]:
     return {str(e["id"]): e for e in SOURCE_CATALOG}
@@ -430,6 +520,172 @@ def catalog_by_id() -> dict[str, dict[str, Any]]:
 def canonicalize_id(source_id: str) -> str:
     sid = str(source_id or "").strip().lower()
     return LEGACY_ID_MAP.get(sid, sid)
+
+
+def source_trust(source_id: str) -> int:
+    sid = canonicalize_id(source_id)
+    if sid in SOURCE_TRUST:
+        return int(SOURCE_TRUST[sid])
+    meta = catalog_by_id().get(sid) or {}
+    group = str(meta.get("group") or "")
+    # 未表列：按分组给保守默认
+    defaults = {
+        "av": 60,
+        "uncensored": 62,
+        "fc2": 60,
+        "chinese": 58,
+        "western": 60,
+        "general": 52,
+    }
+    return int(defaults.get(group, 55))
+
+
+def field_trust(source_id: str, field: str) -> int:
+    """源可信 + 字段偏置（合并打分基数）。"""
+    sid = canonicalize_id(source_id)
+    fid = str(field or "").strip()
+    base = source_trust(sid)
+    bias = int((SOURCE_FIELD_BIAS.get(sid) or {}).get(fid) or 0)
+    return base + bias
+
+
+# 对齐 Amane：显式字段优先级（高→低）。未列出的字段按 field_trust 推导。
+# title/overview 中文源前置；poster/studio/date 官方前置。
+DEFAULT_FIELD_PRIORITY: dict[str, list[str]] = {
+    "title": [
+        "airav",
+        "airav_io",
+        "iqqtv",
+        "avsex",
+        "miss_av",
+        "sevenmmtv",
+        "madou",
+        "madouqu",
+        "libredmm",
+        "javlibrary",
+        "javbus",
+        "mgstage",
+        "dmm",
+        "r18dev",
+        "jav321",
+        "avbase",
+        "avmoo",
+        "freejavbt",
+        "njav",
+        "theporndb",
+    ],
+    "overview": [
+        "airav",
+        "airav_io",
+        "iqqtv",
+        "avsex",
+        "miss_av",
+        "sevenmmtv",
+        "carib",
+        "madou",
+        "libredmm",
+        "dmm",
+        "mgstage",
+        "javbus",
+        "javlibrary",
+        "r18dev",
+    ],
+    "poster": [
+        "dmm",
+        "mgstage",
+        "carib",
+        "r18dev",
+        "libredmm",
+        "javbus",
+        "theporndb",
+        "fc2",
+        "javlibrary",
+        "avmoo",
+        "avsox",
+    ],
+    "studio": [
+        "dmm",
+        "mgstage",
+        "r18dev",
+        "avwikidb",
+        "libredmm",
+        "javbus",
+        "carib",
+        "theporndb",
+        "javlibrary",
+    ],
+    "maker": [
+        "dmm",
+        "mgstage",
+        "r18dev",
+        "avwikidb",
+        "libredmm",
+        "javbus",
+        "theporndb",
+    ],
+    "date": [
+        "dmm",
+        "mgstage",
+        "r18dev",
+        "libredmm",
+        "javbus",
+        "carib",
+        "fc2",
+        "theporndb",
+    ],
+    "year": [
+        "dmm",
+        "mgstage",
+        "r18dev",
+        "libredmm",
+        "javbus",
+        "theporndb",
+    ],
+    "tags": [
+        "airav",
+        "airav_io",
+        "iqqtv",
+        "avsex",
+        "miss_av",
+        "sevenmmtv",
+        "jav321",
+        "javbus",
+        "javlibrary",
+        "mgstage",
+    ],
+}
+
+_FIELD_PRIORITY_CACHE: dict[str, list[str]] = {}
+
+
+def field_priority_chain(field: str, *, override: list[str] | None = None) -> list[str]:
+    """返回字段站点优先级链（高→低）。override 非空时直接使用。"""
+    fid = str(field or "").strip()
+    if override:
+        out: list[str] = []
+        seen: set[str] = set()
+        for raw in override:
+            sid = canonicalize_id(str(raw or ""))
+            if sid and sid not in seen:
+                seen.add(sid)
+                out.append(sid)
+        return out
+    if fid in _FIELD_PRIORITY_CACHE:
+        return list(_FIELD_PRIORITY_CACHE[fid])
+
+    preferred = [canonicalize_id(s) for s in (DEFAULT_FIELD_PRIORITY.get(fid) or [])]
+    preferred = [s for s in preferred if s]
+    seen: set[str] = set(preferred)
+    # 其余源按 trust 接上，保证链完整
+    ids = set(SOURCE_TRUST) | set(SOURCE_FIELD_BIAS)
+    rest = sorted(
+        (s for s in ids if s not in seen),
+        key=lambda s: field_trust(s, fid),
+        reverse=True,
+    )
+    ranked = preferred + rest
+    _FIELD_PRIORITY_CACHE[fid] = ranked
+    return list(ranked)
 
 
 def mirror_seeds_for(source_id: str) -> list[str]:
@@ -447,7 +703,9 @@ def list_catalog_public() -> list[dict[str, Any]]:
     out = []
     for e in SOURCE_CATALOG:
         row = dict(e)
+        sid = str(e["id"])
         row["accessLabel"] = ACCESS_LABEL.get(str(e.get("access") or ""), "")
-        row["seeds"] = mirror_seeds_for(str(e["id"]))
+        row["seeds"] = mirror_seeds_for(sid)
+        row["trust"] = source_trust(sid)
         out.append(row)
     return out

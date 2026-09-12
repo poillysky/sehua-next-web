@@ -21,6 +21,7 @@ export function AppPush({
   skipEnterAnimation = false,
   scrollKey,
   scrollMode = 'restore',
+  scrollPin = 'follow',
 }: {
   title: string;
   onBack: () => void;
@@ -36,12 +37,18 @@ export function AppPush({
    * top：每次进入置顶（详情页，避免真机落在中部）
    */
   scrollMode?: 'restore' | 'top';
+  /**
+   * follow：内容撑高时短窗口内反复钉顶（易与异步加载抢）
+   * once：仅进场钉一次，适合日志等会异步灌数据的页
+   */
+  scrollPin?: 'follow' | 'once';
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const [{ restoreScrollOnBack }] = useUiPreferences();
   const memoryKey = (scrollKey || `push:${title}`).trim();
   const pinTop = scrollMode === 'top';
+  const pinOnce = scrollPin === 'once';
 
   // iOS 边缘侧滑返回手势
   useEdgeSwipeBack({ containerRef: rootRef, onBack });
@@ -79,6 +86,12 @@ export function AppPush({
     if (pinTop) {
       clearScrollPosition(memoryKey);
       el.scrollTop = 0;
+      if (pinOnce) {
+        const raf = requestAnimationFrame(() => {
+          el.scrollTop = 0;
+        });
+        return () => cancelAnimationFrame(raf);
+      }
       let alive = true;
       const deadline = Date.now() + 480;
       const pin = () => {
@@ -135,7 +148,7 @@ export function AppPush({
       ro?.disconnect();
       if (el.scrollTop > 0) saveScrollPosition(memoryKey, el.scrollTop);
     };
-  }, [memoryKey, restoreScrollOnBack, pinTop]);
+  }, [memoryKey, restoreScrollOnBack, pinTop, pinOnce]);
 
   return (
     <div

@@ -208,6 +208,41 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
 
     plot = strip_tags(str(best.get("description") or ""))
 
+    runtime: int | None = None
+    dur = best.get("duration")
+    if isinstance(dur, (int, float)) and dur > 0:
+        runtime = int(round(dur / 60)) if dur > 600 else int(dur)
+
+    directors: list[str] = []
+    for d in best.get("directors") or []:
+        if not isinstance(d, dict):
+            continue
+        name = str(d.get("name") or "").strip()
+        if name and name not in directors:
+            directors.append(name)
+
+    rating_raw = best.get("rating")
+    rating: float | None = None
+    if isinstance(rating_raw, (int, float)) and rating_raw > 0:
+        rating = float(rating_raw)
+
+    website = str(best.get("url") or "").strip() or None
+    trailer = str(best.get("trailer") or "").strip() or None
+
+    extra: dict[str, Any] = {}
+    if runtime and runtime > 0:
+        extra["runtime"] = runtime
+    if directors:
+        extra["director"] = directors[0]
+        extra["directors"] = directors
+    if rating is not None:
+        extra["rating"] = rating
+    if website:
+        extra["website"] = website
+    if trailer:
+        extra["trailer"] = trailer
+        extra["trailerUrl"] = trailer
+
     return make_detail(
         source="theporndb",
         code=std,
@@ -218,4 +253,5 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
         tags=tags,
         overview=plot if len(plot) >= 12 else None,
         date=date,
+        extra=extra or None,
     )

@@ -18,13 +18,6 @@ def _legacy_javbus(code: str, *, base_url: str = "", cookie: str = "", api_key: 
     return _javbus_detail(code, base_url=base_url, cookie=cookie)
 
 
-def _legacy_iqqtv(code: str, *, base_url: str = "", cookie: str = "", api_key: str = "") -> dict[str, Any]:
-    from ..makers_catalog_routes import _iqqtv_detail
-
-    del api_key
-    return _iqqtv_detail(code, base_url=base_url, cookie=cookie)
-
-
 def _legacy_sevenmm(code: str, *, base_url: str = "", cookie: str = "", api_key: str = "") -> dict[str, Any]:
     import re
 
@@ -89,10 +82,10 @@ def _load_fn(module: str, attr: str = "scrape_detail") -> DetailFn:
 # module name means apps.api.app.scrape_details.<name>.scrape_detail
 _PROVIDER_SPEC: dict[str, str | DetailFn] = {
     "javbus": _legacy_javbus,
-    "iqqtv": _legacy_iqqtv,
-    "sevenmmtv": _legacy_sevenmm,
-    "miss_av": _legacy_missav,
-    "madou": _legacy_madou,
+    "iqqtv": "iqqtv",
+    "sevenmmtv": "sevenmmtv",
+    "miss_av": "miss_av",
+    "madou": "madou",
     # ported modules (filled as files land)
     "r18dev": "r18dev",
     "avwikidb": "avwikidb",
@@ -109,10 +102,8 @@ _PROVIDER_SPEC: dict[str, str | DetailFn] = {
     "airav": "airav",
     "avbase": "avbase",
     "freejavbt": "freejavbt",
-    "javdb": "javdb",
     "fc2": "fc2",
     "fd2ppv": "fd2ppv",
-    "fc2_hub": "fc2_hub",
     "madouqu": "madouqu",
     "xiao_huang_shu": "xiao_huang_shu",
     "hscangku": "hscangku",

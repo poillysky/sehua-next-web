@@ -886,6 +886,10 @@ def _javbus_detail(
                 star_id: str | None = None,
             ) -> None:
                 name = re.sub(r"\s+", " ", (name or "").strip())
+                # 去掉「本名（别名）」/ 半截「本名（」，避免瀑布 span 与 img title 重复
+                name = re.sub(r"\s*[\(（][^)）]*[\)）]\s*$", "", name).strip()
+                name = re.sub(r"\s*[\(（][^)）]*$", "", name).strip()
+                name = name.rstrip("（(").strip()
                 if not name or name in seen_names:
                     return
                 seen_names.add(name)
@@ -907,6 +911,15 @@ def _javbus_detail(
                     or ""
                 )
                 img = box.select_one("img")
+                # JavBus 常把完整「本名（别名）」放在 img title，span 却截成「本名（」
+                img_title = ""
+                if img is not None:
+                    img_title = str(img.get("title") or img.get("alt") or "").strip()
+                if img_title and (
+                    name.endswith(("（", "("))
+                    or (len(img_title) > len(name) and name.rstrip("（(") and name.rstrip("（(") in img_title)
+                ):
+                    name = img_title
                 avatar = _abs(base, img.get("src") or img.get("data-src")) if img else None
                 href = box.get("href") if hasattr(box, "get") else None
                 if not href and box.parent and getattr(box.parent, "name", None) == "a":

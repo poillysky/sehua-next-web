@@ -69,6 +69,16 @@ def get_stats(_user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
         raise HTTPException(400, str(e)) from e
 
 
+@router.post("/embed/reset-skeletons")
+def reset_to_skeletons(_user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
+    """清空向量库并按七区目录重建仅番号骨架（本地 NFO 不删）。"""
+    try:
+        data = svc.reset_embed_to_catalog_skeletons()
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, str(e)) from e
+    return {"ok": bool(data.get("ok")), "data": data}
+
+
 @router.get("/embed/quality")
 def get_quality(
     region: str = Query("japan_censored"),
@@ -100,12 +110,29 @@ def get_quality_items(
 
 
 class EnrichBody(BaseModel):
-    region: str = "japan_censored"
+    region: str = ""
+    # 空 = 使用策略里已开启的七区
+    regions: list[str] = Field(default_factory=list)
     # 空 = 服务端默认完整补齐（封面+女优/片商/剧情/标题）
     kinds: list[str] = Field(default_factory=list)
     # 0 = 全量缺口；预览可由前端传小样本
     limit: int = Field(default=0, ge=0, le=20_000)
     dryRun: bool = False
+    # incremental = 仅补缺；overwrite = 全量覆盖已有
+    mode: str = "incremental"
+
+
+class EnrichOneBody(BaseModel):
+    itemId: str = ""
+    dryRun: bool = False
+    # 详情「刷新元数据」默认全量覆盖（重刮 + 覆盖 NFO/向量）
+    overwrite: bool = True
+
+
+class EnrichStrategyCoverBody(BaseModel):
+    quality: str = "high"
+    cropRatio: str = "full"
+    regionCrop: dict[str, str] = Field(default_factory=dict)
 
 
 class EnrichStrategyBody(BaseModel):
@@ -113,8 +140,11 @@ class EnrichStrategyBody(BaseModel):
     adaptiveWorkers: int = Field(default=0, ge=0, le=64)
     flareWorkers: int = Field(default=0, ge=0, le=64)
     includeFlare: bool = True
-    perSourceTimeoutSec: int = Field(default=45, ge=10, le=120)
+    perSourceTimeoutSec: int = Field(default=45, ge=5, le=180)
     regionGroups: dict[str, list[str]] = Field(default_factory=dict)
+    regionsEnabled: dict[str, bool] = Field(default_factory=dict)
+    fillMode: str = "incremental"
+    cover: EnrichStrategyCoverBody | None = None
 
 
 @router.get("/embed/enrich/strategy")
@@ -133,7 +163,10 @@ def put_enrich_strategy(
 ) -> dict[str, Any]:
     from . import scrap_enrich_strategy as strat
 
-    saved = strat.put_strategy(body.model_dump())
+    payload = body.model_dump()
+    if payload.get("cover") is None:
+        payload.pop("cover", None)
+    saved = strat.put_strategy(payload)
     return {"ok": True, "data": strat.strategy_public(saved)}
 
 
@@ -147,9 +180,32 @@ def start_enrich(
     try:
         data = enrich_svc.start_enrich_job(
             region=body.region,
+            regions=list(body.regions or []),
             kinds=list(body.kinds or []),
             limit=int(body.limit),
             dry_run=bool(body.dryRun),
+            mode=str(body.mode or "incremental"),
+        )
+    except RuntimeError as e:
+        raise HTTPException(409, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return {"ok": True, "data": data}
+
+
+@router.post("/embed/enrich/one")
+def enrich_one(
+    body: EnrichOneBody,
+    _user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    """详情页：按批量补全逻辑同步补这一条，返回更新后的条目。"""
+    from . import scrap_library_enrich as enrich_svc
+
+    try:
+        data = enrich_svc.enrich_one_by_item_id(
+            item_id=body.itemId,
+            dry_run=bool(body.dryRun),
+            overwrite=bool(body.overwrite),
         )
     except RuntimeError as e:
         raise HTTPException(409, str(e)) from e
@@ -167,9 +223,145 @@ def get_enrich_status(
     return {"ok": True, "data": enrich_svc.get_enrich_status()}
 
 
+@router.get("/embed/enrich/logs")
+def get_enrich_logs(
+    region: str = Query("", alias="region"),
+    limit: int = Query(200, ge=1, le=500),
+    _user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    """分区刮削日志（元库持久化，重启可查）。"""
+    from . import scrap_library_enrich as enrich_svc
+
+    rid = str(region or "").strip()
+    lines = enrich_svc.load_enrich_logs(region=rid, limit=limit)
+    return {"ok": True, "data": {"region": rid or None, "log": lines}}
+
+
+@router.post("/embed/enrich/cancel")
+def cancel_enrich(
+    _user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    """兼容旧接口：等同暂停（保留进度）。"""
+    from . import scrap_library_enrich as enrich_svc
+
+    return {"ok": True, "data": enrich_svc.request_enrich_pause()}
+
+
+@router.post("/embed/enrich/pause")
+def pause_enrich(
+    _user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    from . import scrap_library_enrich as enrich_svc
+
+    return {"ok": True, "data": enrich_svc.request_enrich_pause()}
+
+
+class EnrichStopBody(BaseModel):
+    region: str = ""
+
+
+@router.post("/embed/enrich/stop")
+def stop_enrich(
+    body: EnrichStopBody | None = None,
+    _user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    """停止并清除队列；下次开始从头跑。"""
+    from . import scrap_library_enrich as enrich_svc
+
+    rid = str((body.region if body else "") or "").strip()
+    return {"ok": True, "data": enrich_svc.request_enrich_stop(region=rid)}
+
+
 @router.get("/embed/status")
 def get_status(_user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
     return {"ok": True, "data": svc.get_job_status()}
+
+
+class ActressOptimizeBody(BaseModel):
+    reembed: bool = True
+    limit: int = Field(default=0, ge=0, le=200_000)
+
+
+@router.get("/embed/actress-optimize/status")
+def get_actress_optimize_status(
+    _user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    return {"ok": True, "data": svc.get_actress_optimize_status()}
+
+
+@router.post("/embed/actress-optimize/start")
+def start_actress_optimize(
+    body: ActressOptimizeBody,
+    _user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    """批量优化女优元数据：中文标准名映射 + 排除导演/男优（不改 NFO）。"""
+    try:
+        lim = int(body.limit or 0)
+        data = svc.start_actress_optimize_job(
+            reembed=bool(body.reembed),
+            limit=lim if lim > 0 else None,
+        )
+    except RuntimeError as e:
+        raise HTTPException(409, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return {"ok": True, "data": data}
+
+
+class ActressAvatarBody(BaseModel):
+    force: bool = False
+    limit: int = Field(default=0, ge=0, le=200_000)
+    region: str = ""
+
+
+@router.get("/embed/actress-avatar/status")
+def get_actress_avatar_status(
+    _user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    from . import scrap_library_actress_avatar as av
+
+    return {"ok": True, "data": av.get_job_status()}
+
+
+@router.get("/embed/actress-avatar/urls")
+def get_actress_avatar_urls(
+    names: list[str] = Query(default=[]),
+    _user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    """按女优名解析本地头像 API 路径（有则返回）。"""
+    from . import scrap_library_actress_avatar as av
+
+    out: dict[str, str] = {}
+    for raw in names or []:
+        name = str(raw or "").strip()
+        if not name or name in out:
+            continue
+        api = av.resolve_avatar_api(name)
+        if api:
+            out[name] = api
+    return {"ok": True, "data": out}
+
+
+@router.post("/embed/actress-avatar/start")
+def start_actress_avatar(
+    body: ActressAvatarBody,
+    _user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    """向量库女优 → GFriends 头像刮削落盘（media/scrap-library/_actress）。"""
+    from . import scrap_library_actress_avatar as av
+
+    try:
+        lim = int(body.limit or 0)
+        data = av.start_actress_avatar_job(
+            force=bool(body.force),
+            limit=lim if lim > 0 else None,
+            region=str(body.region or ""),
+        )
+    except RuntimeError as e:
+        raise HTTPException(409, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return {"ok": True, "data": data}
 
 
 @router.post("/embed/start")
@@ -353,13 +545,17 @@ def get_regions(_user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]
 def get_prefixes(
     region: str = Query(""),
     studio: str = Query(""),
+    q: str = Query(""),
+    limit: int | None = Query(None, ge=1, le=100),
     _user: dict[str, Any] = Depends(require_user),
 ) -> dict[str, Any]:
     try:
         return {
             "ok": True,
             "data": {
-                "prefixes": svc.list_prefixes(region=region, studio=studio),
+                "prefixes": svc.list_prefixes(
+                    region=region, studio=studio, q=q, limit=limit
+                ),
             },
         }
     except Exception as e:  # noqa: BLE001
@@ -408,6 +604,7 @@ def get_facets(
     kind: str = Query("genre"),
     studio: str = Query(""),
     prefix: str = Query(""),
+    q: str = Query(""),
     sort: str = Query("count"),
     order: str = Query("desc"),
     offset: int = Query(0, ge=0),
@@ -422,6 +619,7 @@ def get_facets(
                 kind=kind,
                 studio=studio,
                 prefix=prefix,
+                q=q,
                 sort=sort,
                 order=order,
                 offset=offset,
@@ -437,6 +635,7 @@ def get_facets(
 class FacetsRefreshBody(BaseModel):
     region: str = ""
     kinds: list[str] | None = None
+    allRegions: bool = True
 
 
 @router.get("/embed/facets/snapshot")
@@ -452,12 +651,13 @@ def refresh_facets_snapshot(
     body: FacetsRefreshBody | None = None,
     _user: dict[str, Any] = Depends(require_user),
 ) -> dict[str, Any]:
-    """重建厂牌 / 标签 / 女优磁盘快照（当前区）。"""
+    """重建浏览快照：默认七区厂牌/标签/女优 + 推荐 + 影片首页预热。"""
     payload = body or FacetsRefreshBody()
     try:
         data = svc.refresh_facets_snapshot(
             region=str(payload.region or ""),
             kinds=payload.kinds,
+            all_regions=bool(payload.allRegions),
         )
     except ValueError as e:
         raise HTTPException(400, str(e)) from e

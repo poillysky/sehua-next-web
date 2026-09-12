@@ -327,7 +327,6 @@ def _homepage_url(sid: str, cfg: dict[str, Any], meta: dict[str, Any]) -> str:
 # 与 scrape_details.registry 对齐；值为 detailKey（多数与 id 相同）
 ENRICH_DETAIL_PROVIDERS: dict[str, str] = {
     "javbus": "javbus",
-    "javdb": "javdb",
     "dmm": "dmm",
     "libredmm": "libredmm",
     "airav": "airav",
@@ -349,7 +348,6 @@ ENRICH_DETAIL_PROVIDERS: dict[str, str] = {
     "lulubar": "lulubar",
     "avsox": "avsox",
     "carib": "carib",
-    "fc2_hub": "fc2_hub",
     "fc2": "fc2",
     "fd2ppv": "fd2ppv",
     "madou": "madou",
@@ -573,7 +571,6 @@ def apply_provider_link_for_fetch(source_id: str) -> dict[str, Any]:
 # 主页身份线索（host 子串 / 正文或 title 子串，满足其一即可）
 _PROBE_MARKERS: dict[str, tuple[str, str]] = {
     "javbus": ("javbus", "javbus"),
-    "javdb": ("javdb", "javdb"),
     "dmm": ("dmm.co.jp", "dmm"),
     "libredmm": ("libredmm", "libre"),
     "airav": ("airav", "airav"),
@@ -595,7 +592,6 @@ _PROBE_MARKERS: dict[str, tuple[str, str]] = {
     "lulubar": ("lulubar", "lulu"),
     "avsox": ("avsox", "avsox"),
     "carib": ("caribbean", "caribbean"),
-    "fc2_hub": ("javten", "fc2"),
     "fc2": ("fc2.com", "fc2"),
     "fd2ppv": ("fd2ppv", "fd2"),
     "madou": ("madou", "madou"),

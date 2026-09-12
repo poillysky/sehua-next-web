@@ -226,7 +226,16 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
     plot = strip_tags((og_desc.get("content") if og_desc else "") or "")
     if (not plot or len(plot) < 12 or is_junk_title(plot)) and ld.get("description"):
         plot = str(ld["description"])
-    if len(plot) < 12 or is_junk_title(plot):
+    # 拒番号串 / 过短垃圾简介（本样例 og:description 常为空或等于番号）
+    plot_u = re.sub(r"[^A-Z0-9]", "", plot.upper())
+    code_u = re.sub(r"[^A-Z0-9]", "", display.upper())
+    code_u_alt = re.sub(r"^FC2PPV", "FC2", code_u)
+    if (
+        len(plot) < 12
+        or is_junk_title(plot)
+        or plot_u in {code_u, code_u_alt, fid}
+        or plot.strip().upper() in {display.upper(), f"FC2-{fid}", f"FC2-PPV-{fid}"}
+    ):
         plot = ""
 
     og_video = doc.select_one("meta[property='og:video']")
@@ -244,12 +253,13 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
     if ld.get("ratingValue") is not None:
         mx = float(ld.get("ratingMax") or 5) or 5.0
         val = float(ld["ratingValue"])
+        # 源站分数（多为 /5），不对齐 MDCS ×10
         extra.update(
             {
                 "ratingValue": val,
                 "ratingMax": mx,
                 "ratingSource": "fc2",
-                "score": (val / mx) * 10,
+                "score": val,
             }
         )
         if ld.get("votes"):

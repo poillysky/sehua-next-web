@@ -130,6 +130,23 @@ def build_nfo_embed_text(
     actors = [str(x).strip() for x in (meta.get("actors") or []) if str(x).strip()]
     genres = [str(x).strip() for x in (meta.get("genres") or []) if str(x).strip()]
     tags = [str(x).strip() for x in (meta.get("tags") or []) if str(x).strip()]
+    # 入库前滤掉类型标签 / 登录页噪声，并映射标准女优名、排除导演
+    try:
+        from .scrap_library_enrich import _clean_actors
+        from .scrape_metadata_optimize import polish_actress_names
+
+        actors = _clean_actors(actors)
+        directors: list[str] = []
+        for key in ("director",):
+            d = str(meta.get(key) or "").strip()
+            if d:
+                directors.append(d)
+        actors = polish_actress_names(actors, exclude=directors)
+    except Exception:  # noqa: BLE001
+        pass
+    # 仅排除片商/发行商撞名；类型/标签里常带真名，不能当女优黑名单
+    skip = {studio.casefold(), publisher.casefold()} - {""}
+    actors = [a for a in actors if a.casefold() not in skip]
 
     lines: list[str] = []
     if region:
@@ -179,5 +196,104 @@ def content_sha(source_text: str, *, model: str | None = None, dim: int | None =
     return hashlib.sha256(payload).hexdigest()
 
 
+_ACTRESS_LINE_RE = re.compile(r"^(女优：)(.+)$", re.M)
+_STUDIO_LINE_RE = re.compile(r"^片商：(.+)$", re.M)
+_PUBLISHER_LINE_RE = re.compile(r"^发行：(.+)$", re.M)
+
+
+def normalize_source_text_for_diff(source_text: str) -> str:
+    """按现行清洗+女优映射规则归一化，便于增量比对。"""
+    return polish_source_text_actresses(str(source_text or ""))
+
+
+def preserve_actress_line(prev_source: str, new_source: str) -> str:
+    """NFO 无 actor 时勿用空女优覆盖库内已有女优行。"""
+    prev = str(prev_source or "")
+    new = str(new_source or "")
+    if not prev or not new:
+        return new
+    old_m = _ACTRESS_LINE_RE.search(prev)
+    if not old_m or not str(old_m.group(2) or "").strip():
+        return new
+    new_m = _ACTRESS_LINE_RE.search(new)
+    if new_m and str(new_m.group(2) or "").strip():
+        return new
+    actress_line = f"女优：{old_m.group(2).strip()}"
+    # 插在原标题/标题/番号之后
+    anchor = None
+    for rx in (r"^原标题：.+$", r"^标题：.+$", r"^番号：.+$", r"^前缀：.+$"):
+        m = re.search(rx, new, re.M)
+        if m:
+            anchor = m
+            break
+    if anchor is None:
+        return f"{actress_line}\n{new}".strip()
+    i = anchor.end()
+    return f"{new[:i]}\n{actress_line}{new[i:]}".strip()
+
+
+def polish_source_text_actresses(
+    source_text: str, *, exclude: list[str] | None = None
+) -> str:
+    """对 source_text 女优行做标准名映射 + 排除导演/男优（刮削/同步自动调用）。"""
+    text = str(source_text or "")
+    if not text or "女优：" not in text:
+        return text
+    try:
+        from .scrap_library_enrich import _clean_actors
+        from .scrape_metadata_optimize import polish_actress_names
+    except Exception:  # noqa: BLE001
+        return text
+
+    studio_m = _STUDIO_LINE_RE.search(text)
+    publisher_m = _PUBLISHER_LINE_RE.search(text)
+    ban = {
+        str(x).strip()
+        for x in (exclude or [])
+        if str(x or "").strip()
+    }
+    ban |= {
+        str(studio_m.group(1) if studio_m else "").strip(),
+        str(publisher_m.group(1) if publisher_m else "").strip(),
+    } - {""}
+
+    def _repl(m: re.Match[str]) -> str:
+        parts = [p for p in re.split(r"[\s、,/|]+", m.group(2).strip()) if p.strip()]
+        cleaned = _clean_actors(parts)
+        polished = polish_actress_names(cleaned, exclude=list(ban))
+        if not polished:
+            return ""
+        return f"{m.group(1)}{' '.join(polished[:8])}"
+
+    out = _ACTRESS_LINE_RE.sub(_repl, text)
+    return re.sub(r"\n{2,}", "\n", out).strip()
+
+
 def item_id_from_rel(rel: str) -> str:
     return str(rel or "").replace("\\", "/").strip().strip("/")
+
+
+def format_nfo_xml(root: ET.Element) -> bytes:
+    """NFO 易读输出：每个字段单独一行（含声明与末尾换行）。"""
+    # 去掉旧缩进残留，再统一排版
+    for el in root.iter():
+        if el.text is not None:
+            t = el.text.strip()
+            el.text = t if t else None
+        if el.tail is not None:
+            el.tail = None
+    try:
+        ET.indent(root, space="  ")
+    except AttributeError:
+        # Python <3.9 兜底：至少保证根下子节点分行
+        pass
+    payload = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+    if not payload.endswith(b"\n"):
+        payload += b"\n"
+    return payload
+
+
+def write_nfo(path: Path, root: ET.Element) -> None:
+    """写入易读 NFO（字段分行）。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(format_nfo_xml(root))

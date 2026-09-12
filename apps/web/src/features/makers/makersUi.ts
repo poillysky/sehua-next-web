@@ -32,11 +32,11 @@ export const MAKER_LIBRARY_VIEWS: Array<{
   label: string;
 }> = [
   { id: 'recommended', label: '推荐' },
+  { id: 'folders', label: '文件夹' },
   { id: 'movies', label: '影片' },
   { id: 'genres', label: '标签' },
   { id: 'tags', label: '女优' },
   { id: 'favorites', label: '收藏' },
-  { id: 'folders', label: '文件夹' },
 ];
 
 /** Emby 式排序（影片墙） */

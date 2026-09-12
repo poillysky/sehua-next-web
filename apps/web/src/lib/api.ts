@@ -1284,6 +1284,7 @@ export type ScrapLibraryEmbedJobStatus = {
   result?: {
     written?: number;
     skipped?: number;
+    deleted?: number;
     total?: number;
     meta_db?: string;
   } | null;
@@ -1331,10 +1332,114 @@ export async function startScrapLibraryEmbed(body?: {
   return ((await res.json()) as Envelope<{ started: boolean }>).data;
 }
 
+export type ScrapActressOptimizeJobStatus = {
+  running: boolean;
+  phase?: string;
+  progress?: PrefixCatalogLocalIndexProgress | null;
+  log?: string[];
+  result?: {
+    ok?: boolean;
+    total?: number;
+    unchanged?: number;
+    updated?: number;
+    reembedded?: number;
+    maps?: { count?: number; lang?: string };
+  } | null;
+  error?: string | null;
+};
+
+export async function startScrapActressOptimize(body?: {
+  reembed?: boolean;
+  limit?: number;
+}): Promise<{ started: boolean }> {
+  const res = await apiFetch('/scrap-library/embed/actress-optimize/start', {
+    method: 'POST',
+    body: JSON.stringify({
+      reembed: body?.reembed !== false,
+      limit: body?.limit ?? 0,
+    }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<{ started: boolean }>).data;
+}
+
+export async function getScrapActressOptimizeStatus(): Promise<ScrapActressOptimizeJobStatus> {
+  const res = await apiFetch('/scrap-library/embed/actress-optimize/status');
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<ScrapActressOptimizeJobStatus>).data;
+}
+
+export type ScrapActressAvatarJobStatus = {
+  running: boolean;
+  phase?: string;
+  progress?: PrefixCatalogLocalIndexProgress | null;
+  log?: string[];
+  result?: {
+    ok?: boolean;
+    total?: number;
+    downloaded?: number;
+    downloadedGfriends?: number;
+    downloadedJavbus?: number;
+    skipped?: number;
+    missed?: number;
+    failed?: number;
+    missSamples?: string[];
+  } | null;
+  error?: string | null;
+};
+
+export async function startScrapActressAvatar(body?: {
+  force?: boolean;
+  limit?: number;
+  region?: string;
+}): Promise<{ started: boolean }> {
+  const res = await apiFetch('/scrap-library/embed/actress-avatar/start', {
+    method: 'POST',
+    body: JSON.stringify({
+      force: Boolean(body?.force),
+      limit: body?.limit ?? 0,
+      region: body?.region || '',
+    }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<{ started: boolean }>).data;
+}
+
+export async function getScrapActressAvatarStatus(): Promise<ScrapActressAvatarJobStatus> {
+  const res = await apiFetch('/scrap-library/embed/actress-avatar/status');
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<ScrapActressAvatarJobStatus>).data;
+}
+
+/** 批量解析女优本地头像 API 路径（无头像则不出现在结果中） */
+export async function lookupScrapActressAvatarUrls(
+  names: string[],
+): Promise<Record<string, string>> {
+  const cleaned = [
+    ...new Set(
+      names.map((n) => String(n || '').trim()).filter(Boolean),
+    ),
+  ];
+  if (!cleaned.length) return {};
+  const q = new URLSearchParams();
+  for (const n of cleaned) q.append('names', n);
+  const res = await apiFetch(
+    `/scrap-library/embed/actress-avatar/urls?${q.toString()}`,
+  );
+  if (!res.ok) throw new Error(await parseError(res));
+  return (
+    (await res.json()) as Envelope<Record<string, string>>
+  ).data;
+}
+
 export type ScrapLibraryQualityStats = {
   region?: string | null;
   total?: number;
   incomplete?: number;
+  /** 向量库内已有条目（不含空壳） */
+  embedTotal?: number;
+  /** 片商目录有、尚未进向量库的空壳 */
+  shells?: number;
   counts?: {
     no_local?: number;
     no_media?: number;
@@ -1355,18 +1460,109 @@ export type ScrapLibraryQualityItem = {
   gaps?: string[];
 };
 
+export type ScrapLibraryEnrichFieldRow = {
+  id?: string;
+  label?: string;
+  ok?: boolean;
+  value?: string;
+};
+
+export type ScrapLibraryEnrichSourceTiming = {
+  id?: string;
+  access?: string;
+  ms?: number;
+  ok?: boolean;
+  error?: string;
+  actors?: number;
+  poster?: boolean;
+  status?: 'pending' | 'done' | 'fail' | 'skipped' | string;
+};
+
+export type ScrapLibraryEnrichQueueItem = {
+  index?: number;
+  itemId?: string;
+  code?: string;
+  gaps?: string[];
+  status?: 'pending' | 'running' | 'done' | 'fail' | string;
+  error?: string;
+  source?: string;
+  fetchMs?: number;
+  detailTitle?: string;
+  actors?: number;
+  nfoChanged?: boolean;
+  posterDownloaded?: boolean;
+  vectorSynced?: boolean;
+  vectorError?: string;
+  sourceTimings?: ScrapLibraryEnrichSourceTiming[];
+  fields?: ScrapLibraryEnrichFieldRow[];
+  wouldFill?: Record<string, boolean | number>;
+};
+
+export type ScrapLibraryEnrichCurrent = {
+  code?: string;
+  itemId?: string;
+  gaps?: string[];
+  status?: string;
+  index?: number;
+  total?: number;
+  ok?: boolean;
+  error?: string;
+  source?: string;
+  detailTitle?: string;
+  fetchMs?: number;
+  actors?: number;
+  nfoChanged?: boolean;
+  posterDownloaded?: boolean;
+  vectorSynced?: boolean;
+  vectorError?: string;
+  sourceTimings?: ScrapLibraryEnrichSourceTiming[];
+  fields?: ScrapLibraryEnrichFieldRow[];
+  wouldFill?: Record<string, boolean | number>;
+};
+
+export type ScrapLibraryEnrichCheckpoint = {
+  region?: string;
+  mode?: string;
+  dryRun?: boolean;
+  done?: number;
+  remaining?: number;
+  total?: number;
+  ok?: number;
+  failed?: number;
+};
+
 export type ScrapLibraryEnrichJobStatus = {
   running: boolean;
   phase?: string;
   progress?: PrefixCatalogLocalIndexProgress | null;
   log?: string[];
+  regionLogs?: Record<string, string[]>;
+  /** 各分区本轮/内存日志条数（可大于 regionLogs 回传长度） */
+  regionLogCounts?: Record<string, number>;
+  currentRegion?: string;
+  cancel?: boolean;
+  halt?: 'pause' | 'stop' | string | null;
+  paused?: boolean;
+  checkpoints?: Record<string, ScrapLibraryEnrichCheckpoint>;
+  queue?: ScrapLibraryEnrichQueueItem[];
+  queueTotal?: number;
+  queueCounts?: {
+    pending?: number;
+    running?: number;
+    done?: number;
+    fail?: number;
+  };
+  current?: ScrapLibraryEnrichCurrent | null;
   result?: {
     dryRun?: boolean;
     region?: string;
+    regions?: string[];
     kinds?: string[];
     queued?: number;
     ok?: number;
     failed?: number;
+    cancelled?: boolean;
+    paused?: boolean;
     sources?: string[];
     items?: Array<{
       code?: string;
@@ -1417,14 +1613,17 @@ export async function getScrapLibraryQualityItems(opts?: {
 
 export async function startScrapLibraryEnrich(body?: {
   region?: string;
+  regions?: string[];
   kinds?: string[];
   limit?: number;
   dryRun?: boolean;
+  mode?: 'incremental' | 'overwrite';
 }): Promise<{ started: boolean }> {
   const res = await apiFetch('/scrap-library/embed/enrich', {
     method: 'POST',
     body: JSON.stringify({
-      region: body?.region ?? 'japan_censored',
+      region: body?.region ?? '',
+      regions: body?.regions ?? [],
       // 空数组走服务端默认：完整元数据 + 封面
       kinds: body?.kinds ?? [
         'no_local',
@@ -1436,10 +1635,82 @@ export async function startScrapLibraryEnrich(body?: {
       ],
       limit: body?.limit ?? 0,
       dryRun: Boolean(body?.dryRun),
+      mode: body?.mode === 'overwrite' ? 'overwrite' : 'incremental',
     }),
   });
   if (!res.ok) throw new Error(await parseError(res));
   return ((await res.json()) as Envelope<{ started: boolean }>).data;
+}
+
+/** 详情页：清空该条向量后全量重刮并覆盖 NFO/向量 */
+export async function enrichScrapLibraryItem(opts: {
+  itemId: string;
+  dryRun?: boolean;
+  overwrite?: boolean;
+}): Promise<{
+  ok: boolean;
+  dryRun?: boolean;
+  overwrite?: boolean;
+  gaps?: string[];
+  result?: {
+    ok?: boolean;
+    error?: string;
+    code?: string;
+    nfoChanged?: boolean;
+    posterDownloaded?: boolean;
+    source?: string;
+    actors?: number;
+    fetchMs?: number;
+    sourceTimings?: Array<{
+      id?: string;
+      access?: string;
+      ms?: number;
+      ok?: boolean;
+      error?: string;
+      actors?: number;
+      poster?: boolean;
+    }>;
+  };
+  item?: ScrapLibraryEmbedItem | null;
+}> {
+  const itemId = String(opts.itemId || '').trim();
+  if (!itemId) throw new Error('缺少条目 ID');
+  const res = await apiFetch('/scrap-library/embed/enrich/one', {
+    method: 'POST',
+    body: JSON.stringify({
+      itemId,
+      dryRun: Boolean(opts.dryRun),
+      overwrite: opts.overwrite !== false,
+    }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return (
+    (await res.json()) as Envelope<{
+      ok: boolean;
+      dryRun?: boolean;
+      gaps?: string[];
+      result?: {
+        ok?: boolean;
+        error?: string;
+        code?: string;
+        nfoChanged?: boolean;
+        posterDownloaded?: boolean;
+        source?: string;
+        actors?: number;
+        fetchMs?: number;
+        sourceTimings?: Array<{
+          id?: string;
+          access?: string;
+          ms?: number;
+          ok?: boolean;
+          error?: string;
+          actors?: number;
+          poster?: boolean;
+        }>;
+      };
+      item?: ScrapLibraryEmbedItem | null;
+    }>
+  ).data;
 }
 
 export async function getScrapLibraryEnrichStatus(): Promise<ScrapLibraryEnrichJobStatus> {
@@ -1448,10 +1719,97 @@ export async function getScrapLibraryEnrichStatus(): Promise<ScrapLibraryEnrichJ
   return ((await res.json()) as Envelope<ScrapLibraryEnrichJobStatus>).data;
 }
 
+export async function getScrapLibraryEnrichLogs(opts?: {
+  region?: string;
+  limit?: number;
+}): Promise<{ region?: string | null; log: string[] }> {
+  const q = new URLSearchParams();
+  if (opts?.region) q.set('region', opts.region);
+  if (opts?.limit != null) q.set('limit', String(opts.limit));
+  const res = await apiFetch(
+    `/scrap-library/embed/enrich/logs${q.toString() ? `?${q}` : ''}`,
+  );
+  if (!res.ok) throw new Error(await parseError(res));
+  return (
+    (await res.json()) as Envelope<{ region?: string | null; log: string[] }>
+  ).data;
+}
+
+export async function cancelScrapLibraryEnrich(): Promise<{
+  ok?: boolean;
+  paused?: boolean;
+  cancelled?: boolean;
+  running?: boolean;
+}> {
+  const res = await apiFetch('/scrap-library/embed/enrich/pause', {
+    method: 'POST',
+    body: '{}',
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return (
+    (await res.json()) as Envelope<{
+      ok?: boolean;
+      paused?: boolean;
+      cancelled?: boolean;
+      running?: boolean;
+    }>
+  ).data;
+}
+
+export async function pauseScrapLibraryEnrich(): Promise<{
+  ok?: boolean;
+  paused?: boolean;
+  running?: boolean;
+}> {
+  const res = await apiFetch('/scrap-library/embed/enrich/pause', {
+    method: 'POST',
+    body: '{}',
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return (
+    (await res.json()) as Envelope<{
+      ok?: boolean;
+      paused?: boolean;
+      running?: boolean;
+    }>
+  ).data;
+}
+
+export async function stopScrapLibraryEnrich(opts?: {
+  region?: string;
+}): Promise<{
+  ok?: boolean;
+  stopped?: boolean;
+  cleared?: boolean;
+  running?: boolean;
+}> {
+  const res = await apiFetch('/scrap-library/embed/enrich/stop', {
+    method: 'POST',
+    body: JSON.stringify({ region: opts?.region ?? '' }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return (
+    (await res.json()) as Envelope<{
+      ok?: boolean;
+      stopped?: boolean;
+      cleared?: boolean;
+      running?: boolean;
+    }>
+  ).data;
+}
+
 export type EnrichStrategyMode =
   | 'parallel_all'
   | 'adaptive_first'
   | 'adaptive_only';
+
+export type CoverCropMode = 'right' | 'face' | 'none' | string;
+
+export type ScrapEnrichCoverSettings = {
+  quality: 'high' | 'low' | string;
+  cropRatio?: 'full' | 'emby' | string;
+  regionCrop: Record<string, CoverCropMode>;
+};
 
 export type ScrapEnrichStrategy = {
   mode: EnrichStrategyMode | string;
@@ -1461,9 +1819,23 @@ export type ScrapEnrichStrategy = {
   includeFlare: boolean;
   perSourceTimeoutSec: number;
   regionGroups: Record<string, string[]>;
+  regionsEnabled?: Record<string, boolean>;
+  fillMode?: 'incremental' | 'overwrite' | string;
+  /** 无可用中文或机翻过烂时，自动大模型译中 */
+  llmTranslateOnJunk?: boolean;
+  cover?: ScrapEnrichCoverSettings;
   modes?: { value: string; label: string }[];
   groupOptions?: { id: string; label: string }[];
-  regions?: { id: string; label: string; groups: string[] }[];
+  regions?: {
+    id: string;
+    label: string;
+    groups: string[];
+    enabled?: boolean;
+    coverHint?: string;
+  }[];
+  coverCropOptions?: { id: string; label: string }[];
+  coverQualityOptions?: { id: string; label: string }[];
+  coverRatioOptions?: { id: string; label: string }[];
 };
 
 export async function getScrapEnrichStrategy(): Promise<ScrapEnrichStrategy> {
@@ -1484,6 +1856,10 @@ export async function putScrapEnrichStrategy(
       includeFlare: body.includeFlare !== false,
       perSourceTimeoutSec: body.perSourceTimeoutSec ?? 45,
       regionGroups: body.regionGroups ?? {},
+      regionsEnabled: body.regionsEnabled ?? {},
+      fillMode: body.fillMode === 'overwrite' ? 'overwrite' : 'incremental',
+      llmTranslateOnJunk: body.llmTranslateOnJunk !== false,
+      cover: body.cover,
     }),
   });
   if (!res.ok) throw new Error(await parseError(res));
@@ -1667,6 +2043,8 @@ export type ScrapLibraryEmbedPrefix = {
   /** 主力线优先级，越小越靠前 */
   lineRank?: number;
   blurb?: string;
+  /** 标准厂牌名（有则可用于文件夹导航） */
+  studio?: string;
   posterPath?: string;
   posterApi?: string;
   posterApis?: string[];
@@ -1720,11 +2098,13 @@ export async function listScrapLibraryEmbedRegions(): Promise<
 
 export async function listScrapLibraryEmbedPrefixes(
   region = '',
-  opts?: { studio?: string },
+  opts?: { studio?: string; q?: string; limit?: number },
 ): Promise<ScrapLibraryEmbedPrefix[]> {
   const q = new URLSearchParams();
   if (region) q.set('region', region);
   if (opts?.studio) q.set('studio', opts.studio);
+  if (opts?.q) q.set('q', opts.q);
+  if (opts?.limit != null) q.set('limit', String(opts.limit));
   const res = await apiFetch(
     `/scrap-library/embed/prefixes${q.toString() ? `?${q}` : ''}`,
   );
@@ -1772,6 +2152,7 @@ export async function listScrapLibraryEmbedFacets(opts?: {
   kind?: 'genre' | 'tag' | 'studio' | 'actress' | string;
   studio?: string;
   prefix?: string;
+  q?: string;
   sort?: 'name' | 'count' | string;
   order?: 'asc' | 'desc' | string;
   offset?: number;
@@ -1782,6 +2163,7 @@ export async function listScrapLibraryEmbedFacets(opts?: {
   if (opts?.kind) q.set('kind', opts.kind);
   if (opts?.studio) q.set('studio', opts.studio);
   if (opts?.prefix) q.set('prefix', opts.prefix);
+  if (opts?.q) q.set('q', opts.q);
   if (opts?.sort) q.set('sort', opts.sort);
   if (opts?.order) q.set('order', opts.order);
   if (opts?.offset != null) q.set('offset', String(opts.offset));
@@ -1806,23 +2188,31 @@ export async function listScrapLibraryEmbedFacets(opts?: {
 export async function refreshScrapLibraryEmbedFacetsSnapshot(opts?: {
   region?: string;
   kinds?: Array<'genre' | 'tag' | 'studio' | 'actress' | string>;
+  /** 默认 true：七区全量；false 时仅刷 opts.region */
+  allRegions?: boolean;
 }): Promise<{
   region: string;
+  regions: string[];
   kinds: Record<string, number>;
+  recommend?: { shelves: number; total: number };
   updatedAt: number;
 }> {
+  const allRegions = opts?.allRegions !== false;
   const res = await apiFetch('/scrap-library/embed/facets/refresh', {
     method: 'POST',
     body: JSON.stringify({
-      region: opts?.region || '',
+      region: allRegions ? '' : opts?.region || '',
       kinds: opts?.kinds,
+      allRegions,
     }),
   });
   if (!res.ok) throw new Error(await parseError(res));
   return (
     (await res.json()) as Envelope<{
       region: string;
+      regions: string[];
       kinds: Record<string, number>;
+      recommend?: { shelves: number; total: number };
       updatedAt: number;
     }>
   ).data;
@@ -3284,6 +3674,23 @@ export type PrefixCatalogLocalIndexProgress = {
   total?: number | null;
   percent?: number | null;
   label?: string;
+  /** 刮削补齐：成功条数（运行中实时） */
+  ok?: number | null;
+  /** 刮削补齐：失败条数（运行中实时） */
+  failed?: number | null;
+};
+
+export type CatalogEmbedSkeletonResult = {
+  ok?: boolean;
+  skipped?: boolean;
+  reason?: string;
+  error?: string;
+  inserted?: number;
+  skipped_existing?: number;
+  purged?: number;
+  purged_codes?: number;
+  total?: number;
+  pending?: number;
 };
 
 export type PrefixCatalogLocalIndexStatus = {
@@ -3299,6 +3706,7 @@ export type PrefixCatalogLocalIndexStatus = {
       string,
       { hit: number; codes: number; miss: number }
     >;
+    skeleton?: CatalogEmbedSkeletonResult;
   } | null;
   error: string | null;
 };
@@ -3397,8 +3805,11 @@ export type PrefixCatalogStrmSyncStatus = {
     total?: number;
     written?: number;
     skipped?: number;
+    deleted?: number;
+    pruned_empty?: number;
     errors?: string[];
     by_region?: Record<string, number>;
+    skeleton?: CatalogEmbedSkeletonResult;
   } | null;
   error: string | null;
 };

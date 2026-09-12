@@ -9,6 +9,7 @@ from urllib.parse import quote
 from .common import (
     abs_url,
     clean_title,
+    code_equiv,
     fetch_html,
     is_junk_cover_url,
     is_junk_title,
@@ -138,9 +139,10 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
     std = std_code(raw_code)
     sn_raw = _meta_after_bold(panel, re.compile(r"品番|番號|番号|SN", re.I))
     sn = std_code(sn_raw) or ""
-    if sn and sn != std and sn.replace("-", "") != std.replace("-", ""):
-        if not _page_mentions_code(str(panel) or "", raw_code):
-            raise RuntimeError("番号不匹配")
+    # 品番必须存在且与查询番号等价（容忍前导零补齐差异，如 NAMH-0028 ≡ NAMH-028）；
+    # 禁止页内 substring 放行错页
+    if not sn or not code_equiv(sn, std):
+        raise RuntimeError("番号不匹配")
 
     h3 = panel.select_one(".panel-heading h3") or panel.select_one("h3")
     title_raw = ""
@@ -181,6 +183,51 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
     date_raw = _meta_after_bold(panel, re.compile(r"配信開始日|發行日期|发行日期|Release\s*Date|発売日", re.I))
     dm = re.search(r"(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})", date_raw)
     premiered = f"{dm.group(1)}-{dm.group(2).zfill(2)}-{dm.group(3).zfill(2)}" if dm else None
+
+    series = (
+        (_collect_by_re(panel_html, re.compile(r'href=["\'][^"\']*/series/\d+[^"\']*["\'][^>]*>([^<]+)<', re.I)) or [None])[0]
+        or _meta_after_bold(panel, re.compile(r"シリーズ|系列|Series", re.I))
+        or None
+    )
+    if series:
+        series = str(series).strip() or None
+
+    runtime_raw = _meta_after_bold(
+        panel, re.compile(r"収録時間|播放時長|播放时长|Play\s*time|Runtime", re.I)
+    )
+    runtime_m = re.search(r"(\d+)\s*(?:minutes?|分|分钟|分鐘)?", runtime_raw, re.I)
+    runtime = int(runtime_m.group(1)) if runtime_m else None
+    if runtime is not None and not (0 < runtime < 600):
+        runtime = None
+
+    rating_raw = _meta_after_bold(panel, re.compile(r"平均評価|平均评分|Average\s*Rating", re.I))
+    rating_extra: dict = {}
+    gif = re.search(
+        r'<b>平均評価</b>:\s*<img[^>]+data-original=["\']/img/(\d+)\.gif["\']',
+        html,
+        re.I,
+    )
+    if gif:
+        rating_value = float(gif.group(1)) / 10
+        if rating_value > 0:
+            rating_extra = {
+                "ratingValue": rating_value,
+                "ratingMax": 5,
+                "ratingSource": "jav321",
+                "score": rating_value * 2,
+            }
+    else:
+        num_m = re.search(r"(\d+(?:\.\d+)?)", rating_raw or "")
+        if num_m:
+            num = float(num_m.group(1))
+            if num > 0:
+                rating_max = 5 if num <= 5 else 10
+                rating_extra = {
+                    "ratingValue": num,
+                    "ratingMax": rating_max,
+                    "ratingSource": "jav321",
+                    "score": num if rating_max == 10 else num * 2,
+                }
 
     plot = ""
     for el in panel.select(".row .col-md-12"):
@@ -235,6 +282,14 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
     if not title:
         raise RuntimeError("未找到标题")
 
+    extra: dict = {
+        "series": series,
+        "website": f"{base}/",
+    }
+    if runtime is not None:
+        extra["runtime"] = runtime
+    extra.update(rating_extra)
+
     return make_detail(
         source="jav321",
         code=std,
@@ -245,4 +300,5 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
         tags=tags,
         overview=plot or None,
         date=premiered,
+        extra=extra,
     )

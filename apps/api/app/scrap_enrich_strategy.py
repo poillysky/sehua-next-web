@@ -23,6 +23,7 @@ _DEFAULT_REGION_GROUPS: dict[str, list[str]] = {
 }
 
 VALID_MODES = ("parallel_all", "adaptive_first", "adaptive_only")
+VALID_FILL_MODES = ("incremental", "overwrite")
 VALID_GROUP_IDS = {str(g.get("id") or "") for g in SOURCE_GROUPS if g.get("id")}
 
 MODE_LABELS: dict[str, str] = {
@@ -33,6 +34,8 @@ MODE_LABELS: dict[str, str] = {
 
 
 def default_strategy() -> dict[str, Any]:
+    from .cover_scrape import default_cover_settings
+
     return {
         # parallel_all：番号匹配源一起并发（按配置并发数）
         "mode": "parallel_all",
@@ -40,10 +43,21 @@ def default_strategy() -> dict[str, Any]:
         "adaptiveWorkers": 0,
         "flareWorkers": 0,
         "includeFlare": True,
-        "perSourceTimeoutSec": 45,
+        "perSourceTimeoutSec": 60,
         "regionGroups": {
             rid: list(groups) for rid, groups in _DEFAULT_REGION_GROUPS.items()
         },
+        # 刮削库页七区开关：关则批量补齐跳过该区
+        "regionsEnabled": {rid: True for rid in REGION_ORDER},
+        # 增量 = 只补缺；覆盖 = 全量覆盖
+        "fillMode": "incremental",
+        # 无可用中文 / 机翻过烂时：大模型译中（失败再回落机翻级联）
+        "llmTranslateOnJunk": True,
+        # 字段站点优先级覆盖：{ title: [airav, iqqtv, ...], overview: [...] }
+        # 空 = 用 scrape_source_catalog.field_priority_chain 默认
+        "fieldPriority": {},
+        # 刮削封面：画质 + 七区裁剪
+        "cover": default_cover_settings(),
     }
 
 
@@ -69,35 +83,128 @@ def _norm_groups(raw: Any, *, fallback: list[str]) -> list[str]:
     return out or list(fallback)
 
 
-def normalize_strategy(raw: dict[str, Any] | None) -> dict[str, Any]:
+def normalize_strategy(
+    raw: dict[str, Any] | None, *, prev: dict[str, Any] | None = None
+) -> dict[str, Any]:
     base = default_strategy()
+    prior = prev if isinstance(prev, dict) else {}
     if not isinstance(raw, dict):
-        return base
-    mode = str(raw.get("mode") or base["mode"]).strip().lower()
+        raw = {}
+    mode = str(raw.get("mode") or prior.get("mode") or base["mode"]).strip().lower()
     if mode not in VALID_MODES:
         mode = str(base["mode"])
-    region_in = raw.get("regionGroups") if isinstance(raw.get("regionGroups"), dict) else {}
+    region_in = (
+        raw.get("regionGroups")
+        if isinstance(raw.get("regionGroups"), dict)
+        else prior.get("regionGroups")
+        if isinstance(prior.get("regionGroups"), dict)
+        else {}
+    )
     region_groups: dict[str, list[str]] = {}
     for rid in REGION_ORDER:
         fb = list(_DEFAULT_REGION_GROUPS.get(rid) or ["general"])
         region_groups[rid] = _norm_groups(region_in.get(rid), fallback=fb)
+
+    if "regionsEnabled" in raw and isinstance(raw.get("regionsEnabled"), dict):
+        enabled_in = dict(raw.get("regionsEnabled") or {})
+        prior_en = (
+            prior.get("regionsEnabled")
+            if isinstance(prior.get("regionsEnabled"), dict)
+            else {}
+        )
+        for rid in REGION_ORDER:
+            if rid not in enabled_in and rid in prior_en:
+                enabled_in[rid] = prior_en[rid]
+    elif isinstance(prior.get("regionsEnabled"), dict):
+        enabled_in = dict(prior.get("regionsEnabled") or {})
+    else:
+        enabled_in = {}
+    regions_enabled: dict[str, bool] = {}
+    for rid in REGION_ORDER:
+        if rid in enabled_in:
+            regions_enabled[rid] = bool(enabled_in[rid])
+        else:
+            regions_enabled[rid] = True
+
+    fill_raw = raw.get("fillMode", prior.get("fillMode", base["fillMode"]))
+    fill_mode = str(fill_raw or base["fillMode"]).strip().lower()
+    if fill_mode not in VALID_FILL_MODES:
+        fill_mode = str(base["fillMode"])
+
+    from .cover_scrape import (
+        COVER_CROP_LABELS,
+        COVER_CROP_MODES,
+        normalize_cover_settings,
+    )
+
+    cover = normalize_cover_settings(
+        raw.get("cover"),
+        prev=prior.get("cover") if isinstance(prior.get("cover"), dict) else base["cover"],
+    )
+
+    fp_raw = (
+        raw.get("fieldPriority")
+        if isinstance(raw.get("fieldPriority"), dict)
+        else prior.get("fieldPriority")
+        if isinstance(prior.get("fieldPriority"), dict)
+        else {}
+    )
+    field_priority: dict[str, list[str]] = {}
+    if isinstance(fp_raw, dict):
+        from .scrape_source_catalog import canonicalize_id
+
+        for fk, sites in fp_raw.items():
+            key = str(fk or "").strip()
+            if not key or not isinstance(sites, list):
+                continue
+            chain: list[str] = []
+            seen: set[str] = set()
+            for s in sites:
+                sid = canonicalize_id(str(s or ""))
+                if sid and sid not in seen:
+                    seen.add(sid)
+                    chain.append(sid)
+            if chain:
+                field_priority[key] = chain
+
     return {
         "mode": mode,
         # 0 = 全开（等于源数）；上限放宽，避免「固定 8」
         "adaptiveWorkers": _clamp_int(
-            raw.get("adaptiveWorkers"), lo=0, hi=64, default=int(base["adaptiveWorkers"])
+            raw.get("adaptiveWorkers", prior.get("adaptiveWorkers")),
+            lo=0,
+            hi=64,
+            default=int(base["adaptiveWorkers"]),
         ),
         "flareWorkers": _clamp_int(
-            raw.get("flareWorkers"), lo=0, hi=64, default=int(base["flareWorkers"])
+            raw.get("flareWorkers", prior.get("flareWorkers")),
+            lo=0,
+            hi=64,
+            default=int(base["flareWorkers"]),
         ),
-        "includeFlare": bool(raw.get("includeFlare", base["includeFlare"])),
+        "includeFlare": bool(
+            raw.get(
+                "includeFlare",
+                prior.get("includeFlare", base["includeFlare"]),
+            )
+        ),
         "perSourceTimeoutSec": _clamp_int(
-            raw.get("perSourceTimeoutSec"),
-            lo=10,
-            hi=120,
+            raw.get("perSourceTimeoutSec", prior.get("perSourceTimeoutSec")),
+            lo=5,
+            hi=180,
             default=int(base["perSourceTimeoutSec"]),
         ),
         "regionGroups": region_groups,
+        "regionsEnabled": regions_enabled,
+        "fillMode": fill_mode,
+        "llmTranslateOnJunk": bool(
+            raw.get(
+                "llmTranslateOnJunk",
+                prior.get("llmTranslateOnJunk", base["llmTranslateOnJunk"]),
+            )
+        ),
+        "fieldPriority": field_priority,
+        "cover": cover,
     }
 
 
@@ -107,15 +214,19 @@ def get_strategy() -> dict[str, Any]:
 
 
 def put_strategy(body: dict[str, Any] | None) -> dict[str, Any]:
-    cfg = normalize_strategy(body if isinstance(body, dict) else {})
+    prev = get_strategy()
+    cfg = normalize_strategy(body if isinstance(body, dict) else {}, prev=prev)
     settings_store.put_setting(ENRICH_STRATEGY_KEY, cfg)
     return cfg
 
 
 def strategy_public(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     """带标签与可选分组清单，供设置页渲染。"""
+    from .cover_scrape import COVER_CROP_LABELS, COVER_CROP_MODES, COVER_CROP_HINTS
+
     data = normalize_strategy(cfg) if cfg is not None else get_strategy()
     regions = []
+    enabled = data.get("regionsEnabled") or {}
     for rid in REGION_ORDER:
         meta = REGION_META.get(rid) or {}
         regions.append(
@@ -123,6 +234,8 @@ def strategy_public(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
                 "id": rid,
                 "label": str(meta.get("label") or rid),
                 "groups": list(data["regionGroups"].get(rid) or []),
+                "enabled": bool(enabled.get(rid, True)),
+                "coverHint": COVER_CROP_HINTS.get(rid, ""),
             }
         )
     return {
@@ -135,7 +248,24 @@ def strategy_public(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
             if g.get("id")
         ],
         "regions": regions,
+        "coverCropOptions": [
+            {"id": m, "label": COVER_CROP_LABELS.get(m, m)} for m in COVER_CROP_MODES
+        ],
+        "coverQualityOptions": [
+            {"id": "high", "label": "高画质"},
+            {"id": "low", "label": "低画质"},
+        ],
+        "coverRatioOptions": [
+            {"id": "full", "label": "完整海报（2.12:3）"},
+            {"id": "emby", "label": "Emby 比例（2:3）"},
+        ],
     }
+
+
+def enabled_region_ids(cfg: dict[str, Any] | None = None) -> list[str]:
+    data = normalize_strategy(cfg) if cfg is not None else get_strategy()
+    enabled = data.get("regionsEnabled") or {}
+    return [rid for rid in REGION_ORDER if bool(enabled.get(rid, True))]
 
 
 def resolve_pool_workers(configured: int, batch_size: int) -> int:

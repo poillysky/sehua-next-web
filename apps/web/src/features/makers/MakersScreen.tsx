@@ -1,7 +1,6 @@
 'use client';
 
 import {
-  startTransition,
   useCallback,
   useEffect,
   useMemo,
@@ -41,7 +40,7 @@ import {
   type MakerSortId,
 } from './makersUi';
 import { ScrapPosterCard } from './ScrapPosterCard';
-import { ScrapActressCard, ScrapCollageCard } from './ScrapCollageCard';
+import { ScrapActressCard, ScrapCollageCard, ScrapTagCard } from './ScrapCollageCard';
 import { ScrapDetailBody } from './ScrapDetailBody';
 import {
   listScrapFavorites,
@@ -51,15 +50,9 @@ import {
 type DrillStack =
   | { kind: 'hub' }
   | { kind: 'search' }
-  /** 文件夹：厂牌 → 前缀 → 女优 → 番号 */
+  /** 文件夹：厂牌 → 前缀 → 番号 */
   | { kind: 'folderStudio'; studio: string }
   | { kind: 'folderPrefix'; studio: string; prefix: string }
-  | {
-      kind: 'folderActress';
-      studio: string;
-      prefix: string;
-      actress: string;
-    }
   | {
       kind: 'facet';
       facet: 'genre' | 'tag' | 'actress';
@@ -148,6 +141,39 @@ export function MakersScreen() {
       }
     >(),
   );
+  /** 一级浏览方式内存缓存：切换 Tab 秒开 */
+  const hubCacheRef = useRef(
+    new Map<
+      string,
+      {
+        items: ScrapLibraryEmbedItem[];
+        facets: ScrapLibraryEmbedFacet[];
+        total: number;
+        recommend: ScrapLibraryEmbedRecommend | null;
+      }
+    >(),
+  );
+  const putHubCache = useCallback(
+    (
+      key: string,
+      payload: {
+        items: ScrapLibraryEmbedItem[];
+        facets: ScrapLibraryEmbedFacet[];
+        total: number;
+        recommend: ScrapLibraryEmbedRecommend | null;
+      },
+    ) => {
+      const m = hubCacheRef.current;
+      if (m.has(key)) m.delete(key);
+      m.set(key, payload);
+      while (m.size > 64) {
+        const oldest = m.keys().next().value;
+        if (oldest == null) break;
+        m.delete(oldest);
+      }
+    },
+    [],
+  );
   const putDrillCache = useCallback(
     (
       key: string,
@@ -176,6 +202,12 @@ export function MakersScreen() {
   const [snapRefreshing, setSnapRefreshing] = useState(false);
   const [searchDraft, setSearchDraft] = useState('');
   const [searchHits, setSearchHits] = useState<ScrapLibraryEmbedItem[]>([]);
+  const [searchStudios, setSearchStudios] = useState<ScrapLibraryEmbedFacet[]>(
+    [],
+  );
+  const [searchPrefixes, setSearchPrefixes] = useState<
+    ScrapLibraryEmbedPrefix[]
+  >([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchDone, setSearchDone] = useState(false);
   const [favTick, setFavTick] = useState(0);
@@ -206,31 +238,19 @@ export function MakersScreen() {
   );
 
   const folderStudio =
-    stack.kind === 'folderStudio' ||
-    stack.kind === 'folderPrefix' ||
-    stack.kind === 'folderActress'
+    stack.kind === 'folderStudio' || stack.kind === 'folderPrefix'
       ? stack.studio
       : stack.kind === 'detail' &&
           (stack.from.kind === 'folderStudio' ||
-            stack.from.kind === 'folderPrefix' ||
-            stack.from.kind === 'folderActress')
+            stack.from.kind === 'folderPrefix')
         ? stack.from.studio
         : undefined;
   const folderPrefix =
-    stack.kind === 'folderPrefix' || stack.kind === 'folderActress'
+    stack.kind === 'folderPrefix'
       ? stack.prefix
-      : stack.kind === 'detail' &&
-          (stack.from.kind === 'folderPrefix' ||
-            stack.from.kind === 'folderActress')
+      : stack.kind === 'detail' && stack.from.kind === 'folderPrefix'
         ? stack.from.prefix
         : undefined;
-  const folderActress =
-    stack.kind === 'folderActress'
-      ? stack.actress
-      : stack.kind === 'detail' && stack.from.kind === 'folderActress'
-        ? stack.from.actress
-        : undefined;
-
   const facetKind =
     stack.kind === 'facet'
       ? stack.facet
@@ -248,10 +268,10 @@ export function MakersScreen() {
     libraryView !== 'recommended' && libraryView !== 'favorites';
   const isItemSortView =
     libraryView === 'movies' ||
-    stack.kind === 'folderActress' ||
+    stack.kind === 'folderPrefix' ||
     stack.kind === 'facet' ||
     (stack.kind === 'detail' &&
-      (stack.from.kind === 'folderActress' || stack.from.kind === 'facet'));
+      (stack.from.kind === 'folderPrefix' || stack.from.kind === 'facet'));
   const isPrefixSortView =
     stack.kind === 'folderStudio' ||
     (stack.kind === 'detail' && stack.from.kind === 'folderStudio');
@@ -266,9 +286,7 @@ export function MakersScreen() {
           region: hubTab,
           prefix: folderPrefix,
           studio: folderStudio,
-          actress:
-            folderActress ||
-            (facetKind === 'actress' ? facetValue : undefined),
+          actress: facetKind === 'actress' ? facetValue : undefined,
           genre: facetKind === 'genre' ? facetValue : undefined,
           tag: facetKind === 'tag' ? facetValue : undefined,
           sort: itemSort,
@@ -292,7 +310,6 @@ export function MakersScreen() {
       hubTab,
       folderStudio,
       folderPrefix,
-      folderActress,
       facetKind,
       facetValue,
       itemSort,
@@ -301,6 +318,17 @@ export function MakersScreen() {
   );
 
   const loadRecommend = useCallback(async () => {
+    const cacheKey = 'recommend';
+    const cached = hubCacheRef.current.get(cacheKey);
+    if (cached?.recommend) {
+      setRecommend(cached.recommend);
+      setItems([]);
+      setPrefixes([]);
+      setFacets([]);
+      setTotal(cached.total);
+      setLoading(false);
+      return;
+    }
     const seq = ++loadSeq.current;
     setLoading(true);
     setMsg('');
@@ -313,6 +341,12 @@ export function MakersScreen() {
       if (seq !== loadSeq.current) return;
       setRecommend(data);
       setTotal(data.total || 0);
+      putHubCache(cacheKey, {
+        items: [],
+        facets: [],
+        total: data.total || 0,
+        recommend: data,
+      });
     } catch (e) {
       if (seq !== loadSeq.current) return;
       setRecommend(null);
@@ -320,7 +354,7 @@ export function MakersScreen() {
     } finally {
       if (seq === loadSeq.current) setLoading(false);
     }
-  }, []);
+  }, [putHubCache]);
 
   const scrollHubTop = useCallback(() => {
     const el =
@@ -339,6 +373,19 @@ export function MakersScreen() {
   const loadHubView = useCallback(
     async (pageNum: number) => {
       if (libraryView === 'recommended') return;
+      const cacheKey = `${hubTab}|${libraryView}|${itemSort}|${facetSort}|${sortOrder}|${pageNum}`;
+      if (libraryView !== 'favorites') {
+        const cached = hubCacheRef.current.get(cacheKey);
+        if (cached) {
+          setItems(cached.items);
+          setFacets(cached.facets);
+          setRecommend(null);
+          setPrefixes([]);
+          setTotal(cached.total);
+          setLoading(false);
+          return;
+        }
+      }
       const seq = ++loadSeq.current;
       setLoading(true);
       setMsg('');
@@ -357,8 +404,15 @@ export function MakersScreen() {
             limit: PAGE_SIZE,
           });
           if (seq !== loadSeq.current) return;
-          setItems(page.items || []);
+          const nextItems = page.items || [];
+          setItems(nextItems);
           setTotal(page.total);
+          putHubCache(cacheKey, {
+            items: nextItems,
+            facets: [],
+            total: page.total,
+            recommend: null,
+          });
         } else if (
           libraryView === 'folders' ||
           libraryView === 'genres' ||
@@ -379,8 +433,15 @@ export function MakersScreen() {
             limit: PAGE_SIZE,
           });
           if (seq !== loadSeq.current) return;
-          setFacets(page.facets || []);
+          const nextFacets = page.facets || [];
+          setFacets(nextFacets);
           setTotal(page.total);
+          putHubCache(cacheKey, {
+            items: [],
+            facets: nextFacets,
+            total: page.total,
+            recommend: null,
+          });
         } else if (libraryView === 'favorites') {
           await ensureScrapFavoritesLoaded();
           if (seq !== loadSeq.current) return;
@@ -394,7 +455,7 @@ export function MakersScreen() {
         if (seq === loadSeq.current) setLoading(false);
       }
     },
-    [hubTab, libraryView, itemSort, facetSort, sortOrder],
+    [hubTab, libraryView, itemSort, facetSort, sortOrder, putHubCache],
   );
 
   useEffect(() => {
@@ -444,25 +505,33 @@ export function MakersScreen() {
     setMsg('');
     try {
       const data = await refreshScrapLibraryEmbedFacetsSnapshot({
-        region: hubTab,
+        allRegions: true,
       });
       drillCacheRef.current.clear();
+      hubCacheRef.current.clear();
       loadedDrillKeyRef.current = '';
       const counts = data.kinds || {};
+      const nRegions = Array.isArray(data.regions) ? data.regions.length : 0;
       const parts = [
+        nRegions > 1 ? `${nRegions} 区` : '',
+        counts.recommend != null ? `推荐 ${counts.recommend}` : '',
+        counts.moviesWarm != null ? `影片首页 ${counts.moviesWarm}` : '',
         counts.studio != null ? `厂牌 ${counts.studio}` : '',
         counts.genre != null ? `标签 ${counts.genre}` : '',
         counts.actress != null ? `女优 ${counts.actress}` : '',
       ].filter(Boolean);
       setMsg(
         parts.length
-          ? `分面快照已更新（${parts.join(' · ')}）`
-          : '分面快照已更新',
+          ? `快照已更新（${parts.join(' · ')}）`
+          : '快照已更新',
       );
-      if (
+      if (libraryView === 'recommended') {
+        await loadRecommend();
+      } else if (
         libraryView === 'folders' ||
         libraryView === 'genres' ||
-        libraryView === 'tags'
+        libraryView === 'tags' ||
+        libraryView === 'movies'
       ) {
         await loadHubView(hubPage);
       }
@@ -471,7 +540,7 @@ export function MakersScreen() {
     } finally {
       setSnapRefreshing(false);
     }
-  }, [snapRefreshing, hubTab, libraryView, hubPage, loadHubView]);
+  }, [snapRefreshing, libraryView, hubPage, loadHubView, loadRecommend]);
 
   const goDrillPage = useCallback(
     (next: number) => {
@@ -480,25 +549,23 @@ export function MakersScreen() {
     },
     [scrollDrillTop],
   );
-  // 文件夹中间层：厂牌下前缀 / 前缀下女优
+  // 文件夹中间层：厂牌下的前缀列表
   const folderMidKey = useMemo(() => {
     if (stack.kind === 'folderStudio') {
       return `fs|${hubTab}|${stack.studio}|${prefixSort}|${sortOrder}`;
     }
-    if (stack.kind === 'folderPrefix') {
-      return `fp|${hubTab}|${stack.studio}|${stack.prefix}|${facetSort}|${sortOrder}`;
-    }
     if (stack.kind === 'detail' && stack.from.kind === 'folderStudio') {
       return `fs|${hubTab}|${stack.from.studio}|${prefixSort}|${sortOrder}`;
     }
-    if (stack.kind === 'detail' && stack.from.kind === 'folderPrefix') {
-      return `fp|${hubTab}|${stack.from.studio}|${stack.from.prefix}|${facetSort}|${sortOrder}`;
-    }
     return '';
-  }, [stack, hubTab, facetSort, prefixSort, sortOrder]);
+  }, [stack, hubTab, prefixSort, sortOrder]);
 
   useEffect(() => {
     drillCacheRef.current.clear();
+    // 换区清掉分区相关的一级缓存；推荐跨区保留
+    for (const key of [...hubCacheRef.current.keys()]) {
+      if (key !== 'recommend') hubCacheRef.current.delete(key);
+    }
     loadedDrillKeyRef.current = '';
   }, [hubTab]);
 
@@ -513,47 +580,27 @@ export function MakersScreen() {
       return;
     }
     let cancelled = false;
-    const level = folderMidKey.startsWith('fs|') ? 'studio' : 'prefix';
-    // 已有同层内容时不先清空，避免后退闪白
+    // 无缓存：先清空再拉，避免先闪上一个厂牌的前缀
+    setDrillPrefixes([]);
+    setDrillFacets([]);
+    setDrillTotal(0);
     setDrillLoading(true);
     setMsg('');
     void (async () => {
       try {
-        if (level === 'studio') {
-          const studio = folderStudio || '';
-          const rows = await listScrapLibraryEmbedPrefixes(hubTab, { studio });
-          if (cancelled) return;
-          const prefixes = sortPrefixes(rows, prefixSort, sortOrder);
-          const payload = {
-            prefixes,
-            facets: [] as ScrapLibraryEmbedFacet[],
-            total: rows.length,
-          };
-          putDrillCache(folderMidKey, payload);
-          setDrillPrefixes(payload.prefixes);
-          setDrillFacets(payload.facets);
-          setDrillTotal(payload.total);
-        } else {
-          const page = await listScrapLibraryEmbedFacets({
-            region: hubTab,
-            kind: 'actress',
-            studio: folderStudio,
-            prefix: folderPrefix,
-            sort: facetSort,
-            order: sortOrder,
-          });
-          if (cancelled) return;
-          const facets = page.facets || [];
-          const payload = {
-            prefixes: [] as ScrapLibraryEmbedPrefix[],
-            facets,
-            total: page.total,
-          };
-          putDrillCache(folderMidKey, payload);
-          setDrillPrefixes(payload.prefixes);
-          setDrillFacets(payload.facets);
-          setDrillTotal(payload.total);
-        }
+        const studio = folderStudio || '';
+        const rows = await listScrapLibraryEmbedPrefixes(hubTab, { studio });
+        if (cancelled) return;
+        const prefixes = sortPrefixes(rows, prefixSort, sortOrder);
+        const payload = {
+          prefixes,
+          facets: [] as ScrapLibraryEmbedFacet[],
+          total: rows.length,
+        };
+        putDrillCache(folderMidKey, payload);
+        setDrillPrefixes(payload.prefixes);
+        setDrillFacets(payload.facets);
+        setDrillTotal(payload.total);
       } catch (e) {
         if (cancelled) return;
         setMsg(e instanceof Error ? e.message : '加载失败');
@@ -571,8 +618,6 @@ export function MakersScreen() {
     folderMidKey,
     hubTab,
     folderStudio,
-    folderPrefix,
-    facetSort,
     prefixSort,
     sortOrder,
     putDrillCache,
@@ -580,14 +625,14 @@ export function MakersScreen() {
 
   // 钻取列表：详情盖住时保持同一 drillKey，避免返回时重新拉数
   const drillLoadKey = useMemo(() => {
-    if (stack.kind === 'folderActress') {
-      return `${hubTab}|fa|${stack.studio}|${stack.prefix}|${stack.actress}|${itemSort}|${sortOrder}`;
+    if (stack.kind === 'folderPrefix') {
+      return `${hubTab}|fp|${stack.studio}|${stack.prefix}|${itemSort}|${sortOrder}`;
     }
     if (stack.kind === 'facet') {
       return `${hubTab}|facet|${stack.facet}|${stack.value}|${itemSort}|${sortOrder}`;
     }
-    if (stack.kind === 'detail' && stack.from.kind === 'folderActress') {
-      return `${hubTab}|fa|${stack.from.studio}|${stack.from.prefix}|${stack.from.actress}|${itemSort}|${sortOrder}`;
+    if (stack.kind === 'detail' && stack.from.kind === 'folderPrefix') {
+      return `${hubTab}|fp|${stack.from.studio}|${stack.from.prefix}|${itemSort}|${sortOrder}`;
     }
     if (stack.kind === 'detail' && stack.from.kind === 'facet') {
       return `${hubTab}|facet|${stack.from.facet}|${stack.from.value}|${itemSort}|${sortOrder}`;
@@ -599,6 +644,10 @@ export function MakersScreen() {
     if (!drillLoadKey) return;
     setDrillPage(1);
     loadedDrillKeyRef.current = '';
+    // 立刻清空旧列表，避免先闪「原页面」海报再换成真实结果
+    setItems([]);
+    setTotal(0);
+    setLoading(true);
   }, [drillLoadKey]);
 
   useEffect(() => {
@@ -749,12 +798,25 @@ export function MakersScreen() {
     setSearchDone(false);
     setMsg('');
     try {
-      const page = await listScrapLibraryEmbedItems({
-        region: hubTab,
-        q,
-        offset: 0,
-        limit: PAGE_SIZE,
-      });
+      const [page, prefixes, studioPage] = await Promise.all([
+        listScrapLibraryEmbedItems({
+          region: hubTab,
+          q,
+          offset: 0,
+          limit: PAGE_SIZE,
+        }),
+        listScrapLibraryEmbedPrefixes(hubTab, { q, limit: 24 }).catch(
+          () => [] as ScrapLibraryEmbedPrefix[],
+        ),
+        listScrapLibraryEmbedFacets({
+          region: hubTab,
+          kind: 'studio',
+          q,
+          sort: 'count',
+          order: 'desc',
+          limit: 24,
+        }).catch(() => ({ facets: [] as ScrapLibraryEmbedFacet[], total: 0 })),
+      ]);
       let hits = page.items || [];
       if (hits.length < 8) {
         try {
@@ -777,9 +839,13 @@ export function MakersScreen() {
         }
       }
       setSearchHits(hits);
+      setSearchPrefixes(prefixes || []);
+      setSearchStudios(studioPage.facets || []);
       setSearchDone(true);
     } catch (e) {
       setSearchHits([]);
+      setSearchPrefixes([]);
+      setSearchStudios([]);
       setSearchDone(true);
       setMsg(e instanceof Error ? e.message : '搜索失败');
     } finally {
@@ -801,14 +867,6 @@ export function MakersScreen() {
         prefix: stack.prefix,
       };
     }
-    if (stack.kind === 'folderActress') {
-      return {
-        kind: 'folderActress',
-        studio: stack.studio,
-        prefix: stack.prefix,
-        actress: stack.actress,
-      };
-    }
     return {
       kind: 'facet',
       facet: stack.facet,
@@ -826,9 +884,7 @@ export function MakersScreen() {
     ) {
       setHubTab(rid as typeof hubTab);
     }
-    startTransition(() =>
-      setStack({ kind: 'detail', item, from: currentDrill() }),
-    );
+    setStack({ kind: 'detail', item, from: currentDrill() });
   }
 
   function openFacetFromDetail(
@@ -838,22 +894,18 @@ export function MakersScreen() {
     const name = String(value || '').trim();
     if (!name) return;
     const fromDetail = stack.kind === 'detail' ? stack.item : undefined;
-    startTransition(() =>
-      setStack({
-        kind: 'facet',
-        facet,
-        value: name,
-        fromDetail,
-      }),
-    );
+    setStack({
+      kind: 'facet',
+      facet,
+      value: name,
+      fromDetail,
+    });
   }
 
   function openStudioFromDetail(value: string) {
     const name = String(value || '').trim();
     if (!name) return;
-    startTransition(() =>
-      setStack({ kind: 'folderStudio', studio: name }),
-    );
+    setStack({ kind: 'folderStudio', studio: name });
   }
 
   const wall = (
@@ -1094,7 +1146,7 @@ export function MakersScreen() {
             if (items.length === 0) return null;
             return shelfRail(
               shelf.region || title,
-              `${title} · 最新`,
+              `${title} · 最近刮削`,
               items.map((item, i) => (
                 <ScrapPosterCard
                   key={`${shelf.region}-${String(item.itemId || item.code)}`}
@@ -1143,9 +1195,7 @@ export function MakersScreen() {
                 posterApi={f.posterApi}
                 coverUrl={f.coverUrl}
                 onClick={() =>
-                  startTransition(() =>
-                    setStack({ kind: 'folderStudio', studio: f.name }),
-                  )
+                  setStack({ kind: 'folderStudio', studio: f.name })
                 }
               />
             ))}
@@ -1157,9 +1207,9 @@ export function MakersScreen() {
     if (libraryView === 'genres') {
       if (loading) {
         return (
-          <div className="makers-collage-grid makers-collage-grid--skel" aria-hidden>
-            {Array.from({ length: 6 }).map((_, i) => (
-              <span key={i} className="makers-collage-skel" />
+          <div className="makers-tag-card-grid makers-tag-card-grid--skel" aria-hidden>
+            {Array.from({ length: 15 }).map((_, i) => (
+              <span key={i} className="makers-tag-card-skel" />
             ))}
           </div>
         );
@@ -1171,22 +1221,18 @@ export function MakersScreen() {
       }
       return (
         <>
-          <div className="makers-collage-grid">
+          <div className="makers-tag-card-grid">
             {facets.map((f) => (
-              <ScrapCollageCard
+              <ScrapTagCard
                 key={f.name}
                 title={f.name}
                 count={f.count}
-                posterApi={f.posterApi}
-                coverUrl={f.coverUrl}
                 onClick={() =>
-                  startTransition(() =>
-                    setStack({
-                      kind: 'facet',
-                      facet: 'genre',
-                      value: f.name,
-                    }),
-                  )
+                  setStack({
+                    kind: 'facet',
+                    facet: 'genre',
+                    value: f.name,
+                  })
                 }
               />
             ))}
@@ -1225,13 +1271,11 @@ export function MakersScreen() {
                 posterApis={f.posterApis}
                 coverUrl={f.coverUrl}
                 onClick={() =>
-                  startTransition(() =>
-                    setStack({
-                      kind: 'facet',
-                      facet: 'actress',
-                      value: f.name,
-                    }),
-                  )
+                  setStack({
+                    kind: 'facet',
+                    facet: 'actress',
+                    value: f.name,
+                  })
                 }
               />
             ))}
@@ -1267,21 +1311,23 @@ export function MakersScreen() {
                   ? 'media-hub__search-btn makers-hub__refresh-btn is-busy'
                   : 'media-hub__search-btn makers-hub__refresh-btn'
               }
-              aria-label="刷新分面快照"
-              title="刷新厂牌 / 标签 / 女优快照"
+              aria-label="刷新浏览快照"
+              title="刷新七区厂牌/标签/女优 + 推荐 + 影片首页快照"
               disabled={snapRefreshing}
               onClick={() => {
                 void refreshFacetsSnapshot();
               }}
             >
-              <RefreshCw
-                size={17}
-                strokeWidth={2.4}
-                aria-hidden
+              <span
                 className={
-                  snapRefreshing ? 'makers-hub__refresh-spin' : undefined
+                  snapRefreshing
+                    ? 'makers-hub__refresh-spin is-spinning'
+                    : 'makers-hub__refresh-spin'
                 }
-              />
+                aria-hidden
+              >
+                <RefreshCw size={17} strokeWidth={2.4} />
+              </span>
             </button>
             <button
               type="button"
@@ -1290,8 +1336,10 @@ export function MakersScreen() {
               onClick={() => {
                 setSearchDraft('');
                 setSearchHits([]);
+                setSearchStudios([]);
+                setSearchPrefixes([]);
                 setSearchDone(false);
-                startTransition(() => setStack({ kind: 'search' }));
+                setStack({ kind: 'search' });
               }}
             >
               <Search size={17} strokeWidth={2.4} aria-hidden />
@@ -1376,13 +1424,25 @@ export function MakersScreen() {
 
   if (stack.kind === 'search') {
     const searchQuery = searchDraft.trim();
+    const searchNavTotal =
+      searchStudios.length + searchPrefixes.length + searchHits.length;
+    const searchStatusParts = [
+      searchStudios.length ? `${searchStudios.length} 厂牌` : '',
+      searchPrefixes.length ? `${searchPrefixes.length} 前缀` : '',
+      searchHits.length ? `${searchHits.length} 影片` : '',
+    ].filter(Boolean);
+    const clearSearchResults = () => {
+      setSearchHits([]);
+      setSearchStudios([]);
+      setSearchPrefixes([]);
+      setSearchDone(false);
+    };
     push = (
       <AppPush
         title="搜索"
         scrollKey={`makers-search-${hubTab}`}
         onBack={() => {
-          setSearchHits([]);
-          setSearchDone(false);
+          clearSearchResults();
           setStack({ kind: 'hub' });
         }}
         skipEnterAnimation
@@ -1406,7 +1466,7 @@ export function MakersScreen() {
                 className="makers-search__input"
                 value={searchDraft}
                 onChange={(e) => setSearchDraft(e.target.value)}
-                placeholder={`${makerSourceLabel(hubTab)} · 番号或语义`}
+                placeholder={`${makerSourceLabel(hubTab)} · 番号 / 厂牌 / 前缀`}
                 autoFocus
                 enterKeyHint="search"
                 autoComplete="off"
@@ -1420,8 +1480,7 @@ export function MakersScreen() {
                   aria-label="清除"
                   onClick={() => {
                     setSearchDraft('');
-                    setSearchHits([]);
-                    setSearchDone(false);
+                    clearSearchResults();
                   }}
                 >
                   <X size={15} strokeWidth={2.35} aria-hidden />
@@ -1437,23 +1496,25 @@ export function MakersScreen() {
             </button>
           </form>
 
-          {searchLoading || (searchDone && searchHits.length > 0) ? (
+          {searchLoading || (searchDone && searchNavTotal > 0) ? (
             <p className="makers-search__status allow-select" aria-live="polite">
-              {searchLoading ? '搜索中…' : `${searchHits.length} 条结果`}
+              {searchLoading
+                ? '搜索中…'
+                : searchStatusParts.join(' · ')}
             </p>
           ) : null}
 
-          {!searchLoading && !searchDone && searchHits.length === 0 ? (
+          {!searchLoading && !searchDone && searchNavTotal === 0 ? (
             <div className="makers-search-empty allow-select">
               <span className="makers-search-empty__icon" aria-hidden>
                 <Search size={28} strokeWidth={1.75} />
               </span>
-              <p className="makers-search-empty__title">搜番号或语义</p>
+              <p className="makers-search-empty__title">搜番号、厂牌或前缀</p>
               <p className="makers-search-empty__hint">
-                例如 SSIS-001、女优名
+                例如 SSIS-001、S1、SSIS
               </p>
             </div>
-          ) : !searchLoading && searchDone && searchHits.length === 0 ? (
+          ) : !searchLoading && searchDone && searchNavTotal === 0 ? (
             <div className="makers-search-empty allow-select">
               <span className="makers-search-empty__icon" aria-hidden>
                 <Search size={28} strokeWidth={1.75} />
@@ -1462,7 +1523,100 @@ export function MakersScreen() {
               <p className="makers-search-empty__hint">换个关键字再试试</p>
             </div>
           ) : (
-            wall(searchHits, '无匹配结果', { loading: searchLoading })
+            <div className="makers-search-results">
+              {searchStudios.length > 0 ? (
+                <section className="makers-search-nav">
+                  <h3 className="makers-search-nav__title">厂牌</h3>
+                  <ul className="makers-prefix-list">
+                    {searchStudios.map((s) => (
+                      <li key={`studio-${s.name}`}>
+                        <button
+                          type="button"
+                          className="makers-prefix-list__row"
+                          onClick={() =>
+                            setStack({
+                              kind: 'folderStudio',
+                              studio: s.name,
+                            })
+                          }
+                        >
+                          <span className="makers-prefix-list__main">
+                            <span className="makers-prefix-list__prefix">
+                              {s.name}
+                            </span>
+                            {s.blurb ? (
+                              <span className="makers-prefix-list__maker">
+                                {s.blurb}
+                              </span>
+                            ) : null}
+                          </span>
+                          <span className="makers-search-nav__count allow-select">
+                            {s.count}
+                          </span>
+                          <ChevronRight
+                            size={16}
+                            strokeWidth={2.2}
+                            aria-hidden
+                          />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ) : null}
+              {searchPrefixes.length > 0 ? (
+                <section className="makers-search-nav">
+                  <h3 className="makers-search-nav__title">前缀</h3>
+                  <ul className="makers-prefix-list">
+                    {searchPrefixes.map((p) => {
+                      const studio = String(p.studio || p.prefix || '').trim();
+                      return (
+                        <li key={`prefix-${p.prefix}`}>
+                          <button
+                            type="button"
+                            className="makers-prefix-list__row"
+                            onClick={() =>
+                              setStack({
+                                kind: 'folderPrefix',
+                                studio: studio || p.prefix,
+                                prefix: p.prefix,
+                              })
+                            }
+                          >
+                            <span className="makers-prefix-list__main">
+                              <span className="makers-prefix-list__prefix">
+                                {p.prefix}
+                              </span>
+                              {p.studio || p.blurb ? (
+                                <span className="makers-prefix-list__maker">
+                                  {p.studio || p.blurb}
+                                </span>
+                              ) : null}
+                            </span>
+                            <span className="makers-search-nav__count allow-select">
+                              {p.count}
+                            </span>
+                            <ChevronRight
+                              size={16}
+                              strokeWidth={2.2}
+                              aria-hidden
+                            />
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </section>
+              ) : null}
+              {searchHits.length > 0 || searchLoading ? (
+                <section className="makers-search-nav">
+                  {searchStudios.length > 0 || searchPrefixes.length > 0 ? (
+                    <h3 className="makers-search-nav__title">影片</h3>
+                  ) : null}
+                  {wall(searchHits, '无匹配结果', { loading: searchLoading })}
+                </section>
+              ) : null}
+            </div>
           )}
         </div>
       </AppPush>
@@ -1509,13 +1663,11 @@ export function MakersScreen() {
                   posterApi={p.posterApi}
                   coverUrl={p.coverUrl}
                   onClick={() =>
-                    startTransition(() =>
-                      setStack({
-                        kind: 'folderPrefix',
-                        studio: stack.studio,
-                        prefix: p.prefix,
-                      }),
-                    )
+                    setStack({
+                      kind: 'folderPrefix',
+                      studio: stack.studio,
+                      prefix: p.prefix,
+                    })
                   }
                 />
               ))}
@@ -1540,58 +1692,23 @@ export function MakersScreen() {
             ref={sortSlotRef}
           >
             <p className="makers-drill-toolbar__meta allow-select">
-              {drillLoading && drillFacets.length === 0
+              {loading && items.length === 0
                 ? '加载中…'
-                : `${stack.studio} · ${drillTotal} 位女优`}
+                : `${stack.studio} · ${total} 项`}
             </p>
             {combinedSortBtn(true, 'makers-drill-sort')}
             {sortDropdown}
           </div>
-          {drillLoading && drillFacets.length === 0 ? (
-            <div
-              className="makers-actress-grid makers-actress-grid--skel"
-              aria-hidden
-            >
-              {Array.from({ length: 9 }).map((_, i) => (
-                <span key={i} className="makers-actress-skel" />
-              ))}
-            </div>
-          ) : drillFacets.length === 0 ? (
-            <p className="media-empty makers-hub__empty allow-select">
-              暂无女优
-            </p>
-          ) : (
-            <div className="makers-actress-grid">
-              {drillFacets.map((f) => (
-                <ScrapActressCard
-                  key={f.name}
-                  title={f.name}
-                  count={f.count}
-                  posterApi={f.posterApi}
-                  posterApis={f.posterApis}
-                  coverUrl={f.coverUrl}
-                  onClick={() =>
-                    startTransition(() =>
-                      setStack({
-                        kind: 'folderActress',
-                        studio: stack.studio,
-                        prefix: stack.prefix,
-                        actress: f.name,
-                      }),
-                    )
-                  }
-                />
-              ))}
-            </div>
-          )}
+          {wall(items, '暂无匹配条目', {
+            loading: loading && items.length === 0,
+          })}
+          {drillPager}
         </div>
       </AppPush>
     );
-  } else if (stack.kind === 'folderActress' || stack.kind === 'facet') {
-    const title =
-      stack.kind === 'folderActress' ? stack.actress : stack.value;
+  } else if (stack.kind === 'facet') {
     const onDrillBack = () => {
-      if (stack.kind === 'facet' && stack.fromDetail) {
+      if (stack.fromDetail) {
         setStack({
           kind: 'detail',
           item: stack.fromDetail,
@@ -1599,20 +1716,12 @@ export function MakersScreen() {
         });
         return;
       }
-      if (stack.kind === 'folderActress') {
-        setStack({
-          kind: 'folderPrefix',
-          studio: stack.studio,
-          prefix: stack.prefix,
-        });
-        return;
-      }
       setStack({ kind: 'hub' });
     };
     push = (
       <AppPush
-        title={title}
-        scrollKey={`makers-drill-${hubTab}-${stack.kind}-${title}`}
+        title={stack.value}
+        scrollKey={`makers-drill-${hubTab}-facet-${stack.value}`}
         onBack={onDrillBack}
         skipEnterAnimation
       >
@@ -1622,11 +1731,7 @@ export function MakersScreen() {
             ref={sortSlotRef}
           >
             <p className="makers-drill-toolbar__meta allow-select">
-              {loading && items.length === 0
-                ? '加载中…'
-                : stack.kind === 'folderActress'
-                  ? `${stack.studio} · ${stack.prefix} · ${total} 项`
-                  : `共 ${total} 项`}
+              {loading && items.length === 0 ? '加载中…' : `共 ${total} 项`}
             </p>
             {combinedSortBtn(true, 'makers-drill-sort')}
             {sortDropdown}
@@ -1672,13 +1777,11 @@ export function MakersScreen() {
             }
           }}
           onOpenRelated={(next) =>
-            startTransition(() =>
-              setStack({
-                kind: 'detail',
-                item: next,
-                from: stack.from,
-              }),
-            )
+            setStack({
+              kind: 'detail',
+              item: next,
+              from: stack.from,
+            })
           }
         />
       </AppPush>

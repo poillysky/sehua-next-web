@@ -266,13 +266,23 @@ def run_strm_sync(
                 )
 
     if total == 0:
-        emit("完成 · 无可写条目", stage="done", done=0, total=0, percent=100)
+        emit("清理多余文件夹…", stage="prune", done=0, total=0, percent=50)
+        deleted, pruned_empty = _prune_strm_extras(out_root_s, set())
+        emit(
+            f"完成 · 无可写条目 · 删多余 {deleted}",
+            stage="done",
+            done=0,
+            total=0,
+            percent=100,
+        )
         return {
             "root": configured,
             "resolved": str(out_root),
             "total": 0,
             "written": 0,
             "skipped": 0,
+            "deleted": deleted,
+            "pruned_empty": pruned_empty,
             "errors": [],
             "by_region": by_region,
         }
@@ -281,21 +291,172 @@ def run_strm_sync(
         for kind, payload in pool.map(write_one, jobs, chunksize=64):
             bump(kind, payload)
 
+    # 多的删：树里有、目录没有的番号文件夹清掉
+    emit("清理多余文件夹…", stage="prune", done=total, total=total, percent=94)
+    wanted_dirs = {
+        (
+            region_names[lab],
+            prefix_names[(lab, pref)],
+            safe_name(code),
+        )
+        for lab, pref, code in jobs
+    }
+    deleted, pruned_empty = _prune_strm_extras(out_root_s, wanted_dirs)
+    if deleted or pruned_empty:
+        emit(
+            f"已删多余 {deleted:,} · 空目录 {pruned_empty:,}",
+            stage="prune",
+            done=total,
+            total=total,
+            percent=96,
+        )
+
+    # 空目录框架写入向量库：仅补缺失番号，已有数据不覆盖
+    skeleton: dict[str, Any] = {"ok": False, "skipped": True, "reason": "not_run"}
+    try:
+        from . import scrap_library_embed as embed_svc
+
+        def _skel_prog(payload: dict[str, Any]) -> None:
+            stage = str(payload.get("stage") or "skeleton")
+            label = str(payload.get("label") or "")
+            emit(
+                label or "同步番号骨架…",
+                stage=stage,
+                done=payload.get("done"),
+                total=payload.get("total"),
+                percent=payload.get("percent"),
+            )
+
+        emit(
+            "同步番号骨架…",
+            stage="skeleton",
+            done=0,
+            total=total,
+            percent=97,
+        )
+        skeleton = embed_svc.upsert_catalog_skeletons(on_progress=_skel_prog)
+    except Exception as e:  # noqa: BLE001
+        skeleton = {"ok": False, "error": str(e)}
+        emit(f"骨架同步失败 · {e}", stage="skeleton", done=total, total=total, percent=99)
+
     result = {
         "root": configured,
         "resolved": str(out_root),
         "total": total,
         "written": written,
         "skipped": skipped,
+        "deleted": deleted,
+        "pruned_empty": pruned_empty,
         "errors": errors,
         "by_region": by_region,
         "workers": workers,
+        "skeleton": skeleton,
     }
+    sk_ins = int(skeleton.get("inserted") or 0) if isinstance(skeleton, dict) else 0
+    sk_skip = (
+        int(skeleton.get("skipped_existing") or 0) if isinstance(skeleton, dict) else 0
+    )
+    sk_codes = (
+        int(skeleton.get("purged_codes") or 0) if isinstance(skeleton, dict) else 0
+    )
     emit(
-        f"完成 · 写入 {written} · 跳过 {skipped} · 合计 {total}",
+        f"完成 · 写入 {written} · 跳过 {skipped} · 删多余 {deleted}"
+        f" · 合计 {total} · 骨架 +{sk_ins} / 已有 {sk_skip}"
+        f" · 清目录外向量 {sk_codes}",
         stage="done",
         done=total,
         total=total,
         percent=100,
     )
     return result
+
+
+def _prune_strm_extras(
+    out_root_s: str,
+    wanted: set[tuple[str, str, str]],
+) -> tuple[int, int]:
+    """删除不在目录中的 区/前缀/番号 文件夹；并清掉空的前缀/区目录。
+
+    返回 (deleted_code_dirs, pruned_empty_parents)。
+    Windows 下个别占用失败会重试一次，仍失败则跳过并计入失败（不中断整轮）。
+    """
+    import os
+    import shutil
+    import time
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    deleted = 0
+    pruned_empty = 0
+    failed = 0
+    if not os.path.isdir(out_root_s):
+        return 0, 0
+
+    to_delete: list[str] = []
+    for region_name in list(os.listdir(out_root_s)):
+        region_dir = os.path.join(out_root_s, region_name)
+        if not os.path.isdir(region_dir) or region_name.startswith("."):
+            continue
+        for prefix_name in list(os.listdir(region_dir)):
+            prefix_dir = os.path.join(region_dir, prefix_name)
+            if not os.path.isdir(prefix_dir) or prefix_name.startswith("."):
+                continue
+            for code_name in list(os.listdir(prefix_dir)):
+                code_dir = os.path.join(prefix_dir, code_name)
+                if not os.path.isdir(code_dir) or code_name.startswith("."):
+                    continue
+                key = (region_name, prefix_name, code_name)
+                if key in wanted:
+                    continue
+                to_delete.append(code_dir)
+
+    def _rm_one(path: str) -> bool:
+        for attempt in range(2):
+            try:
+                shutil.rmtree(path)
+                return True
+            except OSError:
+                if attempt == 0:
+                    time.sleep(0.05)
+                    continue
+                return False
+        return False
+
+    if to_delete:
+        workers = max(4, min(16, (os.cpu_count() or 4)))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futs = [pool.submit(_rm_one, p) for p in to_delete]
+            for fut in as_completed(futs):
+                if fut.result():
+                    deleted += 1
+                else:
+                    failed += 1
+
+    # 空前缀 / 空区目录
+    for region_name in list(os.listdir(out_root_s)):
+        region_dir = os.path.join(out_root_s, region_name)
+        if not os.path.isdir(region_dir) or region_name.startswith("."):
+            continue
+        for prefix_name in list(os.listdir(region_dir)):
+            prefix_dir = os.path.join(region_dir, prefix_name)
+            if not os.path.isdir(prefix_dir) or prefix_name.startswith("."):
+                continue
+            try:
+                if not os.listdir(prefix_dir):
+                    os.rmdir(prefix_dir)
+                    pruned_empty += 1
+            except OSError:
+                pass
+        try:
+            if not os.listdir(region_dir):
+                os.rmdir(region_dir)
+                pruned_empty += 1
+        except OSError:
+            pass
+
+    # failed 暂不单独返回，避免破坏调用方；写入日志由上层 phase 体现
+    if failed:
+        # 挂到函数属性供调试（轻量）
+        _prune_strm_extras.last_failed = failed  # type: ignore[attr-defined]
+    else:
+        _prune_strm_extras.last_failed = 0  # type: ignore[attr-defined]
+    return deleted, pruned_empty

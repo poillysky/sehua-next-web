@@ -27,23 +27,29 @@ from app import bitmagnet_pg  # noqa: E402
 from app import pg  # noqa: E402
 from app import prefix_catalog_store as store  # noqa: E402
 from app import prefix_ranges as pr  # noqa: E402
+from app.prefix_code_read import resolve_code_read  # noqa: E402
 from app.region_meta import REGION_ORDER, std_prefix  # noqa: E402
 from app.search_av import is_western_studio_prefix  # noqa: E402
 from app.search_av import (  # noqa: E402
-    _clamp_std_code_digits,
     code_sort_key,
     extract_maker_codes,
     resolve_maker_shape,
 )
+from app import search_av as _search_av  # noqa: E402
+
 
 REPORT = ROOT / "data" / "_debug" / "prefix-codes-from-local-dbs.json"
 SPECIAL_SHAPES = {"fc2", "fc2ppv", "date6", "alnum_id", "western_date", "western_ep"}
 DIGIT_HEAD_RE = re.compile(r"^(\d{2,3})([A-Z]{2,14})$")
-# 允许更长厂牌前缀（FELLATIOJAPAN=14）
+# 左侧边界不含 -/_ ：避免 jukujo-club-983 被当成 CLUB-983
+# 号后不得再跟字母数字：避免 gs544om8 / Start720p 粘连
 LONG_CODE_RE = re.compile(
-    r"(?:^|[^A-Z0-9])([A-Z]{2,20}|\d{2,3}[A-Z]{2,14}|[A-Z]+\d+[A-Z]*)[-_\s]?(\d{2,6})(?![0-9])",
+    r"(?:^|[^A-Z0-9\-_])([A-Z]{2,20}|\d{2,3}[A-Z]{2,14}|[A-Z]+\d+[A-Z]*)[-_\s]?(\d{2,6})(?![A-Z0-9])",
     re.I,
 )
+# 分辨率伪号：Ellies Fresh Start 720p → START-720
+_RESOLUTION_SERIALS = frozenset({360, 480, 720, 1080, 1440, 2160})
+_RES_FOLLOW_RE = re.compile(r"^P(?:[^A-Z]|$)", re.I)
 
 
 @lru_cache(maxsize=8192)
@@ -85,10 +91,33 @@ def special_needles(pref: str) -> tuple[str, ...]:
     return (u,)
 
 
-def accept_std_serial(pref: str, n: int) -> bool:
-    """准度门闩：去掉年份伪号与离谱大号（HEYZO 等高压水号前缀放行年份段）。"""
+def _profile_for(pref: str, profiles: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
+    key = clean_prefix(pref)
+    if profiles and key in profiles:
+        return profiles[key]
+    if profiles:
+        dm = DIGIT_HEAD_RE.match(key)
+        if dm and dm.group(2) in profiles:
+            return profiles[dm.group(2)]
+    return resolve_code_read(key)
+
+
+def accept_std_serial(
+    pref: str,
+    n: int,
+    profile: dict[str, Any] | None = None,
+) -> bool:
+    """准度门闩：按前缀 code_read 硬顶 + 拒年份伪号/离谱大号。"""
     if n <= 0:
         return False
+    prof = profile or resolve_code_read(pref)
+    max_serial = prof.get("max_serial")
+    if max_serial is not None:
+        try:
+            if n > int(max_serial):
+                return False
+        except (TypeError, ValueError):
+            pass
     # 高流水真号前缀（无码站）可到 2000+
     if pref in {"HEYZO", "KIN8", "XXXAV", "NYOSHIN"}:
         return n < 100000
@@ -109,7 +138,11 @@ def accept_std_serial(pref: str, n: int) -> bool:
     return True
 
 
-def accept_std_code(pref: str, code: str) -> bool:
+def accept_std_code(
+    pref: str,
+    code: str,
+    profile: dict[str, Any] | None = None,
+) -> bool:
     """标准形番号：PREFIX-纯数字；拒 HEYZO-1913L / JVID-2023 / JVID-34D。"""
     pref = clean_prefix(pref)
     c = str(code or "").strip().upper()
@@ -118,6 +151,7 @@ def accept_std_code(pref: str, code: str) -> bool:
     shape = _shape(pref)
     if shape != "std":
         return True
+    prof = profile or resolve_code_read(pref)
     dm = DIGIT_HEAD_RE.match(pref)
     if dm:
         letter = dm.group(2)
@@ -126,11 +160,11 @@ def accept_std_code(pref: str, code: str) -> bool:
         ):
             return False
         n = int(c.rsplit("-", 1)[-1])
-        return accept_std_serial(letter, n)
+        return accept_std_serial(letter, n, prof)
     if not re.fullmatch(rf"{re.escape(pref)}-\d{{2,6}}", c):
         return False
     n = int(c.rsplit("-", 1)[-1])
-    return accept_std_serial(pref, n)
+    return accept_std_serial(pref, n, prof)
 
 
 # 跨区同前缀：按标题语境分流（有码 MDS=宇宙企画；国产用 MDSR，若误挂 MDS 也走国产语境）
@@ -194,9 +228,13 @@ def accept_western_code(code: str) -> bool:
     return True
 
 
-def format_std(pref: str, n: int) -> str:
-    pad = 3 if n < 1000 else (4 if n < 10000 else len(str(n)))
-    return f"{pref}-{str(n).zfill(pad)}"
+def format_std(pref: str, n: int, profile: dict[str, Any] | None = None) -> str:
+    prof = profile or resolve_code_read(pref)
+    pad = int(prof.get("pad") or 0)
+    if pad <= 0:
+        pad = 3 if n < 1000 else (4 if n < 10000 else len(str(n)))
+    width = max(pad, len(str(n)))
+    return f"{pref}-{str(n).zfill(width)}"
 
 
 def ingest_line(
@@ -209,6 +247,7 @@ def ingest_line(
     needle_to_prefs: dict[str, list[str]],
     prefix_regions: dict[str, list[str]],
     bucket: dict[str, dict[str, set[str]]],
+    profiles: dict[str, dict[str, Any]] | None = None,
 ) -> None:
     if not text or len(text) < 4:
         return
@@ -219,7 +258,8 @@ def ingest_line(
         if not c:
             return
         shape = _shape(pref)
-        if shape == "std" and not accept_std_code(pref, c):
+        prof = _profile_for(pref, profiles)
+        if shape == "std" and not accept_std_code(pref, c, prof):
             return
         if shape in {"fc2", "fc2ppv"} and not accept_fc2_code(c):
             return
@@ -247,8 +287,13 @@ def ingest_line(
         if not targets:
             continue
         clamp_pref = dm.group(2) if dm else p
-        clamped = _clamp_std_code_digits(
-            clamp_pref, m.group(2), following=upper[m.end() : m.end() + 12]
+        prof = _profile_for(clamp_pref, profiles)
+        following = upper[m.end() : m.end() + 12]
+        clamped = _search_av._clamp_std_code_digits(
+            clamp_pref,
+            m.group(2),
+            following=following,
+            profile=prof,
         )
         if not clamped:
             continue
@@ -256,12 +301,15 @@ def ingest_line(
             n = int(clamped)
         except ValueError:
             continue
-        if not accept_std_serial(clamp_pref, n):
+        # Start 720p / xxx 1080p → 拒分辨率伪流水
+        if n in _RESOLUTION_SERIALS and _RES_FOLLOW_RE.match(following):
             continue
-        real_code = format_std(clamp_pref if dm else p, n)
+        if not accept_std_serial(clamp_pref, n, prof):
+            continue
+        real_code = format_std(clamp_pref if dm else p, n, prof)
         for cat in targets:
             if cat == p and not dm:
-                add(cat, format_std(cat, n))
+                add(cat, format_std(cat, n, _profile_for(cat, profiles)))
             else:
                 add(cat, real_code)
 
@@ -284,23 +332,82 @@ def ingest_line(
             add(pref, code)
 
 
-def filter_outlier_codes(pref: str, codes: list[str]) -> list[str]:
-    """形态门闩 + robust 主簇砍离群高号（std）。"""
+def filter_outlier_codes(
+    pref: str,
+    codes: list[str],
+    profile: dict[str, Any] | None = None,
+) -> list[str]:
+    """按前缀 code_read：硬顶 + robust / 主宽度离群过滤。"""
     shape = _shape(pref)
-    codes = [c for c in codes if shape != "std" or accept_std_code(pref, c)]
-    if shape != "std" or len(codes) < 8:
+    prof = profile or resolve_code_read(pref)
+    codes = [c for c in codes if shape != "std" or accept_std_code(pref, c, prof)]
+    if shape != "std":
         return codes
+
+    max_serial = prof.get("max_serial")
+    if max_serial is not None:
+        try:
+            cap = int(max_serial)
+            capped: list[str] = []
+            for c in codes:
+                m = re.search(r"-(\d+)$", c)
+                if not m or int(m.group(1)) <= cap:
+                    capped.append(c)
+            codes = capped
+        except (TypeError, ValueError):
+            pass
+
+    if str(prof.get("outlier") or "robust") == "none":
+        return codes
+
     serial_map: dict[int, list[str]] = defaultdict(list)
     for c in codes:
         m = re.search(r"-(\d+)$", c)
         if not m:
             continue
         serial_map[int(m.group(1))].append(c)
-    if len(serial_map) < 8:
+    nums = list(serial_map.keys())
+    if len(nums) < 3:
         return codes
-    rob = pr.robust_serial_max(serial_map.keys())
+
+    prefer = prof.get("prefer_digit_len")
+    try:
+        prefer_n = int(prefer) if prefer is not None else 0
+    except (TypeError, ValueError):
+        prefer_n = 0
+
+    rob = pr.robust_serial_max(nums) if len(nums) >= 5 else max(nums)
     if rob <= 0:
         return codes
+
+    # 主宽度优先：std3_dmm → 三位数；amateur4/std4 → 四位数；std3_open 不钉死位数
+    if prefer_n in {3, 4}:
+        bound = 10 ** prefer_n
+        low = [n for n in nums if n < bound]
+        high = sorted(n for n in nums if n >= bound)
+        if len(low) >= 3:
+            rob_low = pr.robust_serial_max(low) if len(low) >= 5 else max(low)
+            attach = False
+            low_ratio = len(low) / max(1, len(nums))
+            gap_abs = int(getattr(pr, "SERIAL_GAP_ABS", 50) or 50)
+            near_cap = bound + (50 if prefer_n == 3 else 500)
+            if high and rob_low > 0 and low_ratio >= 0.35:
+                if high[0] <= rob_low + gap_abs and high[0] <= near_cap:
+                    near = [n for n in high if n <= high[0] + 200]
+                    if len(near) >= max(5, int(0.08 * len(low))):
+                        attach = True
+                        rob = max(rob_low, pr.robust_serial_max(low + near))
+            if not attach and (low_ratio >= 0.35 or (high and high[0] - rob_low > gap_abs)):
+                rob = rob_low
+            elif not attach and not high:
+                rob = min(rob, rob_low)
+
+    if max_serial is not None:
+        try:
+            rob = min(rob, int(max_serial))
+        except (TypeError, ValueError):
+            pass
+
     kept = []
     for c in codes:
         m = re.search(r"-(\d+)$", c)
@@ -355,6 +462,7 @@ def _ingest_chunk(
     special_re: re.Pattern[str] | None,
     needle_to_prefs: dict[str, list[str]],
     prefix_regions: dict[str, list[str]],
+    profiles: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, dict[str, set[str]]]:
     bucket: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
     for text in texts:
@@ -368,6 +476,7 @@ def _ingest_chunk(
             needle_to_prefs,
             prefix_regions,
             bucket,
+            profiles,
         )
     # defaultdict → 普通 dict，便于跨线程合并
     return {k: {rid: set(codes) for rid, codes in regs.items()} for k, regs in bucket.items()}
@@ -417,6 +526,7 @@ def _process_texts_parallel(
     prefix_regions: dict[str, list[str]],
     bucket: dict[str, dict[str, set[str]]],
     emit: Callable[..., None],
+    profiles: dict[str, dict[str, Any]] | None = None,
 ) -> None:
     n = len(texts)
     if n == 0:
@@ -440,6 +550,7 @@ def _process_texts_parallel(
                 special_re,
                 needle_to_prefs,
                 prefix_regions,
+                profiles,
             ): len(ch)
             for ch in chunks
         }
@@ -475,6 +586,7 @@ def scan_all(
     needle_to_prefs: dict[str, list[str]],
     prefix_regions: dict[str, list[str]],
     on_progress=None,
+    profiles: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[dict[str, dict[str, set[str]]], int, int]:
     def emit(
         phase: str,
@@ -545,6 +657,7 @@ def scan_all(
             prefix_regions=prefix_regions,
             bucket=bucket,
             emit=emit,
+            profiles=profiles,
         )
         del sehua_texts
 
@@ -592,6 +705,7 @@ def scan_all(
                     prefix_regions=prefix_regions,
                     bucket=bucket,
                     emit=emit,
+                    profiles=profiles,
                 )
                 finished += 1
 
@@ -600,6 +714,29 @@ def scan_all(
 
 def run_local_db_index(on_progress: Callable[[Any], None] | None = None) -> dict:
     """双库单次全表扫，写回 catalog。可供 CLI / API 调用。"""
+    # 长驻 API 下本脚本每次热加载，但 app.* 可能仍是旧缓存；入口强制刷新。
+    global resolve_code_read, _search_av, store, pr, code_sort_key, extract_maker_codes, resolve_maker_shape
+    import importlib
+
+    from app import prefix_catalog_store as _store_mod
+    from app import prefix_code_read as _pcr_mod
+    from app import prefix_ranges as _pr_mod
+    from app import search_av as _sav_mod
+
+    _pcr_mod = importlib.reload(_pcr_mod)
+    _sav_mod = importlib.reload(_sav_mod)
+    _pr_mod = importlib.reload(_pr_mod)
+    _store_mod = importlib.reload(_store_mod)
+    resolve_code_read = _pcr_mod.resolve_code_read
+    _search_av = _sav_mod
+    code_sort_key = _sav_mod.code_sort_key
+    extract_maker_codes = _sav_mod.extract_maker_codes
+    resolve_maker_shape = _sav_mod.resolve_maker_shape
+    pr = _pr_mod
+    store = _store_mod
+    # 清掉 shape/prefix 缓存，避免绑到旧 resolve_maker_shape
+    clean_prefix.cache_clear()
+    _shape.cache_clear()
 
     def emit(
         phase: str,
@@ -623,13 +760,22 @@ def run_local_db_index(on_progress: Callable[[Any], None] | None = None) -> dict
 
     emit("加载目录…", stage="prepare", percent=1)
     doc = store.load_catalog(force=True)
+    # 回填每个前缀的 code_read（缺失则推断）
+    for rid in REGION_ORDER:
+        prefs = doc["regions"][rid].get("prefixes") or {}
+        for p, ent in list(prefs.items()):
+            prefs[p] = store._normalize_prefix_entry(p, ent)
+
     locations: dict[str, list[tuple[str, dict]]] = defaultdict(list)
     want: set[str] = set()
+    profiles: dict[str, dict[str, Any]] = {}
     for rid in REGION_ORDER:
         for p, ent in (doc["regions"][rid].get("prefixes") or {}).items():
             key = clean_prefix(p)
             want.add(key)
             locations[key].append((rid, ent))
+            if key not in profiles:
+                profiles[key] = resolve_code_read(key, ent)
 
     special_prefs = sorted(p for p in want if is_special(p))
     want_std = {p for p in want if p not in set(special_prefs)}
@@ -668,6 +814,7 @@ def run_local_db_index(on_progress: Callable[[Any], None] | None = None) -> dict
         needle_to_prefs,
         prefix_regions,
         on_progress=on_progress,
+        profiles=profiles,
     )
 
     emit("写回目录…", stage="write", percent=95)
@@ -684,23 +831,35 @@ def run_local_db_index(on_progress: Callable[[Any], None] | None = None) -> dict
         else:
             for _rid, s in slots.items():
                 raw |= s
-        return sorted(filter_outlier_codes(key, sorted(raw)), key=code_sort_key)
+        return sorted(
+            filter_outlier_codes(key, sorted(raw), profiles.get(key)),
+            key=code_sort_key,
+        )
 
     for key, locs in locations.items():
         multi = len(locs) > 1
+        prof = profiles.get(key) or resolve_code_read(key)
         for rid, ent in locs:
             codes = codes_for_region(key, rid, multi)
             prefs = doc["regions"][rid]["prefixes"]
             if codes:
                 serials = codes_to_serials(key, codes)
                 latest = max(codes, key=code_sort_key)
+                hint = serials[-1] if serials else 0
+                max_serial = prof.get("max_serial")
+                if max_serial is not None and hint:
+                    try:
+                        hint = min(hint, int(max_serial))
+                    except (TypeError, ValueError):
+                        pass
                 ent = dict(ent)
                 ent.update(
                     {
                         "codes": codes,
                         "serials": serials,
-                        "serial_max_hint": serials[-1] if serials else 0,
+                        "serial_max_hint": hint,
                         "latest_code": latest,
+                        "code_read": str(prof.get("id") or ent.get("code_read") or ""),
                         "status": "active",
                         "integrity": "local_db_index",
                         "verified_at": store._now(),
@@ -729,6 +888,7 @@ def run_local_db_index(on_progress: Callable[[Any], None] | None = None) -> dict
                         "serials": [],
                         "serial_max_hint": 0,
                         "latest_code": "",
+                        "code_read": str(prof.get("id") or ent.get("code_read") or ""),
                         "integrity": "local_db_miss",
                         "verified_at": store._now(),
                     }

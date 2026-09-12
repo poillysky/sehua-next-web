@@ -52,6 +52,7 @@ def scrape_detail(
     io_err: str | None = None
     try:
         # Prefer airav.io when base_url points there; otherwise use airav_io defaults.
+        # 配置里常见 https://airav.io（无 /cn）→ 交给 airav_io 强制简体站。
         io_base = ""
         if base_url and re.search(r"airav\.io", base_url, re.I):
             io_base = base_url

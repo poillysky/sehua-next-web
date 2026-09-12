@@ -31,6 +31,25 @@ def thread_allow_flare() -> bool:
     return bool(getattr(_tls, "allow_flare", True))
 
 
+def set_thread_request_timeout(seconds: float | None) -> None:
+    """刮削补齐：线程内出站请求以策略「单源超时」为准。"""
+    if seconds is None:
+        if hasattr(_tls, "request_timeout"):
+            delattr(_tls, "request_timeout")
+        return
+    _tls.request_timeout = max(1.0, float(seconds))
+
+
+def thread_request_timeout() -> float | None:
+    v = getattr(_tls, "request_timeout", None)
+    if v is None:
+        return None
+    try:
+        return max(1.0, float(v))
+    except (TypeError, ValueError):
+        return None
+
+
 _DEFAULT_FLARE_PORT = 8191
 _DEFAULT_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -1161,6 +1180,10 @@ def _fetch_page_unlocked(
     del source_id  # 预留：按源覆盖 access
     host = _host_key(url)
     mode = normalize_access(access)
+    # 策略单源超时优先于调用方传入的默认 12/28s
+    tls_to = thread_request_timeout()
+    if tls_to is not None:
+        timeout = float(tls_to)
     if isinstance(timeout, httpx.Timeout):
         to = timeout
     elif timeout is not None:
@@ -1324,12 +1347,17 @@ def _fetch_page_unlocked(
             str(last_err)[:80] if last_err else "",
         )
         try:
-            flare_timeout = int(
-                max(
-                    35000 if fresh_probe else 45000,
-                    (getattr(to, "read", None) or 22) * 1000,
+            read_s = float(_timeout_seconds(to, 22.0))
+            if thread_request_timeout() is not None:
+                # 以策略超时为准，不再抬到 35s/45s
+                flare_timeout = max(3000, int(read_s * 1000))
+            else:
+                flare_timeout = int(
+                    max(
+                        35000 if fresh_probe else 45000,
+                        read_s * 1000,
+                    )
                 )
-            )
             # 有磁盘 clearance 时一并注入，避免年龄门/二次挑战
             flare_cookie = merged_cookie or None
             result = flaresolverr_request_full(

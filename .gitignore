@@ -35,7 +35,16 @@ apps/api/_*.json
 apps/api/_*.html
 apps/api/_*.txt
 apps/api/_*.out.txt
+apps/api/_*.jpg
+apps/api/_*.jpeg
+apps/api/_*.png
+apps/api/_*.webp
+apps/api/_*.log
+apps/api/_gap_reports/
 apps/api/__pycache__/
+
+# mistaken / unused duplicate of repo-root data/
+apps/data/
 
 # cursor / local agent (keep out of repo)
 .cursor/
@@ -69,6 +78,7 @@ apps/web/next-env.d.ts
 /data/prefix_catalog/
 /data/presets/
 /data/*.json
+/data/scrap_facets_snap/
 !/data/.gitkeep
 !/data/README.md
 

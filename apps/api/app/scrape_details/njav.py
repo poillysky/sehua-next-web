@@ -42,8 +42,8 @@ def _pick_detail_href(html: str, code: str) -> str:
     compact = std.replace("-", "")
     hrefs: list[str] = []
     for pat in (
-        r'href=["\']([^"\']+/v/[^"\'#?]+)["\']',
-        r'href=["\']([^"\']+/videos/[^"\'#?]+)["\']',
+        r'href=["\']([^"\']*/v/[^"\'#?]+)["\']',
+        r'href=["\']([^"\']*/videos/[^"\'#?]+)["\']',
         r'class=["\'][^"\']*(?:box-item|detail)[^"\']*["\'][^>]*>[\s\S]*?href=["\']([^"\']+)["\']',
     ):
         hrefs.extend(m.group(1) for m in re.finditer(pat, html or "", re.I))
@@ -57,15 +57,14 @@ def _pick_detail_href(html: str, code: str) -> str:
             score -= 80
         if slug == std or slug == compact:
             score += 100
-        elif slug.startswith(std) or slug.startswith(compact):
-            score += 40
+        # 禁止 startswith 模糊（abf-005-xxx 错页）
         if re.search(r"/search/", path, re.I):
             score -= 50
         if re.search(r"uncensored", slug, re.I):
             score -= 20
         scored.append((h, score))
     scored.sort(key=lambda x: x[1], reverse=True)
-    return scored[0][0] if scored and scored[0][1] > 0 else ""
+    return scored[0][0] if scored and scored[0][1] >= 100 else ""
 
 
 def _is_detail_html(html: str, code: str) -> bool:
@@ -239,6 +238,10 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
         raise RuntimeError("解析失败")
 
     actors = _row_list(rows, "出演者", "女優", "女优", "Actress")[:20]
+    # 站点偶发半角片假名（倉本ｽﾐﾚ）→ 全角，便于后续映射
+    import unicodedata
+
+    actors = [unicodedata.normalize("NFKC", a) for a in actors if a]
     tags = []
     for g in _row_list(rows, "ジャンル", "类型", "Genre") + _row_list(rows, "タグ", "标签", "Tag"):
         if g and g not in tags:
@@ -271,4 +274,5 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
         tags=tags,
         overview=plot or None,
         date=premiered,
+        extra={"website": detail_url},
     )

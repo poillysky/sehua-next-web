@@ -96,9 +96,16 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
                 source_id="xiao_huang_shu",
             )
             d = soup(detail_html)
-            title = strip_tags(
-                (d.select_one("h1.hero-title-text") or d).get_text(" ", strip=True)
-            ) or pick_og_title(detail_html)
+            title = ""
+            h1 = d.select_one("h1.hero-title-text, h1")
+            if h1:
+                title = strip_tags(h1.get_text(" ", strip=True))
+            if not title:
+                title = pick_og_title(detail_html)
+            # 去掉站点导航尾巴：外送小姨子 - 麻豆传媒 - 中文AV - 小黄书...
+            title = re.split(r"\s*[-|｜]\s*(?:麻豆|中文AV|小黄书|xChina)", title, maxsplit=1, flags=re.I)[
+                0
+            ].strip()
             title = clean_title(re.sub(r"（[^）]*）|\([^)]*\)", "", title), code)
             if is_junk_title(title):
                 title = ""
@@ -109,8 +116,8 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
                     actors.append(n)
             studio = hit_studio
             cover = pick_og_image(detail_html) or hit_cover
-            if cover and is_junk_cover_url(cover):
-                cover = None
+            runtime: int | None = None
+            premiered = ""
             # ld+json
             for m_ld in re.finditer(
                 r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>([\s\S]*?)</script>',
@@ -124,11 +131,33 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
                         if not isinstance(vo, dict) or vo.get("@type") != "VideoObject":
                             continue
                         if vo.get("name") and not title:
-                            title = clean_title(str(vo["name"]), code)
+                            t2 = str(vo["name"])
+                            t2 = re.split(
+                                r"\s*[-|｜]\s*(?:麻豆|中文AV|小黄书|xChina)",
+                                t2,
+                                maxsplit=1,
+                                flags=re.I,
+                            )[0].strip()
+                            title = clean_title(t2, code)
                         if isinstance(vo.get("thumbnailUrl"), str) and not cover:
                             cover = vo["thumbnailUrl"]
+                        if isinstance(vo.get("uploadDate"), str) and not premiered:
+                            dm = re.search(r"(\d{4}-\d{2}-\d{2})", vo["uploadDate"])
+                            if dm:
+                                premiered = dm.group(1)
+                        dur = vo.get("duration")
+                        if isinstance(dur, str) and runtime is None:
+                            hm = re.search(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", dur, re.I)
+                            if hm:
+                                runtime = (
+                                    int(hm.group(1) or 0) * 60
+                                    + int(hm.group(2) or 0)
+                                    or None
+                                )
                 except Exception:
                     continue
+            if cover and is_junk_cover_url(cover):
+                cover = None
             if not title and not cover:
                 raise RuntimeError("详情无有效内容")
             return make_detail(
@@ -138,6 +167,12 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
                 poster=cover,
                 studio=studio or None,
                 actors=actors,
+                date=premiered or None,
+                extra={
+                    "runtime": runtime,
+                    "website": hit_url,
+                    "titleZh": title or None,
+                },
             )
         except Exception as e:  # noqa: BLE001
             last_err = e

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from typing import Any
 
 import httpx
@@ -17,6 +18,8 @@ _local_model: Any = None
 _local_model_name: str | None = None
 _local_providers: tuple[str, ...] | None = None
 _onnx_dml_patched = False
+# DirectML / ONNX Runtime 非线程安全：多番号并发补齐时必须串行编码，否则整进程崩
+_local_embed_lock = threading.RLock()
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -161,41 +164,43 @@ def _session_providers(model: Any) -> list[str] | None:
 
 def reset_local_embed_model() -> None:
     global _local_model, _local_model_name, _local_providers
-    _local_model = None
-    _local_model_name = None
-    _local_providers = None
+    with _local_embed_lock:
+        _local_model = None
+        _local_model_name = None
+        _local_providers = None
 
 
 def _load_local(model_name: str, *, device: str | None = None) -> Any:
     global _local_model, _local_model_name, _local_providers
     providers = tuple(_resolve_local_providers(device=device))
-    if (
-        _local_model is not None
-        and _local_model_name == model_name
-        and _local_providers == providers
-    ):
+    with _local_embed_lock:
+        if (
+            _local_model is not None
+            and _local_model_name == model_name
+            and _local_providers == providers
+        ):
+            return _local_model
+        try:
+            from fastembed import TextEmbedding
+        except ImportError as e:
+            raise RuntimeError(
+                "未安装 fastembed。请执行: pip install -r apps/api/requirements-embed.txt"
+            ) from e
+
+        if "DmlExecutionProvider" in providers:
+            _patch_onnx_for_directml()
+
+        _local_model = None
+        _local_model = TextEmbedding(
+            model_name=model_name,
+            providers=list(providers),
+            cuda=False,
+        )
+        _local_model_name = model_name
+        _local_providers = providers
+        active = _session_providers(_local_model) or list(providers)
+        log.info("local embed model=%s providers=%s", model_name, active)
         return _local_model
-    try:
-        from fastembed import TextEmbedding
-    except ImportError as e:
-        raise RuntimeError(
-            "未安装 fastembed。请执行: pip install -r apps/api/requirements-embed.txt"
-        ) from e
-
-    if "DmlExecutionProvider" in providers:
-        _patch_onnx_for_directml()
-
-    _local_model = None
-    _local_model = TextEmbedding(
-        model_name=model_name,
-        providers=list(providers),
-        cuda=False,
-    )
-    _local_model_name = model_name
-    _local_providers = providers
-    active = _session_providers(_local_model) or list(providers)
-    log.info("local embed model=%s providers=%s", model_name, active)
-    return _local_model
 
 
 def _encode_local(
@@ -205,12 +210,13 @@ def _encode_local(
     query: bool,
     device: str | None = None,
 ) -> list[list[float]]:
-    model = _load_local(model_name, device=device)
-    if query and len(texts) == 1 and hasattr(model, "query_embed"):
-        vecs = list(model.query_embed(texts))
-        if vecs:
-            return [list(map(float, vecs[0]))]
-    return [list(map(float, vec)) for vec in model.embed(texts)]
+    with _local_embed_lock:
+        model = _load_local(model_name, device=device)
+        if query and len(texts) == 1 and hasattr(model, "query_embed"):
+            vecs = list(model.query_embed(texts))
+            if vecs:
+                return [list(map(float, vecs[0]))]
+        return [list(map(float, vec)) for vec in model.embed(texts)]
 
 
 async def _encode_openai(

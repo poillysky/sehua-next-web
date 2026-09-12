@@ -374,19 +374,62 @@ def post_local_index() -> dict[str, Any]:
     def run() -> None:
         try:
             result = local_index.run_local_db_index(on_progress=_local_index_log)
+            # 扫描结束后：按目录 1:1 同步番号骨架（少补多删，不覆盖已刮削）
+            skeleton: dict[str, Any] = {"ok": False, "skipped": True}
+            try:
+                from . import scrap_library_embed as embed_svc
+
+                def _skel_prog(payload: dict[str, Any]) -> None:
+                    _local_index_log(
+                        {
+                            "stage": "skeleton",
+                            "phase": str(payload.get("label") or "同步番号骨架…"),
+                            "done": payload.get("done"),
+                            "total": payload.get("total"),
+                            "percent": payload.get("percent"),
+                            "label": str(payload.get("label") or ""),
+                        }
+                    )
+
+                _local_index_log(
+                    {
+                        "stage": "skeleton",
+                        "phase": "同步番号骨架…",
+                        "percent": 96,
+                        "label": "同步番号骨架…",
+                    }
+                )
+                skeleton = embed_svc.upsert_catalog_skeletons(on_progress=_skel_prog)
+            except Exception as sk_e:  # noqa: BLE001
+                skeleton = {"ok": False, "error": str(sk_e)}
+                _local_index_log(
+                    {
+                        "stage": "skeleton",
+                        "phase": f"骨架同步失败 · {sk_e}",
+                        "percent": 99,
+                        "label": f"骨架同步失败 · {sk_e}",
+                    }
+                )
             _local_index_job["result"] = {
                 "updated": result.get("updated"),
                 "cleared_miss": result.get("cleared_miss"),
                 "summary": result.get("summary"),
                 "by_region": result.get("by_region"),
+                "skeleton": skeleton,
             }
+            sk_ins = int(skeleton.get("inserted") or 0)
+            sk_skip = int(skeleton.get("skipped_existing") or 0)
+            sk_codes = int(skeleton.get("purged_codes") or 0)
             _local_index_job["phase"] = "done"
             _local_index_job["progress"] = {
                 "stage": "done",
                 "done": result.get("updated"),
                 "total": None,
                 "percent": 100,
-                "label": "done",
+                "label": (
+                    f"done · 骨架 +{sk_ins} / 已有 {sk_skip}"
+                    f" · 清目录外向量 {sk_codes}"
+                ),
             }
         except Exception as e:  # noqa: BLE001
             _local_index_job["error"] = str(e)

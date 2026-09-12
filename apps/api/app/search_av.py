@@ -1093,7 +1093,7 @@ def _extract_std(upper: str, prefix: str, out: set[str]) -> None:
     if china:
         # 按帖题原样保留位数：JD-150 / MDSR-0002 / YCM086，不强制四位
         for m in re.finditer(
-            rf"(?:^|[^A-Z0-9])(?:\d{{2,3}})?{esc}[-_\s]?(\d{{1,6}})"
+            rf"(?:^|[^A-Z0-9\-_])(?:\d{{2,3}})?{esc}[-_\s]?(\d{{1,6}})"
             rf"(?:[-_\s]?(?:EP|E)[-_\s]?\d{{1,2}}|[-_]\d{{1,2}})?(?![A-Z0-9])",
             upper,
             re.I,
@@ -1107,8 +1107,9 @@ def _extract_std(upper: str, prefix: str, out: set[str]) -> None:
             out.add(f"{p}-{raw_num}")
         return
     # 数字与可选分集后缀分开：避免 EBWH-061100cm 把 CM 吃进番号
+    # 左侧边界不含 -/_ ：避免 jukujo-club-983 → CLUB-983
     for m in re.finditer(
-        rf"(?:^|[^A-Z0-9])(?:\d{{2,3}})?{esc}[-_\s]?(\d{{2,6}})([A-Z]{{1,2}})?(?![A-Z0-9])",
+        rf"(?:^|[^A-Z0-9\-_])(?:\d{{2,3}})?{esc}[-_\s]?(\d{{2,6}})([A-Z]{{1,2}})?(?![A-Z0-9])",
         upper,
         re.I,
     ):
@@ -1117,6 +1118,12 @@ def _extract_std(upper: str, prefix: str, out: set[str]) -> None:
         unit = bool(suf and _CODE_UNIT_SUFFIX_RE.fullmatch(suf))
         # 单位后缀（cm）并入 following，便于 061100+CM → 截成 061
         following = ((suf if unit else "") + upper[m.end() : m.end() + 12])
+        # Start 720p / 1080p（含抽成 START-720P）
+        if int(raw_num) in {360, 480, 720, 1080, 1440, 2160} and (
+            re.match(r"^P(?:[^A-Z]|$)", following, re.I)
+            or suf.upper() == "P"
+        ):
+            continue
         clamped = _clamp_std_code_digits(p, raw_num, following=following)
         if not clamped:
             continue
@@ -1134,7 +1141,17 @@ _MEASURE_AFTER_CODE_RE = re.compile(
 )
 
 
-def _pad_for_extract(prefix: str) -> int:
+def _pad_for_extract(prefix: str, profile: dict[str, Any] | None = None) -> int:
+    if profile and int(profile.get("pad") or 0) > 0:
+        return max(1, min(8, int(profile["pad"])))
+    try:
+        from .prefix_code_read import resolve_code_read
+
+        pad = int(resolve_code_read(prefix).get("pad") or 0)
+        if pad > 0:
+            return max(1, min(8, pad))
+    except Exception:
+        pass
     try:
         from .prefix_ranges import get_range
 
@@ -1147,28 +1164,74 @@ def _pad_for_extract(prefix: str) -> int:
 
 
 def _clamp_std_code_digits(
-    prefix: str, raw_num: str, *, following: str = ""
+    prefix: str,
+    raw_num: str,
+    *,
+    following: str = "",
+    profile: dict[str, Any] | None = None,
 ) -> str | None:
-    """按前缀规范位数截断：EBWH-061100cm → 061（pad=3）。"""
+    """按前缀 code_read 处理数字段。
+
+    - DMM 形前导零补位：club00127 → 127（绝不能左截成 001）
+    - 粘连度量：EBWH-061100cm → 061（仅 measure_glue 开启时）
+    """
     if not re.fullmatch(r"\d{2,6}", raw_num):
         return None
     n = int(raw_num)
     if n <= 0:
         return None
-    pad = _pad_for_extract(prefix)
+    prof = profile
+    if prof is None:
+        try:
+            from .prefix_code_read import resolve_code_read
+
+            prof = resolve_code_read(prefix)
+        except Exception:
+            prof = {
+                "pad": 3,
+                "cid_width": 5,
+                "leading_zero": "int",
+                "measure_glue": True,
+            }
+    pad = _pad_for_extract(prefix, prof)
+    cid_width = int(prof.get("cid_width") or 0)
+    leading_zero = str(prof.get("leading_zero") or "int")
+    measure_glue = bool(prof.get("measure_glue"))
+
+    # 前导零补位（常见 5 位 cid）：优先还原整数值，除非尾部像身高/体重
+    zero_pad_hit = raw_num.startswith("0") and (
+        len(raw_num) > pad or (cid_width > 0 and len(raw_num) == cid_width)
+    )
+    if zero_pad_hit:
+        head, tail = raw_num[:pad], raw_num[pad:]
+        follow = f"{tail}{following or ''}"
+        if measure_glue and _MEASURE_AFTER_CODE_RE.match(follow):
+            return head
+        if leading_zero == "head":
+            return head
+        return str(n)
+
     if len(raw_num) <= pad:
         return raw_num
+
     head, tail = raw_num[:pad], raw_num[pad:]
     follow = f"{tail}{following or ''}"
-    if _MEASURE_AFTER_CODE_RE.match(follow):
+    if measure_glue and _MEASURE_AFTER_CODE_RE.match(follow):
         return head
-    # 超长流水（pad+2 及以上）多半是把 100cm 等粘进来了
-    if len(raw_num) >= pad + 2:
+    # 无前导零的超长粘连（pad+2 及以上）：多半把 100cm 等粘进数字
+    if measure_glue and len(raw_num) >= pad + 2:
         try:
             from .prefix_ranges import get_range
 
             r = get_range(prefix)
             to = int((r or {}).get("to") or 0)
+            max_serial = prof.get("max_serial")
+            if max_serial is not None:
+                try:
+                    to = int(max_serial) if to <= 0 else min(to, int(max_serial))
+                except (TypeError, ValueError):
+                    pass
+            # 仅当「头段」本身像合法流水时才左截；否则保留原值交给离群过滤
             if to <= 0 or int(head) <= to:
                 return head
         except Exception:

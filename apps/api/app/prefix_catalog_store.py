@@ -60,6 +60,13 @@ def empty_catalog() -> dict[str, Any]:
 
 
 def _normalize_prefix_entry(prefix: str, raw: dict[str, Any] | None = None) -> dict[str, Any]:
+    from .prefix_code_read import (
+        CODE_READ_PRESETS,
+        VALID_CODE_READ_IDS,
+        infer_code_read,
+        resolve_code_read,
+    )
+
     p = std_prefix(prefix)
     src = dict(raw or {})
     serials = sorted(
@@ -78,15 +85,49 @@ def _normalize_prefix_entry(prefix: str, raw: dict[str, Any] | None = None) -> d
     )
     pad = int(src.get("pad") or 3)
     pad = max(1, min(8, pad))
+    had_code_read = str(src.get("code_read") or "").strip() in VALID_CODE_READ_IDS
+    code_read = (
+        str(src.get("code_read") or "").strip()
+        if had_code_read
+        else infer_code_read(p, src)
+    )
+    if not had_code_read:
+        preset_pad = int((CODE_READ_PRESETS.get(code_read) or {}).get("pad") or 0)
+        if preset_pad > 0:
+            pad = max(1, min(8, preset_pad))
+    code_read_max = src.get("code_read_max")
+    code_read_cid = src.get("code_read_cid")
+    if code_read_max is not None and str(code_read_max).strip() == "":
+        code_read_max = None
+    if code_read_cid is not None and str(code_read_cid).strip() == "":
+        code_read_cid = None
     latest_code = str(src.get("latest_code") or "").strip().upper() or ""
     hint = int(src.get("serial_max_hint") or 0)
     if not hint and serials:
         hint = serials[-1]
+    profile = resolve_code_read(
+        p,
+        {
+            **src,
+            "code_read": code_read,
+            "pad": pad,
+            "code_read_max": code_read_max,
+            "code_read_cid": code_read_cid,
+        },
+    )
+    max_serial = profile.get("max_serial")
+    if max_serial is not None:
+        try:
+            cap = int(max_serial)
+            if hint > cap:
+                hint = cap
+        except (TypeError, ValueError):
+            pass
     if codes:
         code_count = len(codes)
     else:
         code_count = len(serials) if serials else (1 if latest_code else 0)
-    return {
+    out: dict[str, Any] = {
         "prefix": p,
         "maker": str(src.get("maker") or "").strip(),
         "maker_zh": str(src.get("maker_zh") or "").strip(),
@@ -97,6 +138,7 @@ def _normalize_prefix_entry(prefix: str, raw: dict[str, Any] | None = None) -> d
         "pad": pad,
         "format": str(src.get("format") or "{prefix}-{num}"),
         "dmm_digit": str(src.get("dmm_digit") or ""),
+        "code_read": code_read,
         "serials": serials,
         "codes": codes,
         "serial_min": int(serials[0]) if serials else int(src.get("serial_min") or 0),
@@ -109,6 +151,17 @@ def _normalize_prefix_entry(prefix: str, raw: dict[str, Any] | None = None) -> d
         "verified_at": str(src.get("verified_at") or ""),
         "notes": str(src.get("notes") or ""),
     }
+    if code_read_max is not None:
+        try:
+            out["code_read_max"] = int(code_read_max)
+        except (TypeError, ValueError):
+            pass
+    if code_read_cid is not None:
+        try:
+            out["code_read_cid"] = max(0, min(8, int(code_read_cid)))
+        except (TypeError, ValueError):
+            pass
+    return out
 
 
 def effective_code_count(entry: dict[str, Any] | None) -> int:

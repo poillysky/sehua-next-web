@@ -9,7 +9,7 @@ from urllib.parse import quote
 from .common import (
     abs_url,
     clean_title,
-    code_key,
+    code_equiv,
     fetch_html,
     is_junk_cover_url,
     is_junk_title,
@@ -82,7 +82,7 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
 
     doc = soup(detail_html)
     page_code = strip_tags(doc.select_one(".jpnum").get_text() if doc.select_one(".jpnum") else "")
-    if page_code and code_key(page_code) != code_key(std):
+    if page_code and not code_equiv(page_code, std):
         raise RuntimeError("番号不匹配")
 
     title_el = doc.select_one("#videoInfo h1.video-title") or doc.select_one("#videoInfo h1")
@@ -114,7 +114,11 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
         or ""
     )
     plot = re.sub(rf"^{re.escape(std).replace('-', '[-]?')}\s*", "", plot, flags=re.I).strip()
-    if len(plot) < 8 or (re.search(r"JAVDAY|免費高清|在线看", plot, re.I) and len(plot) < 40):
+    # 站点 SEO 描述常把标题+「免費高清AV在線看」拼在一起，整段丢弃
+    if (
+        len(plot) < 8
+        or re.search(r"JAVDAY|免費高清|免费高清|在线看|在線看|無需下載|无需下载", plot, re.I)
+    ):
         plot = ""
 
     cover = pick_og_image(detail_html) or ""
@@ -134,4 +138,5 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
         actors=actors,
         tags=tags,
         overview=plot or None,
+        extra={"website": detail_url, "titleZh": title or None},
     )

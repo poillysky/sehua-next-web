@@ -121,6 +121,31 @@ export function ScrapCollageCard({
   );
 }
 
+/** 标签一级：纯文字卡片（无封面） */
+export function ScrapTagCard({
+  title,
+  count,
+  onClick,
+}: {
+  title: string;
+  count?: number;
+  onClick: () => void;
+}) {
+  return (
+    <button type="button" className="makers-tag-card" onClick={onClick}>
+      <span className="makers-tag-card__name allow-select">{title}</span>
+      {count != null ? (
+        <span className="makers-tag-card__count">
+          <span className="makers-tag-card__count-num">
+            {count.toLocaleString()}
+          </span>
+          <span className="makers-tag-card__count-unit">部</span>
+        </span>
+      ) : null}
+    </button>
+  );
+}
+
 /** 女优：竖版封面墙 */
 export function ScrapActressCard({
   title,
@@ -148,7 +173,12 @@ export function ScrapActressCard({
   });
 
   return (
-    <button type="button" className="makers-actress" onClick={onClick}>
+    <button
+      type="button"
+      className="makers-actress"
+      data-avatar={posterApi?.includes('/_actress/') ? '1' : undefined}
+      onClick={onClick}
+    >
       <span className="makers-actress__frame">
         {src ? (
           // eslint-disable-next-line @next/next/no-img-element

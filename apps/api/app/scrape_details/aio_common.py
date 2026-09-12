@@ -9,16 +9,19 @@ from urllib.parse import quote
 from .common import (
     abs_url,
     clean_title,
-    code_key,
     collect_by_re,
     fetch_html,
+    fold_code,
+    folded_code_matches,
     is_junk_cover_url,
     is_junk_title,
     make_detail,
-    page_mentions_code,
     std_code,
     strip_tags,
 )
+
+# 对齐 MDCS avmoo.ts：SPA 需 FlareSolverr waitInSeconds
+_AIO_FLARE_WAIT_SEC = 3
 
 
 def is_aio_thin_shell(html: str) -> bool:
@@ -28,9 +31,12 @@ def is_aio_thin_shell(html: str) -> bool:
         return False
     if "detail-label" in html:
         return False
+    # 搜索结果已渲染
+    if re.search(r'class=["\'][^"\']*movie-(?:card|meta|info)', html, re.I):
+        return False
     if len(html) < 2000:
         return True
-    return len(html) < 4000
+    return len(html) < 4000 and not re.search(r"/cn/movies/", html, re.I)
 
 
 def aio_detail_value(html: str, label: str) -> str:
@@ -51,6 +57,7 @@ def aio_detail_value(html: str, label: str) -> str:
 def pick_aio_movie_path(html: str, code: str, lang: str = "cn") -> str | None:
     std = std_code(code)
     code_pat = std.replace("-", "[-]?")
+    # 优先：卡片 span 展示番号（近精确）
     for m in re.finditer(
         rf'href=["\']([^"\']*/{lang}/movies/[^"\'#]+)["\'][\s\S]{{0,1200}}?movie-meta[\s\S]{{0,300}}?<span[^>]*>\s*{code_pat}\s*</span>',
         html,
@@ -59,14 +66,26 @@ def pick_aio_movie_path(html: str, code: str, lang: str = "cn") -> str | None:
         href = (m.group(1) or "").strip()
         if href:
             return href
-    code_re = re.compile(code_pat, re.I)
+    # 回退：仅 path/块内折叠命中番号；禁止裸 substring（ABF-005 错页）
+    want = fold_code(code)
     for m in re.finditer(
         rf'href=["\']([^"\']*/{lang}/movies/[^"\'#]+)["\']([\s\S]{{0,800}})',
         html,
         re.I,
     ):
         href = (m.group(1) or "").strip()
-        if href and code_re.search(f"{href} {m.group(2) or ''}"):
+        if not href:
+            continue
+        chunk = m.group(2) or ""
+        if folded_code_matches(href, code, mode="endswith"):
+            return href
+        # span/文本里折叠全等才认（避免 ABF005 ⊂ 更长串）
+        span = re.search(
+            rf"<span[^>]*>\s*([A-Z0-9][A-Z0-9._\-\s]{{2,24}})\s*</span>",
+            chunk,
+            re.I,
+        )
+        if span and fold_code(span.group(1)) == want:
             return href
     return None
 
@@ -77,13 +96,42 @@ def mirror_netcdn_to_dmm(url: str) -> str | None:
     return re.sub(r"https?://[^/]*netcdn\.space", "https://pics.dmm.co.jp", url, flags=re.I)
 
 
-def parse_aio_detail_html(html: str, detail_url: str, code: str, *, source: str):
+def parse_aio_extrafanart(html: str, detail_url: str) -> list[str]:
+    urls = collect_by_re(
+        html,
+        r'(?:sample-grid|samples)[\s\S]{0,4000}?<img[^>]+src=["\']([^"\']+)["\']',
+    )
+    if not urls:
+        urls = collect_by_re(
+            html,
+            r'src=["\'](https?://[^"\']+/(?:digital/video|pics_dig/digital/video)/[^"\']+-\d+\.(?:jpg|jpeg|png|webp))["\']',
+        )
+    out: list[str] = []
+    for u in urls:
+        abs_u = abs_url(u, detail_url) or u
+        if abs_u and not re.search(r"iframe\.html", abs_u, re.I) and abs_u not in out:
+            out.append(abs_u)
+    return out[:30]
+
+
+def parse_aio_detail_html(
+    html: str,
+    detail_url: str,
+    code: str,
+    *,
+    source: str,
+    alt_codes: list[str] | None = None,
+):
     if is_aio_thin_shell(html):
         return None
+
     id_span = aio_detail_value(html, "识别码") or aio_detail_value(html, "識別碼")
-    if id_span and code_key(id_span) != code_key(code):
+    # 必须有识别码且折叠全等；禁止「页内某处提到番号」放过错页（ABF-005→ジュポニカ）
+    if not id_span:
         return None
-    if not page_mentions_code(html, code) and not id_span:
+    ik = fold_code(id_span)
+    want_keys = {fold_code(c) for c in [code, *(alt_codes or [])] if c}
+    if not ik or ik not in want_keys:
         return None
     h1_m = re.search(
         r'class=["\']movie-detail["\'][\s\S]*?<h1[^>]*>([\s\S]*?)</h1>',
@@ -91,6 +139,9 @@ def parse_aio_detail_html(html: str, detail_url: str, code: str, *, source: str)
         re.I,
     )
     title = clean_title(strip_tags(h1_m.group(1) if h1_m else ""), code)
+    for a in alt_codes or []:
+        if a:
+            title = clean_title(title, a)
     if is_junk_title(title):
         title = ""
     actors = collect_by_re(html, r'class=["\'][^"\']*actress-name[^"\']*["\'][^>]*>([^<]+)<')
@@ -101,21 +152,51 @@ def parse_aio_detail_html(html: str, detail_url: str, code: str, *, source: str)
     studio = aio_detail_value(html, "制作商") or aio_detail_value(html, "製作商") or ""
     if studio == "-":
         studio = ""
+    publisher = aio_detail_value(html, "发行商") or aio_detail_value(html, "發行商") or ""
+    if publisher == "-":
+        publisher = ""
+    series = aio_detail_value(html, "系列") or ""
+    if series == "-" or len(series) < 2 or is_junk_title(series):
+        series = ""
+    director = aio_detail_value(html, "导演") or aio_detail_value(html, "導演") or ""
+    if director == "-":
+        director = ""
     premiered = (aio_detail_value(html, "发行时间") or aio_detail_value(html, "發行時間") or "")[:10]
+    runtime_raw = aio_detail_value(html, "长度") or aio_detail_value(html, "長度") or ""
+    runtime_m = re.search(r"(\d+)", runtime_raw)
+    runtime = int(runtime_m.group(1)) if runtime_m else None
+    if runtime is not None and not (0 < runtime < 600):
+        runtime = None
     cover_m = re.search(
         r'class=["\'][^"\']*poster-image[^"\']*["\'][\s\S]*?src=["\']([^"\']+)["\']',
         html,
         re.I,
     ) or re.search(
-        r'(https?://[^\'">\s]+/(?:digital/video|pics_dig/digital/video)/[^\'">\s]+pl\.(?:jpg|jpeg|png|webp))',
+        r'(https?://[^\'">\s]+/(?:digital/video|storage/caribbeancom|pics_dig/digital/video)/[^\'">\s]+(?:pl|l_l)\.(?:jpg|jpeg|png|webp))',
         html,
         re.I,
     )
     cover = abs_url(cover_m.group(1), detail_url) if cover_m else None
     if cover and is_junk_cover_url(cover):
         cover = None
+    extras = parse_aio_extrafanart(html, detail_url)
+    dmm_alt = mirror_netcdn_to_dmm(cover) if cover else None
     if not title and not cover and not actors and not genres:
         return None
+    extra: dict = {
+        "publisher": publisher or None,
+        "series": series or None,
+        "website": detail_url,
+        "extrafanartUrls": extras or None,
+        "mosaic": "无码" if source in {"avsox", "avheat"} else None,
+    }
+    if director:
+        extra["director"] = director
+        extra["directors"] = [director]
+    if runtime is not None:
+        extra["runtime"] = runtime
+    if dmm_alt and dmm_alt != cover:
+        extra["alternateCoverUrls"] = [dmm_alt]
     return make_detail(
         source=source,
         code=code,
@@ -125,7 +206,41 @@ def parse_aio_detail_html(html: str, detail_url: str, code: str, *, source: str)
         actors=actors,
         tags=genres,
         date=premiered or None,
+        extra=extra,
     )
+
+
+def _fetch_aio_html(
+    url: str,
+    *,
+    referer: str,
+    cookie: str = "",
+    source_id: str,
+) -> str:
+    """先普通拉取；SPA 空壳则 FlareSolverr + wait（对齐 MDCS）。"""
+    html = fetch_html(
+        url, referer=referer, cookie=cookie or None, source_id=source_id
+    )
+    need_flare = is_aio_thin_shell(html)
+    if "/search/" in url and not re.search(r"/cn/movies/", html or "", re.I):
+        need_flare = True
+    if not need_flare:
+        return html
+    try:
+        from ..outbound_http import flaresolverr_request, set_thread_allow_flare, thread_allow_flare
+
+        if not thread_allow_flare():
+            set_thread_allow_flare(True)
+        html2, _final = flaresolverr_request(
+            url,
+            max_timeout_ms=90000,
+            referer=referer,
+            cookie=cookie or None,
+            wait_in_seconds=_AIO_FLARE_WAIT_SEC,
+        )
+        return html2 or html
+    except Exception:
+        return html
 
 
 def scrape_aio_family(
@@ -138,25 +253,52 @@ def scrape_aio_family(
     search_code: str | None = None,
 ) -> dict:
     std = std_code(code)
-    q = search_code or std
+    q = (search_code or std).strip()
     base = (base_url or default_base).rstrip("/")
     lang = "cn"
-    search_url = f"{base}/{lang}/search/{quote(q)}"
-    search_html = fetch_html(
-        search_url, referer=f"{base}/{lang}", cookie=cookie or None, source_id=source
-    )
-    movie_path = pick_aio_movie_path(search_html, std, lang)
+    # MDCS：多候选搜索词（无码 CARIB → 010117-339）
+    queries: list[str] = []
+    for cand in (q, std):
+        if cand and cand not in queries:
+            queries.append(cand)
+    m = re.match(r"^([A-Z]{2,12})[-_]?(\d{6}-\d{3})$", std, re.I)
+    if m and m.group(2) not in queries:
+        queries.append(m.group(2))
+
+    movie_path: str | None = None
+    search_url = ""
+    search_html = ""
+    for query in queries:
+        search_url = f"{base}/{lang}/search/{quote(query)}"
+        search_html = _fetch_aio_html(
+            search_url, referer=f"{base}/{lang}", cookie=cookie, source_id=source
+        )
+        if re.search(r"没有结果|沒有結果|no results", search_html or "", re.I):
+            continue
+        # 优先用本次搜索词挑链（CARIB 页上是 010117-339）
+        movie_path = pick_aio_movie_path(search_html, query, lang) or pick_aio_movie_path(
+            search_html, std, lang
+        )
+        if movie_path:
+            break
+
     if not movie_path:
         raise RuntimeError(f"{source} 搜索无结果")
     detail_url = abs_url(movie_path, base)
     if not detail_url:
         raise RuntimeError(f"{source} 详情链接无效")
-    detail_html = fetch_html(
-        detail_url, referer=search_url, cookie=cookie or None, source_id=source
+    detail_html = _fetch_aio_html(
+        detail_url, referer=search_url, cookie=cookie, source_id=source
     )
     if is_aio_thin_shell(detail_html):
         raise RuntimeError(f"{source} SPA 未渲染（需 Flare）")
-    parsed = parse_aio_detail_html(detail_html, detail_url, std, source=source)
+    parsed = parse_aio_detail_html(
+        detail_html,
+        detail_url,
+        std,
+        source=source,
+        alt_codes=queries,
+    )
     if not parsed:
         raise RuntimeError(f"{source} 详情解析失败")
     return parsed

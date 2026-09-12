@@ -79,9 +79,7 @@ def list_airav_search_cards(html: str) -> list[dict[str, str]]:
 
 def pick_airav_hid_from_search(html: str, code: str) -> str | None:
     hits = list_airav_search_cards(html)
-    if len(hits) == 1:
-        only = hits[0]
-        return None if is_airav_junk_entry(only["title"]) else only["href"]
+    # 单卡也必须番号边界匹配；禁止 first-hit（错页风险）
     for hit in hits:
         if not match_airav_number(hit["title"], code):
             continue
@@ -102,8 +100,21 @@ def pick_airav_hid_from_search(html: str, code: str) -> str | None:
     return None
 
 
+def _airav_code_flex(code: str) -> str:
+    """番号里的 -/_ 可互换；对齐 MDCS（先 replace 再入正则，勿 re.escape 后再 replace）。"""
+    raw = str(code or "").strip()
+    if not raw:
+        return ""
+    # 仅放宽连字符；其余字符转义，避免正则注入
+    parts = re.split(r"[-_]", raw)
+    return "[-_]?".join(re.escape(p) for p in parts if p)
+
+
 def airav_detail_code_ok(html: str, code: str) -> bool:
-    code_re = re.compile(rf"^{re.escape(code).replace('-', '[-_]?')}$", re.I)
+    flex = _airav_code_flex(code)
+    if not flex:
+        return False
+    code_re = re.compile(rf"^{flex}$", re.I)
     span_m = re.search(
         r"番[号號]\s*[：:]\s*<span[^>]*>([^<]+)</span>", html, re.I
     ) or re.search(r"番[号號]\s*<span[^>]*>([^<]+)</span>", html, re.I)
@@ -115,7 +126,7 @@ def airav_detail_code_ok(html: str, code: str) -> bool:
         re.I,
     ) or re.search(r"<h1[^>]*>([\s\S]*?)</h1>", html, re.I)
     h1 = strip_tags(h1_m.group(1) if h1_m else "")
-    prefix_re = re.compile(rf"^{re.escape(code).replace('-', '[-_]?')}\b", re.I)
+    prefix_re = re.compile(rf"^{flex}\b", re.I)
     if h1 and prefix_re.search(h1):
         return True
     og = pick_og_title(html)
@@ -312,14 +323,46 @@ def parse_airav_io_detail(html: str, page_url: str, code: str) -> dict | None:
 
 
 def _normalize_cn_base(url: str) -> str:
-    u = str(url or "").strip().rstrip("/")
-    if not u:
+    """规范化为 https://host/cn（简体）。对齐 MDCS normalizeAiravCnBase。
+
+    airav 根路径是繁体，/cn 才是简体；配置里常写成 https://airav.io，
+    若只做字符串拼接会落到繁体页。
+    """
+    s = str(url or "").strip()
+    if not s:
         return DEFAULT_BASE
-    if not re.search(r"/cn$", u, re.I):
-        # keep host; append /cn if looks like airav root
-        if re.search(r"airav", u, re.I) and not re.search(r"/video", u, re.I):
-            return f"{u}/cn"
-    return u
+    try:
+        from urllib.parse import urlparse
+
+        raw = s if re.match(r"^https?://", s, re.I) else f"https://{s}"
+        p = urlparse(raw)
+        host = (p.hostname or "").lower()
+        if not host:
+            return DEFAULT_BASE
+        # airav 族一律强制 /cn，避免根站繁体 / 错误把 search_result 拼成 …/cn
+        if re.search(r"airav", host, re.I):
+            return f"https://{host}/cn"
+        path_part = (p.path or "").rstrip("/") or ""
+        has_cn = bool(re.search(r"/cn(/|$)", path_part, re.I))
+        if has_cn or not path_part or path_part == "/":
+            return f"https://{host}/cn"
+        return f"https://{host}{path_part}"
+    except Exception:
+        return DEFAULT_BASE
+
+
+def _cn_video_url(href: str, cn_base: str) -> str | None:
+    """详情 URL 强制落在 /cn/video（hid/jid 皆可）。"""
+    u = abs_url(href, cn_base) or ""
+    if not u:
+        return None
+    return re.sub(
+        r"(https?://[^/]+)/(?!cn/)((?:zh/)?video\?)",
+        r"\1/cn/\2",
+        u,
+        count=1,
+        flags=re.I,
+    )
 
 
 def scrape_detail(
@@ -342,16 +385,28 @@ def scrape_detail(
     if not hid_href:
         raise RuntimeError("未找到")
 
-    detail_url = abs_url(hid_href, landed_base) or (
-        f"{landed_base.rstrip('/')}{'' if hid_href.startswith('/') else '/'}{hid_href}"
-    )
+    detail_url = _cn_video_url(hid_href, landed_base or cn_base)
+    if not detail_url:
+        raise RuntimeError("未找到")
     detail_html, detail_landed = fetch_html_result(
         detail_url, referer=search_url, cookie=ck, source_id=SOURCE
     )
+    # 若被跳到根站繁体，再强制拉一次 /cn
+    if detail_landed and not re.search(r"/cn/", detail_landed, re.I):
+        retry = _cn_video_url(detail_landed, cn_base) or detail_url
+        if retry and retry != detail_landed:
+            html2, landed2 = fetch_html_result(
+                retry, referer=search_url, cookie=ck, source_id=SOURCE
+            )
+            if html2 and airav_detail_code_ok(html2, normalized):
+                detail_html, detail_landed = html2, landed2
     if not airav_detail_code_ok(detail_html, normalized):
         raise RuntimeError("未找到")
 
-    parsed = parse_airav_io_detail(detail_html, detail_landed or detail_url, normalized)
+    page_url = detail_landed or detail_url
+    if page_url and not re.search(r"/cn/", page_url, re.I):
+        page_url = _cn_video_url(page_url, cn_base) or page_url
+    parsed = parse_airav_io_detail(detail_html, page_url, normalized)
     if not parsed:
         raise RuntimeError("未找到")
     return parsed

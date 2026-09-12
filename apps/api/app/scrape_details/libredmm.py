@@ -45,13 +45,32 @@ def _parse_hit(raw: Any, code: str) -> dict[str, Any] | None:
     if not title and not cover:
         return None
 
-    plot = strip_tags(str(raw.get("description") or raw.get("comment") or raw.get("subtitle") or ""))
+    plot = re.sub(
+        r"\s+",
+        " ",
+        strip_tags(str(raw.get("description") or raw.get("comment") or raw.get("subtitle") or "")),
+    ).strip()
 
     premiered = str(raw.get("date") or "")[:10]
     date = premiered if re.match(r"^\d{4}-\d{2}-\d{2}", premiered) else None
 
     makers = raw.get("makers") or []
     studio = str(makers[0] if makers else "").strip() or None
+    labels = raw.get("labels") or []
+    publisher = str(labels[0] if labels else "").strip() or None
+
+    series_raw = raw.get("series")
+    if isinstance(series_raw, list):
+        series = str(series_raw[0] if series_raw else "").strip() or None
+    else:
+        series = str(series_raw or "").strip() or None
+
+    runtime_raw = raw.get("minute")
+    if not isinstance(runtime_raw, (int, float)):
+        runtime_raw = raw.get("runtime")
+    runtime = int(runtime_raw) if isinstance(runtime_raw, (int, float)) else None
+    if runtime is not None and not (0 < runtime < 600):
+        runtime = None
 
     genres = []
     for g in raw.get("genres") or []:
@@ -65,9 +84,34 @@ def _parse_hit(raw: Any, code: str) -> dict[str, Any] | None:
         "actors": actors,
         "tags": genres,
         "studio": studio,
+        "publisher": publisher,
+        "series": series,
+        "runtime": runtime,
         "date": date,
         "poster": cover,
     }
+
+
+def _detail_from_hit(code: str, hit: dict[str, Any]) -> dict[str, Any]:
+    extra: dict[str, Any] = {}
+    if hit.get("publisher"):
+        extra["publisher"] = hit["publisher"]
+    if hit.get("series"):
+        extra["series"] = hit["series"]
+    if hit.get("runtime") is not None:
+        extra["runtime"] = hit["runtime"]
+    return make_detail(
+        source="libredmm",
+        code=code,
+        title=hit.get("title"),
+        poster=hit.get("poster"),
+        studio=hit.get("studio"),
+        actors=hit.get("actors") or [],
+        tags=hit.get("tags") or [],
+        overview=hit.get("overview"),
+        date=hit.get("date"),
+        extra=extra or None,
+    )
 
 
 def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: str = "") -> dict:
@@ -95,17 +139,7 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
                 break
             hit = _parse_hit(data, code_u)
             if hit and (hit.get("title") or hit.get("poster")):
-                return make_detail(
-                    source="libredmm",
-                    code=code_u,
-                    title=hit.get("title"),
-                    poster=hit.get("poster"),
-                    studio=hit.get("studio"),
-                    actors=hit.get("actors") or [],
-                    tags=hit.get("tags") or [],
-                    overview=hit.get("overview"),
-                    date=hit.get("date"),
-                )
+                return _detail_from_hit(code_u, hit)
         if i < 2:
             time.sleep(0.8)
             continue
@@ -122,16 +156,6 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
 
     from_search = _parse_hit(search_data, code_u)
     if from_search and (from_search.get("title") or from_search.get("poster")):
-        return make_detail(
-            source="libredmm",
-            code=code_u,
-            title=from_search.get("title"),
-            poster=from_search.get("poster"),
-            studio=from_search.get("studio"),
-            actors=from_search.get("actors") or [],
-            tags=from_search.get("tags") or [],
-            overview=from_search.get("overview"),
-            date=from_search.get("date"),
-        )
+        return _detail_from_hit(code_u, from_search)
 
     raise RuntimeError("未找到")

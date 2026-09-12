@@ -1,12 +1,21 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Bookmark, BookmarkCheck, Captions, Languages, Search } from 'lucide-react';
 import {
+  Bookmark,
+  BookmarkCheck,
+  Captions,
+  Languages,
+  RefreshCw,
+  Search,
+} from 'lucide-react';
+import {
+  enrichScrapLibraryItem,
   fetchScrapLibrarySubtitles,
   fetchTranslate,
   listScrapLibraryEmbedItems,
   listScrapLibrarySubtitles,
+  lookupScrapActressAvatarUrls,
   saveScrapLibraryPlot,
   searchScrapLibraryEmbed,
   scrapLibraryCoverUrl,
@@ -20,6 +29,54 @@ import { isScrapFavorite, toggleScrapFavorite, ensureScrapFavoritesLoaded } from
 import { parseScrapSourceText } from './scrapSourceMeta';
 import { ScrapPosterCard } from './ScrapPosterCard';
 import { useScrapLocalCover, SCRAP_DETAIL_COVER_OPTS } from './useScrapLocalCover';
+
+function MkdActressAvatar({
+  name,
+  posterApi,
+  onOpen,
+}: {
+  name: string;
+  posterApi?: string;
+  onOpen?: (name: string) => void;
+}) {
+  const [gone, setGone] = useState(false);
+  const src =
+    !gone && posterApi
+      ? scrapLibraryCoverUrl(
+          { posterApi },
+          { w: 128, prefer: 'poster', rp: false },
+        )
+      : '';
+
+  useEffect(() => {
+    setGone(false);
+  }, [posterApi, name]);
+
+  return (
+    <button
+      type="button"
+      className="mkd-actress"
+      onClick={() => onOpen?.(name)}
+    >
+      <span className="mkd-actress__avatar" aria-hidden>
+        {src ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={src}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            referrerPolicy="no-referrer"
+            onError={() => setGone(true)}
+          />
+        ) : (
+          <span className="mkd-actress__ph">{name.slice(0, 1)}</span>
+        )}
+      </span>
+      <span className="mkd-actress__name allow-select">{name}</span>
+    </button>
+  );
+}
 
 export function ScrapDetailBody({
   item,
@@ -48,6 +105,28 @@ export function ScrapDetailBody({
     () => parseScrapSourceText(item.sourceText),
     [item.sourceText],
   );
+  const [actressAvatars, setActressAvatars] = useState<Record<string, string>>(
+    {},
+  );
+  const actressKey = meta.actresses.join('\0');
+  useEffect(() => {
+    const names = actressKey ? actressKey.split('\0') : [];
+    if (!names.length) {
+      setActressAvatars({});
+      return;
+    }
+    let cancelled = false;
+    void lookupScrapActressAvatarUrls(names)
+      .then((m) => {
+        if (!cancelled) setActressAvatars(m || {});
+      })
+      .catch(() => {
+        if (!cancelled) setActressAvatars({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [actressKey]);
   const code = String(item.code || meta.code || '').trim();
   const title = String(item.title || meta.title || '').trim();
   const originalTitle = String(meta.originalTitle || '').trim();
@@ -70,8 +149,9 @@ export function ScrapDetailBody({
     return a || b;
   })();
   const displayTitle = titleZhOrJa;
+  const [coverRev, setCoverRev] = useState(0);
   const {
-    src: poster,
+    src: posterRaw,
     onError: onPosterError,
   } = useScrapLocalCover({
     posterApi: item.posterApi,
@@ -80,6 +160,9 @@ export function ScrapDetailBody({
     itemId: item.itemId,
     ...SCRAP_DETAIL_COVER_OPTS,
   });
+  const poster = posterRaw
+    ? `${posterRaw}${posterRaw.includes('?') ? '&' : '?'}v=${coverRev || 0}`
+    : '';
   const fanart = item.fanartApi
     ? scrapLibraryCoverUrl(
         { posterApi: item.fanartApi, coverUrl: '' },
@@ -93,13 +176,17 @@ export function ScrapDetailBody({
         { prefer: 'poster', w: 720, rp: false },
       )
     : '';
-  const washSrc = fanart || thumbWide || poster;
+  const washSrcBase = fanart || thumbWide || posterRaw;
+  const washSrc = washSrcBase
+    ? `${washSrcBase}${washSrcBase.includes('?') ? '&' : '?'}v=${coverRev || 0}`
+    : '';
 
   const [imgGone, setImgGone] = useState(false);
   const [favorited, setFavorited] = useState(false);
   const [favBusy, setFavBusy] = useState(false);
   const [subBusy, setSubBusy] = useState(false);
   const [subReady, setSubReady] = useState(false);
+  const [enrichBusy, setEnrichBusy] = useState(false);
   const [plotZh, setPlotZh] = useState('');
   const [plotSaved, setPlotSaved] = useState(false);
   const [plotBusy, setPlotBusy] = useState(false);
@@ -129,6 +216,8 @@ export function ScrapDetailBody({
     setPlotZh('');
     setPlotSaved(false);
     setPlotBusy(false);
+    setEnrichBusy(false);
+    setCoverRev(0);
     let cancelled = false;
     const id = String(item.itemId || '');
     // 收藏真相在服务端：先确保缓存就绪再据其点亮状态
@@ -270,6 +359,66 @@ export function ScrapDetailBody({
     );
     if (!ok) toast('没有可用的番号用于搜索', 'error');
     else toast('已跳转资源库搜索', 'success');
+  }
+
+  async function onRefreshMeta() {
+    if (enrichBusy) return;
+    const iid = String(item.itemId || '').trim();
+    if (!iid) {
+      toast('无法刷新：缺少条目 ID', 'error');
+      return;
+    }
+    setEnrichBusy(true);
+    toast('正在清空向量并全量重刮覆盖…', 'info');
+    try {
+      const data = await enrichScrapLibraryItem({
+        itemId: iid,
+        overwrite: true,
+      });
+      const one = data.result;
+      if (!data.ok || !one?.ok) {
+        toast(
+          one?.error === 'detail_not_found'
+            ? '未找到该番号详情源'
+            : one?.error || '刷新失败',
+          'error',
+        );
+        return;
+      }
+      const fresh = data.item;
+      if (fresh) {
+        onItemPatch?.(fresh);
+        setPlotZh('');
+        setPlotSaved(false);
+      }
+      setCoverRev((n) => n + 1);
+      setImgGone(false);
+      const bits: string[] = [];
+      if (one.nfoChanged) bits.push('元数据');
+      if (one.posterDownloaded) bits.push('封面');
+      if ((one.actors || 0) > 0) bits.push(`女优×${one.actors}`);
+      const slow = (one.sourceTimings || [])
+        .slice(0, 3)
+        .map(
+          (t) =>
+            `${t.id || '?'}${typeof t.ms === 'number' ? ` ${Math.round(t.ms / 100) / 10}s` : ''}${t.ok ? '' : '×'}`,
+        )
+        .filter(Boolean);
+      const timingHint = slow.length
+        ? ` · 最慢 ${slow.join(' / ')}`
+        : typeof one.fetchMs === 'number'
+          ? ` · ${Math.round(one.fetchMs / 100) / 10}s`
+          : '';
+      toast(
+        (bits.length ? `已覆盖重写${bits.join('与')}` : '已全量刷新') +
+          timingHint,
+        'success',
+      );
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '刷新失败', 'error');
+    } finally {
+      setEnrichBusy(false);
+    }
   }
 
   async function onTranslatePlot() {
@@ -427,6 +576,28 @@ export function ScrapDetailBody({
     facts.push({ k: '发行', v: meta.label });
   }
 
+  const favFactBtn = (
+    <button
+      type="button"
+      className={
+        favorited
+          ? 'mkd-fav mkd-fav--beside mkd-fav--on'
+          : 'mkd-fav mkd-fav--beside'
+      }
+      onClick={() => void onToggleFavorite()}
+      aria-pressed={favorited}
+      aria-label={favorited ? '取消收藏' : '收藏'}
+      disabled={favBusy || enrichBusy}
+      title={favorited ? '取消收藏' : '收藏'}
+    >
+      {favorited ? (
+        <BookmarkCheck size={15} strokeWidth={2.25} aria-hidden />
+      ) : (
+        <Bookmark size={15} strokeWidth={2.25} aria-hidden />
+      )}
+    </button>
+  );
+
   return (
     <div className="mkd">
       <header className="mkd-head">
@@ -465,33 +636,62 @@ export function ScrapDetailBody({
           </div>
 
           <div className="mkd-head__id">
-            <p className="mkd-head__code allow-select">{code || '—'}</p>
+            <div className="mkd-head__code-row">
+              <p className="mkd-head__code allow-select">{code || '—'}</p>
+              <div className="mkd-head__tools">
+                <button
+                  type="button"
+                  className={
+                    enrichBusy ? 'mkd-enrich mkd-enrich--busy' : 'mkd-enrich'
+                  }
+                  onClick={() => void onRefreshMeta()}
+                  disabled={enrichBusy}
+                  title="清空本条向量后全量重刮，覆盖 NFO 与向量库全部字段"
+                >
+                  <RefreshCw
+                    size={15}
+                    strokeWidth={2.25}
+                    aria-hidden
+                    className={enrichBusy ? 'mkd-enrich__spin' : undefined}
+                  />
+                  {enrichBusy ? '…' : '刷新'}
+                </button>
+              </div>
+            </div>
             {displayTitle ? (
               <h2 className="mkd-head__title allow-select">{displayTitle}</h2>
             ) : null}
 
-            {facts.length > 0 ? (
-              <dl className="mkd-facts">
-                {facts.map((f) => (
-                  <div key={f.k} className="mkd-fact">
-                    <dt className="mkd-fact__k">{f.k}</dt>
-                    <dd className="mkd-fact__v">
-                      {f.onClick ? (
-                        <button
-                          type="button"
-                          className="mkd-fact__link allow-select"
-                          onClick={f.onClick}
-                        >
-                          {f.v}
-                        </button>
-                      ) : (
-                        <span className="allow-select">{f.v}</span>
-                      )}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-            ) : null}
+            <div className="mkd-facts-row">
+              {facts.length > 0 ? (
+                <dl className="mkd-facts">
+                  {facts.map((f) => (
+                    <div
+                      key={f.k}
+                      className={
+                        f.k === '年份' ? 'mkd-fact mkd-fact--year' : 'mkd-fact'
+                      }
+                    >
+                      <dt className="mkd-fact__k">{f.k}</dt>
+                      <dd className="mkd-fact__v">
+                        {f.onClick ? (
+                          <button
+                            type="button"
+                            className="mkd-fact__link allow-select"
+                            onClick={f.onClick}
+                          >
+                            {f.v}
+                          </button>
+                        ) : (
+                          <span className="allow-select">{f.v}</span>
+                        )}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              ) : null}
+              {favFactBtn}
+            </div>
           </div>
         </div>
       </header>
@@ -499,16 +699,14 @@ export function ScrapDetailBody({
       {meta.actresses.length > 0 ? (
         <section className="mkd-section">
           <h3 className="media-detail__h mkd-section__h">女优</h3>
-          <div className="mkd-chips">
+          <div className="mkd-actress-rail">
             {meta.actresses.map((name) => (
-              <button
+              <MkdActressAvatar
                 key={name}
-                type="button"
-                className="mkd-chip mkd-chip--btn"
-                onClick={() => onOpenActress?.(name)}
-              >
-                {name}
-              </button>
+                name={name}
+                posterApi={actressAvatars[name]}
+                onOpen={onOpenActress}
+              />
             ))}
           </div>
         </section>
@@ -561,25 +759,11 @@ export function ScrapDetailBody({
       <div className="mkd-actions">
         <button
           type="button"
-          className={favorited ? 'mkd-fav mkd-fav--on' : 'mkd-fav'}
-          onClick={() => void onToggleFavorite()}
-          aria-pressed={favorited}
-          disabled={favBusy}
-        >
-          {favorited ? (
-            <BookmarkCheck size={17} strokeWidth={2.25} aria-hidden />
-          ) : (
-            <Bookmark size={17} strokeWidth={2.25} aria-hidden />
-          )}
-          {favBusy ? '…' : favorited ? '已收藏' : '收藏'}
-        </button>
-        <button
-          type="button"
           className={
             subReady ? 'mkd-sub mkd-sub--on' : 'mkd-sub'
           }
           onClick={() => void onFetchSubtitle()}
-          disabled={subBusy}
+          disabled={subBusy || enrichBusy}
           title={
             subReady
               ? '本地已有字幕；再点可强制重下并上传 115'
@@ -593,6 +777,7 @@ export function ScrapDetailBody({
           type="button"
           className="media-detail__cta mkd-cta"
           onClick={onSearch}
+          disabled={enrichBusy}
         >
           <Search size={17} strokeWidth={2.25} aria-hidden />
           在资源库搜索

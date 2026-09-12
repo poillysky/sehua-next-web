@@ -440,14 +440,29 @@ PREFIX_INTRO: dict[str, str] = {
     # —— タカラ映像 ——
     "SPRD": "宝映像 人妻家庭伦理剧主力",
     "MOND": "宝映像 周一剧场等人妻剧",
-    # —— Moodyz 常见 ——
-    "MIDE": "Moodyz 经典专属单体",
-    "MIDV": "Moodyz 现行专属单体",
-    "MIAA": "Moodyz 企划/痴女向",
-    "MIAB": "Moodyz 较新企划线",
+    # —— Moodyz（与 av-makers.japan.json prefix_notes 对齐：新→旧）——
+    "MIDA": "Moodyz 现行专属单体",
+    "MIDV": "Moodyz 上一代专属单体",
+    "MIDE": "Moodyz 更早专属单体",
+    "MIDD": "Moodyz 早期专属单体",
+    "MIAB": "Moodyz 非专属企划现行",
+    "MIAA": "Moodyz 非专属企划上一代",
+    "MIAD": "Moodyz 早期 Acid 线",
+    "MIAE": "Moodyz Acid 更早",
+    "MIGD": "Moodyz 硬核/解禁企划",
     "MIMK": "Moodyz 漫画改编企划",
-    "MIGD": "Moodyz 解禁/浓厚向经典",
-    "MIFD": "Moodyz 出道作线",
+    "MIFD": "Moodyz 新人出道线",
+    "MIRD": "Moodyz 大型企划",
+    "MDVR": "Moodyz VR",
+    "MIBD": "Moodyz 旧作精选",
+    "MIZD": "Moodyz 新作精选",
+    "MOGI": "Moodyz 相关线",
+    "MKY": "Moodyz 相关线",
+    "MISM": "Moodyz 相关线",
+    "MIST": "Moodyz 相关线",
+    "MVSD": "Moodyz 相关线",
+    "MIKR": "Moodyz 相关线",
+    "MILD": "Moodyz 相关线",
     # —— IdeaPocket ——
     "IPX": "IdeaPocket 主力专属单体",
     "IPZZ": "IdeaPocket 现行专属线",
@@ -1039,46 +1054,57 @@ def resolve_maker_intro_for_prefix(prefix: str) -> str:
     return ""
 
 
-def prefix_line_rank(prefix: str, blurb: str = "") -> int:
-    """前缀货架优先级：越小越靠前（现行主力 < 上一代 < 旁支 < VR/合集）。"""
-    pref = std_prefix(prefix)
-    notes = ""
+def _prefix_notes_from_japan_json(pref: str) -> str:
+    """读取 av-makers.japan.json 里该前缀的 prefix_notes。"""
     try:
         path = ROOT / "apps" / "web" / "src" / "config" / "av-makers.japan.json"
-        if path.exists():
-            for row in json.loads(path.read_text(encoding="utf-8")):
-                pn_map = row.get("prefix_notes") or {}
-                pn = pn_map.get(pref) or pn_map.get(pref.upper())
-                if pn:
-                    notes = str(pn)
-                    break
+        if not path.exists():
+            return ""
+        for row in json.loads(path.read_text(encoding="utf-8")):
+            pn_map = row.get("prefix_notes") or {}
+            pn = pn_map.get(pref) or pn_map.get(pref.upper())
+            if pn:
+                return str(pn).strip()
     except Exception:  # noqa: BLE001
-        notes = ""
-    text = f"{blurb or ''} {PREFIX_INTRO.get(pref, '')} {notes}"
+        return ""
+    return ""
 
-    if re.search(r"现行主力|现行主线|现行专属", text):
+
+def prefix_line_rank(prefix: str, blurb: str = "") -> int:
+    """前缀货架优先级：越小越靠前（现行主力 < 上一代 < 旁支 < VR/合集）。
+
+    仅用 PREFIX_INTRO + prefix_notes 推断；厂牌级通用简介含「企划」会污染排序，勿单独依赖。
+    """
+    pref = std_prefix(prefix)
+    notes = _prefix_notes_from_japan_json(pref)
+    text = f"{PREFIX_INTRO.get(pref, '')} {notes}".strip() or str(blurb or "")
+
+    if re.search(r"专属现行|现行专属|现行主力|现行主线", text):
         return 0
-    if re.search(r"较新主力|较新专属|较新主线", text):
-        return 1
-    if re.search(r"上一代主力|上一代主线", text):
+    # 须先于「专属上一代」：否则「非专属上一代」会被误匹配
+    if re.search(r"非专属企划现行|企划现行", text):
+        return 6
+    if re.search(r"非专属企划上一代|非专属上一代|企划上一代", text):
+        return 7
+    if re.search(r"专属上一代|上一代专属|上一代主力|上一代主线", text):
         return 2
-    if re.search(r"主力专属|主力线|主力：|主力巨乳|专属女优主力|剧情主力", text):
-        return 3
-    if re.search(r"经典专属|经典.*线|全盛", text):
+    if re.search(r"更早专属|更早主线|经典专属|经典.*线|全盛", text):
         return 4
-    if re.search(r"较早|早期|草创|历史主线|更早主线|旧专属", text):
+    if re.search(r"早期专属|早期 Acid|Acid|较早|早期|草创|历史主线|旧专属", text):
         return 5
     if re.search(r"过渡", text):
-        return 6
-    if re.search(r"出道", text):
         return 7
-    if re.search(r"旁支|企划", text) and not re.search(r"合集|精选", text):
+    if re.search(r"出道|新人", text):
         return 8
-    if re.search(r"(?i)(?:^|[^a-z])vr(?:[^a-z]|$)", text):
-        return 9
-    if re.search(r"合集|精选|特别篇|祭典", text):
+    if re.search(r"(?i)(?:^|[^a-z])vr(?:[^a-z]|$)", text) or notes.upper() == "VR":
         return 10
-    return 5
+    if re.search(r"合集|精选|特别篇|祭典|旧作精选|新作精选", text):
+        return 11
+    if re.search(r"旁支|企划|大型企划|硬核|漫画", text):
+        return 9
+    if re.search(r"主力专属|主力线|主力：|主力巨乳|专属女优主力|剧情主力", text):
+        return 3
+    return 99
 
 
 def resolve_maker_intro_for_studio(studio_name: str) -> str:

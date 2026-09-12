@@ -114,8 +114,18 @@ def _is_forum_image_host(host: str) -> bool:
     return bool(_FORUM_IMG_HOST_RE.search(host or ""))
 
 
+def _is_slow_cover_host(host: str) -> bool:
+    h = (host or "").lower()
+    return "javbus" in h or "seejav" in h
+
+
+def _is_dmm_cover_host(host: str) -> bool:
+    h = (host or "").lower()
+    return "dmm.co.jp" in h or "awsimgsrc.dmm." in h or "netcdn.space" in h
+
+
 def _referers_for_host(host: str, scheme: str) -> list[str | None]:
-    """论坛图床优先 sehuatang Referer，减少 403 / 无效 HTML。"""
+    """论坛图床优先 sehuatang Referer；CDN 只用同源/官方 Referer，避免无用重试拖超时。"""
     referers: list[str | None] = []
     if host.endswith("doubanio.com") or host.endswith("douban.com"):
         referers.extend(
@@ -124,33 +134,39 @@ def _referers_for_host(host: str, scheme: str) -> list[str | None]:
                 "https://movie.douban.com/",
             ]
         )
-    if "netcdn.space" in host or host.endswith("dmm.co.jp") or "dmm.co.jp" in host:
+    if _is_dmm_cover_host(host):
+        # DMM 图床：官方 Referer + 无 Referer 即可，勿叠论坛站
         referers.append("https://www.dmm.co.jp/")
-    if "javbus" in host or "seejav" in host:
+        if host:
+            referers.append(f"{scheme}://{host}/")
+        referers.append(None)
+    elif _is_slow_cover_host(host):
+        # javbus/seejav：最多试 2 个同源镜像，超时即放弃（见 _fetch_bytes_unlocked）
         referers.extend(
             [
                 "https://www.javbus.com/",
-                "https://www.seejav.me/",
-                "https://www.seejav.bid/",
+                f"{scheme}://{host}/" if host else None,
+                None,
             ]
         )
-    if _is_forum_image_host(host):
-        referers.extend(
-            [
-                "https://www.sehuatang.org/",
-                "https://sehuatang.net/",
-            ]
-        )
-    if host:
-        referers.append(f"{scheme}://{host}/")
-    if not _is_forum_image_host(host):
-        referers.extend(
-            [
-                "https://www.sehuatang.org/",
-                "https://sehuatang.net/",
-            ]
-        )
-    referers.append(None)
+    else:
+        if _is_forum_image_host(host):
+            referers.extend(
+                [
+                    "https://www.sehuatang.org/",
+                    "https://sehuatang.net/",
+                ]
+            )
+        if host:
+            referers.append(f"{scheme}://{host}/")
+        if not _is_forum_image_host(host):
+            referers.extend(
+                [
+                    "https://www.sehuatang.org/",
+                    "https://sehuatang.net/",
+                ]
+            )
+        referers.append(None)
     seen: set[str | None] = set()
     uniq: list[str | None] = []
     for ref in referers:
@@ -176,6 +192,14 @@ def _fetch_bytes_unlocked(url: str) -> tuple[bytes, str]:
     host = (parsed.hostname or "").lower()
     scheme = parsed.scheme or "https"
     uniq_refs = _referers_for_host(host, scheme)
+    slow = _is_slow_cover_host(host)
+    # 慢图床少试 Referer；DMM 也只需 2 个
+    ref_cap = 2 if (slow or _is_dmm_cover_host(host)) else 4
+    # 慢图床连接失败立刻换下一 URL，勿连撞 3 次超时
+    fail_cap = 1 if slow else 3
+    timeout = (
+        httpx.Timeout(3.0, connect=1.5) if slow else _COVER_FETCH_TIMEOUT
+    )
 
     from .outbound_http import resolve_scrape_proxy_url
 
@@ -191,12 +215,12 @@ def _fetch_bytes_unlocked(url: str) -> tuple[bytes, str]:
     for copts in client_opts:
         try:
             with httpx.Client(
-                timeout=_COVER_FETCH_TIMEOUT,
+                timeout=timeout,
                 trust_env=False,
                 follow_redirects=True,
                 **copts,
             ) as client:
-                for ref in uniq_refs[:4]:
+                for ref in uniq_refs[:ref_cap]:
                     try:
                         headers = _image_headers(url, referer=ref)
                         if host.endswith("doubanio.com"):
@@ -210,7 +234,7 @@ def _fetch_bytes_unlocked(url: str) -> tuple[bytes, str]:
                         last_err = e
                         transport_fails += 1
                         log.warning("cover fetch transport error ref=%s: %s", ref, e)
-                        if transport_fails >= 3:
+                        if transport_fails >= fail_cap:
                             break
                         continue
                     last_status = r.status_code
@@ -233,7 +257,7 @@ def _fetch_bytes_unlocked(url: str) -> tuple[bytes, str]:
             last_err = e
             log.warning("cover client opts=%s: %s", copts, e)
             continue
-        if transport_fails >= 3:
+        if transport_fails >= fail_cap:
             break
     if last_err is not None and last_status == 0:
         raise HTTPException(status_code=502, detail=f"拉图失败: {last_err}") from last_err

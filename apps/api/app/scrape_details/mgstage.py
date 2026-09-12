@@ -12,9 +12,11 @@ from .common import (
     clean_title,
     fetch_html,
     fetch_json,
+    fold_code,
     is_junk_cover_url,
     make_detail,
     page_mentions_code,
+    pick_href_by_folded_code,
     std_code,
     strip_tags,
     soup,
@@ -60,6 +62,50 @@ def _parse_runtime(raw: str) -> int | None:
     except ValueError:
         return None
     return n if 0 < n < 600 else None
+
+
+def _parse_rating(html: str) -> dict[str, Any] | None:
+    """对齐 MDCS parseMgstageRating；score 用源站分数（多为 /5）。"""
+    doc = soup(html)
+    review = doc.select_one(".detail_data td.review")
+    if review is None:
+        return None
+    text = strip_tags(review.get_text())
+    m = re.search(r"([\d.]+)\s*\(\s*(\d+)\s*件\s*\)", text)
+    if m:
+        rating_value = float(m.group(1))
+        if rating_value > 0:
+            return {
+                "ratingValue": rating_value,
+                "ratingMax": 5,
+                "ratingSource": "mgstage",
+                "score": rating_value,
+                "votes": m.group(2),
+            }
+    # 回退：纯数字如 4.2
+    m2 = re.search(r"([\d.]+)", text)
+    if m2:
+        rating_value = float(m2.group(1))
+        if 0 < rating_value <= 5:
+            return {
+                "ratingValue": rating_value,
+                "ratingMax": 5,
+                "ratingSource": "mgstage",
+                "score": rating_value,
+            }
+    star = review.select_one('span[class*="star_"]')
+    cls = " ".join(star.get("class") or []) if star else ""
+    star_m = re.search(r"star_(\d{2})", cls)
+    if star_m:
+        rating_value = int(star_m.group(1)) / 10
+        if rating_value > 0:
+            return {
+                "ratingValue": rating_value,
+                "ratingMax": 5,
+                "ratingSource": "mgstage",
+                "score": rating_value,
+            }
+    return None
 
 
 def _parse_actors(html: str) -> list[str]:
@@ -116,16 +162,35 @@ def _parse_extrafanart(html: str) -> list[str]:
 
 
 def _pick_detail_href(html: str, code: str) -> str:
+    """仅接受 path 番号精确命中；禁止首个 product_detail 兜底。"""
     std = std_code(code).upper()
     esc = re.escape(std)
     m = re.search(rf"/product/product_detail/{esc}/?", html, re.I)
     if m:
         hit = m.group(0)
         return hit if hit.startswith("/") else f"/{hit}"
-    generic = re.search(
-        r'href=["\'](/product/product_detail/[^"\'/]+/)[^"\']*["\']', html, re.I
-    )
-    return generic.group(1) if generic else ""
+    # 折叠匹配（如 path 大小写 / 连字符差异）
+    hrefs = [
+        hm.group(1)
+        for hm in re.finditer(
+            r'href=["\'](/product/product_detail/[^"\'/]+/)[^"\']*["\']',
+            html or "",
+            re.I,
+        )
+    ]
+    hit = pick_href_by_folded_code(hrefs, code)
+    if hit:
+        return hit
+    # 少数页仅写 id=ABF005 形态
+    want = fold_code(code)
+    for hm in re.finditer(
+        r'href=["\'](/product/product_detail/([^"\'/]+)/)[^"\']*["\']',
+        html or "",
+        re.I,
+    ):
+        if fold_code(hm.group(2)) == want:
+            return hm.group(1)
+    return ""
 
 
 def _extract_sample_pid(html: str) -> str | None:
@@ -201,9 +266,21 @@ def _parse_detail(html: str, page_url: str, code: str) -> dict[str, Any] | None:
     runtime = _parse_runtime(_table_value(html, "収録時間"))
     cover = _parse_cover(html)
     extras = _parse_extrafanart(html)
+    rating = _parse_rating(html)
 
     if not title and not cover and not actors and not plot:
         return None
+
+    extra: dict[str, Any] = {
+        "publisher": publisher or None,
+        "series": series or None,
+        "runtime": runtime,
+        "website": page_url,
+        "mosaic": "有码",
+        "extrafanartUrls": extras or None,
+    }
+    if rating:
+        extra.update(rating)
 
     return make_detail(
         source=SOURCE,
@@ -215,14 +292,7 @@ def _parse_detail(html: str, page_url: str, code: str) -> dict[str, Any] | None:
         tags=genres,
         overview=plot or None,
         date=premiered,
-        extra={
-            "publisher": publisher or None,
-            "series": series or None,
-            "runtime": runtime,
-            "website": page_url,
-            "mosaic": "有码",
-            "extrafanartUrls": extras or None,
-        },
+        extra=extra,
     )
 
 

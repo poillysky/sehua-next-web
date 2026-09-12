@@ -35,8 +35,10 @@ function localUrl(
       api = thumbApi;
       rp = true; // 横 thumb → 右裁竖图
     } else if (posterApi) {
+      // 无 thumb 时常落盘的是横版 jacket（cover→poster.jpg）；
+      // rp=1 仅在 w>h 时右裁，竖版 poster 服务端会 no-op
       api = posterApi;
-      rp = false; // 已是竖版 poster，勿再裁
+      rp = true;
     }
   } else if (posterApi) {
     api = posterApi;

@@ -19,12 +19,20 @@ from .common import (
     soup,
 )
 
-DEFAULT_BASE = "https://www.javlibrary.com"
+DEFAULT_BASE = "https://www.javlibrary.com/tw"
 SOURCE = "javlibrary"
 
 
 def _lang_base(base: str) -> str:
-    return re.sub(r"/(ja|cn|tw)$", "", base.rstrip("/"), flags=re.I)
+    return re.sub(r"/(ja|cn|tw)(?:/main\.php)?$", "", base.rstrip("/"), flags=re.I)
+
+
+def _lang_path(base_url: str) -> str:
+    """从配置 URL 取语种；默认 tw（繁体站较稳）。"""
+    m = re.search(r"/(ja|cn|tw)(?:/main\.php)?/?$", str(base_url or "").rstrip("/"), re.I)
+    if m:
+        return m.group(1).lower()
+    return "tw"
 
 
 def _same_netloc(a: str, b: str) -> bool:
@@ -176,12 +184,13 @@ def _parse_detail(html: str, detail_url: str, code: str) -> dict | None:
         "titleZh": title or None,
     }
     if rating is not None:
+        # 源站分数多为 /10（如 8.30），直接沿用，不再按 /5 ×2
         extra.update(
             {
                 "ratingValue": rating,
-                "ratingMax": 5,
+                "ratingMax": 10,
                 "ratingSource": "javlibrary",
-                "score": rating * 2,
+                "score": rating,
                 "votes": votes,
             }
         )
@@ -203,14 +212,15 @@ def scrape_detail(
     code: str, *, base_url: str = "", cookie: str = "", api_key: str = ""
 ) -> dict:
     del api_key
-    base = _lang_base(base_url or DEFAULT_BASE)
+    raw_base = base_url or DEFAULT_BASE
+    base = _lang_base(raw_base)
     if not base:
         raise RuntimeError("未配置网站地址")
     std = std_code(code)
     if not std:
         raise RuntimeError("番号为空")
     ck = cookie or None
-    lang_path = "cn"
+    lang_path = _lang_path(raw_base)
     search_url = f"{base}/{lang_path}/vl_searchbyid.php?keyword={quote(std)}"
     search_html, final_url = fetch_html_result(
         search_url,
@@ -245,6 +255,6 @@ def scrape_detail(
     if not parsed:
         raise RuntimeError("解析失败")
 
-    website = detail_url.replace(base, DEFAULT_BASE) if base != DEFAULT_BASE else detail_url
+    website = detail_url.replace(base, "https://www.javlibrary.com") if base != "https://www.javlibrary.com" else detail_url
     parsed["website"] = website
     return parsed

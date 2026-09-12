@@ -26,6 +26,8 @@ ROUND_STEP = 10
 # 流水号离群：大空洞后的孤立高号（如 MIMK 密到 286 却冒出 726）不进 db_max
 SERIAL_GAP_ABS = 50
 SERIAL_GAP_REL = 0.35
+# 相对空隙不无限放大，避免 900 段脏号一路粘到 7000 段
+SERIAL_GAP_ABS_CAP = 120
 SERIAL_CLUSTER_MIN = 3
 SERIAL_CLUSTER_MIN_FRAC = 0.05
 
@@ -137,7 +139,7 @@ NOISE = {
 }
 
 CODE_RE = re.compile(
-    r"(?:^|[^A-Z0-9])([A-Z]{2,12}|\d{2,3}[A-Z]{2,10}|[A-Z]+\d+[A-Z]*)[-_\s]?(\d{2,6})(?![0-9])",
+    r"(?:^|[^A-Z0-9\-_])([A-Z]{2,12}|\d{2,3}[A-Z]{2,10}|[A-Z]+\d+[A-Z]*)[-_\s]?(\d{2,6})(?![0-9])",
     re.I,
 )
 
@@ -167,7 +169,9 @@ def robust_serial_max(nums: list[int] | set[int]) -> int:
     """从流水号集合取稳健上限：丢掉大空洞后的稀疏离群点。
 
     例：…285,286,726 → 主簇止于 286，忽略 726。
-    空隙阈值 max(50, 0.35*前号)；取够大簇（≥max(3,总数5%)）中最高号。
+    空隙阈值 max(50, 0.35*前号)；在够大的簇里优先取「规模最大」的主簇，
+    避免 1..900 主簇被 7000..8000 脏号簇（更高但更假）盖过。
+    仅当次大簇规模接近最大簇（≥90%）时，才改取更高号那簇（合法跳号续作）。
     """
     uniq = sorted({int(n) for n in nums if int(n) > 0})
     if not uniq:
@@ -179,6 +183,7 @@ def robust_serial_max(nums: list[int] | set[int]) -> int:
     for x in uniq[1:]:
         prev = clusters[-1][-1]
         thr = max(SERIAL_GAP_ABS, int(prev * SERIAL_GAP_REL))
+        thr = min(thr, SERIAL_GAP_ABS_CAP)
         if x - prev > thr:
             clusters.append([x])
         else:
@@ -191,7 +196,14 @@ def robust_serial_max(nums: list[int] | set[int]) -> int:
     candidates = [c for c in clusters if len(c) >= min_size]
     if not candidates:
         candidates = [max(clusters, key=len)]
-    best = max(candidates, key=lambda c: c[-1])
+
+    candidates.sort(key=lambda c: (len(c), c[-1]), reverse=True)
+    best = candidates[0]
+    # 两代都很大且接近：允许取更高那代（1..50 与 200..230）
+    if len(candidates) > 1:
+        second = candidates[1]
+        if len(second) * 10 >= len(best) * 9 and second[-1] > best[-1]:
+            best = second
     return int(best[-1])
 
 

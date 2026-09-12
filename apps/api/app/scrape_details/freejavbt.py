@@ -25,7 +25,7 @@ DEFAULT_BASE = "https://www.freejavbt.com"
 SOURCE = "freejavbt"
 
 AV_MAN_NAMES = {
-    "貞松大輔", "鮫島", "森林原人", "黒田悠斗", "主観", "吉村卓", "野島誠", "小田切ジュン", "しみけん",
+    "貞松大輔", "鮫島", "森林原人", "黒田悠斗", "黒田将稔", "主観", "吉村卓", "野島誠", "小田切ジュン", "しみけん",
     "セツネヒデユキ", "大島丈", "玉木玲", "ウルフ田中", "ジャイアント廣田", "イセドン内村", "西島雄介",
     "平田司", "杉浦ボッ樹", "大沢真司", "ピエール剣", "羽田", "田淵正浩", "タツ", "南佳也", "吉野篤史",
     "今井勇太", "マッスル澤野", "井口", "松山伸也", "花岡じった", "佐川銀次", "およよ中野", "小沢とおる",
@@ -421,6 +421,10 @@ def parse_freejavbt_detail_html(html: str, code: str, page_url: str) -> dict:
         or _meta_by_label(doc, re.compile(r"发行|發行"))[0]
         or ""
     )
+    if studio.strip() in ("", "-", "N/A", "n/a"):
+        studio = ""
+    if publisher.strip() in ("", "-", "N/A", "n/a"):
+        publisher = ""
     actors = _parse_actors(doc, actor_title_hint)
     genres = _parse_genres(doc)
     cover_url = _parse_cover(html, page_url)

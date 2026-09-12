@@ -352,6 +352,18 @@ _LLM_TRANSLATE_SYSTEM_ZH_RETRY = (
     "Output only the Chinese translation. Keep proper nouns. Do not refuse."
 )
 
+_LLM_TRANSLATE_SYSTEM_TITLE_ZH = (
+    "你是影视资料库的本地化编辑，把作品标题译成通顺的简体中文片名片题。"
+    "这是片库元数据整理：完整意译，不要拒答；保留演员常见中文名；"
+    "不要逐字硬译（如勿把「男の娘」译成「男孩子女孩」）；"
+    "不要追加系列卷号以外的解释。只输出标题译文，无引号无前后缀。"
+)
+
+_LLM_TRANSLATE_SYSTEM_TITLE_ZH_RETRY = (
+    "Translate this Japanese AV catalog title into natural Simplified Chinese. "
+    "Output only the title. Keep actress names. Do not refuse or literal-calque."
+)
+
 
 def _normalize_plot_text(text: str) -> str:
     t = str(text or "")
@@ -440,24 +452,32 @@ async def _llm_chat_once(
     return content, finish
 
 
-async def translate_llm(text: str, *, target: str = "zh") -> str:
-    """用设置页配置的 OpenAI 兼容 LLM 翻译（主要用于剧情译中）。"""
+async def translate_llm(text: str, *, target: str = "zh", kind: str = "plot") -> str:
+    """用设置页配置的 OpenAI 兼容 LLM 翻译（主要用于剧情/标题译中）。"""
     if target != "zh":
         raise _fail("LLM 翻译仅支持译中")
     cfg = _llm_configured()
     if not cfg:
         raise _fail("未配置大模型（设置 → AI / LLM）")
 
-    q = _prepare_query(_normalize_plot_text(text), target=target)
-    user = f"请译成简体中文（只输出译文）：\n\n{q}"
-    content, finish = await _llm_chat_once(
-        cfg=cfg, system=_LLM_TRANSLATE_SYSTEM_ZH, user=user
-    )
+    kind_l = str(kind or "plot").strip().lower()
+    if kind_l == "title":
+        system = _LLM_TRANSLATE_SYSTEM_TITLE_ZH
+        system_retry = _LLM_TRANSLATE_SYSTEM_TITLE_ZH_RETRY
+        q = _prepare_query(_normalize_plot_text(text), target=target)
+        user = f"请译成简体中文标题（只输出标题）：\n\n{q}"
+    else:
+        system = _LLM_TRANSLATE_SYSTEM_ZH
+        system_retry = _LLM_TRANSLATE_SYSTEM_ZH_RETRY
+        q = _prepare_query(_normalize_plot_text(text), target=target)
+        user = f"请译成简体中文（只输出译文）：\n\n{q}"
+
+    content, finish = await _llm_chat_once(cfg=cfg, system=system, user=user)
     if (not content) or finish in {"content_filter", "safety", "blocked"}:
         logger.warning("llm content filtered finish=%s, retry mild prompt", finish)
         content, finish = await _llm_chat_once(
             cfg=cfg,
-            system=_LLM_TRANSLATE_SYSTEM_ZH_RETRY,
+            system=system_retry,
             user=q,
             temperature=0.2,
         )
@@ -466,6 +486,93 @@ async def translate_llm(text: str, *, target: str = "zh") -> str:
     if not _translation_matches_target(content, target=target, source_text=text):
         raise _fail("大模型译文语种不符（仍含日文或非中文）")
     return content
+
+
+async def translate_to_zh(
+    text: str,
+    *,
+    kind: str = "plot",
+    prefer_llm: bool = True,
+) -> dict[str, str]:
+    """译中级联：优先大模型，失败再 Google/Simply/Lingva/MyMemory。
+
+    返回 ``{"text": 译文, "engine": "llm"|"google"|...}``；失败抛 HTTPException。
+    """
+    raw = _normalize_plot_text(text)
+    if len(raw) < 2:
+        raise _fail("译文过短", 400)
+
+    source = detect_source(raw)
+    if source == "zh" and not _has_kana(raw):
+        return {"text": raw, "engine": "none"}
+
+    errors: list[str] = []
+    src = source or "auto"
+
+    if prefer_llm:
+        try:
+            out = await translate_llm(raw, target="zh", kind=kind)
+            if out:
+                return {"text": out, "engine": "llm"}
+        except HTTPException as e:
+            errors.append(str(e.detail))
+            logger.warning("llm translate (%s) failed: %s", kind, e.detail)
+        except Exception as e:  # noqa: BLE001
+            errors.append(str(e))
+            logger.warning("llm translate (%s) failed: %s", kind, e)
+
+    for fn in (
+        translate_google,
+        translate_simply,
+        translate_lingva,
+        translate_mymemory,
+    ):
+        try:
+            translated = await fn(raw, src, target="zh")
+            if translated:
+                return {
+                    "text": translated,
+                    "engine": fn.__name__.replace("translate_", ""),
+                }
+        except HTTPException as e:
+            errors.append(str(e.detail))
+            logger.warning("%s failed: %s", fn.__name__, e.detail)
+        except Exception as e:  # noqa: BLE001
+            errors.append(str(e))
+            logger.warning("%s failed: %s", fn.__name__, e)
+
+    raise HTTPException(
+        status_code=502,
+        detail=errors[-1] if errors else "翻译失败，请稍后重试",
+    )
+
+
+def translate_to_zh_sync(
+    text: str,
+    *,
+    kind: str = "plot",
+    prefer_llm: bool = True,
+    timeout_sec: float = 90.0,
+) -> dict[str, str]:
+    """供刮削同步路径调用的译中封装（内部 asyncio.run）。"""
+    import asyncio
+    import concurrent.futures
+
+    async def _run() -> dict[str, str]:
+        return await translate_to_zh(text, kind=kind, prefer_llm=prefer_llm)
+
+    def _isolated() -> dict[str, str]:
+        return asyncio.run(_run())
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return _isolated()
+
+    # 已在事件循环中：丢到独立线程跑，避免 nest_asyncio
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        fut = pool.submit(_isolated)
+        return fut.result(timeout=max(15.0, float(timeout_sec)))
 
 
 def _split_translate_chunks(text: str, *, max_len: int = 420) -> list[str]:

@@ -333,6 +333,22 @@ def init_db() -> None:
                 ON scrap_favorites (user_id, favorited_at DESC)
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS enrich_logs (
+                  id BIGSERIAL PRIMARY KEY,
+                  region TEXT NOT NULL DEFAULT '',
+                  line TEXT NOT NULL,
+                  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_enrich_logs_region_id
+                ON enrich_logs (region, id DESC)
+                """
+            )
             conn.commit()
         _initialized = True
         logger.info("meta schema ready on %s", meta_dsn_label())

@@ -53,13 +53,38 @@ def parse_avbase_next_data(html: str) -> dict[str, Any] | None:
 def parse_avbase_date(raw: str | None) -> str | None:
     if not raw:
         return None
-    iso = re.search(r"(\d{4})-(\d{2})-(\d{2})", raw)
+    s = str(raw).strip()
+    iso = re.search(r"(\d{4})-(\d{2})-(\d{2})", s)
     if iso:
         return f"{iso.group(1)}-{iso.group(2)}-{iso.group(3)}"
+    # AVBase 常给 JS Date 字符串：Fri Dec 08 2023 10:00:00 GMT+0900 (...)
+    mon = {
+        "jan": 1,
+        "feb": 2,
+        "mar": 3,
+        "apr": 4,
+        "may": 5,
+        "jun": 6,
+        "jul": 7,
+        "aug": 8,
+        "sep": 9,
+        "oct": 10,
+        "nov": 11,
+        "dec": 12,
+    }
+    m = re.search(
+        r"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s+(\d{4})\b",
+        s,
+        re.I,
+    )
+    if m:
+        month = mon.get(m.group(1).lower())
+        if month:
+            return f"{m.group(3)}-{month:02d}-{int(m.group(2)):02d}"
     try:
         from datetime import datetime
 
-        d = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        d = datetime.fromisoformat(s.replace("Z", "+00:00"))
         return f"{d.year:04d}-{d.month:02d}-{d.day:02d}"
     except Exception:
         return None
@@ -76,6 +101,8 @@ def strip_avbase_description(raw: str | None) -> str:
     )
     s = re.sub(r"<br\s*/?>", "\n", s, flags=re.I)
     s = re.sub(r"<[^>]+>", "", s)
+    # JSON 截断时可能留下残缺标签，如末尾 `<br`
+    s = re.sub(r"<[^>]*$", "", s)
     s = re.sub(r"…+$", "", s)
     s = re.sub(r"\n{3,}", "\n\n", s)
     return s.strip()
