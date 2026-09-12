@@ -16,8 +16,8 @@ from app import bitmagnet_pg  # noqa: E402
 from app import pg  # noqa: E402
 from app import prefix_catalog_store as store  # noqa: E402
 from app import prefix_ranges as pr  # noqa: E402
-from app.search_av import is_western_studio_prefix  # noqa: E402
-from app.region_meta import REGION_META, REGION_ORDER, std_prefix  # noqa: E402
+from app.search.av import is_western_studio_prefix  # noqa: E402
+from app.core.region_meta import REGION_META, REGION_ORDER, std_prefix  # noqa: E402
 
 SEED = ROOT / "apps" / "web" / "src" / "config" / "prefix-catalog.seed.json"
 REPORT = ROOT / "data" / "_debug" / "prefix-from-local-dbs.json"

@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "apps" / "api"))
 
 from app import scrap_library_embed as scrap  # noqa: E402
-from app.studio_display_names import resolve_studio_for_prefix  # noqa: E402
+from app.scrap_library.studio_display_names import resolve_studio_for_prefix  # noqa: E402
 
 
 def main() -> None:

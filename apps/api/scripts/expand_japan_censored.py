@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT / "apps" / "api"))
 from app import prefix_catalog_dmm as dmm  # noqa: E402
 from app import prefix_catalog_harvest as harvest  # noqa: E402
 from app import prefix_catalog_store as store  # noqa: E402
-from app.region_meta import std_prefix  # noqa: E402
+from app.core.region_meta import std_prefix  # noqa: E402
 
 SEED = ROOT / "apps" / "web" / "src" / "config" / "prefix-catalog.seed.json"
 MAKERS = ROOT / "apps" / "web" / "src" / "config" / "av-makers.japan.json"

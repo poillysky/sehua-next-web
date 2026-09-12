@@ -21,7 +21,7 @@ sys.path.insert(0, str(ROOT / "apps" / "api"))
 
 from app import prefix_catalog_store as store  # noqa: E402
 from app import prefix_maker_names as maker_names  # noqa: E402
-from app.region_meta import std_prefix  # noqa: E402
+from app.core.region_meta import std_prefix  # noqa: E402
 
 AV_MAKERS = ROOT / "apps" / "web" / "src" / "config" / "av-makers.japan.json"
 IPPA_PARSED = ROOT / "data" / "_debug" / "ippa_parsed_makers.json"

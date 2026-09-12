@@ -15,8 +15,8 @@ from app import bitmagnet_pg  # noqa: E402
 from app import pg  # noqa: E402
 from app import prefix_catalog_store as store  # noqa: E402
 from app import prefix_ranges as pr  # noqa: E402
-from app.region_meta import REGION_ORDER  # noqa: E402
-from app.search_av import extract_maker_codes, resolve_maker_shape  # noqa: E402
+from app.core.region_meta import REGION_ORDER  # noqa: E402
+from app.search.av import extract_maker_codes, resolve_maker_shape  # noqa: E402
 
 OUT = ROOT / "data" / "_debug" / "prefix-scan-audit.json"
 

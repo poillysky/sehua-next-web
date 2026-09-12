@@ -201,7 +201,7 @@ def run_one(
     from app import outbound_http
     from app import scrape_sources_settings as scrape_src
     from app.scrape_details import fetch_detail_for_source
-    from app.scrap_library_enrich import _clean_actors, _clean_tags, _detail_usable
+    from app.scrap_library.enrich import _clean_actors, _clean_tags, _detail_usable
 
     outbound_http.set_thread_allow_flare(include_flare)
     t0 = time.perf_counter()
@@ -291,7 +291,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    from app.db import init_db
+    from app.core.db import init_db
 
     init_db()
     from app import scrap_enrich_strategy as strat

@@ -29,7 +29,7 @@ sys.path.insert(0, str(ROOT / "apps" / "api"))
 
 from app import prefix_catalog_store as store  # noqa: E402
 from app import prefix_maker_names as maker_names  # noqa: E402
-from app.region_meta import std_prefix  # noqa: E402
+from app.core.region_meta import std_prefix  # noqa: E402
 
 SOURCE = "ippa"
 NS = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}

@@ -15,8 +15,8 @@ sys.path.insert(0, str(ROOT / "apps" / "api"))
 from app import bitmagnet_pg  # noqa: E402
 from app import pg  # noqa: E402
 from app import prefix_catalog_store as store  # noqa: E402
-from app.region_meta import REGION_ORDER, std_prefix  # noqa: E402
-from app.search_av import resolve_maker_shape  # noqa: E402
+from app.core.region_meta import REGION_ORDER, std_prefix  # noqa: E402
+from app.search.av import resolve_maker_shape  # noqa: E402
 
 OUT = ROOT / "data" / "_debug" / "prefix-random-sample-audit.json"
 DIGIT_HEAD_RE = re.compile(r"^(\d{2,3})([A-Z]{2,14})$")

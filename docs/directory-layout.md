@@ -7,95 +7,63 @@ sehua-next-web/
 ├── apps/
 │   ├── web/                 # Next.js PWA :3020
 │   └── api/                 # FastAPI :8020
-│       ├── app/             # 业务代码
-│       │   └── scrape_maps_seed/   # 映射种子（进 git）
+│       ├── app/             # 业务（按域分包）
+│       │   ├── main.py
+│       │   ├── core/ auth/ ai/ p115/ prefix/
+│       │   ├── scrap_library/ scrape/ scrape_details/
+│       │   ├── scrape_maps_seed/
+│       │   ├── search/ makers/ media/ translate/ tests/
 │       ├── scripts/         # 运维脚本（进 git）
-│       └── _local_refs/     # 本机参考数据（不进 git）
-│           └── mdcx/        # mapping_actor.xml · Actress.db
-├── config/                  # app.json 等
-├── data/                    # 运行时缓存/映射（不进 git 大文件）
-├── media/                   # 刮削库 / STRM（不进 git）
-├── docs/                    # 本目录：仓库文档（进 git）
-├── backups/                 # 本机备份（不进 git）
-├── docker/ · Dockerfile · docker-compose.yml
-├── scripts/                 # 根级辅助脚本
+│       └── _local_refs/     # 本机参考（不进 git）· mdcx/
+├── config/
+├── data/                    # 运行时缓存/映射
+├── media/                   # 刮削库 / STRM
+├── docs/
+├── backups/
 └── README.md
 ```
 
-程序里的 `ROOT` = 仓库根。因此：
+程序里的 `ROOT` = 仓库根。映射/缓存在 **`data/`**，片库在 **`media/`**。
 
-- 映射/缓存必须在 **`data/`**，不要放 `apps/data/`
-- 片库必须在 **`media/`**，不要塞进 `data/`
+## `apps/api/app` 分包（已整理）
 
-## 评估结论
+| 包 | 内容 |
+|----|------|
+| `core/` | db · pg · bootstrap · settings · http · region … |
+| `auth/` | 登录鉴权 |
+| `ai/` | 助手 / 对话 / 嵌入配置 |
+| `p115/` | 115 网盘 |
+| `prefix/` | 前缀目录 / STRM / harvest |
+| `scrap_library/` | 刮削库向量 / 补齐 / 头像 / 字幕 / 封面 |
+| `scrape/` | 源站配置与元数据优化（不含 details） |
+| `scrape_details/` | 各源站解析器 |
+| `scrape_maps_seed/` | 演员/标签映射种子 |
+| `search/` | 资源搜索 · sehua/bitmagnet · 收藏 · 论坛 |
+| `makers/` · `media/` · `translate/` | 片商目录 · 影视 · 翻译 |
+| `tests/` | 原 `app/test_*.py` |
 
-| 路径 | 判定 | 说明 |
-|------|------|------|
-| `apps/web` · `apps/api` | ✅ | 前后端分离清晰 |
-| `apps/api/app/scrape_maps_seed/` | ✅ | 默认可交付；体积小 |
-| `data/scrape_maps/` | ✅ | 本机大表/人工修正；优先于 seed |
-| `media/` | ✅ | 与 `data/` 职责分离 |
-| `apps/api/_local_refs/mdcx/` | ✅ | MDCX 源材料；脚本默认识别 |
-| `docs/` | ✅ | 长文档集中，避免散落 |
-| `backups/` | ✅ | 整理/迁移快照；gitignore |
-| `apps/data/` | ❌ 已清理 | 曾误放，程序从不读取 |
-| `apps/api/_gap_reports/` | ❌ 应保持清理 | 探针输出；备份在 `backups/workspace-*` |
+入口仍为 [`apps/api/app/main.py`](../apps/api/app/main.py)，导入形如 `from app.scrap_library.embed_routes import …`。
 
 ## 进 git / 不进 git
 
-**进 git**
+**进 git**：`apps/**` 业务与种子、脚本、`docs/**`、`config/app.json`、根 README / Docker。
 
-- `apps/**` 业务与种子映射、脚本
-- `docs/**`
-- `config/app.json`（及示例）
-- 根 `README`、compose、Dockerfile
-
-**不进 git**（见 `.gitignore`）
-
-- `data/scrape_maps/`、`data/scrap_facets_snap/`、`data/meta/`、`data/prefix_catalog/` …
-- `media/**`
-- `apps/api/_local_refs/`、`apps/api/_gap_reports/`、`apps/api/_*.py|json|…`
-- `backups/`、`.refs/`、`.agents/`、`.workbuddy/`、`.env*.local`
+**不进 git**：`data/scrape_maps/`、`media/**`、`apps/api/_local_refs/`、`apps/api/_gap_reports/`、`apps/api/_*.py|json…`、`backups/`、`.refs/` 等。
 
 ## 禁止
 
-- 不要在**仓库外**路径批量整理/删除
+- 不要在仓库外路径批量整理/删除
 - 不要删 `media/`、`data/meta`、`data/prefix_catalog`、Postgres
-- 不要把大批探针结果再提交进 `apps/api/app/`
+- 不要把探针探针结果再塞回 `apps/api/app/`
 
-## `apps/` 内部清晰度
-
-### `apps/web` — 清晰
+## `apps/web`
 
 ```
-src/
-├── app/          # Next 路由壳
-├── features/     # 按业务：home / makers / media / settings / …
-├── components/   # 通用 UI
-├── shell/        # Tab / AppShell
-├── lib/ · hooks/ · config/ · types/
+src/app · features/ · components/ · shell/ · lib/
 ```
 
-按功能域分包，和 Tab 一致。主要负担是超大 `app-ui.css`（样式未按 feature 拆）。
+按 Tab/业务域分包，结构清晰。主要负担是超大 `app-ui.css`。
 
-### `apps/api` — 顶层合理，`app/` 偏平
+## 本机运行时
 
-```
-api/
-├── app/                 # ~100 个 .py 几乎全摊在根上
-│   ├── scrape_details/  # 按站点拆源（清晰）
-│   └── scrape_maps_seed/
-├── scripts/             # 运维脚本
-└── _local_refs/         # 本机参考
-```
-
-合理处：`scrape_details/`、大致的 `*_routes` / `*_store` / `*_client` 命名。
-
-不清处：
-
-1. `app/` 根平铺过多 — prefix / scrap_library / p115 / ai / search 靠文件名前缀分区，文件夹边界弱
-2. `scrap_*` 与 `scrape_*` 双轨命名易混
-3. `test_*.py` 与业务同目录，未独立 `tests/`
-4. 探针文件易回流 `api/` 根（`_tmp_*`、`_gap_reports`）
-
-日后若重构，可按域建子包（不必一次拆完），例如 `core/`、`scrap_library/`、`prefix/`、`p115/`、`ai/`、`search/`。
+见 [local-runtime.md](./local-runtime.md)、[scrape-maps.md](./scrape-maps.md)。

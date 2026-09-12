@@ -23,15 +23,15 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=0)
     args = ap.parse_args()
 
-    from app.db import init_db, get_meta_pool
-    from app.scrap_library_embed import TABLE, ensure_schema
-    from app.scrap_library_nfo import content_sha
-    from app.scrape_metadata_optimize import (
+    from app.core.db import init_db, get_meta_pool
+    from app.scrap_library.embed import TABLE, ensure_schema
+    from app.scrap_library.nfo import content_sha
+    from app.scrape.metadata_optimize import (
         clear_map_cache,
         polish_actress_names,
         actor_maps_loaded,
     )
-    from app.ai_config import resolve_embed_config
+    from app.ai.config import resolve_embed_config
 
     init_db()
     ensure_schema()
@@ -40,7 +40,7 @@ def main() -> int:
     print(f"map={maps}", flush=True)
 
     try:
-        from app.scrap_library_enrich import _clean_actors
+        from app.scrap_library.enrich import _clean_actors
     except Exception:  # noqa: BLE001
         def _clean_actors(xs):  # type: ignore
             return [str(x).strip() for x in (xs or []) if str(x or "").strip()]

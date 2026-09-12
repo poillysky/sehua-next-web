@@ -16,7 +16,7 @@ from app import pg  # noqa: E402
 from app import prefix_catalog_store as store  # noqa: E402
 from app import prefix_maker_names as names  # noqa: E402
 from app import prefix_ranges as pr  # noqa: E402
-from app.search_av import (  # noqa: E402
+from app.search.av import (  # noqa: E402
     _clamp_std_code_digits,
     code_sort_key,
     extract_maker_codes,

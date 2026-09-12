@@ -29,44 +29,42 @@ import psycopg
 
 
 
-from .auth_routes import (
+from app.auth.routes import (
     require_admin,
     require_user,
     router as auth_router,
 )
 
-from .bootstrap import seed_admin_from_config, seed_settings_from_config
+from app.core.bootstrap import seed_admin_from_config, seed_settings_from_config
 
-from .config_loader import config_paths
+from app.core.config_loader import config_paths
 
-from .db import close_meta_pool, init_db, meta_dsn_label
+from app.core.db import close_meta_pool, init_db, meta_dsn_label
 
-from .pg import close_pool
-from .bitmagnet_pg import close_pool as close_bitmagnet_pool
+from app.core.pg import close_pool
+from app.search.bitmagnet_pg import close_pool as close_bitmagnet_pool
 
-from .resource_routes import router as resource_router
-from .conn_settings_routes import router as conn_settings_router
-from .ai_settings_routes import router as ai_settings_router
-from .ai_chat_routes import router as ai_chat_router
-from .ai_assistant_routes import router as ai_assistant_router
-from .ai_chat_preset_routes import router as ai_chat_preset_router
-from .magnet_routes import router as magnet_router
-from .pansou_routes import router as pansou_router
-from .cloudsaver_routes import router as cloudsaver_router
-from .translate_routes import router as translate_router
-from .cover_focus_routes import router as cover_focus_router
-from .media_routes import router as media_router
-from .makers_catalog_routes import router as makers_catalog_router
-from .prefix_catalog_routes import router as prefix_catalog_router
-from .scrap_library_embed_routes import router as scrap_library_embed_router
-from .scrape_sources_routes import router as scrape_sources_router
-from .favorites_routes import router as favorites_router
+from app.search.resource_routes import router as resource_router
+from app.core.conn_settings_routes import router as conn_settings_router
+from app.ai.settings_routes import router as ai_settings_router
+from app.ai.chat_routes import router as ai_chat_router
+from app.ai.assistant_routes import router as ai_assistant_router
+from app.ai.chat_preset_routes import router as ai_chat_preset_router
+from app.search.magnet_routes import router as magnet_router
+from app.search.pansou_routes import router as pansou_router
+from app.search.cloudsaver_routes import router as cloudsaver_router
+from app.translate.routes import router as translate_router
+from app.scrap_library.cover_focus_routes import router as cover_focus_router
+from app.media.routes import router as media_router
+from app.makers.catalog_routes import router as makers_catalog_router
+from app.prefix.catalog_routes import router as prefix_catalog_router
+from app.scrap_library.embed_routes import router as scrap_library_embed_router
+from app.scrape.sources_routes import router as scrape_sources_router
+from app.search.favorites_routes import router as favorites_router
 
-from . import (
-    pg_data_backup,
-    prefix_ranges,
-    settings_store,
-)
+import app.core.pg_data_backup as pg_data_backup
+import app.prefix.ranges as prefix_ranges
+import app.core.settings_store as settings_store
 
 
 
@@ -127,7 +125,7 @@ async def lifespan(_app: FastAPI):
     seed_admin_from_config()
     seed_settings_from_config()
     prefix_ranges.start_daily_scheduler()
-    from .outbound_http import start_flare_monitor, stop_flare_monitor
+    from app.core.outbound_http import start_flare_monitor, stop_flare_monitor
 
     start_flare_monitor()
     yield
@@ -447,7 +445,7 @@ class ResourceDbEmbedStartBody(BaseModel):
 def resource_db_embed_stats(
     _user: dict[str, Any] = Depends(require_admin),
 ) -> Envelope:
-    from . import sehua_resource_embed_svc as embed_svc
+    import app.search.sehua_resource_embed_svc as embed_svc
 
     try:
         return Envelope(data=embed_svc.stats())
@@ -459,7 +457,7 @@ def resource_db_embed_stats(
 def resource_db_embed_status(
     _user: dict[str, Any] = Depends(require_admin),
 ) -> Envelope:
-    from . import sehua_resource_embed_svc as embed_svc
+    import app.search.sehua_resource_embed_svc as embed_svc
 
     return Envelope(data=embed_svc.get_job_status())
 
@@ -469,7 +467,7 @@ def resource_db_embed_start(
     body: ResourceDbEmbedStartBody,
     _user: dict[str, Any] = Depends(require_admin),
 ) -> Envelope:
-    from . import sehua_resource_embed_svc as embed_svc
+    import app.search.sehua_resource_embed_svc as embed_svc
 
     _resource_dsn_or_400()
     try:
@@ -485,7 +483,7 @@ def resource_db_embed_start(
 def resource_db_embed_stop(
     _user: dict[str, Any] = Depends(require_admin),
 ) -> Envelope:
-    from . import sehua_resource_embed_svc as embed_svc
+    import app.search.sehua_resource_embed_svc as embed_svc
 
     return Envelope(data=embed_svc.request_stop(), message="正在暂停")
 
@@ -494,7 +492,7 @@ def resource_db_embed_stop(
 def resource_db_embed_create_index(
     _user: dict[str, Any] = Depends(require_admin),
 ) -> Envelope:
-    from . import sehua_resource_embed_svc as embed_svc
+    import app.search.sehua_resource_embed_svc as embed_svc
 
     _resource_dsn_or_400()
     try:
@@ -595,7 +593,7 @@ class BitmagnetDbEmbedStartBody(BaseModel):
 def bitmagnet_db_embed_stats(
     _user: dict[str, Any] = Depends(require_admin),
 ) -> Envelope:
-    from . import bitmagnet_embed_svc as embed_svc
+    import app.search.bitmagnet_embed_svc as embed_svc
 
     try:
         return Envelope(data=embed_svc.stats())
@@ -607,7 +605,7 @@ def bitmagnet_db_embed_stats(
 def bitmagnet_db_embed_status(
     _user: dict[str, Any] = Depends(require_admin),
 ) -> Envelope:
-    from . import bitmagnet_embed_svc as embed_svc
+    import app.search.bitmagnet_embed_svc as embed_svc
 
     return Envelope(data=embed_svc.get_job_status())
 
@@ -617,7 +615,7 @@ def bitmagnet_db_embed_start(
     body: BitmagnetDbEmbedStartBody,
     _user: dict[str, Any] = Depends(require_admin),
 ) -> Envelope:
-    from . import bitmagnet_embed_svc as embed_svc
+    import app.search.bitmagnet_embed_svc as embed_svc
 
     _bitmagnet_dsn_or_400()
     try:
@@ -633,7 +631,7 @@ def bitmagnet_db_embed_start(
 def bitmagnet_db_embed_stop(
     _user: dict[str, Any] = Depends(require_admin),
 ) -> Envelope:
-    from . import bitmagnet_embed_svc as embed_svc
+    import app.search.bitmagnet_embed_svc as embed_svc
 
     return Envelope(data=embed_svc.request_stop(), message="正在暂停")
 
@@ -642,7 +640,7 @@ def bitmagnet_db_embed_stop(
 def bitmagnet_db_embed_create_index(
     _user: dict[str, Any] = Depends(require_admin),
 ) -> Envelope:
-    from . import bitmagnet_embed_svc as embed_svc
+    import app.search.bitmagnet_embed_svc as embed_svc
 
     _bitmagnet_dsn_or_400()
     try:
