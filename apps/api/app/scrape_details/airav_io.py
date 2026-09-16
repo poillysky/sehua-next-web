@@ -7,6 +7,8 @@ import json
 import re
 from urllib.parse import quote
 
+from app.core import detail_path_cache
+
 from .common import (
     abs_url,
     clean_title,
@@ -375,6 +377,28 @@ def scrape_detail(
     cn_base = _normalize_cn_base(base_url or DEFAULT_BASE)
     ck = cookie or None
 
+    # 第十六轮：详情路径缓存命中（hid 对同番号实测稳定）→ 直接抓详情，
+    # 跳过搜索；页面校验不过回落搜索并刷新缓存。坏缓存最多浪费 1 请求。
+    cached_href = detail_path_cache.lookup(SOURCE, normalized)
+    if cached_href:
+        try:
+            cached_url = _cn_video_url(cached_href, cn_base)
+            if cached_url:
+                cached_html, cached_landed = fetch_html_result(
+                    cached_url, referer=f"{cn_base}/", cookie=ck, source_id=SOURCE
+                )
+                if cached_html and airav_detail_code_ok(cached_html, normalized):
+                    cached_page = cached_landed or cached_url
+                    if cached_page and not re.search(r"/cn/", cached_page, re.I):
+                        cached_page = _cn_video_url(cached_page, cn_base) or cached_page
+                    cached_parsed = parse_airav_io_detail(
+                        cached_html, cached_page, normalized
+                    )
+                    if cached_parsed:
+                        return cached_parsed
+        except Exception:
+            pass  # 缓存失效 → 走下方完整搜索流程
+
     search_url = f"{cn_base}/search_result?kw={quote(normalized)}"
     search_html, landed = fetch_html_result(
         search_url, referer=f"{cn_base}/", cookie=ck, source_id=SOURCE
@@ -384,6 +408,8 @@ def scrape_detail(
     hid_href = pick_airav_hid_from_search(search_html, normalized)
     if not hid_href:
         raise RuntimeError("未找到")
+    # 第十六轮：记住 hid（实测稳定），重复刮直接走缓存跳过搜索
+    detail_path_cache.remember(SOURCE, normalized, hid_href)
 
     detail_url = _cn_video_url(hid_href, landed_base or cn_base)
     if not detail_url:

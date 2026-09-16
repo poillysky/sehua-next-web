@@ -5,103 +5,19 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from typing import Any
+from app.core.maps_paths import load_json_map
 
 from app.search.constants import escape_ilike
 
-WESTERN_STUDIO_PREFIXES = {
-    s.upper()
-    for s in (
-        "BRAZZERS",
-        "BLACKED",
-        "BLACKEDRAW",
-        "TUSHY",
-        "TUSHYRAW",
-        "VIXEN",
-        "DEEPER",
-        "REALITYKINGS",
-        "RK",
-        "RKPRIME",
-        "NAUGHTYAMERICA",
-        "BANGBROS",
-        "BANGBUS",
-        "MOFOS",
-        "FAKETAXI",
-        "FAKEHUB",
-        "EVILANGEL",
-        "JULESJORDAN",
-        "PURETABOO",
-        "ADULTTIME",
-        "DORCEL",
-        "DORCELCLUB",
-        "PRIVATE",
-        "ONLYFANS",
-        "MANYVIDS",
-        "DIGITALPLAYGROUND",
-        "ELEGANTANGEL",
-        "LETHALHARDCORE",
-        "ANALVIDS",
-        "KINK",
-        "PUBLICAGENT",
-        "FAMILYSTROKES",
-        "TEAMSKEET",
-        "BRATTYSIS",
-        "NUBILES",
-        "NUBILEFILMS",
-        "LEGALPORNO",
-        "SEXMEX",
-        "PORNWORLD",
-        "MILFY",
-        "WICKED",
-        "SEXART",
-        "WATCH4BEAUTY",
-        "PLAYBOYPLUS",
-    )
-}
 
-DATE6_PREFIX_LABEL = {
-    "CARIB": "CARIB",
-    "CARIBBEAN": "CARIB",
-    "CARIBBEANCOM": "CARIB",
-    "CARIBPR": "CARIBPR",
-    "1PON": "1PON",
-    "1PONDO": "1PON",
-    "PACO": "PACO",
-    "PACOPACOMAMA": "PACO",
-    "10MU": "10MU",
-    "10MUSUME": "10MU",
-}
-
-# 索引 / 解析统一 canonical：别名输入 → 规范前缀
-PREFIX_CANONICAL: dict[str, str] = {
-    **DATE6_PREFIX_LABEL,
-    "GACHI": "GACHI",
-    "GACHINCO": "GACHI",
-    "TOKYOHOT": "TOKYOHOT",
-    "TOKYO-HOT": "TOKYOHOT",
-}
-
-PREFIX_SHAPE: dict[str, str] = {
-    "FC2": "fc2",
-    "FC2PPV": "fc2ppv",
-    "H0930": "alnum_id",
-    "C0930": "alnum_id",
-    "H4610": "alnum_id",
-    "KIN8": "std",
-    "GACHI": "std",
-    "GACHINCO": "std",
-}
-for p in DATE6_PREFIX_LABEL:
-    PREFIX_SHAPE[p] = "date6"
-for p in WESTERN_STUDIO_PREFIXES:
-    PREFIX_SHAPE[p] = "western_date"
-
-UNCENSORED_PREFIX_RE = re.compile(
-    r"^(FC2|CARIB|1PON|HEYZO|TOKYO|PACO|KIN8|H0930|C0930|H4610|10MU|GACHI|COSPURI|XXX)",
-    re.I,
-)
+_SHAPE_DOC = load_json_map("prefix-code-shapes.json")
+WESTERN_STUDIO_PREFIXES = set(_SHAPE_DOC.get("westernPrefixes") or [])
+DATE6_PREFIX_LABEL: dict[str, str] = dict(_SHAPE_DOC.get("date6Labels") or {})
+PREFIX_CANONICAL: dict[str, str] = dict(_SHAPE_DOC.get("canonical") or {})
+PREFIX_SHAPE: dict[str, str] = dict(_SHAPE_DOC.get("shapes") or {})
 
 
-@dataclass
+@dataclass(frozen=True)
 class ParsedMakerCode:
     shape: str
     canonical: str
@@ -175,9 +91,9 @@ def _ensure_western_from_config() -> None:
         return
     _western_config_loaded = True
     try:
-        from app.core.db import ROOT
+        from app.core.maps_paths import av_makers
 
-        path = ROOT / "apps" / "web" / "src" / "config" / "av-makers.western.json"
+        path = av_makers("western")
         if not path.exists():
             return
         import json

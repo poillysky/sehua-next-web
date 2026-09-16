@@ -27,6 +27,21 @@ def test_actor_echo():
     assert not _title_is_actor_echo("无胸罩走光", ["木村愛心"])
 
 
+def test_actor_echo_tolerates_glyph_variants():
+    """标题是源站日文写法、actors 是映射表标准名时也要判出「只是人名」。
+
+    `pick_forum_seed_from_posts()` 会把 actors 过一遍 `normalize_actor_names()`
+    （`木村愛心` → `木村爱心`），而标题仍是源站写法 → 只 casefold 会漏判，
+    女优名就会冒充中文片名（本模块存在的意义）。
+    """
+    assert _title_is_actor_echo("木村愛心", ["木村爱心"])
+    assert _title_is_actor_echo("木村爱心", ["木村愛心"])
+    # 片假名/平假名写法差异同理
+    assert _title_is_actor_echo("倉本スミレ", ["倉本すみれ"])
+    # 不同人不得误判
+    assert not _title_is_actor_echo("木村愛心", ["花咲澪"])
+
+
 def test_finalize_drops_bare_actor_even_without_ja():
     assert (
         _finalize_seed_title(
@@ -63,6 +78,15 @@ def test_finalize_prefers_ja_over_actor_name():
 
 
 def test_pick_seed_keeps_japanese_when_zh_is_actress():
+    """女优名（源站日文写法）不能当中文片名 —— 标题必须让给日文正片。
+
+    actors 出口是**映射表标准名**：`apps/maps/scrape/actors.zh-CN.json` 登记了
+    `木村愛心 → 木村爱心`，而 `pick_forum_seed_from_posts()` 出口显式过
+    `normalize_actor_names()`（"索引展示默认开映射"）。标准文档
+    `docs/E2E_SCRAPE_STANDARD.md`：跨源异写「有表用 canon，无表折叠字形，不强制中文」，
+    且硬失败只看错人 / 同人未收敛 / 错绑 —— 字形折叠成表内标准名不算失败。
+    故此处断言 canon 形式；「不让人名盖掉正片标题」由下面的标题断言保证。
+    """
     ja = (
         "ノーブラ！ポロリ！透け乳首！死ぬほどシコれるLcup"
         "エロスシチュエーション無防備着衣おっぱいで全力誘惑！木村愛心"
@@ -81,6 +105,7 @@ def test_pick_seed_keeps_japanese_when_zh_is_actress():
         ],
         want_actors=True,
     )
-    assert seed["actors"] == ["木村愛心"]
+    assert seed["actors"] == ["木村爱心"], seed["actors"]
     assert "ノーブラ" in seed["title"]
     assert seed["title"] != "木村愛心"
+    assert seed["title"] != "木村爱心"

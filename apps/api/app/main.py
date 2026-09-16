@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import logging
 import os
-
 from contextlib import asynccontextmanager
 
 from typing import Any
@@ -40,6 +39,8 @@ from app.core.bootstrap import seed_admin_from_config, seed_settings_from_config
 from app.core.config_loader import config_paths
 
 from app.core.db import close_meta_pool, init_db, meta_dsn_label
+
+log = logging.getLogger(__name__)
 
 from app.core.pg import close_pool
 from app.search.bitmagnet_pg import close_pool as close_bitmagnet_pool
@@ -124,6 +125,14 @@ async def lifespan(_app: FastAPI):
     init_db()
     seed_admin_from_config()
     seed_settings_from_config()
+    # 刮削策略迁移（补 regionSources / 升 coverLogicVersion）落库一次。
+    # 放在启动期：`get_strategy()` 是纯读，不再在 GET/每番号路径上写库。
+    try:
+        from app.scrap_library import enrich_strategy as _enrich_strategy
+
+        _enrich_strategy.migrate_strategy_settings()
+    except Exception as e:  # noqa: BLE001
+        log.warning("enrich strategy migrate skipped: %s", e)
     prefix_ranges.start_daily_scheduler()
     from app.core.outbound_http import start_flare_monitor, stop_flare_monitor
 

@@ -18,6 +18,7 @@ from .common import (
     soup,
     strip_tags,
 )
+from app.core import detail_path_cache
 
 DEFAULT_BASE = "https://madouqu.com"
 
@@ -135,6 +136,37 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
     compact = _madou_compact(std)
     want = compact.lower()
 
+    def _finish(abs_u: str, referer: str) -> dict | None:
+        """抓详情 + 解析 + 构造（搜索路径与缓存路径共用）。"""
+        try:
+            detail_html = fetch_html(abs_u, referer=referer, cookie=cookie or None, source_id="madouqu")
+        except Exception:
+            return None
+        parsed = _parse_detail(detail_html, abs_u, std)
+        if parsed and (parsed.get("title") or parsed.get("cover")):
+            return make_detail(
+                source="madouqu",
+                code=std,
+                title=parsed.get("title"),
+                poster=parsed.get("cover"),
+                studio=parsed.get("studio"),
+                actors=parsed.get("actors") or [],
+                date=parsed.get("premiered"),
+                extra={"titleZh": parsed.get("title")},
+            )
+        return None
+
+    # 第十六轮：详情路径缓存命中 → 直接抓详情，跳过搜索（重复刮省 1-2 请求）。
+    # _parse_detail 校验不过返回 None → 回落搜索；坏缓存最多浪费 1 请求。
+    cached_url = detail_path_cache.lookup("madouqu", std)
+    if cached_url:
+        try:
+            cached_got = _finish(cached_url, f"{base}/")
+            if cached_got:
+                return cached_got
+        except Exception:
+            pass  # 缓存失效 → 回落搜索
+
     for q in list(dict.fromkeys([std, compact])):
         search_url = f"{base}/?s={quote(q)}"
         try:
@@ -162,22 +194,11 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
         abs_u = abs_url(detail_url, base)
         if not abs_u:
             continue
-        try:
-            detail_html = fetch_html(abs_u, referer=search_url, cookie=cookie or None, source_id="madouqu")
-        except Exception:
-            continue
-        parsed = _parse_detail(detail_html, abs_u, std)
-        if parsed and (parsed.get("title") or parsed.get("cover")):
-            return make_detail(
-                source="madouqu",
-                code=std,
-                title=parsed.get("title"),
-                poster=parsed.get("cover"),
-                studio=parsed.get("studio"),
-                actors=parsed.get("actors") or [],
-                date=parsed.get("premiered"),
-                extra={"titleZh": parsed.get("title")},
-            )
+        got = _finish(abs_u, search_url)
+        if got:
+            # 第十六轮：记住详情 URL，重复刮直接走缓存跳过搜索
+            detail_path_cache.remember("madouqu", std, abs_u)
+            return got
 
     for slug in list(dict.fromkeys([std.lower(), want])):
         url = f"{base}/video/{quote(slug)}/"

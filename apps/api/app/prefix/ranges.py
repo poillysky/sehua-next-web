@@ -1,7 +1,7 @@
 """番号前缀 1..N 上限：按库内最大流水号估算，每日 00:00 增量刷新。
 
-运行时缓存：`data/prefix-code-ranges.json`（可写，不依赖 Next 打包）。
-种子：`apps/web/src/config/prefix-code-ranges.json`（首次无缓存时拷贝）。
+运行时缓存：`data/prefix/code-ranges.json`（可写，不依赖 Next 打包）。
+种子：`apps/maps/prefixes/code-ranges.json`（首次无缓存时拷贝）。
 """
 
 from __future__ import annotations
@@ -16,7 +16,8 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from app.core.db import ROOT, data_dir
+from app.core.db import ROOT, prefix_code_ranges_cache
+from app.core.maps_paths import av_makers_all, prefix_code_ranges_seed, load_json_map
 
 log = logging.getLogger(__name__)
 
@@ -31,112 +32,14 @@ SERIAL_GAP_ABS_CAP = 120
 SERIAL_CLUSTER_MIN = 3
 SERIAL_CLUSTER_MIN_FRAC = 0.05
 
-WEB_SEED = (
-    ROOT / "apps" / "web" / "src" / "config" / "prefix-code-ranges.json"
-)
-MAKERS_FILES = (
-    ROOT / "apps" / "web" / "src" / "config" / "av-makers.japan.json",
-    ROOT / "apps" / "web" / "src" / "config" / "av-makers.china.json",
-    ROOT / "apps" / "web" / "src" / "config" / "av-makers.western.json",
-)
+WEB_SEED = prefix_code_ranges_seed()
+MAKERS_FILES = av_makers_all()
 
-SKIP_PREFIXES = {
-    "FC2",
-    "FC2PPV",
-    "CARIB",
-    "CARIBPR",
-    "1PON",
-    "HEYZO",
-    "TOKYOHOT",
-    "H0930",
-    "C0930",
-    "H4610",
-    "10MU",
-    "PACO",
-    "XXX-AV",
-    "HEYDOUGA",
-    "MESUBUTA",
-    "KIN8",
-    "SPERMMANIA",
-    "RHJ",
-    "GACHINCO",
-    "COSPURI",
-    "BRAZZERS",
-    "BLACKED",
-    "BLACKEDRAW",
-    "TUSHY",
-    "VIXEN",
-    "DEEPER",
-    "REALITYKINGS",
-    "RK",
-    "NAUGHTYAMERICA",
-    "BANGBROS",
-    "BANGBUS",
-    "MOFOS",
-    "FAKETAXI",
-    "FAKEHUB",
-    "EVILANGEL",
-    "JULESJORDAN",
-    "ADULTTIME",
-    "DORCEL",
-    "PRIVATE",
-    "ONLYFANS",
-    "MANYVIDS",
-    "DIGITALPLAYGROUND",
-    "ELEGANTANGEL",
-    "LETHALHARDCORE",
-    "ANALVIDS",
-    "KINK",
-    "PUBLICAGENT",
-    "FAMILYSTROKES",
-    "TEAMSKEET",
-    "BRATTYSIS",
-    "NUBILES",
-    "NUBILEFILMS",
-    "LEGALPORNO",
-    "TUSHYRAW",
-    "RKPRIME",
-    "SEXMEX",
-    "PORNWORLD",
-    "MILFY",
-    "WICKED",
-    "SEXART",
-    "WATCH4BEAUTY",
-    "PLAYBOYPLUS",
-    "DORCELCLUB",
-    "JVID",
-}
 
-NOISE = {
-    "HD",
-    "FHD",
-    "UHD",
-    "MP4",
-    "AVI",
-    "MKV",
-    "WMV",
-    "CH",
-    "CD",
-    "PART",
-    "VOL",
-    "DVD",
-    "ISO",
-    "X264",
-    "X265",
-    "HEVC",
-    "AAC",
-    "H264",
-    "H265",
-    "WEB",
-    "DL",
-    "BD",
-    "PDF",
-    "ZIP",
-    "RAR",
-    "THE",
-    "AND",
-    "FOR",
-}
+_SHAPE_DOC = load_json_map("prefix-code-shapes.json")
+SKIP_PREFIXES = set(_SHAPE_DOC.get("skipPrefixes") or [])
+NOISE = set(_SHAPE_DOC.get("noiseTokens") or [])
+
 
 CODE_RE = re.compile(
     r"(?:^|[^A-Z0-9\-_])([A-Z]{2,12}|\d{2,3}[A-Z]{2,10}|[A-Z]+\d+[A-Z]*)[-_\s]?(\d{2,6})(?![0-9])",
@@ -150,7 +53,7 @@ _thread: threading.Thread | None = None
 
 
 def cache_path() -> Path:
-    return data_dir() / "prefix-code-ranges.json"
+    return prefix_code_ranges_cache()
 
 
 def norm_prefix(prefix: str) -> str:
@@ -215,7 +118,9 @@ def load_china_prefixes() -> set[str]:
     global _china_prefixes_cache
     if _china_prefixes_cache is not None:
         return _china_prefixes_cache
-    path = ROOT / "apps" / "web" / "src" / "config" / "av-makers.china.json"
+    from app.core.maps_paths import av_makers
+
+    path = av_makers("china")
     out: set[str] = set()
     if path.exists():
         try:

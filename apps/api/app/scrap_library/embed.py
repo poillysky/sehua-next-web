@@ -46,9 +46,80 @@ _job: dict[str, Any] = {
     "result": None,
     "error": None,
 }
+_job_hydrated = False
+_job_hydrate_lock = threading.Lock()
+
+
+def _persist_embed_job(**extra: Any) -> None:
+    try:
+        from app.core import job_persist
+
+        with _job_lock:
+            payload = {
+                "status": "running" if _job.get("running") else str(extra.get("status") or _job.get("phase") or "idle"),
+                "phase": str(_job.get("phase") or ""),
+                "progress": dict(_job.get("progress") or {}) or None,
+                "log": list(_job.get("log") or [])[-40:],
+                "result": _job.get("result"),
+                "error": _job.get("error"),
+                "running": bool(_job.get("running")),
+            }
+        for k, v in extra.items():
+            if k == "status" and _job.get("running"):
+                payload["status"] = "running"
+            else:
+                payload[k] = v
+        if payload.get("running"):
+            payload["status"] = "running"
+        job_persist.save_job(job_persist.EMBED_JOB_KEY, payload)
+    except Exception as e:  # noqa: BLE001
+        log.warning("persist embed job failed: %s", e)
+
+
+def _hydrate_embed_job(*, force: bool = False) -> dict[str, Any]:
+    """从 DB 恢复上次任务快照；若上次崩溃中 running→interrupted。"""
+    global _job_hydrated
+    with _job_hydrate_lock:
+        if _job_hydrated and not force:
+            return {}
+        _job_hydrated = True
+    try:
+        from app.core import job_persist
+
+        raw = job_persist.load_job(job_persist.EMBED_JOB_KEY)
+        if not raw:
+            return {}
+        with _job_lock:
+            if _job.get("running"):
+                return raw
+            if not _job.get("phase") and raw.get("phase"):
+                _job["phase"] = str(raw.get("phase") or "")
+            if not _job.get("progress") and raw.get("progress"):
+                _job["progress"] = dict(raw.get("progress") or {})
+            if not _job.get("log") and raw.get("log"):
+                _job["log"] = list(raw.get("log") or [])[-40:]
+            if _job.get("result") is None and raw.get("result") is not None:
+                _job["result"] = raw.get("result")
+            if not _job.get("error") and raw.get("error"):
+                _job["error"] = raw.get("error")
+            st = str(raw.get("status") or "")
+            if st == "running":
+                _job["phase"] = "interrupted"
+                prog = dict(_job.get("progress") or {})
+                prog["label"] = "进程中断 · 可继续"
+                _job["progress"] = prog
+                raw = dict(raw)
+                raw["status"] = "interrupted"
+                raw["running"] = False
+                job_persist.save_job(job_persist.EMBED_JOB_KEY, raw)
+        return raw
+    except Exception as e:  # noqa: BLE001
+        log.warning("hydrate embed job failed: %s", e)
+        return {}
 
 
 def get_job_status() -> dict[str, Any]:
+    _hydrate_embed_job()
     with _job_lock:
         return {
             "running": bool(_job["running"]),
@@ -101,16 +172,38 @@ def put_settings(*, root: str) -> dict[str, Any]:
     return out
 
 
+# `resolve_root()` 的进程内记忆化表：输入串 → 已解析绝对路径。
+# 见函数 docstring：它在**每个番号**上被反复调用，且 `.resolve()` 要过文件系统。
+_ROOT_CACHE: dict[str, Path] = {}
+_ROOT_CACHE_MAX = 256
+
+
 def resolve_root(raw: str | None = None) -> Path:
+    """片库相对根 → 绝对路径。
+
+    ⚠️ 纯函数（只依赖入参 + 模块常量 `DEFAULT_REL_ROOT` / `db.MEDIA_DIR`），
+    因此按输入串记忆化。`enrich_one_row` / `_finish_one` / `_download_covers`
+    **每个番号**都要调它一次以上，而 `(base / parts).resolve()` 会走文件系统
+    （实测 ~0.1ms，叠加 `media_dir()` 后单次 0.45ms）。
+    非法入参（相对路径含 `..`）在缓存之前就抛错，不会被记忆化成合法结果。
+    """
     text = str(raw or "").strip() or DEFAULT_REL_ROOT
+    hit = _ROOT_CACHE.get(text)
+    if hit is not None:
+        return hit
     p = Path(text)
     if p.is_absolute():
-        return p.resolve()
-    parts = [x for x in p.parts if x not in ("", ".")]
-    if any(x == ".." for x in parts):
-        raise ValueError("相对路径不能包含 ..")
-    base = media_dir()
-    return (base / Path(*parts)).resolve() if parts else base.resolve()
+        out = p.resolve()
+    else:
+        parts = [x for x in p.parts if x not in ("", ".")]
+        if any(x == ".." for x in parts):
+            raise ValueError("相对路径不能包含 ..")
+        base = media_dir()
+        out = (base / Path(*parts)).resolve() if parts else base.resolve()
+    if len(_ROOT_CACHE) >= _ROOT_CACHE_MAX:
+        _ROOT_CACHE.clear()
+    _ROOT_CACHE[text] = out
+    return out
 
 
 def _vec_literal(vec: list[float]) -> str:
@@ -261,6 +354,12 @@ def ensure_schema(*, recreate: bool = False) -> dict[str, Any]:
                         f"CREATE INDEX IF NOT EXISTS {TABLE}_code ON {TABLE} (code)"
                     )
         conn.commit()
+    try:
+        from app.scrap_library.actress_store import ensure_actress_schema
+
+        ensure_actress_schema()
+    except Exception as e:  # noqa: BLE001
+        log.warning("actress schema ensure failed: %s", e)
     return {"table": TABLE, "dim": dim, "meta_db": meta_dsn_label()}
 
 
@@ -882,10 +981,15 @@ def _embed_code_set(region: str = "") -> set[str]:
 def _shell_rel_path(region_label: str, prefix: str, code: str) -> str:
     from app.prefix.catalog_strm_sync import safe_name
 
+    label = str(region_label or "").strip()
+    code_u = str(code or "").strip()
+    # FC2 扁平：FC2/{CODE}（无制作商/无多余前缀层）
+    if label.casefold() in {"fc2", "fc2ppv"} or label.upper() == "FC2":
+        return f"{safe_name(label)}/{safe_name(code_u)}"
     return (
-        f"{safe_name(region_label)}/"
+        f"{safe_name(label)}/"
         f"{safe_name(prefix)}/"
-        f"{safe_name(code)}"
+        f"{safe_name(code_u)}"
     )
 
 
@@ -989,13 +1093,38 @@ def list_skeleton_shell_items(
     *,
     limit: int = 0,
     offset: int = 0,
+    prefer_prefixes: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """向量库空壳（仅骨架）队列项。"""
+    """向量库空壳（仅骨架）队列项。
+
+    prefer_prefixes：本地已有/热门前缀优先（空壳降权，避免全库按番号字母从头刮）。
+    """
     ensure_schema()
     off = max(0, int(offset or 0))
     lim = int(limit or 0)
     region_sql, params = _quality_region_sql(region)
+    prefs = [
+        str(p or "").strip().upper()
+        for p in (prefer_prefixes or [])
+        if str(p or "").strip()
+    ]
+    # 去重保序
+    seen_p: set[str] = set()
+    prefs_u: list[str] = []
+    for p in prefs:
+        if p in seen_p:
+            continue
+        seen_p.add(p)
+        prefs_u.append(p)
+    order_sql = "ORDER BY code ASC"
     sql_params: list[Any] = [*params]
+    if prefs_u:
+        # 热门前缀靠前，其余空壳殿后
+        order_sql = (
+            "ORDER BY CASE WHEN upper(prefix) = ANY(%s) THEN 0 ELSE 1 END, "
+            "code ASC"
+        )
+        sql_params.append(prefs_u)
     sql_limit = ""
     if lim > 0:
         sql_limit = " LIMIT %s OFFSET %s"
@@ -1011,7 +1140,7 @@ def list_skeleton_shell_items(
                    poster_path, thumb_path, cover_url, source_text, content_sha
             FROM {TABLE}
             WHERE {_SKELETON_SQL}{region_sql}
-            ORDER BY code ASC
+            {order_sql}
             {sql_limit}
             """,
             sql_params,
@@ -1366,7 +1495,7 @@ def _blank_pixels(im) -> list:
 
 
 def _blank_from_pixels(pixels: list) -> bool:
-    """低色彩多样性 / 近灰白平铺 → 视为空封面。"""
+    """低色彩多样性 / 近灰白平铺 / 近黑近白低方差 → 视为空封面。"""
     if not pixels:
         return True
     uniq = len({(p[0] >> 3, p[1] >> 3, p[2] >> 3) for p in pixels})
@@ -1379,6 +1508,12 @@ def _blank_from_pixels(pixels: list) -> bool:
         return True
     # 灰白占位（NOW PRINTING 一类）
     if min(means) > 175 and var < 900 and uniq <= 40:
+        return True
+    # 近白 / 近黑 + 低方差（亮度门）
+    mean_y = 0.299 * means[0] + 0.587 * means[1] + 0.114 * means[2]
+    if mean_y > 245 and var < 500:
+        return True
+    if mean_y < 12 and var < 500:
         return True
     return False
 
@@ -1410,12 +1545,21 @@ def _image_bytes_looks_blank(raw: bytes) -> bool:
 
 
 def _is_blank_cover_file(path: Path) -> bool:
-    """本地封面文件是否为源站空图占位。"""
+    """本地封面是否源站假图/占位/坏文件（NOW PRINTING、HTML 错误页等）。
+
+    真小图（矮 ps 常 &lt;12KB）必须保留；只靠像素多样性/灰白平铺判定。
+    **非图片容器**（无 JPEG/PNG/GIF/WEBP/BMP/AVIF 头）一律按坏封面处理 ——
+    否则 HTML 错误页会被当成有效封面长期挂在库里，既不会被重下也不会被修。
+    """
     try:
         size = path.stat().st_size
+        if size < 400:
+            return True
+        with open(path, "rb") as f:
+            head = f.read(16)
     except OSError:
         return True
-    if size < 12_000:
+    if not _image_magic_ok(head):
         return True
     if size >= 80_000:
         return False
@@ -1423,13 +1567,44 @@ def _is_blank_cover_file(path: Path) -> bool:
 
 
 def _is_blank_cover_bytes(raw: bytes) -> bool:
-    """内存版空图判定：阈值与 `_is_blank_cover_file` 完全一致。"""
+    """内存版假图判定：阈值与 `_is_blank_cover_file` 一致（不按体积误杀小图）。"""
     size = len(raw or b"")
-    if size < 12_000:
+    if size < 400:
+        return True
+    if not _image_magic_ok(raw):
         return True
     if size >= 80_000:
         return False
     return _image_bytes_looks_blank(raw)
+
+
+# 已知图片容器头。HTML / JSON 错误页没有这些头。
+def _image_magic_ok(raw: bytes) -> bool:
+    """字节是否带**图片容器头**（JPEG / PNG / GIF / WEBP / BMP / AVIF-ish）。
+
+    ⚠️ 为什么单靠 `_is_blank_cover_file()` 不够：它对「PIL 打不开」一律
+    `return False`（= 当作有效图，避免 PIL 缺编解码器时把所有封面误判成空白）。
+    于是源站返回的 **HTML 错误页（>1024B）会被当成合格封面落成 poster.jpg**，
+    而且 `>=80_000` 字节还会走体积豁免分支直接放行。
+    真实缺陷现场：`_write_poster_jpg(HTML 2482B)` → 落盘成功。
+    这里用**容器头**做廉价硬门禁（不解码、不依赖 PIL），挡掉非图片字节。
+    """
+    head = bytes(raw or b"")[:16]
+    if len(head) < 12:
+        return False
+    if head.startswith(b"\xff\xd8\xff"):  # JPEG
+        return True
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):  # PNG
+        return True
+    if head.startswith((b"GIF87a", b"GIF89a")):  # GIF
+        return True
+    if head.startswith(b"BM"):  # BMP
+        return True
+    if head[0:4] == b"RIFF" and head[8:12] == b"WEBP":  # WEBP
+        return True
+    if head[4:8] == b"ftyp" and head[8:12] in (b"avif", b"avis", b"mif1"):  # AVIF/HEIF
+        return True
+    return False
 
 
 # 拼贴选图缓存（rel → blank?）
@@ -1520,7 +1695,20 @@ _POSTER_DL_WORKERS = 3
 _poster_dl_q: queue.Queue[tuple[str, str, str]] | None = None
 _poster_dl_lock = threading.Lock()
 _poster_dl_inflight: set[str] = set()
+# 失败冷却表：item_id → 冷却截止时间戳。**必须设上限**，否则长跑大库会只增不减。
 _poster_dl_fail_until: dict[str, float] = {}
+_POSTER_DL_FAIL_CAP = 4096
+
+
+def _trim_poster_dl_fails() -> None:
+    """超上限时丢掉最早过期的一半（纯冷却表，丢失只会让某条早点重试）。"""
+    if len(_poster_dl_fail_until) < _POSTER_DL_FAIL_CAP:
+        return
+    doomed = sorted(_poster_dl_fail_until, key=_poster_dl_fail_until.get)[
+        : len(_poster_dl_fail_until) // 2
+    ]
+    for k in doomed:
+        _poster_dl_fail_until.pop(k, None)
 
 
 def _is_http_url(url: str) -> bool:
@@ -1528,24 +1716,39 @@ def _is_http_url(url: str) -> bool:
     return u.startswith("http://") or u.startswith("https://")
 
 
-def _fetch_cover_bytes(url: str) -> tuple[bytes, str] | None:
-    """复用封面代理拉图；失败返回 None（不抛到列表路径）。"""
-    try:
-        from app.scrap_library.cover_focus_routes import _fetch_bytes
+def _fetch_cover_bytes(
+    url: str, *, slot_timeout: float | None = None
+) -> tuple[bytes, str] | None:
+    """刮削落盘用拉图；走 enrich 专用闸门，不与列表封面代理抢槽。
 
-        data, ctype = _fetch_bytes(url)
-        if not data or len(data) < 1024:
-            return None
-        return data, ctype or "image/jpeg"
+    slot_timeout：抢槽秒数。槽超时抛 TimeoutError（上层可记 slot_blocked）；
+    其它错误返回 None。
+    """
+    from app.scrap_library.cover_focus_routes import _fetch_bytes_for_enrich
+
+    to = 8.0 if slot_timeout is None else float(slot_timeout)
+    try:
+        data, ctype = _fetch_bytes_for_enrich(url, timeout=to)
+    except TimeoutError:
+        raise
     except Exception as e:  # noqa: BLE001
         log.debug("scrap poster download fetch failed: %s", e)
         return None
+    if not data or len(data) < 1024:
+        return None
+    return data, ctype or "image/jpeg"
 
 
 def _write_poster_jpg(folder: Path, data: bytes) -> Path | None:
     """写入番号目录 poster.jpg；成功返回路径。"""
     try:
-        folder.mkdir(parents=True, exist_ok=True)
+        # 先挡非图片字节：HTML / JSON 错误页必须在这里被拒，不能落成 poster.jpg
+        # （`_is_blank_cover_file` 对「PIL 打不开」返回 False，单靠它会放行）。
+        if not _image_magic_ok(data):
+            log.debug("scrap poster reject: not an image container")
+            return None
+        if not folder.is_dir():
+            folder.mkdir(parents=True, exist_ok=True)
         dest = folder / "poster.jpg"
         tmp = folder / "poster.jpg.part"
         tmp.write_bytes(data)
@@ -1576,8 +1779,12 @@ def download_remote_poster(
     cover_url: str,
     *,
     media_root: Path | None = None,
+    crop_mode: str | None = None,
 ) -> str:
-    """本地缺/空 poster 时，把远程 cover 落到 folder/poster.jpg，返回 media 相对路径。"""
+    """本地缺/空 poster 时，把远程 cover 落到 folder/poster.jpg，返回 media 相对路径。
+
+    横图会按分区走 smart 裁出主人物竖幅（与 enrich 一致），避免整盒横封直接落盘。
+    """
     if not _is_http_url(cover_url):
         return ""
     if not folder.is_dir():
@@ -1589,7 +1796,10 @@ def download_remote_poster(
     if existing.is_file() and not _is_blank_cover_file(existing):
         return _media_rel(existing, media_root=media_root)
 
-    got = _fetch_cover_bytes(cover_url)
+    try:
+        got = _fetch_cover_bytes(cover_url)
+    except TimeoutError:
+        return ""
     if not got:
         return ""
     data, ctype = got
@@ -1610,6 +1820,34 @@ def download_remote_poster(
             data = buf.getvalue()
         except Exception:
             pass
+
+    try:
+        from app.scrap_library.cover_scrape import (
+            cover_crop_for_region,
+            process_cover_bytes,
+        )
+
+        mode = str(crop_mode or "").strip().lower()
+        if mode not in ("right", "face", "none"):
+            # 从目录名推断分区（…/日本有码/厂牌/番号）
+            mode = "right"
+            try:
+                from app.core.region_meta import REGION_META
+
+                parts = {str(p) for p in folder.parts}
+                for rid, meta in REGION_META.items():
+                    label = str(meta.get("label") or "")
+                    if label and label in parts:
+                        mode = cover_crop_for_region(rid)
+                        break
+            except Exception:  # noqa: BLE001
+                mode = "right"
+        data = process_cover_bytes(
+            data, crop_mode=mode, quality="compact", crop_ratio="full"
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
     dest = _write_poster_jpg(folder, data)
     if not dest:
         return ""
@@ -1743,6 +1981,7 @@ def _poster_dl_worker_loop() -> None:
             )
         except Exception as e:  # noqa: BLE001
             log.debug("poster dl worker: %s", e)
+            _trim_poster_dl_fails()
             _poster_dl_fail_until[item_id] = time.time() + 600
         finally:
             with _poster_dl_lock:
@@ -1781,6 +2020,9 @@ def schedule_ensure_local_poster(
         until = float(_poster_dl_fail_until.get(iid) or 0)
         if until > now:
             return False
+        if until:
+            # 冷却已过期：顺手清掉，避免这张表只增不减
+            _poster_dl_fail_until.pop(iid, None)
         if iid in _poster_dl_inflight:
             return False
         _poster_dl_inflight.add(iid)
@@ -1805,9 +2047,15 @@ def _scan_one_nfo(
     except ValueError:
         return None
     parts = [p for p in rel.split("/") if p]
-    region = parts[0] if len(parts) >= 1 else ""
-    prefix = parts[1] if len(parts) >= 2 else ""
-    code = parts[2] if len(parts) >= 3 else nfo.stem
+    # FC2 扁平：FC2/{CODE}；其它区仍是 region/prefix/code
+    if len(parts) == 2 and str(parts[0] or "").casefold() in {"fc2", "fc2ppv"}:
+        region = parts[0]
+        prefix = "FC2"
+        code = parts[1]
+    else:
+        region = parts[0] if len(parts) >= 1 else ""
+        prefix = parts[1] if len(parts) >= 2 else ""
+        code = parts[2] if len(parts) >= 3 else nfo.stem
     meta = parse_nfo(nfo)
     if not meta:
         return None
@@ -2016,18 +2264,30 @@ def ingest(
     force: bool = False,
     limit: int | None = None,
     on_progress: ProgressCb | None = None,
+    resume_done_ids: set[str] | None = None,
 ) -> dict[str, Any]:
-    """扫描 scrap-library，把 NFO 元数据写入元库向量表。"""
+    """扫描 scrap-library，把 NFO 元数据写入元库向量表。
+
+    resume_done_ids: 断点续跑时已写入的 item_id，跳过不再编码。
+    """
     init_db()
     schema = ensure_schema()
     cfg_root = root if root is not None else get_settings().get("root")
     abs_root = resolve_root(str(cfg_root or DEFAULT_REL_ROOT))
+    done_ids = set(resume_done_ids or ())
 
     def prog(stage: str, **kw: Any) -> None:
         payload = {"stage": stage, **kw}
         _set_progress(**payload)
         if on_progress:
             on_progress(payload)
+        # 扫描阶段也落盘，便于 UI 重启后看到进度
+        if stage in {"scan", "diff", "embed", "covers", "done"}:
+            _persist_embed_job(
+                status="running" if stage != "done" else "done",
+                params={"force": bool(force), "root": str(cfg_root or "")},
+                doneIds=sorted(done_ids)[-8000:],
+            )
 
     # 扫描与模型预热并行：避免「扫完才开始加载模型」的长时间假死
     warmup_err: list[BaseException] = []
@@ -2143,6 +2403,18 @@ def ingest(
         pending.append(it)
 
     skipped = len(skipped_items) + len(text_only_items)
+    # 断点续跑：跳过本轮已写入的 item
+    if done_ids:
+        before_pending = len(pending)
+        pending = [
+            it
+            for it in pending
+            if str(it.get("item_id") or "") not in done_ids
+        ]
+        resumed_skip = before_pending - len(pending)
+        if resumed_skip:
+            _push_log(f"续跑跳过已写入 {resumed_skip:,}")
+            skipped += resumed_skip
     if polished_actress:
         _push_log(f"自动优化女优名 {polished_actress:,}")
     if preserved_actress:
@@ -2303,6 +2575,10 @@ def ingest(
                     cur.executemany(insert_sql, rows)
                 conn.commit()
             written += len(chunk)
+            for p in chunk:
+                iid = str(p.get("item_id") or "")
+                if iid:
+                    done_ids.add(iid)
             pct = 26 + int(66 * written / max(1, len(pending)))
             prog(
                 "embed",
@@ -2310,6 +2586,11 @@ def ingest(
                 label=f"写入 {written}/{len(pending)}",
                 done=written,
                 total=len(pending),
+            )
+            _persist_embed_job(
+                status="running",
+                params={"force": bool(force), "root": str(cfg_root or "")},
+                doneIds=sorted(done_ids)[-8000:],
             )
             if written == len(chunk) or written % max(bs * 4, 1) == 0:
                 _push_log(f"写入 {written}/{len(pending)}")
@@ -2371,34 +2652,69 @@ def ingest(
 
 def start_ingest_job(*, root: str = "", force: bool = False) -> dict[str, Any]:
     assert_embed_ready()
+    prev = _hydrate_embed_job()
+    resume_done: set[str] = set()
+    resumed = False
+    prev_params = prev.get("params") if isinstance(prev.get("params"), dict) else {}
+    prev_status = str(prev.get("status") or "")
+    want_root = str(root or "").strip() or str(
+        (get_settings().get("root") or "")
+    )
+    same_params = (
+        bool(prev_params.get("force")) == bool(force)
+        and str(prev_params.get("root") or "").strip() in {"", want_root}
+    )
+    if (
+        prev_status in {"interrupted", "running", "paused"}
+        and same_params
+        and isinstance(prev.get("doneIds"), list)
+    ):
+        resume_done = {str(x) for x in prev["doneIds"] if str(x).strip()}
+        resumed = bool(resume_done)
+
     with _job_lock:
         if _job["running"]:
             raise RuntimeError("刮削库向量灌库已在运行")
         _job.update(
             {
                 "running": True,
-                "phase": "starting",
+                "phase": "继续" if resumed else "starting",
                 "progress": {
                     "stage": "prepare",
-                    "done": 0,
+                    "done": len(resume_done) if resumed else 0,
                     "total": None,
                     "percent": 0,
-                    "label": "starting",
+                    "label": "继续" if resumed else "starting",
                 },
-                "log": [],
+                "log": list(_job.get("log") or [])[-20:] if resumed else [],
                 "result": None,
                 "error": None,
             }
         )
+    _persist_embed_job(
+        status="running",
+        params={"force": bool(force), "root": want_root},
+        doneIds=sorted(resume_done)[-8000:],
+    )
 
     def run() -> None:
         try:
             if root.strip():
                 put_settings(root=root.strip())
-            result = ingest(force=force)
+            if resumed:
+                _push_log(f"续跑 · 已跳过 {len(resume_done):,} 条")
+            result = ingest(
+                force=force,
+                resume_done_ids=resume_done or None,
+            )
             with _job_lock:
                 _job["result"] = result
                 _job["phase"] = "done"
+            _persist_embed_job(
+                status="done",
+                params={"force": bool(force), "root": want_root},
+                doneIds=[],
+            )
         except Exception as e:  # noqa: BLE001
             log.exception("scrap library embed failed")
             with _job_lock:
@@ -2407,12 +2723,18 @@ def start_ingest_job(*, root: str = "", force: bool = False) -> dict[str, Any]:
                 log_list = list(_job.get("log") or [])
                 log_list.append(f"失败: {e}")
                 _job["log"] = log_list[-40:]
+            _persist_embed_job(
+                status="error",
+                params={"force": bool(force), "root": want_root},
+                doneIds=sorted(resume_done)[-8000:],
+            )
         finally:
             with _job_lock:
                 _job["running"] = False
+            _persist_embed_job()
 
     threading.Thread(target=run, name="scrap-library-embed", daemon=True).start()
-    return {"started": True}
+    return {"started": True, "resumed": resumed}
 
 
 def _hit_from_row(row: dict[str, Any], *, score: float | None = None) -> dict[str, Any]:
@@ -2453,9 +2775,13 @@ def _hit_from_row(row: dict[str, Any], *, score: float | None = None) -> dict[st
 
 _LIST_YEAR_RE = re.compile(r"^年份：(.+)$", re.M)
 _LIST_ACTRESS_RE = re.compile(r"^女优：(.+)$", re.M)
+_LIST_BADGE_RE = re.compile(r"^角标：(.+)$", re.M)
+_LIST_DEF_RE = re.compile(r"^清晰度：(.+)$", re.M)
+_LIST_MOSAIC_RE = re.compile(r"^马赛克：(.+)$", re.M)
+
 
 def _list_card_meta(source_text: str) -> dict[str, Any]:
-    """条目附加字段（年份等）；列表卡不再展示剧情短摘。"""
+    """条目附加字段（年份/角标等）；列表卡不再展示剧情短摘。"""
     src = str(source_text or "")
     year = ""
     m = _LIST_YEAR_RE.search(src)
@@ -2475,9 +2801,34 @@ def _list_card_meta(source_text: str) -> dict[str, Any]:
             if len(actresses) >= 3:
                 break
 
+    badges: list[str] = []
+    m = _LIST_BADGE_RE.search(src)
+    if m:
+        for tok in re.split(r"[\s,，、/|]+", m.group(1).strip()):
+            t = tok.strip()
+            if t and t not in badges:
+                badges.append(t)
+            if len(badges) >= 6:
+                break
+    definition = ""
+    m = _LIST_DEF_RE.search(src)
+    if m:
+        definition = m.group(1).strip()
+    mosaic = ""
+    m = _LIST_MOSAIC_RE.search(src)
+    if m:
+        mosaic = m.group(1).strip()
+    cnsub = bool(re.search(r"^字幕：中字\s*$", src, re.M)) or any(
+        "中字" in b or "字幕" in b or b.lower() == "cnsub" for b in badges
+    )
+
     return {
         "year": year,
         "actresses": actresses,
+        "badges": badges,
+        "cnsub": cnsub,
+        "definition": definition,
+        "mosaic": mosaic,
     }
 
 
@@ -2622,8 +2973,8 @@ def list_prefixes(
                        max(updated_at) AS latest_at,
                        array_agg(
                          COALESCE(
-                           NULLIF(thumb_path, ''),
                            NULLIF(poster_path, ''),
+                           NULLIF(thumb_path, ''),
                            NULLIF(cover_url, '')
                          )
                          ORDER BY
@@ -2743,6 +3094,7 @@ def _list_items_uncached(
     tag: str = "",
     studio: str = "",
     actress: str = "",
+    signal: str = "",
     sort: str = "code",
     order: str = "asc",
     offset: int = 0,
@@ -2759,6 +3111,7 @@ def _list_items_uncached(
     tag_q = str(tag or "").strip()
     studio_q = str(studio or "").strip()
     actress_q = str(actress or "").strip()
+    signal_q = str(signal or "").strip().lower()
     sort_key = str(sort or "code").strip().lower()
     ascending = str(order or "asc").strip().lower() not in {
         "desc",
@@ -2824,6 +3177,27 @@ def _list_items_uncached(
         _append_studio_clause(clauses, params, studio_q, region=region)
     if actress_q:
         _append_actress_clause(clauses, params, actress_q)
+    if signal_q in {"cnsub", "中字", "字幕"}:
+        clauses.append(
+            "(source_text ILIKE %s OR source_text ILIKE %s OR source_text ILIKE %s)"
+        )
+        params.extend(["%字幕：中字%", "%角标：%中字%", "%角标：%字幕%"])
+    elif signal_q in {"hd", "4k", "uhd"}:
+        clauses.append(
+            "(source_text ILIKE %s OR source_text ILIKE %s OR source_text ILIKE %s)"
+        )
+        params.extend(["%清晰度：%", "%角标：%4K%", "%角标：%HD%"])
+    elif signal_q in {"uncensored", "无码"}:
+        clauses.append(
+            "(source_text ILIKE %s OR source_text ILIKE %s OR source_text ILIKE %s)"
+        )
+        params.extend(["%马赛克：无码%", "%角标：%无码%", "%角标：%uncensored%"])
+    elif signal_q in {"leak", "流出"}:
+        clauses.append("(source_text ILIKE %s OR source_text ILIKE %s)")
+        params.extend(["%角标：%流出%", "%角标：%leak%"])
+    elif signal_q in {"crack", "破解"}:
+        clauses.append("(source_text ILIKE %s OR source_text ILIKE %s)")
+        params.extend(["%角标：%破解%", "%角标：%crack%"])
     where = " AND ".join(clauses)
 
     if sort_key in {"recent", "updated", "new", "dateadded"}:
@@ -2916,6 +3290,7 @@ def list_items(
     tag: str = "",
     studio: str = "",
     actress: str = "",
+    signal: str = "",
     sort: str = "code",
     order: str = "asc",
     offset: int = 0,
@@ -2934,6 +3309,7 @@ def list_items(
             str(tag or "").strip(),
             str(studio or "").strip(),
             str(actress or "").strip(),
+            str(signal or "").strip(),
         )
     )
     cache_key = ""
@@ -2956,6 +3332,7 @@ def list_items(
         tag=tag,
         studio=studio,
         actress=actress,
+        signal=signal,
         sort=sort,
         order=order,
         offset=offset,
@@ -3095,8 +3472,8 @@ def _build_studio_facets_by_prefix(*, region: str = "") -> list[dict[str, Any]]:
                 SELECT upper(prefix) AS pref, count(*)::int AS n,
                        array_agg(
                          COALESCE(
-                           NULLIF(thumb_path, ''),
                            NULLIF(poster_path, ''),
+                           NULLIF(thumb_path, ''),
                            NULLIF(cover_url, '')
                          )
                          ORDER BY code ASC
@@ -3234,8 +3611,8 @@ def _null_studio_prefix_buckets(region: str) -> list[dict[str, Any]]:
                 SELECT prefix, count(*)::int AS n,
                        array_agg(
                          COALESCE(
-                           NULLIF(thumb_path, ''),
                            NULLIF(poster_path, ''),
+                           NULLIF(thumb_path, ''),
                            NULLIF(cover_url, '')
                          )
                          ORDER BY code ASC
@@ -3412,7 +3789,8 @@ _FACETS_CACHE_TTL_S = 600.0
 _FACETS_CACHE_MAX = 48
 
 # 磁盘快照：厂牌/标签/女优等全库聚合很慢，落盘后重启仍可秒开
-_FACETS_SNAP_DIR = "scrap_facets_snap"
+# 路径：data/cache/facets/
+_FACETS_SNAP_DIR = ("cache", "facets")
 # v3：女优分面过滤类型标签噪声
 _FACETS_SNAP_VERSION = 3
 _FACETS_SNAP_KINDS = ("genre", "actress", "studio", "tag")
@@ -3537,8 +3915,8 @@ def _build_facets_sql_line_tokens(
                           ''
                         ) AS line,
                         COALESCE(
-                          NULLIF(thumb_path, ''),
-                          NULLIF(poster_path, '')
+                          NULLIF(poster_path, ''),
+                          NULLIF(thumb_path, '')
                         ) AS local_poster,
                         NULLIF(cover_url, '') AS cover
                       FROM {TABLE}
@@ -3588,8 +3966,8 @@ def _build_facets_sql_line_tokens(
                           ''
                         ) AS line,
                         COALESCE(
-                          NULLIF(thumb_path, ''),
-                          NULLIF(poster_path, '')
+                          NULLIF(poster_path, ''),
+                          NULLIF(thumb_path, '')
                         ) AS local_poster,
                         NULLIF(cover_url, '') AS cover
                       FROM {TABLE}
@@ -3613,8 +3991,8 @@ def _build_facets_sql_line_tokens(
                 FROM (
                   SELECT
                     COALESCE(
-                      NULLIF(thumb_path, ''),
-                      NULLIF(poster_path, '')
+                      NULLIF(poster_path, ''),
+                      NULLIF(thumb_path, '')
                     ) AS local_poster,
                     NULLIF(cover_url, '') AS cover
                   FROM {TABLE}
@@ -3741,8 +4119,8 @@ def _build_facets_all(
                     continue
                 text = str(row.get("source_text") or "")
                 poster = (
-                    str(row.get("thumb_path") or "").strip()
-                    or str(row.get("poster_path") or "").strip()
+                    str(row.get("poster_path") or "").strip()
+                    or str(row.get("thumb_path") or "").strip()
                     or str(row.get("cover_url") or "").strip()
                 )
                 prefix_val = str(row.get("prefix") or "").strip().upper()
@@ -3822,6 +4200,21 @@ def _sort_facets(
     if sort_key == "name":
         return sorted(rows, key=name_of, reverse=not ascending)
 
+    if sort_key in {"age", "birthday"}:
+        # 年龄越小越前（asc）；无年龄沉底
+        def age_key(row: dict[str, Any]) -> tuple[int, int, str]:
+            raw = row.get("age")
+            try:
+                age_i = int(raw) if raw is not None and str(raw).strip() != "" else None
+            except (TypeError, ValueError):
+                age_i = None
+            has = age_i is not None and age_i > 0
+            if ascending:
+                return (0 if has else 1, age_i if has else 0, name_of(row))
+            return (0 if has else 1, -(age_i if has else 0), name_of(row))
+
+        return sorted(rows, key=age_key)
+
     def count_name(row: dict[str, Any]) -> tuple[int, str]:
         c = int(row.get("count") or 0)
         return (c if ascending else -c, name_of(row))
@@ -3835,7 +4228,7 @@ def _facets_snap_region_key(region: str) -> str:
 
 
 def _facets_snap_path(region: str, kind: str) -> Path:
-    d = data_dir() / _FACETS_SNAP_DIR / _facets_snap_region_key(region)
+    d = data_dir().joinpath(*_FACETS_SNAP_DIR) / _facets_snap_region_key(region)
     d.mkdir(parents=True, exist_ok=True)
     return d / f"{kind}.json"
 
@@ -4100,6 +4493,24 @@ def list_facets(
             or ql in str((r or {}).get("blurb") or "").casefold()
         ]
 
+    if key == "actress":
+        try:
+            from app.scrap_library.actress_bio import fold_key
+            from app.scrap_library.actress_store import actress_ages_for_names
+
+            ages = actress_ages_for_names(
+                [str((r or {}).get("name") or "") for r in rows]
+            )
+            for r in rows:
+                fk = fold_key(str((r or {}).get("name") or ""))
+                age = ages.get(fk)
+                if age is not None:
+                    r["age"] = age
+                else:
+                    r.pop("age", None)
+        except Exception as e:  # noqa: BLE001
+            log.debug("apply actress ages skipped: %s", e)
+
     sorted_rows = _sort_facets(rows, sort=sort, order=order)
     if key == "actress":
         try:
@@ -4164,7 +4575,7 @@ _RECOMMEND_SNAP_VERSION = 1
 
 
 def _recommend_snap_path() -> Path:
-    d = data_dir() / _FACETS_SNAP_DIR / "_recommend"
+    d = data_dir().joinpath(*_FACETS_SNAP_DIR) / "_recommend"
     d.mkdir(parents=True, exist_ok=True)
     return d / "shelves.json"
 
@@ -4302,9 +4713,82 @@ _actress_opt_job: dict[str, Any] = {
     "result": None,
     "error": None,
 }
+_actress_opt_hydrated = False
+_actress_opt_hydrate_lock = threading.Lock()
+
+
+def _persist_actress_opt_job(**extra: Any) -> None:
+    try:
+        from app.core import job_persist
+
+        with _ACTRESS_OPT_LOCK:
+            payload = {
+                "status": (
+                    "running"
+                    if _actress_opt_job.get("running")
+                    else str(extra.get("status") or _actress_opt_job.get("phase") or "idle")
+                ),
+                "phase": str(_actress_opt_job.get("phase") or ""),
+                "progress": dict(_actress_opt_job.get("progress") or {}) or None,
+                "log": list(_actress_opt_job.get("log") or [])[-40:],
+                "result": _actress_opt_job.get("result"),
+                "error": _actress_opt_job.get("error"),
+                "running": bool(_actress_opt_job.get("running")),
+            }
+        for k, v in extra.items():
+            payload[k] = v
+        if payload.get("running"):
+            payload["status"] = "running"
+        job_persist.save_job(job_persist.ACTRESS_OPTIMIZE_JOB_KEY, payload)
+    except Exception as e:  # noqa: BLE001
+        log.warning("persist actress optimize job failed: %s", e)
+
+
+def _hydrate_actress_opt_job(*, force: bool = False) -> dict[str, Any]:
+    global _actress_opt_hydrated
+    with _actress_opt_hydrate_lock:
+        if _actress_opt_hydrated and not force:
+            return {}
+        _actress_opt_hydrated = True
+    try:
+        from app.core import job_persist
+
+        raw = job_persist.load_job(job_persist.ACTRESS_OPTIMIZE_JOB_KEY)
+        if not raw:
+            return {}
+        with _ACTRESS_OPT_LOCK:
+            if _actress_opt_job.get("running"):
+                return raw
+            if not _actress_opt_job.get("phase") and raw.get("phase"):
+                _actress_opt_job["phase"] = str(raw.get("phase") or "")
+            if not _actress_opt_job.get("progress") and raw.get("progress"):
+                _actress_opt_job["progress"] = dict(raw.get("progress") or {})
+            if not _actress_opt_job.get("log") and raw.get("log"):
+                _actress_opt_job["log"] = list(raw.get("log") or [])[-40:]
+            if (
+                _actress_opt_job.get("result") is None
+                and raw.get("result") is not None
+            ):
+                _actress_opt_job["result"] = raw.get("result")
+            if not _actress_opt_job.get("error") and raw.get("error"):
+                _actress_opt_job["error"] = raw.get("error")
+            if str(raw.get("status") or "") == "running":
+                _actress_opt_job["phase"] = "interrupted"
+                prog = dict(_actress_opt_job.get("progress") or {})
+                prog["label"] = "进程中断 · 可继续"
+                _actress_opt_job["progress"] = prog
+                raw = dict(raw)
+                raw["status"] = "interrupted"
+                raw["running"] = False
+                job_persist.save_job(job_persist.ACTRESS_OPTIMIZE_JOB_KEY, raw)
+        return raw
+    except Exception as e:  # noqa: BLE001
+        log.warning("hydrate actress optimize job failed: %s", e)
+        return {}
 
 
 def get_actress_optimize_status() -> dict[str, Any]:
+    _hydrate_actress_opt_job()
     with _ACTRESS_OPT_LOCK:
         return {
             "running": bool(_actress_opt_job["running"]),
@@ -4335,11 +4819,17 @@ def _actress_opt_progress(**kw: Any) -> None:
 def optimize_actress_metadata(
     *,
     reembed: bool = True,
+    force: bool = False,
     limit: int | None = None,
     batch_size: int = 32,
     read_nfo_directors: bool = False,
+    resume_done_ids: set[str] | None = None,
 ) -> dict[str, Any]:
-    """批量优化向量库女优行：映射中文标准名 + 排除导演/男优（不改 NFO）。"""
+    """批量优化向量库女优行：映射中文标准名 + 排除导演/男优（不改 NFO）。
+
+    force=True：即使女优行未变也重嵌（全量同步）。
+    resume_done_ids：断点续跑已写入 item_id。
+    """
     from app.ai.embed import encode_texts_sync
     from app.scrap_library.nfo import content_sha, parse_nfo
     from app.scrape.metadata_optimize import (
@@ -4349,8 +4839,11 @@ def optimize_actress_metadata(
 
     ensure_schema()
     maps_info = actor_maps_loaded()
+    done_ids = set(resume_done_ids or ())
     _actress_opt_log(
         f"映射表 {maps_info.get('lang')} · {maps_info.get('count') or 0} 条"
+        + (" · 全量" if force else " · 增量")
+        + (f" · 续跑跳过 {len(done_ids):,}" if done_ids else "")
     )
     root = resolve_root(get_settings().get("root"))
     pool = get_meta_pool()
@@ -4377,6 +4870,10 @@ def optimize_actress_metadata(
     pending: list[dict[str, Any]] = []
     unchanged = 0
     for i, row in enumerate(rows, 1):
+        iid = str(row.get("item_id") or "")
+        if iid and iid in done_ids:
+            unchanged += 1
+            continue
         src = str(row.get("source_text") or "")
         m = actress_re.search(src)
         if not m:
@@ -4422,10 +4919,13 @@ def optimize_actress_metadata(
             new_line = f"女优：{' '.join(polished[:12])}"
         else:
             new_line = ""
-        if new_line == old_line:
+        if new_line == old_line and not force:
             unchanged += 1
             continue
-        if new_line:
+        if new_line == old_line and force:
+            # 全量：文本未变也重嵌
+            new_src = src
+        elif new_line:
             new_src = src[: m.start()] + new_line + src[m.end() :]
         else:
             before = src[: m.start()].rstrip("\n")
@@ -4528,6 +5028,10 @@ def optimize_actress_metadata(
                     )
                     written += 1
             conn.commit()
+            for p in chunk:
+                iid = str(p.get("item_id") or "")
+                if iid:
+                    done_ids.add(iid)
             done = min(len(pending), i + len(chunk))
             _actress_opt_progress(
                 stage="embed" if reembed else "patch",
@@ -4535,6 +5039,15 @@ def optimize_actress_metadata(
                 label=f"写入 {done}/{len(pending)}",
                 done=done,
                 total=len(pending),
+            )
+            _persist_actress_opt_job(
+                status="running",
+                params={
+                    "reembed": bool(reembed),
+                    "force": bool(force),
+                    "limit": limit,
+                },
+                doneIds=sorted(done_ids)[-8000:],
             )
             if done == len(chunk) or done % (bs * 4) == 0:
                 _actress_opt_log(f"写入 {done}/{len(pending)}")
@@ -4553,6 +5066,11 @@ def optimize_actress_metadata(
     _actress_opt_log(
         f"完成 · 更新 {written:,} · 重嵌 {reembedded:,} · 未变 {unchanged:,}"
     )
+    _persist_actress_opt_job(
+        status="done",
+        params={"reembed": bool(reembed), "force": bool(force), "limit": limit},
+        doneIds=[],
+    )
     return {
         "ok": True,
         "total": total,
@@ -4564,36 +5082,73 @@ def optimize_actress_metadata(
 
 
 def start_actress_optimize_job(
-    *, reembed: bool = True, limit: int | None = None
+    *, reembed: bool = True, force: bool = False, limit: int | None = None
 ) -> dict[str, Any]:
+    import app.scrap_library.actress_avatar as av
+
+    prev = _hydrate_actress_opt_job()
+    resume_done: set[str] = set()
+    resumed = False
+    prev_params = prev.get("params") if isinstance(prev.get("params"), dict) else {}
+    prev_status = str(prev.get("status") or "")
+    same = (
+        bool(prev_params.get("force")) == bool(force)
+        and bool(prev_params.get("reembed", True)) == bool(reembed)
+        and (prev_params.get("limit") in (None, limit) or limit is None)
+    )
+    if (
+        prev_status in {"interrupted", "running", "paused"}
+        and same
+        and isinstance(prev.get("doneIds"), list)
+    ):
+        resume_done = {str(x) for x in prev["doneIds"] if str(x).strip()}
+        resumed = bool(resume_done)
+
     with _ACTRESS_OPT_LOCK:
         if _actress_opt_job["running"]:
             raise RuntimeError("女优元数据优化已在运行")
         if get_job_status().get("running"):
             raise RuntimeError("刮削库向量同步进行中，请稍后再试")
+        if av.get_job_status().get("running"):
+            raise RuntimeError("女优刮削进行中，请稍后再试")
         _actress_opt_job.update(
             {
                 "running": True,
-                "phase": "starting",
+                "phase": "继续" if resumed else "starting",
                 "progress": {
                     "stage": "prepare",
                     "percent": 0,
-                    "label": "starting",
-                    "done": 0,
+                    "label": "继续" if resumed else "starting",
+                    "done": len(resume_done) if resumed else 0,
                     "total": None,
                 },
-                "log": [],
+                "log": (
+                    list(_actress_opt_job.get("log") or [])[-20:] if resumed else []
+                ),
                 "result": None,
                 "error": None,
             }
         )
+    _persist_actress_opt_job(
+        status="running",
+        params={"reembed": bool(reembed), "force": bool(force), "limit": limit},
+        doneIds=sorted(resume_done)[-8000:],
+    )
 
     def run() -> None:
         try:
-            result = optimize_actress_metadata(reembed=reembed, limit=limit)
+            if resumed:
+                _actress_opt_log(f"续跑 · 已跳过 {len(resume_done):,} 条")
+            result = optimize_actress_metadata(
+                reembed=reembed,
+                force=bool(force),
+                limit=limit,
+                resume_done_ids=resume_done or None,
+            )
             with _ACTRESS_OPT_LOCK:
                 _actress_opt_job["result"] = result
                 _actress_opt_job["phase"] = "done"
+            _persist_actress_opt_job(status="done", doneIds=[])
         except Exception as e:  # noqa: BLE001
             log.exception("actress optimize failed")
             with _ACTRESS_OPT_LOCK:
@@ -4602,14 +5157,19 @@ def start_actress_optimize_job(
                 log_list = list(_actress_opt_job.get("log") or [])
                 log_list.append(f"失败: {e}")
                 _actress_opt_job["log"] = log_list[-40:]
+            _persist_actress_opt_job(
+                status="error",
+                doneIds=sorted(resume_done)[-8000:],
+            )
         finally:
             with _ACTRESS_OPT_LOCK:
                 _actress_opt_job["running"] = False
+            _persist_actress_opt_job()
 
     threading.Thread(
         target=run, name="scrap-actress-optimize", daemon=True
     ).start()
-    return {"started": True}
+    return {"started": True, "resumed": resumed}
 
 
 def local_file_api(rel: str) -> str:

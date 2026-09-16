@@ -24,8 +24,9 @@ import app.scrap_library.embed as svc
 router = APIRouter(prefix="/scrap-library", tags=["scrap-library-embed"])
 
 _CACHE_HEADERS = {
-    # 本地文件 + ETag；public 便于浏览器磁盘缓存，二次打开更快
-    "Cache-Control": "public, max-age=604800, immutable",
+    # 封面会被 overwrite 重刮；勿用 immutable/长 max-age（Cursor 内置浏览器尤甚）。
+    # ETag 含 mtime：未变走 304，变了立刻换新图。
+    "Cache-Control": "public, max-age=0, must-revalidate",
 }
 
 
@@ -109,6 +110,78 @@ def get_quality_items(
         raise HTTPException(400, str(e)) from e
 
 
+@router.get("/embed/quality/gate")
+def get_quality_gate(
+    itemId: str = Query(""),
+    code: str = Query(""),
+    relPath: str = Query(""),
+    _user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    """G34：单条合格门禁（只读）。按 itemId / code / relPath 定位本地 NFO+poster。"""
+    from pathlib import Path
+
+    from app.scrap_library.quality_gate import evaluate_quality_gate
+
+    folder: Path | None = None
+    try:
+        settings = svc.get_settings()
+        root = svc.resolve_root(settings.get("root"))
+        iid = str(itemId or "").strip()
+        rel = str(relPath or "").strip().replace("\\", "/")
+        code_u = str(code or "").strip().upper()
+        if iid or (code_u and not rel):
+            try:
+                from app.core.db import connect
+
+                table = getattr(svc, "TABLE", "scrap_library_embed")
+                with connect() as conn:
+                    with conn.cursor() as cur:
+                        if iid:
+                            cur.execute(
+                                f"""
+                                SELECT rel_path, code
+                                FROM {table}
+                                WHERE item_id = %s
+                                LIMIT 1
+                                """,
+                                (iid,),
+                            )
+                        else:
+                            cur.execute(
+                                f"""
+                                SELECT rel_path, code
+                                FROM {table}
+                                WHERE UPPER(code) = %s
+                                LIMIT 1
+                                """,
+                                (code_u,),
+                            )
+                        r = cur.fetchone()
+                        if r:
+                            if isinstance(r, dict):
+                                rel = str(r.get("rel_path") or rel)
+                                code_u = str(r.get("code") or code_u).upper()
+                            else:
+                                rel = str(r[0] or rel)
+                                code_u = str(r[1] or code_u).upper()
+            except Exception:  # noqa: BLE001
+                pass
+        if rel:
+            folder = (root / rel).resolve()
+            try:
+                folder.relative_to(root.resolve())
+            except ValueError as e:
+                raise HTTPException(400, "bad path") from e
+            if not folder.is_dir():
+                folder = None
+        data = evaluate_quality_gate(folder=folder, code=code_u)
+        return {"ok": True, "data": data}
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, str(e)) from e
+
+
 class EnrichBody(BaseModel):
     region: str = ""
     # 空 = 使用策略里已开启的七区
@@ -127,23 +200,52 @@ class EnrichOneBody(BaseModel):
     dryRun: bool = False
     # 详情「刷新元数据」默认全量覆盖（重刮 + 覆盖 NFO/向量）
     overwrite: bool = True
+    # False：只写本地 NFO/封面（设置页分区刮削/重刮）；True：详情页顺带同步向量+女优
+    syncVector: bool = True
 
 
 class EnrichStrategyCoverBody(BaseModel):
-    quality: str = "high"
+    quality: str = "compact"
     cropRatio: str = "full"
     regionCrop: dict[str, str] = Field(default_factory=dict)
+    minShortEdge: int = Field(default=400, ge=120, le=1200)
+    coverLogicVersion: int = 9
+
+
+class EnrichStrategyLocalMapsBody(BaseModel):
+    """标题/女优/标签映射模式为字符串；换行精简为布尔。"""
+
+    title: str | None = None
+    actors: str | None = None
+    tags: str | None = None
+    compactOutlineNewlines: bool | None = None
 
 
 class EnrichStrategyBody(BaseModel):
     mode: str = "parallel_all"
+    itemWorkers: int = Field(default=5, ge=1, le=16)
     adaptiveWorkers: int = Field(default=0, ge=0, le=64)
     flareWorkers: int = Field(default=0, ge=0, le=64)
     includeFlare: bool = True
     perSourceTimeoutSec: int = Field(default=45, ge=5, le=180)
     regionGroups: dict[str, list[str]] = Field(default_factory=dict)
+    regionSources: dict[str, list[str]] = Field(default_factory=dict)
     regionsEnabled: dict[str, bool] = Field(default_factory=dict)
     fillMode: str = "incremental"
+    actressAvatarMode: str = "incremental"
+    llmTranslateOnJunk: bool = True
+    fieldLanguage: dict[str, str] = Field(default_factory=dict)
+    stripTitleActorSuffix: bool = False
+    stripTitleCodePrefix: bool = False
+    fc2SellerAsActor: bool = True
+    coverEnhance: str = "off"
+    outlineShow: str = "zh"
+    forceFields: list[str] = Field(default_factory=list)
+    fieldPriority: dict[str, list[str]] = Field(default_factory=dict)
+    fieldPriorityHideEmpty: bool = False
+    localMaps: EnrichStrategyLocalMapsBody = Field(
+        default_factory=EnrichStrategyLocalMapsBody
+    )
     cover: EnrichStrategyCoverBody | None = None
 
 
@@ -166,6 +268,10 @@ def put_enrich_strategy(
     payload = body.model_dump()
     if payload.get("cover") is None:
         payload.pop("cover", None)
+    # localMaps 嵌套模型：去掉未传的 None，避免覆盖已有配置
+    maps = payload.get("localMaps")
+    if isinstance(maps, dict):
+        payload["localMaps"] = {k: v for k, v in maps.items() if v is not None}
     saved = strat.put_strategy(payload)
     return {"ok": True, "data": strat.strategy_public(saved)}
 
@@ -206,6 +312,7 @@ def enrich_one(
             item_id=body.itemId,
             dry_run=bool(body.dryRun),
             overwrite=bool(body.overwrite),
+            sync_vector=bool(body.syncVector),
         )
     except RuntimeError as e:
         raise HTTPException(409, str(e)) from e
@@ -223,6 +330,99 @@ def get_enrich_status(
     return {"ok": True, "data": enrich_svc.get_enrich_status()}
 
 
+@router.get("/embed/enrich/status/stream")
+async def enrich_status_stream(
+    request: Request,
+    _user: dict[str, Any] = Depends(require_user),
+):
+    """SSE：刮削状态变更时推送（替代 450ms 轮询）。"""
+    import asyncio
+    import json
+
+    import app.scrap_library.enrich as enrich_svc
+    from fastapi.responses import StreamingResponse
+
+    async def gen():
+        sub = enrich_svc.subscribe_enrich_updates()
+        last = ""
+        # 构建一帧状态要跑 DB 计数 + 内存纠偏扫描，属于「重活」；
+        # 通知风暴时（每条 item 有多次 force / 进度通知）必须限流，
+        # 否则多路 SSE 会把状态快照刷成每秒几十次，把 worker 的 CPU 抢光。
+        min_gap_sec = 0.25
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                t_build0 = asyncio.get_running_loop().time()
+                snap = await asyncio.to_thread(enrich_svc.get_enrich_status)
+                payload = json.dumps(
+                    {"event": "status", "data": snap},
+                    ensure_ascii=False,
+                    default=str,
+                )
+                if payload != last:
+                    last = payload
+                    yield f"data: {payload}\n\n".encode("utf-8")
+                spent = asyncio.get_running_loop().time() - t_build0
+                if spent < min_gap_sec:
+                    await asyncio.sleep(min_gap_sec - spent)
+                woken = await asyncio.to_thread(sub.wait, 12.0)
+                sub.clear()
+                if not woken:
+                    yield b": ping\n\n"
+        finally:
+            enrich_svc.unsubscribe_enrich_updates(sub)
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+class RecompressBody(BaseModel):
+    region: str = ""
+    quality: str = ""
+    # 0 = 全量；预览可传小样本
+    limit: int = Field(default=0, ge=0, le=20_000)
+    dryRun: bool = False
+
+
+@router.post("/embed/posters/recompress")
+def start_poster_recompress(
+    body: RecompressBody,
+    _user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    """按当前策略画质重压已落盘 poster.jpg（不改构图）。"""
+    from app.scrap_library import poster_recompress as svc
+
+    try:
+        data = svc.start_job(
+            region=str(body.region or ""),
+            quality=str(body.quality or ""),
+            limit=int(body.limit or 0),
+            dry_run=bool(body.dryRun),
+        )
+    except RuntimeError as e:
+        raise HTTPException(409, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return {"ok": True, "data": data}
+
+
+@router.get("/embed/posters/recompress/status")
+def get_poster_recompress_status(
+    _user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    from app.scrap_library import poster_recompress as svc
+
+    return {"ok": True, "data": svc.get_status()}
+
+
 @router.get("/embed/enrich/logs")
 def get_enrich_logs(
     region: str = Query("", alias="region"),
@@ -237,14 +437,99 @@ def get_enrich_logs(
     return {"ok": True, "data": {"region": rid or None, "log": lines}}
 
 
+class EnrichLogsClearBody(BaseModel):
+    region: str = ""
+
+
+@router.post("/embed/enrich/logs/clear")
+def clear_enrich_logs_route(
+    body: EnrichLogsClearBody | None = None,
+    _user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    """清空分区刮削日志表（文本日志 + 队列记录）并清除该区旧检查点。"""
+    import app.scrap_library.enrich as enrich_svc
+
+    rid = str((body.region if body else "") or "").strip()
+    return {"ok": True, "data": enrich_svc.clear_enrich_logs(region=rid)}
+
+
+@router.get("/embed/enrich/queue-log")
+def get_enrich_queue_log(
+    region: str = Query("", alias="region"),
+    status: str = Query("", alias="status"),
+    code: str = Query("", alias="code"),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0, le=1_000_000),
+    _user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    """刮削队列日志表：各状态任务记录（仅清空日志会删除）。支持 code 查番号。"""
+    import app.scrap_library.enrich as enrich_svc
+
+    rid = str(region or "").strip()
+    st = str(status or "").strip()
+    code_q = str(code or "").strip()
+    return {
+        "ok": True,
+        "data": enrich_svc.load_queue_log(
+            region=rid,
+            status=st,
+            limit=limit,
+            offset=offset,
+            code=code_q,
+        ),
+    }
+
+
+@router.get("/embed/enrich/local-covers")
+def get_enrich_local_covers(
+    region: str = Query("", alias="region"),
+    code: str = Query("", alias="code"),
+    itemId: str = Query("", alias="itemId"),
+    _user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    """检查用：番号目录里已落盘的 poster/thumb/fanart。"""
+    import app.scrap_library.enrich as enrich_svc
+
+    return {
+        "ok": True,
+        "data": enrich_svc.list_local_covers(
+            region=str(region or "").strip(),
+            code=str(code or "").strip(),
+            item_id=str(itemId or "").strip(),
+        ),
+    }
+
+
+class EnrichQueueScanBody(BaseModel):
+    region: str = ""
+    limit: int = Field(default=0, ge=0, le=50_000)
+
+
+@router.post("/embed/enrich/queue-scan")
+def scan_enrich_queue(
+    body: EnrichQueueScanBody,
+    _user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    """打开分区日志：扫描缺口写入 pending，刷新成功/失败计数（不启动任务）。"""
+    import app.scrap_library.enrich as enrich_svc
+
+    rid = str(body.region or "").strip()
+    if not rid:
+        raise HTTPException(status_code=400, detail="region required")
+    return {
+        "ok": True,
+        "data": enrich_svc.scan_enrich_queue(region=rid, limit=int(body.limit or 0)),
+    }
+
+
 @router.post("/embed/enrich/cancel")
 def cancel_enrich(
     _user: dict[str, Any] = Depends(require_user),
 ) -> dict[str, Any]:
-    """兼容旧接口：等同暂停（保留进度）。"""
+    """取消刮削：语义等同暂停（保留进度/checkpoint）。"""
     import app.scrap_library.enrich as enrich_svc
 
-    return {"ok": True, "data": enrich_svc.request_enrich_pause()}
+    return {"ok": True, "data": enrich_svc.request_enrich_cancel()}
 
 
 @router.post("/embed/enrich/pause")
@@ -272,6 +557,24 @@ def stop_enrich(
     return {"ok": True, "data": enrich_svc.request_enrich_stop(region=rid)}
 
 
+class EnrichRetryFailsBody(BaseModel):
+    region: str = ""
+
+
+@router.post("/embed/enrich/retry-fails")
+def retry_enrich_fails(
+    body: EnrichRetryFailsBody,
+    _user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    """失败批量重试：转入未处理队列，运行中则插到最前优先处理。"""
+    import app.scrap_library.enrich as enrich_svc
+
+    rid = str(body.region or "").strip()
+    if not rid:
+        raise HTTPException(status_code=400, detail="region required")
+    return {"ok": True, "data": enrich_svc.retry_enrich_fails(region=rid)}
+
+
 @router.get("/embed/status")
 def get_status(_user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
     return {"ok": True, "data": svc.get_job_status()}
@@ -279,6 +582,8 @@ def get_status(_user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
 
 class ActressOptimizeBody(BaseModel):
     reembed: bool = True
+    # True=全量（未变也重嵌）；False=增量（跳过已对齐）
+    force: bool = False
     limit: int = Field(default=0, ge=0, le=200_000)
 
 
@@ -294,11 +599,12 @@ def start_actress_optimize(
     body: ActressOptimizeBody,
     _user: dict[str, Any] = Depends(require_user),
 ) -> dict[str, Any]:
-    """批量优化女优元数据：中文标准名映射 + 排除导演/男优（不改 NFO）。"""
+    """同步女优名到向量库：映射标准名写回 source_text + 重嵌。"""
     try:
         lim = int(body.limit or 0)
         data = svc.start_actress_optimize_job(
             reembed=bool(body.reembed),
+            force=bool(body.force),
             limit=lim if lim > 0 else None,
         )
     except RuntimeError as e:
@@ -312,6 +618,8 @@ class ActressAvatarBody(BaseModel):
     force: bool = False
     limit: int = Field(default=0, ge=0, le=200_000)
     region: str = ""
+    # 先映射写回向量库，再刮头像（默认开）
+    polishMeta: bool = True
 
 
 @router.get("/embed/actress-avatar/status")
@@ -342,12 +650,34 @@ def get_actress_avatar_urls(
     return {"ok": True, "data": out}
 
 
+@router.get("/embed/actress-profile")
+def get_actress_profile(
+    name: str = Query(""),
+    region: str = Query(""),
+    refresh: bool = Query(False),
+    _user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    """女优详情：标准名、别名、作品数、本地头像、生日/三围等详细资料。"""
+    import app.scrap_library.actress_avatar as av
+
+    n = str(name or "").strip()
+    if not n:
+        raise HTTPException(400, "name required")
+    try:
+        data = av.get_actress_profile(
+            n, region=str(region or "").strip(), refresh=bool(refresh)
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return {"ok": True, "data": data}
+
+
 @router.post("/embed/actress-avatar/start")
 def start_actress_avatar(
     body: ActressAvatarBody,
     _user: dict[str, Any] = Depends(require_user),
 ) -> dict[str, Any]:
-    """向量库女优 → GFriends 头像刮削落盘（media/scrap-library/_actress）。"""
+    """女优刮削：从向量库取女优名 → 头像/资料落本地（默认不写回向量）。"""
     import app.scrap_library.actress_avatar as av
 
     try:
@@ -355,7 +685,8 @@ def start_actress_avatar(
         data = av.start_actress_avatar_job(
             force=bool(body.force),
             limit=lim if lim > 0 else None,
-            region=str(body.region or ""),
+            region=str(body.region or "").strip(),
+            polish_meta=bool(body.polishMeta),
         )
     except RuntimeError as e:
         raise HTTPException(409, str(e)) from e
@@ -571,6 +902,7 @@ def get_items(
     tag: str = Query(""),
     studio: str = Query(""),
     actress: str = Query(""),
+    signal: str = Query(""),
     sort: str = Query("name"),
     order: str = Query("asc"),
     offset: int = Query(0, ge=0),
@@ -588,6 +920,7 @@ def get_items(
                 tag=tag,
                 studio=studio,
                 actress=actress,
+                signal=signal,
                 sort=sort,
                 order=order,
                 offset=offset,

@@ -392,6 +392,9 @@ MIRROR_SEEDS: dict[str, list[str]] = {
 LEGACY_ID_MAP: dict[str, str] = {
     "missav": "miss_av",
     "7mmtv": "sevenmmtv",
+    "mmtv": "sevenmmtv",
+    "fc2_hub": "fd2ppv",
+    "fc2hub": "fd2ppv",
 }
 
 # 源基础可信度（0–100）：合并字段时 + 值质量分 选最优
@@ -513,8 +516,16 @@ SOURCE_FIELD_BIAS: dict[str, dict[str, int]] = {
 }
 
 
+# SOURCE_CATALOG 是模块级静态常量（无运行时修改），索引在导入时建一次即可。
+# 本函数落在合并/设置热路径上：`field_priority_chain` 排序、`source_trust`、
+# `provider_settings`、`effective_display_url`、`mirror_seeds_for` 每源各调一次，
+# 原先每次重建整表（~90 项）纯属浪费；批量刮削时是每番号数百次。
+# 调用方一律只读（`.get()` / `in`），返回共享表。
+_CATALOG_BY_ID: dict[str, dict[str, Any]] = {str(e["id"]): e for e in SOURCE_CATALOG}
+
+
 def catalog_by_id() -> dict[str, dict[str, Any]]:
-    return {str(e["id"]): e for e in SOURCE_CATALOG}
+    return _CATALOG_BY_ID
 
 
 def canonicalize_id(source_id: str) -> str:
@@ -549,12 +560,21 @@ def field_trust(source_id: str, field: str) -> int:
     return base + bias
 
 
+# 设置页预填 / 策略默认（对齐用户参考配置；短链，合并时仍会接全局补充）
+FIELD_PRIORITY_PREFILL: dict[str, list[str]] = {
+    "title": ["airav_io", "iqqtv", "javbus"],
+    "overview": ["airav_io", "iqqtv"],
+    "actors": ["javbus", "airav_io", "iqqtv"],
+    "poster": ["dmm", "libredmm", "r18dev", "javbus", "mgstage"],
+    "tags": ["javbus", "avbase", "freejavbt"],
+}
+
 # 对齐 Amane：显式字段优先级（高→低）。未列出的字段按 field_trust 推导。
 # title/overview 中文源前置；poster/studio/date 官方前置。
 DEFAULT_FIELD_PRIORITY: dict[str, list[str]] = {
     "title": [
-        "airav",
         "airav_io",
+        "airav",
         "iqqtv",
         "avsex",
         "miss_av",
@@ -575,8 +595,8 @@ DEFAULT_FIELD_PRIORITY: dict[str, list[str]] = {
         "theporndb",
     ],
     "overview": [
-        "airav",
         "airav_io",
+        "airav",
         "iqqtv",
         "avsex",
         "miss_av",
@@ -592,11 +612,11 @@ DEFAULT_FIELD_PRIORITY: dict[str, list[str]] = {
     ],
     "poster": [
         "dmm",
+        "libredmm",
+        "r18dev",
+        "javbus",
         "mgstage",
         "carib",
-        "r18dev",
-        "libredmm",
-        "javbus",
         "theporndb",
         "fc2",
         "javlibrary",
@@ -642,6 +662,9 @@ DEFAULT_FIELD_PRIORITY: dict[str, list[str]] = {
         "theporndb",
     ],
     "tags": [
+        "javbus",
+        "avbase",
+        "freejavbt",
         "airav",
         "airav_io",
         "iqqtv",
@@ -649,7 +672,6 @@ DEFAULT_FIELD_PRIORITY: dict[str, list[str]] = {
         "miss_av",
         "sevenmmtv",
         "jav321",
-        "javbus",
         "javlibrary",
         "mgstage",
     ],
@@ -659,8 +681,25 @@ _FIELD_PRIORITY_CACHE: dict[str, list[str]] = {}
 
 
 def field_priority_chain(field: str, *, override: list[str] | None = None) -> list[str]:
-    """返回字段站点优先级链（高→低）。override 非空时直接使用。"""
+    """返回字段站点优先级链（高→低）。
+
+    override 非空：配置源按填写顺序排最前（如 DMM → MGStage），其余按 trust 接上。
+    NFO 合并：配置源有数据即用；都没有才用全局补充。
+    """
     fid = str(field or "").strip()
+    ids = set(SOURCE_TRUST) | set(SOURCE_FIELD_BIAS) | {
+        str(e.get("id") or "") for e in SOURCE_CATALOG if e.get("id")
+    }
+    ids.discard("")
+
+    def _rest_after(preferred: list[str]) -> list[str]:
+        seen = set(preferred)
+        return sorted(
+            (s for s in ids if s not in seen),
+            key=lambda s: field_trust(s, fid),
+            reverse=True,
+        )
+
     if override:
         out: list[str] = []
         seen: set[str] = set()
@@ -669,21 +708,14 @@ def field_priority_chain(field: str, *, override: list[str] | None = None) -> li
             if sid and sid not in seen:
                 seen.add(sid)
                 out.append(sid)
-        return out
+        return out + _rest_after(out)
+
     if fid in _FIELD_PRIORITY_CACHE:
         return list(_FIELD_PRIORITY_CACHE[fid])
 
     preferred = [canonicalize_id(s) for s in (DEFAULT_FIELD_PRIORITY.get(fid) or [])]
     preferred = [s for s in preferred if s]
-    seen: set[str] = set(preferred)
-    # 其余源按 trust 接上，保证链完整
-    ids = set(SOURCE_TRUST) | set(SOURCE_FIELD_BIAS)
-    rest = sorted(
-        (s for s in ids if s not in seen),
-        key=lambda s: field_trust(s, fid),
-        reverse=True,
-    )
-    ranked = preferred + rest
+    ranked = preferred + _rest_after(preferred)
     _FIELD_PRIORITY_CACHE[fid] = ranked
     return list(ranked)
 

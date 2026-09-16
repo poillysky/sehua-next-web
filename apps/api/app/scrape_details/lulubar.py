@@ -14,11 +14,13 @@ from .common import (
     is_junk_cover_url,
     is_junk_title,
     make_detail,
+    page_mentions_code,
     pick_og_image,
     soup,
     std_code,
     strip_tags,
 )
+from app.core import detail_path_cache
 
 DEFAULT_BASE = "https://lulubar.co"
 IMAGE_HOST = "https://image.lulubar.co"
@@ -87,10 +89,15 @@ def _parse_detail(html: str, detail_url: str, code: str) -> dict:
 
     doc = soup(html)
     h2 = doc.select_one("#detail h2.mb-1") or doc.select_one("h2.mb-1")
+    h2_text = ""
     if h2 is not None:
-        for og in h2.select("a.ogtag"):
+        # `soup()` 返回的是线程内共享只读树（同一份 html 只解析一次，见 common.soup）。
+        # 想剔掉 a.ogtag 的文字必须在**副本**上变异，不能动共享树 ——
+        # 否则同一次抓取里后续 helper 会看不到这些节点（结果静默变化）。
+        clone = soup(str(h2))
+        for og in clone.select("a.ogtag"):
             og.decompose()
-    h2_text = strip_tags(h2.get_text() if h2 is not None else "")
+        h2_text = strip_tags(clone.get_text())
     if not h2_text or want not in code_key(h2_text):
         raise RuntimeError("解析失败")
 
@@ -193,6 +200,23 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
     base = (base_url or DEFAULT_BASE).rstrip("/")
     if not base:
         raise RuntimeError("未配置网站地址")
+
+    # 第十六轮：详情路径缓存命中 → 直接抓详情，跳过搜索（重复刮省 1 请求）。
+    # 页面番号校验不过回落搜索；坏缓存最多浪费 1 请求，不会错绑。
+    cached_href = detail_path_cache.lookup(SOURCE, std)
+    if cached_href:
+        try:
+            cached_url = abs_url(cached_href, base) or cached_href
+            cached_html = fetch_html(
+                cached_url, referer=f"{base}/", cookie=cookie or None, source_id=SOURCE
+            )
+            if cached_html and page_mentions_code(cached_html, std):
+                cached_parsed = _parse_detail(cached_html, cached_url, std)
+                if cached_parsed:
+                    return cached_parsed
+        except Exception:
+            pass  # 缓存失效 → 回落搜索
+
     search_url = f"{base}/video/bysearch?search={quote(std)}&page=1"
     html = fetch_html(
         search_url, referer=f"{base}/", cookie=cookie or None, source_id=SOURCE
@@ -200,6 +224,8 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
     detail_href = _pick_detail_href(html or "", std)
     if not detail_href:
         raise RuntimeError("未找到")
+    # 第十六轮：记住详情路径，重复刮直接走缓存跳过搜索
+    detail_path_cache.remember(SOURCE, std, detail_href)
     detail_url = abs_url(detail_href, base) or detail_href
     detail_html = fetch_html(
         detail_url, referer=search_url, cookie=cookie or None, source_id=SOURCE

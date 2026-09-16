@@ -8,6 +8,8 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from urllib.parse import quote
 
+from app.core import detail_path_cache
+
 from .common import (
     abs_url,
     clean_title,
@@ -238,6 +240,76 @@ def scrape_detail(
 
     jp_base, cn_base = _lang_bases(root)
     ck = cookie or None
+
+    def _fetch_pair(rel: str, referer: str) -> tuple[str, str, str, str]:
+        """抓 JP/CN 双页并校验番号；失败按原语义抛 RuntimeError。"""
+        jp_url = abs_url(f"/jp/{rel}", f"{jp_base}/") or f"{jp_base}/{rel}"
+        cn_url = abs_url(f"/cn/{rel}", f"{cn_base}/") or f"{cn_base}/{rel}"
+
+        def _fetch(url: str) -> str:
+            return fetch_html(url, referer=referer, cookie=ck, source_id=SOURCE)
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            jp_f = pool.submit(_fetch, jp_url)
+            cn_f = pool.submit(_fetch, cn_url)
+            jp_html = jp_f.result()
+            cn_html = cn_f.result()
+
+        if not jp_html or len(jp_html) < 800 or not page_mentions_code(jp_html, std):
+            raise RuntimeError("日文详情不可用")
+        if not cn_html or len(cn_html) < 800 or not page_mentions_code(cn_html, std):
+            raise RuntimeError("中文详情不可用")
+        return jp_html, cn_html, jp_url, cn_url
+
+    def _build_detail(
+        jp_html: str, cn_html: str, jp_url: str, cn_url: str
+    ) -> dict[str, Any]:
+        jp = parse_iqqtv_detail_html(jp_html, std, jp_url)
+        cn = parse_iqqtv_detail_html(cn_html, std, cn_url)
+        if not cn.get("title") and not jp.get("title"):
+            raise RuntimeError("未找到标题")
+
+        cover = cn.get("coverUrl") or jp.get("coverUrl")
+        actors = cn.get("actors") or jp.get("actors") or []
+        genres = cn.get("genres") or jp.get("genres") or []
+        title_jp = jp.get("title") or cn.get("title")
+        title_zh = cn.get("title") or jp.get("title")
+        plot = cn.get("plot") or jp.get("plot")
+        original_plot = jp.get("plot") or cn.get("plot")
+
+        return make_detail(
+            source=SOURCE,
+            code=std,
+            # 合并侧偏中文：title 优先 CN，日文进 originalTitle
+            title=title_zh or title_jp,
+            poster=cover,
+            studio=(cn.get("studio") or jp.get("studio")),
+            actors=list(actors),
+            tags=list(genres),
+            overview=plot,
+            date=(cn.get("premiered") or jp.get("premiered")),
+            extra={
+                "titleZh": title_zh,
+                "originalTitle": title_jp,
+                "originalPlot": original_plot,
+                "series": cn.get("series") or jp.get("series"),
+                "website": cn_url,
+            },
+        )
+
+    def _from_rel(rel: str, referer: str) -> dict[str, Any]:
+        jp_html, cn_html, jp_url, cn_url = _fetch_pair(rel, referer)
+        return _build_detail(jp_html, cn_html, jp_url, cn_url)
+
+    # 第十六轮：详情路径缓存命中 → 直接抓双页，跳过搜索（重复刮省最慢的 1 请求）。
+    # 页面校验不过 → 抛错回落下方搜索并刷新缓存；坏缓存最多浪费 1 请求，不会错绑。
+    cached_rel = detail_path_cache.lookup(SOURCE, std)
+    if cached_rel:
+        try:
+            return _from_rel(cached_rel, f"{jp_base}/")
+        except Exception:
+            pass
+
     search_url = f"{jp_base}/search.php?kw={quote(std)}"
     try:
         search_html, landed = fetch_html_result(
@@ -269,52 +341,6 @@ def scrape_detail(
         raise RuntimeError("搜索无结果")
 
     rel = re.sub(r"^/(cn|jp)/", "", detail_path, flags=re.I).lstrip("/")
-    jp_url = abs_url(f"/jp/{rel}", f"{jp_base}/") or f"{jp_base}/{rel}"
-    cn_url = abs_url(f"/cn/{rel}", f"{cn_base}/") or f"{cn_base}/{rel}"
-
-    def _fetch(url: str) -> str:
-        return fetch_html(url, referer=search_url, cookie=ck, source_id=SOURCE)
-
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        jp_f = pool.submit(_fetch, jp_url)
-        cn_f = pool.submit(_fetch, cn_url)
-        jp_html = jp_f.result()
-        cn_html = cn_f.result()
-
-    if not jp_html or len(jp_html) < 800 or not page_mentions_code(jp_html, std):
-        raise RuntimeError("日文详情不可用")
-    if not cn_html or len(cn_html) < 800 or not page_mentions_code(cn_html, std):
-        raise RuntimeError("中文详情不可用")
-
-    jp = parse_iqqtv_detail_html(jp_html, std, jp_url)
-    cn = parse_iqqtv_detail_html(cn_html, std, cn_url)
-    if not cn.get("title") and not jp.get("title"):
-        raise RuntimeError("未找到标题")
-
-    cover = cn.get("coverUrl") or jp.get("coverUrl")
-    actors = cn.get("actors") or jp.get("actors") or []
-    genres = cn.get("genres") or jp.get("genres") or []
-    title_jp = jp.get("title") or cn.get("title")
-    title_zh = cn.get("title") or jp.get("title")
-    plot = cn.get("plot") or jp.get("plot")
-    original_plot = jp.get("plot") or cn.get("plot")
-
-    return make_detail(
-        source=SOURCE,
-        code=std,
-        # 合并侧偏中文：title 优先 CN，日文进 originalTitle
-        title=title_zh or title_jp,
-        poster=cover,
-        studio=(cn.get("studio") or jp.get("studio")),
-        actors=list(actors),
-        tags=list(genres),
-        overview=plot,
-        date=(cn.get("premiered") or jp.get("premiered")),
-        extra={
-            "titleZh": title_zh,
-            "originalTitle": title_jp,
-            "originalPlot": original_plot,
-            "series": cn.get("series") or jp.get("series"),
-            "website": cn_url,
-        },
-    )
+    # 第十六轮：记住详情路径（uuid 对同番号稳定），重复刮直接走缓存跳过搜索
+    detail_path_cache.remember(SOURCE, std, rel)
+    return _from_rel(rel, search_url)

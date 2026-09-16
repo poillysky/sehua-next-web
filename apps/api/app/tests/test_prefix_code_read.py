@@ -10,7 +10,8 @@ from app.search.av import _clamp_std_code_digits
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[3]
+# app/tests/… → parents[4] = repo root
+ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(ROOT / "apps" / "api"))
 from scripts.index_codes_from_local_dbs import (  # noqa: E402
     accept_std_serial,

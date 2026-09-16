@@ -83,7 +83,18 @@ _resolving: dict[str, bool] = {}
 
 
 def _store_path() -> Path:
-    return data_dir() / "site-mirrors.json"
+    from app.core.db import site_mirrors_path
+
+    new = site_mirrors_path()
+    # one-shot compat: migrate legacy data/site-mirrors.json
+    legacy = data_dir() / "site-mirrors.json"
+    if legacy.is_file() and not new.is_file():
+        try:
+            new.parent.mkdir(parents=True, exist_ok=True)
+            legacy.replace(new)
+        except OSError:
+            return legacy if legacy.is_file() else new
+    return new
 
 
 def _origin(raw: str) -> str:
@@ -114,46 +125,136 @@ def _host(raw: str) -> str:
         return ""
 
 
+def atomic_write_text(path: Path, text: str) -> None:
+    """同目录临时文件 + `os.replace` 原子替换（实现见 `app/core/atomic_io.py`）。
+
+    ⚠️ 不要退回 `path.write_text()`：`site-mirrors.json` 会被 API 进程与各
+    脚本进程同时更新，直接截断写会让读者看到半截文件，或与另一个写者的
+    写入交错（表现为 `Extra data: line N column 1` —— 合法 JSON 后面挂了尾巴）。
+    原子替换后读者只会看到「旧内容」或「新内容」，不存在中间态。
+    """
+    from app.core.atomic_io import atomic_write_text as _impl
+
+    _impl(Path(path), text)
+
+
+def _salvage_json(text: str) -> Any:
+    """从损坏文件里抢救第一段合法 JSON（`Extra data` 场景的解药）。"""
+    stripped = str(text or "").lstrip("\ufeff \t\r\n")
+    if not stripped:
+        return None
+    try:
+        value, _end = json.JSONDecoder().raw_decode(stripped)
+        return value
+    except Exception:
+        return None
+
+
+def _quarantine_damaged(path: Path) -> None:
+    """把损坏文件另存留证（不删），失败也不影响主流程。"""
+    try:
+        path.replace(path.with_name(f"{path.stem}.corrupt-{int(time.time())}.json"))
+    except OSError:
+        pass
+
+
 def _load_disk() -> None:
     path = _store_path()
     if not path.is_file():
         return
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-        now = int(time.time() * 1000)
-        mirrors = raw.get("mirrors") if isinstance(raw, dict) else {}
-        if not isinstance(mirrors, dict):
-            return
-        for sid, ent in mirrors.items():
-            if not isinstance(ent, dict):
-                continue
-            base = _origin(str(ent.get("baseUrl") or ""))
-            exp = int(ent.get("expiresAt") or 0)
-            if not base or exp <= now:
-                continue
-            if sid == "iqqtv" and _is_iqqtv_redirect_seed(base):
-                continue
-            _memory[str(sid)] = {
-                "baseUrl": base,
-                "discoveredFrom": ent.get("discoveredFrom"),
-                "updatedAt": ent.get("updatedAt"),
-                "expiresAt": exp,
-            }
-    except Exception as e:
-        log.warning("site-mirrors load: %s", e)
+        text = path.read_text(encoding="utf-8")
+    except OSError as e:
+        log.warning("site-mirrors read: %s", e)
+        return
+
+    damaged = False
+    try:
+        raw = json.loads(text)
+    except Exception as e:  # json.JSONDecodeError / UnicodeDecodeError
+        damaged = True
+        log.warning("site-mirrors damaged (%s) — 抢救首段合法 JSON", e)
+        raw = _salvage_json(text)
+    if not isinstance(raw, dict):
+        if damaged:
+            _quarantine_damaged(path)
+        return
+
+    now = int(time.time() * 1000)
+    # 正式格式：{"mirrors": {sid: {...}}}；另兼容旧版写在**顶层**的 sid 键
+    # （`{sid: {"base": ..., "at": ...}}`）——两个写入者曾各写一套 schema。
+    candidates: list[tuple[str, Any]] = []
+    mirrors = raw.get("mirrors")
+    if isinstance(mirrors, dict):
+        candidates.extend((str(k), v) for k, v in mirrors.items())
+    candidates.extend(
+        (str(k), v)
+        for k, v in raw.items()
+        if k not in {"version", "mirrors"} and isinstance(v, dict)
+    )
+
+    for sid, ent in candidates:
+        if not isinstance(ent, dict):
+            continue
+        base = _origin(str(ent.get("baseUrl") or ent.get("base") or ""))
+        exp = int(ent.get("expiresAt") or 0)
+        if not exp:
+            # 旧 schema 是「发现时刻 at + ttlMs」
+            at = int(ent.get("at") or 0)
+            ttl = int(ent.get("ttlMs") or 0)
+            exp = (at + ttl) if (at and ttl) else 0
+        if not base or exp <= now:
+            continue
+        if sid == "iqqtv" and _is_iqqtv_redirect_seed(base):
+            continue
+        prev = _memory.get(sid)
+        if prev and int(prev.get("expiresAt") or 0) >= exp:
+            continue
+        _memory[sid] = {
+            "baseUrl": base,
+            "discoveredFrom": ent.get("discoveredFrom"),
+            "updatedAt": ent.get("updatedAt"),
+            "expiresAt": exp,
+        }
+    if damaged and _memory:
+        # 抢救成功 → 立刻用干净格式重写（顺带清掉混入的旧 schema 顶层键）。
+        _quarantine_damaged(path)
+        _persist()
 
 
 def _persist() -> None:
     path = _store_path()
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
         payload = {"version": 1, "mirrors": dict(_memory)}
-        path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
+        atomic_write_text(
+            path,
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
         )
     except OSError as e:
         log.warning("site-mirrors write: %s", e)
+
+
+def snapshot_live() -> dict[str, dict[str, Any]]:
+    """全部未过期镜像（新 dict，行也是新 dict；调用方可随意改）。
+
+    供 `sources_settings` 的 displayUrl 适配层使用：那份代码过去自己读盘 +
+    自己写盘，与这里形成两个写者，已统一到本模块。
+    """
+    if not _memory and _store_path().is_file():
+        _load_disk()
+    now = int(time.time() * 1000)
+    out: dict[str, dict[str, Any]] = {}
+    for sid, ent in list(_memory.items()):
+        exp = int(ent.get("expiresAt") or 0)
+        if exp <= now:
+            continue
+        out[str(sid)] = {
+            "base": str(ent.get("baseUrl") or ""),
+            "at": exp - TTL_MS,
+            "ttlMs": TTL_MS,
+            "discoveredFrom": ent.get("discoveredFrom"),
+        }
+    return out
 
 
 def _looks_blocked(html: str) -> bool:
@@ -426,11 +527,20 @@ def remember(source_id: str, base_url: str, *, discovered_from: str | None = Non
     }
     _memory[sid] = ent
     _persist()
-    # 兼容旧 iqqtv-mirror.json
+    # 兼容旧 iqqtv-mirror.json（现落在 data/mirrors/）
     if sid == "iqqtv":
         try:
-            legacy = data_dir() / "iqqtv-mirror.json"
-            legacy.write_text(
+            from app.core.db import iqqtv_mirror_legacy_path
+
+            legacy = iqqtv_mirror_legacy_path()
+            old = data_dir() / "iqqtv-mirror.json"
+            if old.is_file() and old.resolve() != legacy.resolve():
+                try:
+                    old.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            atomic_write_text(
+                legacy,
                 json.dumps(
                     {
                         "baseUrl": base,
@@ -441,7 +551,6 @@ def remember(source_id: str, base_url: str, *, discovered_from: str | None = Non
                     ensure_ascii=False,
                     indent=2,
                 ),
-                encoding="utf-8",
             )
         except OSError:
             pass
@@ -468,7 +577,13 @@ def get_cached(source_id: str) -> str | None:
         # 兼容旧 iqqtv 缓存
         if sid == "iqqtv":
             try:
-                path = data_dir() / "iqqtv-mirror.json"
+                from app.core.db import iqqtv_mirror_legacy_path
+
+                path = iqqtv_mirror_legacy_path()
+                if not path.is_file():
+                    old = data_dir() / "iqqtv-mirror.json"
+                    if old.is_file():
+                        path = old
                 if path.is_file():
                     raw = json.loads(path.read_text(encoding="utf-8"))
                     base = _origin(str(raw.get("baseUrl") or ""))

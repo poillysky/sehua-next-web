@@ -4,53 +4,15 @@ from __future__ import annotations
 
 import re
 
-# 稳定 id → 展示名；db_region 供 prefix_service / 白名单查询
-REGION_META: dict[str, dict[str, str]] = {
-    "japan_censored": {
-        "id": "japan_censored",
-        "label": "日本有码",
-        "db_region": "japan_censored",
-        "navPath": "片区/日本/有码",
-    },
-    "japan_gravure": {
-        "id": "japan_gravure",
-        "label": "日本写真",
-        "db_region": "japan",
-        "navPath": "片区/日本/写真",
-    },
-    "japan_uncensored": {
-        "id": "japan_uncensored",
-        "label": "日本无码",
-        "db_region": "japan_uncensored",
-        "navPath": "片区/日本/无码",
-    },
-    "japan_amateur": {
-        "id": "japan_amateur",
-        "label": "日本素人",
-        "db_region": "japan_amateur",
-        "navPath": "片区/日本/素人",
-    },
-    "fc2": {
-        "id": "fc2",
-        "label": "FC2",
-        "db_region": "fc2",
-        "navPath": "片区/日本/FC2",
-    },
-    "china": {
-        "id": "china",
-        "label": "国产无码",
-        "db_region": "china",
-        "navPath": "片区/国产/无码",
-    },
-    "western": {
-        "id": "western",
-        "label": "欧美无码",
-        "db_region": "western",
-        "navPath": "片区/欧美/无码",
-    },
-}
+from app.core.maps_paths import regions_doc
 
-REGION_ORDER = list(REGION_META.keys())
+_REGION_DOC = regions_doc()
+REGION_META: dict[str, dict[str, str]] = {
+    str(k): {str(sk): str(sv) for sk, sv in dict(v).items()}
+    for k, v in dict(_REGION_DOC.get("regions") or {}).items()
+}
+_ORDER = [str(x) for x in (_REGION_DOC.get("order") or [])]
+REGION_ORDER = [x for x in _ORDER if x in REGION_META] or list(REGION_META.keys())
 
 # 仅这两区把女优名写入索引副文案；其它区只保留标题
 FORUM_ACTORS_INDEX_REGIONS = frozenset({"japan_censored", "japan_gravure"})

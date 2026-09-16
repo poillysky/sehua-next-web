@@ -18,6 +18,7 @@ from .common import (
     std_code,
     strip_tags,
 )
+from app.core import detail_path_cache
 
 DEFAULT_BASE = "https://123av.com/ja"
 DETAIL_SUFFIX_RE = re.compile(
@@ -206,6 +207,78 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
         raise RuntimeError("未配置网站地址")
 
     referer = f"{base}/"
+
+    def _build(detail_html: str, detail_url: str) -> dict:
+        """校验 + 解析 + 构造（搜索路径与缓存路径共用）。失败抛 RuntimeError。"""
+        if not detail_html or len(detail_html) < 2000:
+            raise RuntimeError("详情页无响应")
+        if not _is_detail_html(detail_html, std):
+            raise RuntimeError("解析失败")
+
+        rows = _parse_info_rows(detail_html)
+        if not rows:
+            rows = _parse_legacy_rows(detail_html)
+
+        title = _parse_title(detail_html, std)
+        # 与 miss_av / dmm / jav321 / javday / javlibrary / lulubar 及 make_detail 口径一致：
+        # 单字/占位标题（站点标题本身就短）只清空标题，不打死整源；
+        # 详情页有效性已由 _is_detail_html 校验，真·空页由下方 (not title and not cover and ...) 拦住。
+        if title and is_junk_title(title):
+            title = ""
+
+        actors = _row_list(rows, "出演者", "女優", "女优", "Actress")[:20]
+        # 站点偶发半角片假名（倉本ｽﾐﾚ）→ 全角，便于后续映射
+        import unicodedata
+
+        actors = [unicodedata.normalize("NFKC", a) for a in actors if a]
+        tags = []
+        for g in _row_list(rows, "ジャンル", "类型", "Genre") + _row_list(rows, "タグ", "标签", "Tag"):
+            if g and g not in tags:
+                tags.append(g)
+        tags = tags[:40]
+
+        studio = _first_row(rows, "メーカー", "片商", "Maker") or None
+        premiered = (_first_row(rows, "発売日", "发行日", "Release", "公開日") or "")[:10] or None
+
+        doc = soup(detail_html)
+        desc = doc.select_one("div.description p")
+        plot = strip_tags(desc.get_text() if desc else "")
+        if not plot or len(plot) < 12:
+            plot = ""
+
+        cover = _parse_cover(detail_html, detail_url)
+        if cover and is_junk_cover_url(cover):
+            cover = None
+
+        if not title and not cover and not actors and not tags:
+            raise RuntimeError("解析失败")
+
+        return make_detail(
+            source="njav",
+            code=std,
+            title=title or None,
+            poster=cover,
+            studio=studio,
+            actors=actors,
+            tags=tags,
+            overview=plot or None,
+            date=premiered,
+            extra={"website": detail_url},
+        )
+
+    # 第十六轮：详情路径缓存命中 → 直接抓详情，跳过搜索（重复刮省 1 请求）。
+    # _is_detail_html 校验不过回落搜索；坏缓存最多浪费 1 请求，不会错绑。
+    cached_path = detail_path_cache.lookup("njav", std)
+    if cached_path:
+        try:
+            cached_url = abs_url(cached_path, f"{base}/") or cached_path
+            cached_html = fetch_html(
+                cached_url, referer=referer, cookie=cookie or None, source_id="njav"
+            )
+            return _build(cached_html or "", cached_url)
+        except Exception:
+            pass  # 缓存失效 → 回落搜索
+
     search_url = _search_url(base, std)
     try:
         search_html = fetch_html(search_url, referer=referer, cookie=cookie or None, source_id="njav")
@@ -219,60 +292,11 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
         raise RuntimeError("未找到")
 
     detail_url = abs_url(detail_path, f"{base}/") or detail_path
+    # 第十六轮：记住详情路径，重复刮直接走缓存跳过搜索
+    detail_path_cache.remember("njav", std, detail_path)
     try:
         detail_html = fetch_html(detail_url, referer=search_url, cookie=cookie or None, source_id="njav")
     except Exception as e:
         raise RuntimeError(f"详情页无响应: {e}") from e
-    if not detail_html or len(detail_html) < 2000:
-        raise RuntimeError("详情页无响应")
 
-    if not _is_detail_html(detail_html, std):
-        raise RuntimeError("解析失败")
-
-    rows = _parse_info_rows(detail_html)
-    if not rows:
-        rows = _parse_legacy_rows(detail_html)
-
-    title = _parse_title(detail_html, std)
-    if title and is_junk_title(title):
-        raise RuntimeError("解析失败")
-
-    actors = _row_list(rows, "出演者", "女優", "女优", "Actress")[:20]
-    # 站点偶发半角片假名（倉本ｽﾐﾚ）→ 全角，便于后续映射
-    import unicodedata
-
-    actors = [unicodedata.normalize("NFKC", a) for a in actors if a]
-    tags = []
-    for g in _row_list(rows, "ジャンル", "类型", "Genre") + _row_list(rows, "タグ", "标签", "Tag"):
-        if g and g not in tags:
-            tags.append(g)
-    tags = tags[:40]
-
-    studio = _first_row(rows, "メーカー", "片商", "Maker") or None
-    premiered = (_first_row(rows, "発売日", "发行日", "Release", "公開日") or "")[:10] or None
-
-    doc = soup(detail_html)
-    desc = doc.select_one("div.description p")
-    plot = strip_tags(desc.get_text() if desc else "")
-    if not plot or len(plot) < 12:
-        plot = ""
-
-    cover = _parse_cover(detail_html, detail_url)
-    if cover and is_junk_cover_url(cover):
-        cover = None
-
-    if not title and not cover and not actors and not tags:
-        raise RuntimeError("解析失败")
-
-    return make_detail(
-        source="njav",
-        code=std,
-        title=title or None,
-        poster=cover,
-        studio=studio,
-        actors=actors,
-        tags=tags,
-        overview=plot or None,
-        date=premiered,
-        extra={"website": detail_url},
-    )
+    return _build(detail_html or "", detail_url)

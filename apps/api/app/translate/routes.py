@@ -564,15 +564,11 @@ def translate_to_zh_sync(
     def _isolated() -> dict[str, str]:
         return asyncio.run(_run())
 
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return _isolated()
-
-    # 已在事件循环中：丢到独立线程跑，避免 nest_asyncio
+    # 统一丢独立线程并硬超时，避免 LLM 卡死番号槽（无论当前有无事件循环）
+    wait = max(8.0, float(timeout_sec or 90.0))
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
         fut = pool.submit(_isolated)
-        return fut.result(timeout=max(15.0, float(timeout_sec)))
+        return fut.result(timeout=wait)
 
 
 def _split_translate_chunks(text: str, *, max_len: int = 420) -> list[str]:

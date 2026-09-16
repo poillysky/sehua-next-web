@@ -11,10 +11,10 @@ from typing import Any, Callable
 
 # 长驻 API 进程里脚本每次热加载，但 app.* 可能仍是旧模块；扫描前强制 reload。
 _RELOAD_DEPS = (
-    "app.prefix_code_read",
-    "app.prefix_ranges",
-    "app.search_av",
-    "app.prefix_catalog_store",
+    "app.prefix.code_read",
+    "app.prefix.ranges",
+    "app.search.av",
+    "app.prefix.catalog_store",
 )
 
 
@@ -32,7 +32,8 @@ def _reload_scan_deps() -> None:
 
 def _load_script():
     _reload_scan_deps()
-    path = Path(__file__).resolve().parent.parent / "scripts" / "index_codes_from_local_dbs.py"
+    # app/prefix/… → apps/api/scripts/…
+    path = Path(__file__).resolve().parents[2] / "scripts" / "index_codes_from_local_dbs.py"
     spec = importlib.util.spec_from_file_location(
         "prefix_catalog_index_codes_script", path
     )

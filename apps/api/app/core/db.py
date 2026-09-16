@@ -7,6 +7,7 @@ import os
 import re
 import threading
 from contextlib import contextmanager
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterator, Sequence
 from urllib.parse import urlparse, urlunparse
@@ -14,7 +15,8 @@ from urllib.parse import urlparse, urlunparse
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
-ROOT = Path(__file__).resolve().parents[3]
+# app/core/db.py → parents[4] = repo root (sehua-next-web)
+ROOT = Path(__file__).resolve().parents[4]
 DATA_DIR = ROOT / "data"
 MEDIA_DIR = ROOT / "media"
 DEFAULT_META_DSN = "postgresql://postgres:postgres@192.168.2.38:5439/nextweb"
@@ -27,7 +29,35 @@ _init_lock = threading.Lock()
 _initialized = False
 _nofile_raised = False
 
-_QMARK_RE = re.compile(r"\?")
+
+def _replace_qmarks(sql: str) -> str:
+    """把参数占位 `?` 换成 `%s`，**跳过单引号字符串字面量内**的 `?`。
+
+    原实现是 `re.sub(r"\\?", "%s", sql)`：`WHERE note = 'a?b'` 里的 `?` 也会被
+    替换掉，导致占位符与参数数量错位（报错或错值）。这里逐字符扫描并正确
+    处理 `''` 转义。无 `?` 时直接原样返回（快路径）。
+    """
+    if "?" not in sql:
+        return sql
+    out: list[str] = []
+    in_str = False
+    i = 0
+    n = len(sql)
+    while i < n:
+        ch = sql[i]
+        if ch == "'":
+            out.append(ch)
+            if in_str and i + 1 < n and sql[i + 1] == "'":
+                out.append("'")
+                i += 2
+                continue
+            in_str = not in_str
+        elif ch == "?" and not in_str:
+            out.append("%s")
+        else:
+            out.append(ch)
+        i += 1
+    return "".join(out)
 _INSERT_OR_IGNORE_RE = re.compile(r"INSERT\s+OR\s+IGNORE\s+INTO", re.I)
 _INSERT_OR_REPLACE_RE = re.compile(r"INSERT\s+OR\s+REPLACE\s+INTO", re.I)
 _COLLATE_NOCASE_RE = re.compile(r"\s+COLLATE\s+NOCASE", re.I)
@@ -55,15 +85,98 @@ def _raise_nofile_limit() -> None:
         logger.debug("could not raise RLIMIT_NOFILE: %s", e)
 
 
+def _ensure_dir(p: Path) -> Path:
+    """返回目录，**只在缺失时** mkdir。
+
+    ⚠️ 不要退回「每次调用都 `mkdir(parents=True, exist_ok=True)`」：
+    Windows 上实测 `mkdir(exist_ok=True)` **0.26 ms/次**，而 `is_dir()` 探测只要
+    **0.003 ms**（≈90×）。这些 helper（`media_dir()` / `data_dir()` / `mirrors_dir()`）
+    被 `embed.resolve_root()` → `embed.get_settings()` 这类**每番号**路径反复调用，
+    `enrich_one_row` 一个番号就要付 4 次 —— 12.3 万番号合计约 **8.5 分钟**纯 syscall。
+    """
+    if not p.is_dir():
+        p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
 def data_dir() -> Path:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    return DATA_DIR
+    return _ensure_dir(DATA_DIR)
 
 
 def media_dir() -> Path:
     """片库类目录根（STRM / 刮削库等），与 data/ 运行时缓存分开。"""
-    MEDIA_DIR.mkdir(parents=True, exist_ok=True)
-    return MEDIA_DIR
+    return _ensure_dir(MEDIA_DIR)
+
+
+def mirrors_dir() -> Path:
+    return _ensure_dir(data_dir() / "mirrors")
+
+
+def prefix_runtime_dir() -> Path:
+    return _ensure_dir(data_dir() / "prefix")
+
+
+def prefix_catalog_dir() -> Path:
+    p = _ensure_dir(prefix_runtime_dir() / "catalog")
+    legacy = data_dir() / "prefix_catalog"
+    if legacy.is_dir() and not (p / "catalog.json").is_file():
+        # one-shot: 旧扁平目录 → data/prefix/catalog/
+        try:
+            for child in list(legacy.iterdir()):
+                dest = p / child.name
+                if not dest.exists():
+                    child.replace(dest)
+        except OSError:
+            pass
+    return p
+
+
+def prefix_code_ranges_cache() -> Path:
+    new = prefix_runtime_dir() / "code-ranges.json"
+    legacy = data_dir() / "prefix-code-ranges.json"
+    if legacy.is_file() and not new.is_file():
+        try:
+            legacy.replace(new)
+        except OSError:
+            return legacy
+    return new
+
+
+def cover_cache_dir() -> Path:
+    p = data_dir() / "cache" / "cover"
+    legacy = data_dir() / "cover-cache"
+    if not p.exists() and legacy.is_dir():
+        try:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            legacy.replace(p)
+        except OSError:
+            pass
+    return _ensure_dir(p)
+
+
+def facets_cache_dir() -> Path:
+    p = data_dir() / "cache" / "facets"
+    legacy = data_dir() / "scrap_facets_snap"
+    if not p.exists() and legacy.is_dir():
+        try:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            legacy.replace(p)
+        except OSError:
+            pass
+    return _ensure_dir(p)
+
+
+def debug_dir() -> Path:
+    """脚本报告 / 探针输出（原 data/_debug）。"""
+    return _ensure_dir(data_dir() / "debug")
+
+
+def site_mirrors_path() -> Path:
+    return mirrors_dir() / "site-mirrors.json"
+
+
+def iqqtv_mirror_legacy_path() -> Path:
+    return mirrors_dir() / "iqqtv-mirror.json"
 
 
 def db_path() -> Path:
@@ -123,8 +236,13 @@ def close_meta_pool() -> None:
     _initialized = False
 
 
+@lru_cache(maxsize=1024)
 def adapt_sql(sql: str) -> str:
-    """把遗留 SQLite 方言尽量转到 Postgres。"""
+    """把遗留 SQLite 方言尽量转到 Postgres。
+
+    纯函数（str → str）且 SQL 模板数量有限，故结果缓存：原先每次
+    `conn.execute` 都要跑 5 个正则替换，高频查询下是纯浪费。
+    """
     s = sql
     s = s.replace("datetime('now')", "CURRENT_TIMESTAMP")
     s = _COLLATE_NOCASE_RE.sub("", s)
@@ -147,7 +265,7 @@ def adapt_sql(sql: str) -> str:
                   updated_at = EXCLUDED.updated_at
                 """
             )
-    s = _QMARK_RE.sub("%s", s)
+    s = _replace_qmarks(s)
     return s
 
 
@@ -347,6 +465,71 @@ def init_db() -> None:
                 """
                 CREATE INDEX IF NOT EXISTS idx_enrich_logs_region_id
                 ON enrich_logs (region, id DESC)
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS enrich_queue_log (
+                  id BIGSERIAL PRIMARY KEY,
+                  region TEXT NOT NULL DEFAULT '',
+                  item_id TEXT NOT NULL DEFAULT '',
+                  code TEXT NOT NULL DEFAULT '',
+                  status TEXT NOT NULL DEFAULT 'pending',
+                  gaps_json TEXT NOT NULL DEFAULT '[]',
+                  error TEXT NOT NULL DEFAULT '',
+                  source TEXT NOT NULL DEFAULT '',
+                  fetch_ms INTEGER,
+                  detail_title TEXT NOT NULL DEFAULT '',
+                  payload_json TEXT NOT NULL DEFAULT '{}',
+                  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_enrich_queue_log_region_status_id
+                ON enrich_queue_log (region, status, id DESC)
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_enrich_queue_log_region_code
+                ON enrich_queue_log (region, code)
+                WHERE code <> ''
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_enrich_queue_log_region_item
+                ON enrich_queue_log (region, item_id)
+                WHERE item_id <> ''
+                """
+            )
+            # 有界重试提示：记录「本该更好但没拿到」的番号（封面抓不到 / 高优先源故障降级）。
+            # 目的：既不每轮无脑重刮（12 万番号的固定税），也不永久放弃。
+            # kind ∈ {'cover','src_down'}；giveup=True 后增量扫描不再自动入队，
+            # 用户可用「覆盖模式重扫」或单号重刮解除。
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS enrich_retry_hint (
+                  region TEXT NOT NULL DEFAULT '',
+                  code TEXT NOT NULL DEFAULT '',
+                  kind TEXT NOT NULL DEFAULT '',
+                  attempts INTEGER NOT NULL DEFAULT 0,
+                  giveup BOOLEAN NOT NULL DEFAULT FALSE,
+                  last_error TEXT NOT NULL DEFAULT '',
+                  item_id TEXT NOT NULL DEFAULT '',
+                  rel_path TEXT NOT NULL DEFAULT '',
+                  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                  PRIMARY KEY (region, code, kind)
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_enrich_retry_hint_region_kind
+                ON enrich_retry_hint (region, kind, giveup)
                 """
             )
             conn.commit()

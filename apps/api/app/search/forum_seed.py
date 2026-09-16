@@ -213,12 +213,45 @@ _TITLE_CONTENT_HINT_RE = re.compile(
 )
 
 
+_FOLD_FN: Any = None
+
+
+def _fold_token(s: str) -> str:
+    """字形归一（繁简/异体 + 片假名→平假名），复用刮削侧同一套折叠。
+
+    ⚠️ 必须折叠后再比较：`pick_forum_seed_from_posts()` 出的 actors 已经被
+    `normalize_actor_names()` 换成映射表**标准名**（`木村愛心` → `木村爱心`），
+    而标题里仍是源站写法（日文 `愛`）。只 `casefold` 不折叠 → 两者不等，
+    女优名冒充中文片名的判定就会漏（正是本模块要挡的那类脏标题）。
+    """
+    global _FOLD_FN
+    if _FOLD_FN is None:
+        try:
+            from app.scrape.metadata_optimize import (  # noqa: SLF001
+                _fold_variant,
+                _kana_fold,
+            )
+
+            def _apply(x: str) -> str:
+                return _kana_fold(_fold_variant(x))
+
+            _FOLD_FN = _apply
+        except Exception:  # noqa: BLE001
+            _FOLD_FN = lambda x: x  # noqa: E731
+    return str(_FOLD_FN(s or ""))
+
+
 def _norm_title_token(s: str) -> str:
-    return re.sub(r"[\s\u3000·・、,，/|]+", "", str(s or "")).casefold()
+    t = re.sub(r"[\s\u3000·・、,，/|]+", "", str(s or ""))
+    return _fold_token(t).casefold()
 
 
 def _title_is_actor_echo(title: str, actors: list[str] | None) -> bool:
-    """标题是否其实只是女优名（与出演字段相同）。"""
+    """标题是否其实只是女优名（与出演字段相同）。
+
+    比较前做字形折叠 —— 标题常是源站日文写法、actors 是映射表标准名，
+    不折叠会把「女优名当标题」漏判。
+    """
     t = str(title or "").strip()
     if not t or not actors:
         return False

@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 
 from app.auth.routes import require_user
-from app.core.db import data_dir
+from app.core.db import cover_cache_dir
 from app.core.outbound_http import httpx_client
 
 log = logging.getLogger(__name__)
@@ -35,7 +35,6 @@ _FORUM_IMG_HOST_RE = re.compile(
 )
 
 _COVER_FETCH_TIMEOUT = httpx.Timeout(6.0, connect=2.5)
-_COVER_FETCH_SLOTS = threading.Semaphore(4)
 _MEM_CACHE_MAX = 96
 _MEM_CACHE_MAX_BYTES = 24 * 1024 * 1024
 _DISK_MAX_BYTES = 256 * 1024 * 1024
@@ -178,84 +177,128 @@ def _referers_for_host(host: str, scheme: str) -> list[str | None]:
 
 
 def _fetch_bytes(url: str) -> tuple[bytes, str]:
-    # 限制并发：列表页几十张图同时拉会打满线程池，整站像卡死
-    if not _COVER_FETCH_SLOTS.acquire(timeout=8.0):
-        raise HTTPException(status_code=503, detail="封面队列繁忙")
+    """列表/代理拉图：走调度器 ui 档，超时仍 503（避免 UI 挂死）。"""
+    from app.core.outbound_scheduler import get_scheduler
+
+    sched = get_scheduler()
     try:
-        return _fetch_bytes_unlocked(url)
-    finally:
-        _COVER_FETCH_SLOTS.release()
+        with sched.slot(url, kind="ui", timeout=10.0):
+            return _fetch_bytes_core(url, sched=sched)
+    except TimeoutError as e:
+        raise HTTPException(status_code=503, detail="封面队列繁忙") from e
+
+
+def _fetch_bytes_for_enrich(
+    url: str, *, timeout: float = 8.0
+) -> tuple[bytes, str]:
+    """刮削拉封面：cover 档。
+
+    timeout 为抢槽上限（批量应传 1～3s，勿再等 45s 把封面预算拖死）。
+    抢不到槽抛 TimeoutError，由上层记 slot_blocked 并换下一 URL。
+    """
+    from app.core.outbound_scheduler import get_scheduler
+
+    sched = get_scheduler()
+    to = max(0.35, float(timeout or 8.0))
+    with sched.slot(url, kind="cover", timeout=to):
+        return _fetch_bytes_core(url, sched=sched)
 
 
 def _fetch_bytes_unlocked(url: str) -> tuple[bytes, str]:
+    """兼容旧调用：无调度包装（调度应在外层）。"""
+    from app.core.outbound_scheduler import get_scheduler
+
+    return _fetch_bytes_core(url, sched=get_scheduler())
+
+
+def _fetch_bytes_core(
+    url: str, *, sched: Any | None = None
+) -> tuple[bytes, str]:
     parsed = urlparse(url)
     host = (parsed.hostname or "").lower()
     scheme = parsed.scheme or "https"
     uniq_refs = _referers_for_host(host, scheme)
     slow = _is_slow_cover_host(host)
+    dmm = _is_dmm_cover_host(host)
     # 慢图床少试 Referer；DMM 也只需 2 个
-    ref_cap = 2 if (slow or _is_dmm_cover_host(host)) else 4
-    # 慢图床连接失败立刻换下一 URL，勿连撞 3 次超时
-    fail_cap = 1 if slow else 3
+    ref_cap = 2 if (slow or dmm) else 4
+    # 慢图床/DMM：连接失败立刻换下一 URL，勿连撞 3 次超时
+    fail_cap = 1 if (slow or dmm) else 3
     timeout = (
-        httpx.Timeout(3.0, connect=1.5) if slow else _COVER_FETCH_TIMEOUT
+        httpx.Timeout(3.0, connect=1.5)
+        if slow
+        else (
+            httpx.Timeout(4.0, connect=2.0)
+            if dmm
+            else _COVER_FETCH_TIMEOUT
+        )
     )
 
     from app.core.outbound_http import resolve_scrape_proxy_url
+    from app.core.outbound_scheduler import get_scheduler
 
+    scheduler = sched or get_scheduler()
     proxy = resolve_scrape_proxy_url()
-    client_opts: list[dict[str, Any]] = []
+    # 先代理再直连；共用长寿命 Client
+    attempts: list[tuple[str | None, bool]] = []
     if proxy:
-        client_opts.append({"proxy": proxy, "verify": False})
-    client_opts.append({"verify": False})
+        attempts.append((proxy, False))
+    attempts.append((None, False))
 
     last_status = 0
     last_err: Exception | None = None
     transport_fails = 0
-    for copts in client_opts:
+    for proxy_u, verify in attempts:
         try:
-            with httpx.Client(
-                timeout=timeout,
-                trust_env=False,
-                follow_redirects=True,
-                **copts,
-            ) as client:
-                for ref in uniq_refs[:ref_cap]:
+            client = scheduler.shared_client(
+                proxy=proxy_u, verify=verify, timeout=timeout
+            )
+            for ref in uniq_refs[:ref_cap]:
+                try:
+                    headers = _image_headers(url, referer=ref)
+                    if host.endswith("doubanio.com"):
+                        headers["User-Agent"] = (
+                            "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) "
+                            "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 "
+                            "Mobile/15E148 Safari/604.1"
+                        )
+                    r = client.get(url, headers=headers, timeout=timeout)
+                except Exception as e:
+                    last_err = e
+                    transport_fails += 1
+                    log.warning("cover fetch transport error ref=%s: %s", ref, e)
+                    if transport_fails >= fail_cap:
+                        break
+                    continue
+                last_status = r.status_code
+                if last_status in {429, 503}:
+                    ra = r.headers.get("Retry-After")
                     try:
-                        headers = _image_headers(url, referer=ref)
-                        if host.endswith("doubanio.com"):
-                            headers["User-Agent"] = (
-                                "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) "
-                                "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 "
-                                "Mobile/15E148 Safari/604.1"
-                            )
-                        r = client.get(url, headers=headers)
-                    except Exception as e:
-                        last_err = e
-                        transport_fails += 1
-                        log.warning("cover fetch transport error ref=%s: %s", ref, e)
-                        if transport_fails >= fail_cap:
-                            break
-                        continue
-                    last_status = r.status_code
-                    if r.status_code in {403, 404, 418}:
-                        continue
-                    if r.status_code >= 400:
-                        continue
-                    ctype = (
-                        (r.headers.get("content-type") or "image/jpeg")
-                        .split(";")[0]
-                        .strip()
-                    )
-                    data = r.content
-                    if not data or len(data) > 12 * 1024 * 1024:
-                        continue
-                    if not _looks_like_image(data, ctype):
-                        continue
-                    return data, ctype if "image/" in ctype.lower() else "image/jpeg"
+                        if ra and str(ra).strip().isdigit():
+                            scheduler.note_retry_after(url, float(ra))
+                        else:
+                            scheduler.note_status(url, last_status)
+                    except Exception:  # noqa: BLE001
+                        scheduler.note_status(url, last_status)
+                    continue
+                if r.status_code in {403, 404, 418}:
+                    continue
+                if r.status_code >= 400:
+                    continue
+                ctype = (
+                    (r.headers.get("content-type") or "image/jpeg")
+                    .split(";")[0]
+                    .strip()
+                )
+                data = r.content
+                if not data or len(data) > 12 * 1024 * 1024:
+                    continue
+                if not _looks_like_image(data, ctype):
+                    continue
+                return data, ctype if "image/" in ctype.lower() else "image/jpeg"
         except Exception as e:
             last_err = e
-            log.warning("cover client opts=%s: %s", copts, e)
+            log.warning("cover client proxy=%s: %s", bool(proxy_u), e)
             continue
         if transport_fails >= fail_cap:
             break
@@ -270,9 +313,7 @@ def _cache_key(url: str, w: int | None, *, rp: bool = False) -> str:
 
 
 def _cover_cache_dir():
-    d = data_dir() / "cover-cache"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+    return cover_cache_dir()
 
 
 def _mem_get(key: str) -> tuple[bytes, str] | None:
@@ -355,15 +396,14 @@ def _maybe_trim_disk() -> None:
 
 
 def _crop_right_portrait(im):
-    """有码 thumb/fanart 横图：裁右侧竖幅（约 2:3），对齐 poster 区域。"""
+    """有码横图右裁竖幅：与入库 `_crop_right` 一致——只削左右，高度不变。"""
     w, h = im.size
-    if w <= h:
+    if w <= h or h <= 0:
         return im
-    crop_w = max(1, min(w, int(round(h * 2 / 3))))
-    if crop_w >= w:
-        return im
-    left = w - crop_w
-    return im.crop((left, 0, w, h))
+    ratio = 2.12 / 3
+    cw = max(1, min(w, int(round(h * ratio))))
+    left = max(0, w - cw)
+    return im.crop((left, 0, left + cw, h))
 
 
 def _resize_cover(

@@ -1,7 +1,7 @@
 """七区前缀/番号目录：网络校验真相源（不依赖资源仓库）。
 
-运行时：`data/prefix_catalog/catalog.json`
-种子：`apps/web/src/config/prefix-catalog.seed.json`
+运行时：`data/prefix/catalog/catalog.json`
+种子：`apps/maps/prefixes/catalog.seed.json`
 """
 
 from __future__ import annotations
@@ -14,13 +14,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from app.core.db import ROOT, data_dir
+from app.core.db import ROOT, prefix_catalog_dir
+from app.core.maps_paths import prefix_catalog_seed
 from app.core.region_meta import REGION_META, REGION_ORDER, std_prefix
 import app.prefix.maker_names as maker_names
 
 log = logging.getLogger(__name__)
 
-SEED_PATH = ROOT / "apps" / "web" / "src" / "config" / "prefix-catalog.seed.json"
+SEED_PATH = prefix_catalog_seed()
 CATALOG_VERSION = 1
 
 _lock = threading.RLock()
@@ -29,9 +30,7 @@ _cache_mtime: float | None = None
 
 
 def catalog_dir() -> Path:
-    p = data_dir() / "prefix_catalog"
-    p.mkdir(parents=True, exist_ok=True)
-    return p
+    return prefix_catalog_dir()
 
 
 def catalog_path() -> Path:

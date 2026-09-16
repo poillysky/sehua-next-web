@@ -146,7 +146,7 @@ def guess_dmm_cids(code_raw: str) -> list[str]:
 
 
 def _post_graphql(cid: str, cookie: str = "") -> dict[str, Any] | None:
-    from ..outbound_http import curl_request
+    from app.core.outbound_http import api_slot, curl_request, thread_request_timeout
 
     detail = f"https://video.dmm.co.jp/av/content/?id={cid}"
     headers = {
@@ -158,19 +158,24 @@ def _post_graphql(cid: str, cookie: str = "") -> dict[str, Any] | None:
         "Cookie": cookie
         or "age_check_done=1; ckcy=1; cklg=ja; is_overseas=0",
     }
+    # 请求超时跟随线程本地单源预算（原来硬编码 20s，与 enrich 的 down 判定不一致）
+    budget = thread_request_timeout()
+    to = 20.0 if not budget or float(budget) <= 0 else min(20.0, float(budget))
     try:
-        r = curl_request(
-            "POST",
-            GQL,
-            headers=headers,
-            json_body={
-                "operationName": "ScrapDigitalContent",
-                "variables": {"id": cid},
-                "query": DIGITAL_QUERY,
-            },
-            timeout=20.0,
-            verify=False,
-        )
+        # 第十一轮：走 kind="api" 出站通道，直连路径不再裸奔
+        with api_slot(GQL, timeout=to):
+            r = curl_request(
+                "POST",
+                GQL,
+                headers=headers,
+                json_body={
+                    "operationName": "ScrapDigitalContent",
+                    "variables": {"id": cid},
+                    "query": DIGITAL_QUERY,
+                },
+                timeout=to,
+                verify=False,
+            )
     except Exception:
         return None
     if int(getattr(r, "status_code", 500) or 500) >= 400:

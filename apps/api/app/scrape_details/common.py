@@ -4,12 +4,27 @@
 from __future__ import annotations
 
 import re
+import threading
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
 DetailDict = dict[str, Any]
+
+# 线程本地「同一份 html 只解析一次」缓存。
+#
+# 背景（第八轮实测，`_diag_cpu_profile.py`）：各源把**同一份 html 反复传给
+# 多个 `_parse_*(html)` helper** —— mgstage 一条详情要调度 14 次全量 lxml 解析
+# （品番/メーカー/レーベル/シリーズ/配信開始日/商品発売日/収録時間/出演 + 
+# title/outline/genres/cover/extrafanart/rating）。单番号 CPU 里
+# bs4+soupsieve 占比 ~96%，我们自己业务代码只有 ~100ms —— 这是刮削吞吐的
+# 第一瓶颈，而且它随「命中率高的番号族」放大，表现为「越刮越慢 + 假超时」。
+#
+# 键用**对象身份**（`is`）：同一次 scrape_detail 里各 helper 拿到的是同一个
+# str 对象。线程本地 + 单条，跨番号不保留解析树（BeautifulSoup 树很占内存），
+# 抓取线程用完随线程回收，无跨线程共享故不需要锁。
+_tls = threading.local()
 
 
 def strip_tags(s: str) -> str:
@@ -224,7 +239,21 @@ def year_from(s: str | None) -> str | None:
 
 
 def soup(html: str) -> BeautifulSoup:
-    return BeautifulSoup(html or "", "lxml")
+    """解析 HTML —— **同一份 html 在同一线程内只解析一次**。
+
+    ⚠️ 返回的是**共享只读**树：调用方只能查询（select/find/get_text），
+    禁止 `decompose()` / `extract()` / `append()` 等变异，否则会污染同一次
+    抓取里后续 helper 看到的内容。现有 helper 全部是只读查询。
+
+    不同内容、或不同线程 → 各解析一次，语义与旧实现完全一致。
+    """
+    s = html or ""
+    hit = getattr(_tls, "soup_entry", None)
+    if hit is not None and hit[0] is s:
+        return hit[1]
+    doc = BeautifulSoup(s, "lxml")
+    _tls.soup_entry = (s, doc)
+    return doc
 
 
 def make_detail(
@@ -296,7 +325,7 @@ def _page_fetch(
     fast: bool = False,
 ):
     from .. import makers_settings
-    from ..outbound_http import fetch_page, looks_blocked_html
+    from app.core.outbound_http import fetch_page, looks_blocked_html
 
     sid = source_id
     # 与数据源测链一致：优先调用方传入 / 目录 access，再回退 makers
@@ -381,7 +410,12 @@ def fetch_json(
 ) -> Any:
     import json as _json
 
-    from ..outbound_http import curl_request, resolve_scrape_proxy_url
+    from app.core.outbound_http import (
+        api_slot,
+        curl_request,
+        resolve_scrape_proxy_url,
+        thread_request_timeout,
+    )
 
     hdrs = {
         "Accept": "application/json",
@@ -402,15 +436,22 @@ def fetch_json(
         except Exception:
             pass
     proxy = resolve_scrape_proxy_url()
-    r = curl_request(
-        "GET",
-        url,
-        headers=hdrs,
-        timeout=28.0,
-        verify=False,
-        proxy=proxy,
-        use_panel_proxy=True,
-    )
+    # 请求超时跟随线程本地「单源预算」：原来硬编码 28s，而 `enrich._one` 按策略
+    # 的 perSourceTimeoutSec 判 down（默认 28、过盾 18）→ 预算更小时请求还在跑，
+    # 变成没人收的僵尸线程。取两者较小值即「源侧不许比我们的预算更久」。
+    budget = thread_request_timeout()
+    to = 28.0 if not budget or float(budget) <= 0 else min(28.0, float(budget))
+    # 第十一轮：走 kind="api" 出站通道（有界并发 + 等槽记账 + 早停令牌）
+    with api_slot(url, timeout=to):
+        r = curl_request(
+            "GET",
+            url,
+            headers=hdrs,
+            timeout=to,
+            verify=False,
+            proxy=proxy,
+            use_panel_proxy=True,
+        )
     text = (getattr(r, "text", None) or "").strip()
     if not text:
         raise RuntimeError("empty json")
@@ -426,8 +467,17 @@ def fetch_post_form(
     source_id: str | None = None,
     timeout: float = 20.0,
 ) -> str:
-    """对齐 MDCS fetchPostForm：面板代理 + Cookie（不支持强制 Flare）。"""
-    from ..outbound_http import looks_blocked_html, resolve_scrape_proxy_url
+    """对齐 MDCS fetchPostForm：面板代理 + Cookie（不支持强制 Flare）。
+
+    第十一轮：整段尝试走 `kind="api"` 出站通道（有界并发 + 等槽记账 +
+    早停令牌），请求超时跟随线程本地单源预算。
+    """
+    from app.core.outbound_http import (
+        api_slot,
+        looks_blocked_html,
+        resolve_scrape_proxy_url,
+        thread_request_timeout,
+    )
 
     access = ""
     if source_id:
@@ -454,45 +504,50 @@ def fetch_post_form(
         headers["Cookie"] = cookie
 
     proxy = resolve_scrape_proxy_url()
-    try:
-        from curl_cffi import requests as creq
+    budget = thread_request_timeout()
+    to = float(timeout)
+    if budget and float(budget) > 0:
+        to = min(to, float(budget))
+    with api_slot(url, timeout=to):
+        try:
+            from curl_cffi import requests as creq
 
-        kwargs: dict[str, Any] = {
-            "headers": headers,
-            "data": body,
-            "timeout": timeout,
-            "allow_redirects": True,
-            "verify": False,
-            "impersonate": "chrome124",
-        }
-        if proxy:
-            kwargs["proxy"] = proxy
-        r = creq.post(url, **kwargs)
-        text = str(getattr(r, "text", "") or "")
-        if int(getattr(r, "status_code", 500) or 500) < 400 and len(text) > 200:
-            if not looks_blocked_html(text):
+            kwargs: dict[str, Any] = {
+                "headers": headers,
+                "data": body,
+                "timeout": to,
+                "allow_redirects": True,
+                "verify": False,
+                "impersonate": "chrome124",
+            }
+            if proxy:
+                kwargs["proxy"] = proxy
+            r = creq.post(url, **kwargs)
+            text = str(getattr(r, "text", "") or "")
+            if int(getattr(r, "status_code", 500) or 500) < 400 and len(text) > 200:
+                if not looks_blocked_html(text):
+                    return text
+        except Exception:
+            pass
+
+        try:
+            import httpx
+
+            opts: dict[str, Any] = {
+                "timeout": to,
+                "follow_redirects": True,
+                "verify": False,
+                "trust_env": False,
+            }
+            if proxy:
+                opts["proxy"] = proxy
+            with httpx.Client(**opts) as client:
+                r2 = client.post(url, content=body, headers=headers)
+            text = r2.text or ""
+            if r2.status_code < 400 and len(text) > 200 and not looks_blocked_html(text):
                 return text
-    except Exception:
-        pass
-
-    try:
-        import httpx
-
-        opts: dict[str, Any] = {
-            "timeout": timeout,
-            "follow_redirects": True,
-            "verify": False,
-            "trust_env": False,
-        }
-        if proxy:
-            opts["proxy"] = proxy
-        with httpx.Client(**opts) as client:
-            r2 = client.post(url, content=body, headers=headers)
-        text = r2.text or ""
-        if r2.status_code < 400 and len(text) > 200 and not looks_blocked_html(text):
-            return text
-    except Exception:
-        pass
+        except Exception:
+            pass
 
     raise RuntimeError(f"HTTP POST 失败 {url}")
 
@@ -519,8 +574,8 @@ def prepare_provider_site(
     source_id: str, *, fallback_base: str = ""
 ) -> dict[str, Any]:
     """对齐 MDCS prepareProviderFetch：baseUrl / cookie / access / 冷却。"""
-    from .. import scrape_source_catalog as catalog
-    from .. import scrape_sources_settings as scrape_src
+    from app.scrape import source_catalog as catalog
+    from app.scrape import sources_settings as scrape_src
 
     sid = catalog.canonicalize_id(source_id)
     meta = catalog.catalog_by_id().get(sid) or {}

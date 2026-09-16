@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import re
+import threading
 from typing import Any
 from urllib.parse import quote
 
@@ -30,14 +31,35 @@ def _normalize_label(raw: str) -> str:
     return re.sub(r"[：:\s]", "", strip_tags(raw))
 
 
-def _table_value(html: str, label: str) -> str:
+# 「标签行」缓存：`soup()` 返回的是线程内共享只读树，同一棵树整条详情只扫一遍。
+# 原实现每个字段都独立 `doc.select(".detail_data th")` 走一遍全树 —— 一条详情
+# 要扫 8 遍（品番/出演/メーカー/レーベル/シリーズ/配信開始日/商品発売日/収録時間）。
+# 第八轮实测：soupsieve 的 CSS 匹配是砍掉重复解析后的**剩余 CPU 大头**。
+_tls = threading.local()
+
+
+def _label_rows(html: str) -> list[tuple[str, Any]]:
+    """返回 [(归一化标签文本, 对应 td)]；同一棵解析树复用一次结果。"""
     doc = soup(html)
-    out = ""
+    hit = getattr(_tls, "label_rows", None)
+    if hit is not None and hit[0] is doc:
+        return hit[1]
+    rows: list[tuple[str, Any]] = []
     for th in doc.select(".detail_data th"):
-        if label not in _normalize_label(th.get_text()):
-            continue
-        td = th.find_next_sibling("td")
-        if td is None:
+        rows.append((_normalize_label(th.get_text()), th.find_next_sibling("td")))
+    _tls.label_rows = (doc, rows)
+    return rows
+
+
+def _table_value(html: str, label: str) -> str:
+    """取 `.detail_data` 里某标签对应的值（语义与旧实现逐字对齐）。
+
+    旧实现：遍历 `.detail_data th`，`label` 是**子串**匹配，取**最后一个**
+    命中有 td 兄弟的行覆盖 `out`。这里保持同样顺序与覆盖规则。
+    """
+    out = ""
+    for norm, td in _label_rows(html):
+        if label not in norm or td is None:
             continue
         links = [
             strip_tags(a.get_text()).strip()
@@ -116,13 +138,9 @@ def _parse_actors(html: str) -> list[str]:
 
 
 def _parse_genres(html: str) -> list[str]:
-    doc = soup(html)
     out: list[str] = []
-    for th in doc.select(".detail_data th"):
-        if "ジャンル" not in _normalize_label(th.get_text()):
-            continue
-        td = th.find_next_sibling("td")
-        if td is None:
+    for norm, td in _label_rows(html):
+        if "ジャンル" not in norm or td is None:
             continue
         for a in td.select("a"):
             g = strip_tags(a.get_text()).strip()
@@ -206,6 +224,12 @@ def _extract_sample_pid(html: str) -> str | None:
 
 
 def _fetch_trailer(html: str, base: str, *, referer: str, cookie: str) -> str | None:
+    """取预告片地址（sampleRespons API）。
+
+    ⚠️ 第十六轮起**不再在 scrape_detail 里调用**：trailerUrl 全链路无消费方，
+    而这个调用让每次 mgstage 命中多发 1 个请求（mgstage 有盾，≈1-2s 墙钟）。
+    函数保留，供将来真需要预告片时接设置开关再启用。
+    """
     pid = _extract_sample_pid(html)
     if not pid:
         return None
@@ -231,7 +255,7 @@ def _fetch_trailer(html: str, base: str, *, referer: str, cookie: str) -> str | 
 
 
 def _parse_detail(html: str, page_url: str, code: str) -> dict[str, Any] | None:
-    from ..outbound_http import looks_blocked_html
+    from app.core.outbound_http import looks_blocked_html
 
     if not html or looks_blocked_html(html):
         return None
@@ -316,9 +340,9 @@ def scrape_detail(
         )
         parsed = _parse_detail(html, detail_url, std)
         if parsed and (parsed.get("title") or parsed.get("posterUrl")):
-            trailer = _fetch_trailer(html, base, referer=detail_url, cookie=ck)
-            if trailer:
-                parsed["trailerUrl"] = trailer
+            # 第十六轮：不再为预告片多发 1 个 sampleRespons API 请求 ——
+            # trailerUrl 全链路（NFO / 前端 / 落库）无消费方，纯浪费。
+            # 要恢复预告片时重新调用下方保留的 _fetch_trailer。
             return parsed
     except RuntimeError:
         pass
@@ -342,7 +366,5 @@ def scrape_detail(
     parsed = _parse_detail(html, url, std)
     if not parsed:
         raise RuntimeError("未找到")
-    trailer = _fetch_trailer(html, base, referer=url, cookie=ck)
-    if trailer:
-        parsed["trailerUrl"] = trailer
+    # 第十六轮：同上，预告片请求省掉（trailerUrl 无消费方）。
     return parsed

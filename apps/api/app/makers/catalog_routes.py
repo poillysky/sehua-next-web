@@ -226,12 +226,14 @@ def _clear_makers_cache(*, wipe_mirrors: bool = False) -> None:
         site_mirror.invalidate("madou")
     except Exception:
         pass
-    path = data_dir() / "iqqtv-mirror.json"
-    try:
-        if path.is_file():
-            path.unlink()
-    except OSError:
-        pass
+    from app.core.db import iqqtv_mirror_legacy_path
+
+    for path in (iqqtv_mirror_legacy_path(), data_dir() / "iqqtv-mirror.json"):
+        try:
+            if path.is_file():
+                path.unlink()
+        except OSError:
+            pass
     try:
         from app.core.outbound_http import clear_cached_clearance
 
@@ -874,6 +876,7 @@ def _javbus_detail(
             actors = _pick_links("女優", "女优", "Actor", "Actors", "演員", "演员")
             cast: list[dict[str, Any]] = []
             seen_names: set[str] = set()
+            star_rows: dict[str, dict[str, Any]] = {}
 
             def _star_id(href: str | None) -> str | None:
                 m = re.search(r"/star/([^/?#]+)", str(href or ""), re.I)
@@ -890,7 +893,29 @@ def _javbus_detail(
                 name = re.sub(r"\s*[\(（][^)）]*[\)）]\s*$", "", name).strip()
                 name = re.sub(r"\s*[\(（][^)）]*$", "", name).strip()
                 name = name.rstrip("（(").strip()
-                if not name or name in seen_names:
+                if not name:
+                    return
+                # 同一 star_id 只能是一个人：javbus 同一女优会在头像瀑布 span（全名）、
+                # 裸 a[href*="/star/"] 锚点（常被站点截断）等处给出不同显示文本。
+                # 只按名字去重会让同一人变两条（案例 BONY-012 `ありすがわりな`+`ありすがわ`、
+                # OERO-009 `きょうこさん`+`きょうこさ`，两者 star_id 相同）→ 同号内计数虚高。
+                # 取**显示名更长**的那条，短的是截断。
+                prev = star_rows.get(star_id) if star_id else None
+                if prev is not None:
+                    old = str(prev.get("name") or "")
+                    if len(name) <= len(old):
+                        return
+                    prev["name"] = name
+                    if avatar and not prev.get("avatarUrl"):
+                        prev["avatarUrl"] = avatar
+                    seen_names.discard(old)
+                    seen_names.add(name)
+                    if old in actors:
+                        actors[actors.index(old)] = name
+                    if name not in actors:
+                        actors.append(name)
+                    return
+                if name in seen_names:
                     return
                 seen_names.add(name)
                 if name not in actors:
@@ -898,6 +923,7 @@ def _javbus_detail(
                 row: dict[str, Any] = {"name": name, "avatarUrl": avatar}
                 if star_id:
                     row["id"] = star_id
+                    star_rows[star_id] = row
                 cast.append(row)
 
             for box in soup.select(

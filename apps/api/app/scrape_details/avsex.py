@@ -14,10 +14,12 @@ from .common import (
     is_junk_cover_url,
     is_junk_title,
     make_detail,
+    page_mentions_code,
     pick_og_image,
     soup,
     strip_tags,
 )
+from app.core import detail_path_cache
 
 DEFAULT_BASE = "https://avsex.cc"
 SOURCE = "avsex"
@@ -289,6 +291,46 @@ def scrape_detail(
     base = (base_url or DEFAULT_BASE).rstrip("/")
     ck = cookie or None
 
+    def _finish(parsed: dict[str, Any], detail_url: str, alt: str) -> dict[str, Any]:
+        extra: dict[str, Any] = {
+            "titleZh": parsed.get("title"),
+            "originalPlot": parsed.get("plot"),
+            "website": detail_url,
+            "mosaic": parsed.get("mosaic"),
+            "runtime": parsed.get("runtime"),
+            "extrafanartUrls": parsed.get("extrafanartUrls"),
+        }
+        if alt and alt != parsed.get("coverUrl"):
+            extra["alternateCoverUrls"] = [alt]
+        return make_detail(
+            source=SOURCE,
+            code=std,
+            title=parsed.get("title"),
+            poster=parsed.get("coverUrl"),
+            studio=parsed.get("studio"),
+            actors=list(parsed.get("actors") or []),
+            tags=list(parsed.get("genres") or []),
+            overview=parsed.get("plot"),
+            date=parsed.get("premiered"),
+            extra=extra,
+        )
+
+    # 第十六轮：详情路径缓存命中 → 直接抓详情，跳过搜索（重复刮省 1 请求）。
+    # 页面番号校验不过回落搜索；坏缓存最多浪费 1 请求，不会错绑。
+    # 缓存路径没有搜索页，alternateCoverUrls（搜索页海报）不可得 —— 详情页封面兜底。
+    cached_url = detail_path_cache.lookup(SOURCE, std)
+    if cached_url:
+        try:
+            cached_html = fetch_html(
+                cached_url, referer=f"{base}/", cookie=ck, source_id=SOURCE
+            )
+            if cached_html and page_mentions_code(cached_html, std):
+                cached_parsed = parse_avsex_detail_html(cached_html, std, base, "")
+                if cached_parsed.get("title"):
+                    return _finish(cached_parsed, cached_url, "")
+        except Exception:
+            pass  # 缓存失效 → 回落搜索
+
     # MDCS：query 用小写
     search_url = f"{base}/tw/search?query={quote(std.lower())}"
     search_html = fetch_html(
@@ -299,6 +341,8 @@ def scrape_detail(
         raise RuntimeError("搜索无结果")
 
     detail_url = hit["detailUrl"]
+    # 第十六轮：记住详情 URL，重复刮直接走缓存跳过搜索
+    detail_path_cache.remember(SOURCE, std, detail_url)
     detail_html = fetch_html(
         detail_url, referer=search_url, cookie=ck, source_id=SOURCE
     )
@@ -308,27 +352,4 @@ def scrape_detail(
     if not parsed.get("title"):
         raise RuntimeError("未找到标题")
 
-    alt = hit.get("posterUrl") or ""
-    extra: dict[str, Any] = {
-        "titleZh": parsed.get("title"),
-        "originalPlot": parsed.get("plot"),
-        "website": detail_url,
-        "mosaic": parsed.get("mosaic"),
-        "runtime": parsed.get("runtime"),
-        "extrafanartUrls": parsed.get("extrafanartUrls"),
-    }
-    if alt and alt != parsed.get("coverUrl"):
-        extra["alternateCoverUrls"] = [alt]
-
-    return make_detail(
-        source=SOURCE,
-        code=std,
-        title=parsed.get("title"),
-        poster=parsed.get("coverUrl"),
-        studio=parsed.get("studio"),
-        actors=list(parsed.get("actors") or []),
-        tags=list(parsed.get("genres") or []),
-        overview=parsed.get("plot"),
-        date=parsed.get("premiered"),
-        extra=extra,
-    )
+    return _finish(parsed, detail_url, hit.get("posterUrl") or "")

@@ -23,6 +23,7 @@ from .common import (
     strip_tags,
     soup,
 )
+from app.core import detail_path_cache
 
 DEFAULT_BASE = "https://7mmtv.sx/zh"
 SOURCE = "sevenmmtv"
@@ -119,7 +120,7 @@ def _attr_value(doc, label: re.Pattern[str]) -> str:
 
 
 def parse_sevenmmtv_detail(html: str, page_url: str, code: str) -> dict[str, Any] | None:
-    from ..outbound_http import looks_blocked_html
+    from app.core.outbound_http import looks_blocked_html
 
     if not html or looks_blocked_html(html):
         return None
@@ -285,9 +286,33 @@ def scrape_detail(
     if not root:
         raise RuntimeError("未配置网站地址")
 
+    # 第十六轮：详情路径缓存命中 → 直接抓详情，跳过搜索（重复刮省 1 请求）。
+    # 页面番号校验不过回落搜索；坏缓存最多浪费 1 请求，不会错绑。
+    cached_path = detail_path_cache.lookup(SOURCE, normalized)
+    if cached_path:
+        try:
+            cached_url = abs_url(cached_path, root)
+            if cached_url:
+                cached_html, cached_landed = fetch_html_result(
+                    cached_url,
+                    referer=f"{root}/zh/",
+                    cookie=cookie or None,
+                    source_id=SOURCE,
+                )
+                if cached_html and page_mentions_code(cached_html, normalized):
+                    cached_parsed = parse_sevenmmtv_detail(
+                        cached_html, cached_landed or cached_url, normalized
+                    )
+                    if cached_parsed:
+                        return cached_parsed
+        except Exception:
+            pass  # 缓存失效 → 回落搜索
+
     detail_path = _search_detail_path(root, normalized, cookie=cookie)
     if not detail_path:
         raise RuntimeError("搜索无结果")
+    # 第十六轮：记住详情路径，重复刮直接走缓存跳过搜索
+    detail_path_cache.remember(SOURCE, normalized, detail_path)
     detail_url = abs_url(detail_path, root)
     if not detail_url:
         raise RuntimeError("详情链接无效")

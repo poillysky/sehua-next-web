@@ -43,6 +43,81 @@ _strm_sync_job: dict[str, Any] = {
     "result": None,
     "error": None,
 }
+_strm_hydrated = False
+_strm_hydrate_lock = threading.Lock()
+
+
+def _persist_strm_job(**extra: Any) -> None:
+    try:
+        from app.core import job_persist
+
+        with _strm_sync_lock:
+            payload = {
+                "status": (
+                    "running"
+                    if _strm_sync_job.get("running")
+                    else str(
+                        extra.get("status")
+                        or _strm_sync_job.get("phase")
+                        or "idle"
+                    )
+                ),
+                "phase": str(_strm_sync_job.get("phase") or ""),
+                "progress": dict(_strm_sync_job.get("progress") or {}) or None,
+                "log": list(_strm_sync_job.get("log") or [])[-40:],
+                "result": _strm_sync_job.get("result"),
+                "error": _strm_sync_job.get("error"),
+                "running": bool(_strm_sync_job.get("running")),
+            }
+        for k, v in extra.items():
+            payload[k] = v
+        if payload.get("running"):
+            payload["status"] = "running"
+        job_persist.save_job(job_persist.STRM_SYNC_JOB_KEY, payload)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _hydrate_strm_job(*, force: bool = False) -> dict[str, Any]:
+    global _strm_hydrated
+    with _strm_hydrate_lock:
+        if _strm_hydrated and not force:
+            return {}
+        _strm_hydrated = True
+    try:
+        from app.core import job_persist
+
+        raw = job_persist.load_job(job_persist.STRM_SYNC_JOB_KEY)
+        if not raw:
+            return {}
+        with _strm_sync_lock:
+            if _strm_sync_job.get("running"):
+                return raw
+            if not _strm_sync_job.get("phase") and raw.get("phase"):
+                _strm_sync_job["phase"] = str(raw.get("phase") or "")
+            if not _strm_sync_job.get("progress") and raw.get("progress"):
+                _strm_sync_job["progress"] = dict(raw.get("progress") or {})
+            if not _strm_sync_job.get("log") and raw.get("log"):
+                _strm_sync_job["log"] = list(raw.get("log") or [])[-40:]
+            if (
+                _strm_sync_job.get("result") is None
+                and raw.get("result") is not None
+            ):
+                _strm_sync_job["result"] = raw.get("result")
+            if not _strm_sync_job.get("error") and raw.get("error"):
+                _strm_sync_job["error"] = raw.get("error")
+            if str(raw.get("status") or "") == "running":
+                _strm_sync_job["phase"] = "interrupted"
+                prog = dict(_strm_sync_job.get("progress") or {})
+                prog["label"] = "进程中断 · 可继续（已写文件会跳过）"
+                _strm_sync_job["progress"] = prog
+                raw = dict(raw)
+                raw["status"] = "interrupted"
+                raw["running"] = False
+                job_persist.save_job(job_persist.STRM_SYNC_JOB_KEY, raw)
+        return raw
+    except Exception:  # noqa: BLE001
+        return {}
 
 
 def _job_log(msg: str) -> None:
@@ -100,6 +175,14 @@ def _strm_sync_log(payload: Any) -> None:
             else:
                 logs.append(phase)
             _strm_sync_job["log"] = logs[-80:]
+        done = payload.get("done")
+        total = payload.get("total")
+        if (
+            isinstance(done, int)
+            and isinstance(total, int)
+            and (done == total or done % 2000 == 0)
+        ):
+            _persist_strm_job(status="running")
         return
     phase = str(payload or "").strip()
     _strm_sync_job["phase"] = phase
@@ -495,6 +578,7 @@ def mkdir_strm_dir(body: StrmMkdirBody) -> dict[str, Any]:
 
 @router.get("/strm-sync/status")
 def strm_sync_status() -> dict[str, Any]:
+    _hydrate_strm_job()
     return {
         "ok": True,
         "data": {
@@ -522,25 +606,35 @@ def post_strm_sync(body: StrmSyncStartBody | None = None) -> dict[str, Any]:
         if not str(cfg.get("root") or "").strip():
             strm_sync.put_strm_sync_settings(root=strm_sync.DEFAULT_REL_ROOT)
 
+    prev = _hydrate_strm_job()
+    resumed = str(prev.get("status") or "") in {
+        "interrupted",
+        "running",
+        "paused",
+    }
+
     with _strm_sync_lock:
         if _strm_sync_job["running"]:
             raise HTTPException(409, "STRM 同步已在运行")
         _strm_sync_job.update(
             {
                 "running": True,
-                "phase": "starting",
+                "phase": "继续" if resumed else "starting",
                 "progress": {
                     "stage": "prepare",
                     "done": 0,
                     "total": None,
                     "percent": 0,
-                    "label": "starting",
+                    "label": "继续（已有文件跳过）" if resumed else "starting",
                 },
-                "log": [],
+                "log": (
+                    list(_strm_sync_job.get("log") or [])[-20:] if resumed else []
+                ),
                 "result": None,
                 "error": None,
             }
         )
+    _persist_strm_job(status="running", params={"root": root})
 
     def run() -> None:
         try:
@@ -554,11 +648,14 @@ def post_strm_sync(body: StrmSyncStartBody | None = None) -> dict[str, Any]:
                 "percent": 100,
                 "label": "done",
             }
+            _persist_strm_job(status="done")
         except Exception as e:  # noqa: BLE001
             _strm_sync_job["error"] = str(e)
             _strm_sync_job["phase"] = "error"
+            _persist_strm_job(status="error")
         finally:
             _strm_sync_job["running"] = False
+            _persist_strm_job()
 
     threading.Thread(target=run, name="prefix-catalog-strm-sync", daemon=True).start()
-    return {"ok": True, "data": {"started": True}}
+    return {"ok": True, "data": {"started": True, "resumed": resumed}}

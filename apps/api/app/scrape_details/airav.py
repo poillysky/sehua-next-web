@@ -14,7 +14,7 @@ SOURCE = "airav"
 
 
 def _wiki_fallback(code: str, *, base_url: str = "", cookie: str = "") -> dict | None:
-    from ..outbound_http import looks_blocked_html
+    from app.core.outbound_http import looks_blocked_html
 
     normalized = str(code or "").strip().upper()
     if not normalized:

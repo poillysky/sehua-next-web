@@ -202,8 +202,12 @@ def _parse_detail(html: str, page_url: str, code: str) -> dict:
     title_zh = _parse_title(html, std)
     original = _parse_inline_value(html, ["标题", "標題"]) or ""
     title = title_zh or original
+    # 单字/占位标题（案例 ONS-018：站点标题本身就是 `非`）不该打死整源。
+    # 详情页有效性已由 _is_detail_html 校验（og:type + 番号 + 番号 token 三重），
+    # 与 dmm/jav321/javday/javlibrary/lulubar 及 make_detail 的兜底口径保持一致：
+    # 标题清空，其余字段照常返回；真·空页由下方 (not title and not cover and ...) 拦住。
     if title and is_junk_title(title):
-        raise RuntimeError("解析失败")
+        title = ""
 
     actors = _parse_label_links(html, ["女优", "女優"])[:20]
     genres = _parse_label_links(html, ["类型", "類型"])[:40]

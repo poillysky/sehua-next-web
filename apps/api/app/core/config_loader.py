@@ -18,7 +18,8 @@ from typing import Any
 
 
 
-ROOT = Path(__file__).resolve().parents[3]
+# app/core/config_loader.py → parents[4] = repo root
+ROOT = Path(__file__).resolve().parents[4]
 
 DEFAULT_CONFIG = ROOT / "config" / "app.json"
 

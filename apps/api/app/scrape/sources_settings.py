@@ -9,7 +9,6 @@ from urllib.parse import urlparse
 
 import app.scrape.source_catalog as catalog
 import app.core.settings_store as settings_store
-from app.core.db import data_dir
 
 SCRAPE_PROVIDERS_KEY = "scrape.providers"
 _UA = (
@@ -36,17 +35,33 @@ def _norm_url(raw: str) -> str:
         return ""
 
 
-def _live_cache() -> dict[str, Any]:
-    path = data_dir() / "site-mirrors.json"
-    if not path.exists():
-        return {}
-    try:
-        import json
+# `site_mirrors.json` 里 site_mirror 侧的键 → 目录侧 canonical id
+# （`catalog.canonicalize_id()` 把 missav→miss_av、7mmtv→sevenmmtv）
+_MIRROR_CANON = {"missav": "miss_av", "7mmtv": "sevenmmtv"}
 
-        raw = json.loads(path.read_text(encoding="utf-8"))
-        return raw if isinstance(raw, dict) else {}
-    except Exception:
+
+def _live_cache() -> dict[str, Any]:
+    """测通缓存（site-mirrors.json）的**只读**进程内视图。
+
+    ⚠️ 本文件过去也是这个 JSON 的写者（自造 `{sid: {"base":..., "ttlMs":...}}`
+    schema 后用 `write_text` 整份覆盖），与 `app.core.site_mirror` 的
+    `{"version","mirrors"}` 互相覆盖 —— 两套 schema 互为对方读不懂的格式，
+    并发时还会把文件写成「合法 JSON + 尾巴」→ `Extra data: line N column 1`。
+    现在文件**只有** `site_mirror` 一个写者（原子替换），这里只做读适配。
+    """
+    try:
+        import app.core.site_mirror as site_mirror
+
+        snap = site_mirror.snapshot_live()
+    except Exception:  # noqa: BLE001
         return {}
+    out: dict[str, Any] = {}
+    for sid, row in snap.items():
+        out[sid] = row
+        alias = _MIRROR_CANON.get(str(sid))
+        if alias:
+            out.setdefault(alias, row)
+    return out
 
 
 def _remember_live(
@@ -55,45 +70,41 @@ def _remember_live(
     *,
     discovered_from: str | None = None,
 ) -> None:
-    """记录测通/跳转发现的生效地址（镜像发现仍写入缓存）。"""
+    """记录测通/跳转发现的生效地址（写入交给 site_mirror，唯一写者）。"""
     sid = catalog.canonicalize_id(source_id)
     base_n = _norm_url(base)
     if not base_n:
         return
     from_n = _norm_url(discovered_from or "") or base_n
-    path = data_dir() / "site-mirrors.json"
-    data = _live_cache()
-    row = {
-        "base": base_n,
-        "at": int(time.time() * 1000),
-        "ttlMs": 6 * 60 * 60 * 1000,
-        "discoveredFrom": from_n,
-    }
-    data[sid] = row
-    # legacy aliases for makers / site_mirror
-    if sid == "miss_av":
-        data["missav"] = dict(row)
-    if sid == "sevenmmtv":
-        data["7mmtv"] = dict(row)
-    try:
-        import json
-
-        path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    except Exception:
-        pass
-    # 同步正式镜像缓存（发现记录）
     mirror_id = {"miss_av": "missav", "sevenmmtv": "7mmtv"}.get(sid, sid)
     try:
         import app.core.site_mirror as site_mirror
 
         site_mirror.remember(mirror_id, base_n, discovered_from=from_n)
-    except Exception:
+    except Exception:  # noqa: BLE001
         pass
 
 
+# ⚠️ 源配置读取是「每番号」路径上的固定税，不是启动一次：
+# `enabled_enrich_sources`（被 `_fetch_detail` 每个番号调用）对每个源先来一次
+# `provider_settings()`、`effective_display_url()` 里再来一次 → 单次调用读
+# 20 遍 app_settings，每次 ~8ms ≈ 170ms。这里存一份进程内快照；
+# 唯一写入点 `_persist_provider_row` 写完立即失效。
+_providers_cache: dict[str, Any] | None = None
+
+
+def _invalidate_providers_cache() -> None:
+    global _providers_cache
+    _providers_cache = None
+
+
 def load_raw() -> dict[str, Any]:
-    raw = settings_store.get_setting(SCRAPE_PROVIDERS_KEY)
-    return raw if isinstance(raw, dict) else {}
+    """源配置快照。**始终返回副本**——`_persist_provider_row` 会原地写入它。"""
+    global _providers_cache
+    if _providers_cache is None:
+        raw = settings_store.get_setting(SCRAPE_PROVIDERS_KEY)
+        _providers_cache = raw if isinstance(raw, dict) else {}
+    return dict(_providers_cache)
 
 
 def _normalize_last_probe(raw: Any) -> dict[str, Any] | None:
@@ -147,6 +158,14 @@ def provider_settings(source_id: str, raw: dict[str, Any] | None = None) -> dict
     }
 
 
+def is_provider_enabled(source_id: str, raw: dict[str, Any] | None = None) -> bool:
+    """数据源总开关：关则全局/字段优先级配置也不生效。"""
+    sid = catalog.canonicalize_id(source_id)
+    if not sid:
+        return False
+    return bool(provider_settings(sid, raw).get("enabled", True))
+
+
 def _persist_provider_row(sid: str, cfg: dict[str, Any], *, raw: dict[str, Any] | None = None) -> None:
     data = raw if raw is not None else load_raw()
     row: dict[str, Any] = {
@@ -161,6 +180,7 @@ def _persist_provider_row(sid: str, cfg: dict[str, Any], *, raw: dict[str, Any] 
         row["lastProbe"] = last
     data[sid] = row
     settings_store.put_setting(SCRAPE_PROVIDERS_KEY, data)
+    _invalidate_providers_cache()
 
 
 def store_last_probe(result: dict[str, Any]) -> None:
@@ -424,12 +444,23 @@ def enrich_groups_for_region(region: str | None) -> tuple[str, ...]:
     return REGION_ENRICH_GROUPS.get(rid, ())
 
 
-def effective_display_url(source_id: str) -> str:
-    """与数据源列表 displayUrl 一致：activeBase → 测通缓存 → baseUrl → defaultUrl。"""
+def effective_display_url(
+    source_id: str,
+    *,
+    cfg: dict[str, Any] | None = None,
+    live: dict[str, Any] | None = None,
+) -> str:
+    """与数据源列表 displayUrl 一致：activeBase → 测通缓存 → baseUrl → defaultUrl。
+
+    `cfg` / `live` 允许调用方注入，避免热路径重复取配置与重复取缓存：
+    `enabled_enrich_sources()` 每个番号对每个源各调一次。
+    """
     sid = catalog.canonicalize_id(source_id)
     meta = catalog.catalog_by_id().get(sid) or {}
-    cfg = provider_settings(sid)
-    live = _live_cache()
+    if cfg is None:
+        cfg = provider_settings(sid)
+    if live is None:
+        live = _live_cache()
     live_row = live.get(sid) or {}
     if not isinstance(live_row, dict):
         live_row = {}
@@ -452,38 +483,107 @@ def effective_display_url(source_id: str) -> str:
 
 
 def enabled_enrich_sources(*, region: str = "") -> list[dict[str, Any]]:
-    """按数据源目录顺序：七区对应分组 ∩ 已启用 ∩ 有详情补全实现。"""
+    """刮削池 =（番号类型全局有序源 ∪ 字段优先级源）∩ 已启用 ∩ 有详情。
+
+    - regionSources：主列表，顺序即发车/合并全局序
+    - fieldPriority：字段偏好站若不在全局列表，仍追加进池（否则配置了也刮不到）
+    - 数据源总开关关闭：不进池
+    """
+    rid = resolve_enrich_region_id(region)
+    # 测通缓存只取一次：`_live_cache()` 现在只是 site_mirror 进程内内存表的读适配
+    # （不再读盘），但仍没必要每个源各取一次。
+    live = _live_cache()
+    # 策略只读一次：`get_strategy()` 要读 app_settings（~7ms），而本函数在
+    # `_fetch_detail` 里**每个番号**都被调用，读两遍就是白扔 7ms。
+    try:
+        import app.scrap_library.enrich_strategy as strat
+
+        strategy_cfg: dict[str, Any] = strat.get_strategy() or {}
+    except Exception:  # noqa: BLE001
+        strat = None  # type: ignore[assignment]
+        strategy_cfg = {}
+
+    ordered_ids: list[str] = []
+    if rid and strat is not None:
+        try:
+            ordered_ids = list(strat.region_sources_for(rid, cfg=strategy_cfg) or [])
+        except Exception:
+            ordered_ids = []
+
+    # 字段优先级里多出来的站：接到全局列表后，保证能被刮到
+    extra_field_ids: list[str] = []
+    try:
+        fp = strategy_cfg.get("fieldPriority") or {}
+        if isinstance(fp, dict):
+            seen_ord = {catalog.canonicalize_id(s) for s in ordered_ids}
+            seen_extra: set[str] = set()
+            for sites in fp.values():
+                if not isinstance(sites, list):
+                    continue
+                for raw in sites:
+                    sid = catalog.canonicalize_id(str(raw or ""))
+                    if not sid or sid in seen_ord or sid in seen_extra:
+                        continue
+                    seen_extra.add(sid)
+                    extra_field_ids.append(sid)
+    except Exception:
+        extra_field_ids = []
+
+    def _row(sid: str, meta: dict[str, Any]) -> dict[str, Any] | None:
+        detail_key = ENRICH_DETAIL_PROVIDERS.get(sid)
+        if not detail_key:
+            return None
+        cfg = provider_settings(sid)
+        if not cfg.get("enabled", True):
+            return None
+        base = effective_display_url(sid, cfg=cfg, live=live)
+        return {
+            "id": sid,
+            "detailKey": detail_key,
+            "group": str(meta.get("group") or ""),
+            "label": str(meta.get("label") or sid),
+            "baseUrl": base,
+            "cookie": str(cfg.get("cookie") or ""),
+            "apiKey": str(cfg.get("apiKey") or ""),
+            "access": catalog_access(sid),
+            "region": rid,
+        }
+
+    # 这里只需要 id/group/label 等**目录字段**；`list_catalog_public()` 会为全部源
+    # 再构造 seeds/trust/accessLabel 并逐源调 `source_trust`（内含 dict 重建），
+    # 属于每番号白付的税 → 直接用静态索引表。
+    by_meta = catalog.catalog_by_id()
+
+    if ordered_ids or extra_field_ids:
+        out: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for raw_sid in list(ordered_ids) + extra_field_ids:
+            sid = catalog.canonicalize_id(raw_sid)
+            if not sid or sid in seen:
+                continue
+            meta = by_meta.get(sid) or catalog.catalog_by_id().get(sid) or {}
+            if not meta:
+                continue
+            row = _row(sid, meta)
+            if row:
+                seen.add(sid)
+                out.append(row)
+        return out
+
+    # 无有序配置时回落：分组 ∩ 目录顺序
     groups = enrich_groups_for_region(region)
     if region and not groups:
         return []
     allowed = set(groups) if groups else None
-    rid = resolve_enrich_region_id(region)
-    out: list[dict[str, Any]] = []
-    for meta in catalog.list_catalog_public():
+    out = []
+    for meta in catalog.catalog_by_id().values():
         sid = str(meta.get("id") or "")
-        detail_key = ENRICH_DETAIL_PROVIDERS.get(sid)
-        if not detail_key:
-            continue
         group = str(meta.get("group") or "")
         if allowed is not None and group not in allowed:
             continue
-        cfg = provider_settings(sid)
-        if not cfg.get("enabled", True):
-            continue
-        base = effective_display_url(sid)
-        out.append(
-            {
-                "id": sid,
-                "detailKey": detail_key,
-                "group": group,
-                "label": str(meta.get("label") or sid),
-                "baseUrl": base,
-                "cookie": str(cfg.get("cookie") or ""),
-                "apiKey": str(cfg.get("apiKey") or ""),
-                "access": catalog_access(sid),
-                "region": rid,
-            }
-        )
+        row = _row(sid, meta)
+        if row:
+            out.append(row)
     return out
 
 

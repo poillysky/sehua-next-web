@@ -227,16 +227,23 @@ def _fetch_aio_html(
     if not need_flare:
         return html
     try:
-        from ..outbound_http import flaresolverr_request, set_thread_allow_flare, thread_allow_flare
+        from app.core.outbound_http import (
+            flaresolverr_request,
+            thread_allow_flare,
+            thread_request_timeout,
+        )
 
         if not thread_allow_flare():
-            set_thread_allow_flare(True)
+            return html
+        tls = thread_request_timeout()
+        # 批量策略超时优先；勿默认 90s 拖死整批
+        max_ms = int(max(8.0, min(35.0, float(tls) if tls else 22.0)) * 1000)
         html2, _final = flaresolverr_request(
             url,
-            max_timeout_ms=90000,
+            max_timeout_ms=max_ms,
             referer=referer,
             cookie=cookie or None,
-            wait_in_seconds=_AIO_FLARE_WAIT_SEC,
+            wait_in_seconds=min(_AIO_FLARE_WAIT_SEC, 5),
         )
         return html2 or html
     except Exception:

@@ -8,6 +8,7 @@ import re
 import threading
 import time
 from dataclasses import dataclass
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -50,6 +51,99 @@ def thread_request_timeout() -> float | None:
         return None
 
 
+def set_thread_cancel_event(ev: Any) -> None:
+    """刮削补齐：把「本线程所属 fetch 的取消令牌」绑到线程上。
+
+    置位后，出站调度器会在等槽时立刻放弃（`OutboundCancelled`），
+    不再发出请求 —— 源早停/暂停后回收在飞请求靠的就是这条链路。
+    """
+    if ev is None:
+        if hasattr(_tls, "cancel_event"):
+            delattr(_tls, "cancel_event")
+        return
+    _tls.cancel_event = ev
+
+
+def thread_cancel_event() -> Any:
+    return getattr(_tls, "cancel_event", None)
+
+
+def thread_is_cancelled() -> bool:
+    ev = thread_cancel_event()
+    if ev is None:
+        return False
+    try:
+        return bool(ev.is_set())
+    except Exception:  # noqa: BLE001
+        return False
+
+
+# ---------------------------------------------------------------------------
+# 单源「等槽预算」与工作预算解耦（第十轮）
+#
+# 背景：`enrich._one()` 原用 `th.join(timeout=单源超时)` 等源结果，而线程里第一件事是
+# **抢出站槽**。于是「排队/限速/退避」的时间被算进单源超时 → 源明明 3.4s 能返回，
+# 生产 p50 却恰好等于策略上限（mgstage 433 次假 down）。
+#
+# 修法两层：
+#   ① 记账：`SlotWaitMeter` 只累计「没在发请求」的时间，调用方用「墙钟 − 等槽」
+#      判真超时 → 排队不再吃掉单源超时额度。
+#   ② 超时类型：排队超时抛 `OutboundBusy`（TimeoutError 子类），
+#      `_classify_source_failure` 归为 `busy` —— 源没坏，只是没轮到。
+#
+# 第十一轮收紧「代价」：原来地板 20s / 上限 45s 是**与工作预算无关的固定加项**，
+# 于是单源最坏墙钟 = 工作预算 + 20~45s（工作预算 5s 时是 5×）。现在改成
+#   queue = clamp(工作预算, 12s, 30s)
+# 即「排队预算不超过工作预算本身」→ 最坏 ≤ 2× 工作预算（小预算时 ≤ work + 12s）。
+# 生产默认 perSourceTimeoutSec=28 → 28s（与旧值相同，无回归）；
+# 过盾源 18s → 18s（旧 20s，-10%）；探针/小预算 5s → 12s（旧 20s，-40%）。
+# ⚠️ 别再把地板抬回 20s：那是拿番号尾延迟换「排队成功率」，而排队成功与否
+# 主要由**出站容量**（见 kind="api" 通道）决定，不是靠等得久。
+# ---------------------------------------------------------------------------
+
+# 单源排队预算：下限 12s（够一次完整排队轮次）、上限 30s（别让排队拖住番号）
+_QUEUE_WAIT_MIN_SEC = 12.0
+_QUEUE_WAIT_CAP_SEC = 30.0
+# 无「线程内单源超时」时（交互式/封面路径）沿用历史的 90s 槽位预算
+_QUEUE_WAIT_DEFAULT_SEC = 90.0
+
+
+def source_queue_budget(work_budget: float | None = None) -> float:
+    """单源「等出站槽 + 限速 + 退避」可用预算（秒）＝ `clamp(工作预算, 12, 30)`。
+
+    ⚠️ 与策略的「单源超时」**解耦**：后者只约束真正开始发请求之后的耗时，
+    这里给排队留额度。**排队预算 ≤ 工作预算本身**，所以最坏单源墙钟 ≈
+    `2× 工作预算`（工作预算小于下限 12s 时是 `工作预算 + 12s`），
+    而不是旧版的 `工作预算 + 20~45s`。
+
+    排队放得宽不会留下僵尸请求 —— 上层放弃时会置线程取消令牌，
+    它们 ≤0.2s 内抛 `OutboundCancelled` 退出，不占槽、不发请求。
+    """
+    base = work_budget
+    if base is None:
+        base = thread_request_timeout()
+    try:
+        b = float(base) if base is not None else 0.0
+    except (TypeError, ValueError):
+        b = 0.0
+    if b <= 0:
+        return _QUEUE_WAIT_DEFAULT_SEC
+    return min(_QUEUE_WAIT_CAP_SEC, max(_QUEUE_WAIT_MIN_SEC, b))
+
+
+def new_slot_wait_meter():
+    """创建等槽记账对象（延迟 import，避免 outbound_http ↔ outbound_scheduler 耦合）。"""
+    from app.core.outbound_scheduler import SlotWaitMeter
+
+    return SlotWaitMeter()
+
+
+def set_thread_slot_meter(meter: Any) -> None:
+    from app.core.outbound_scheduler import set_thread_slot_meter as _set
+
+    _set(meter)
+
+
 _DEFAULT_FLARE_PORT = 8191
 _DEFAULT_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -63,6 +157,8 @@ _DEFAULT_CLEARANCE_TTL_MS = 45 * 60 * 1000
 _SESSION_IDLE_MS = 25 * 60 * 1000
 _FLARE_MIN_GAP_MS = 120
 _FLARE_BUSY_GAP_MS = 250
+# preferFlare 粘性过久会把越来越多站拖进慢通道；到期后允许再试 curl
+_PREFER_FLARE_TTL_MS = 12 * 60 * 1000
 _FLARE_MONITOR_INTERVAL_MS = 30_000
 _FLARE_MAX_SESSIONS_WARN = 1
 _FLARE_MAX_SESSIONS_CRITICAL = 2
@@ -97,8 +193,10 @@ _flare_monitor_timer: threading.Timer | None = None
 _flare_monitor_ticking = False
 _flare_monitor_started = False
 
-_host_gates: dict[str, threading.Lock] = {}
+_host_gates: dict[str, threading.Semaphore] = {}
 _host_gates_mu = threading.Lock()
+# 兼容旧调用；实际详情出站已改走 OutboundScheduler
+_HOST_CONCURRENCY = 3
 
 
 def normalize_proxy_url(raw: str | None) -> str:
@@ -136,8 +234,38 @@ def _library_raw() -> dict[str, Any]:
     return raw if isinstance(raw, dict) else {}
 
 
+# `resolve_scrape_proxy_url()` / `resolve_flaresolverr_url()` 在**每次 HTTP 请求**
+# 前都会被调用（本文件 961 / 1120 / 1277 等），而它们每次都要 `json.loads` 整个
+# library 配置（~1ms）。返回值是纯字符串，故加 2s TTL 缓存；配置写入经
+# `settings_store` 变更钩子立即失效（所以保存后无需等 TTL）。
+_CFG_TTL_SEC = 2.0
+_proxy_cache: tuple[float, str] | None = None
+_flare_cache: tuple[float, str] | None = None
+
+
+def invalidate_outbound_config_cache(key: str | None = None) -> None:
+    """清代理 / FlareSolverr 解析缓存（`key` 仅为适配变更钩子签名）。"""
+    global _proxy_cache, _flare_cache
+    _proxy_cache = None
+    _flare_cache = None
+
+
+settings_store.register_change_hook(invalidate_outbound_config_cache)
+
+
 def resolve_scrape_proxy_url() -> str:
     """仅在面板启用且填写代理时使用；否则直连。"""
+    global _proxy_cache
+    now = time.monotonic()
+    hit = _proxy_cache
+    if hit is not None and hit[0] > now:
+        return hit[1]
+    val = _scrape_proxy_url_uncached()
+    _proxy_cache = (now + _CFG_TTL_SEC, val)
+    return val
+
+
+def _scrape_proxy_url_uncached() -> str:
     raw = _library_raw()
     enabled = raw.get("proxyEnabled")
     if enabled is None:
@@ -164,6 +292,17 @@ def resolve_scrape_proxy_url() -> str:
 
 def resolve_flaresolverr_url() -> str:
     """面板启用且填写 FlareSolverr 时返回基址；否则空。"""
+    global _flare_cache
+    now = time.monotonic()
+    hit = _flare_cache
+    if hit is not None and hit[0] > now:
+        return hit[1]
+    val = _flaresolverr_url_uncached()
+    _flare_cache = (now + _CFG_TTL_SEC, val)
+    return val
+
+
+def _flaresolverr_url_uncached() -> str:
     raw = _library_raw()
     enabled = raw.get("flareSolverrEnabled")
     if enabled is None:
@@ -321,13 +460,64 @@ def _host_key(url: str) -> str:
 
 
 def _with_host_gate(host: str):
+    """兼容旧 API；优先请用 outbound_scheduler.slot(url)。"""
     key = host or "_"
     with _host_gates_mu:
-        lock = _host_gates.get(key)
-        if lock is None:
-            lock = threading.Lock()
-            _host_gates[key] = lock
-    return lock
+        gate = _host_gates.get(key)
+        if gate is None:
+            gate = threading.Semaphore(_HOST_CONCURRENCY)
+            _host_gates[key] = gate
+    return gate
+
+
+@contextmanager
+def _page_slot(url: str, *, timeout: float = 90.0):
+    """详情页出站：全局 + 按 host（与封面共用调度器）。
+
+    ⚠️ 队列预算与策略「单源超时」**解耦**（第十轮）：原来取
+    `min(90, max(2, 单源超时))` → 源只是排了个队就抛 `outbound slot timeout`，
+    被记成 `down`。现在排队预算走 `source_queue_budget()`（≥20s、≤90s），
+    单源超时只约束「开始发请求之后」的耗时（调用方用 `SlotWaitMeter` 剔除等槽）。
+    放弃排队靠**取消令牌**回收，不会留下占槽的僵尸请求。
+    """
+    from app.core.outbound_scheduler import get_scheduler
+
+    to = max(0.5, float(timeout))
+    to = min(to, source_queue_budget())
+    with get_scheduler().slot(
+        url, kind="page", timeout=to, cancel=thread_cancel_event()
+    ):
+        yield
+
+
+@contextmanager
+def api_slot(url: str, *, timeout: float | None = None):
+    """直连 API（JSON / GraphQL / POST 表单）出站：`kind="api"` 通道。
+
+    第十一轮引入。这些路径（`common.fetch_json` / `common.fetch_post_form` /
+    `dmm._post_graphql`）原来**完全不走调度器**：
+
+    - 不受任何并发上限约束 → 10 个源里 4 个（r18dev / libredmm / dmm / jav321）
+      裸奔，`page` 全局闸只治理得到另外 6 个；
+    - 不进 `SlotWaitMeter` 记账 → `meter.acquired` 恒为 0，于是 `enrich._one`
+      里「acquired==0 → busy」的兜底会把它们**真超时**也记成语义相反的 `busy`
+      （源坏了却记成「我们没轮到」→ 不计源健康度、不退避，坏源被一直重试）。
+
+    走这里之后：并发有界（`_KIND_GLOBAL["api"]`）、等槽记账正确、早停/暂停的
+    取消令牌同样生效（≤0.2s 退出，不发无用请求）。
+
+    ⚠️ 不要在已经持有 `page` 槽的代码里调它（嵌套持有两类全局槽）；当前
+    三条调用路径都是独立作用域，不存在「api → page」的反向等待，无死锁环。
+    """
+    from app.core.outbound_scheduler import get_scheduler
+
+    to = source_queue_budget()
+    if timeout is not None:
+        to = min(to, max(0.5, float(timeout)))
+    with get_scheduler().slot(
+        url, kind="api", timeout=to, cancel=thread_cancel_event()
+    ):
+        yield
 
 
 def _clearance_store_path() -> Path:
@@ -420,14 +610,27 @@ def get_cached_clearance(url: str) -> dict[str, str] | None:
         hit = _clearance_by_host.get(key)
         if not hit:
             return None
-        if int(time.time() * 1000) >= int(hit.get("expiresAt") or 0):
+        now_ms = int(time.time() * 1000)
+        if now_ms >= int(hit.get("expiresAt") or 0):
             _clearance_by_host.pop(key, None)
             _schedule_persist_clearance()
             return None
+        prefer = bool(hit.get("preferFlare"))
+        if prefer:
+            at = int(hit.get("preferFlareAt") or 0)
+            # 旧数据无时间戳：给一次宽限期后衰减
+            if at <= 0:
+                hit["preferFlareAt"] = now_ms
+                at = now_ms
+            if now_ms - at >= int(_PREFER_FLARE_TTL_MS):
+                hit["preferFlare"] = False
+                hit["preferFlareAt"] = 0
+                prefer = False
+                _schedule_persist_clearance()
         return {
             "cookieHeader": str(hit.get("cookieHeader") or ""),
             "userAgent": str(hit.get("userAgent") or ""),
-            "preferFlare": bool(hit.get("preferFlare")),
+            "preferFlare": prefer,
         }
 
 
@@ -490,17 +693,29 @@ def remember_clearance(
             if prefer_flare is not None
             else bool(prev.get("preferFlare"))
         )
+        now_ms = int(time.time() * 1000)
+        prefer_at = int(prev.get("preferFlareAt") or 0)
+        if prefer_flare is True:
+            prefer_at = now_ms
+        elif prefer_flare is False:
+            prefer_at = 0
+        elif prefer and prefer_at <= 0:
+            prefer_at = now_ms
         _clearance_by_host[key] = {
             "cookieHeader": header,
             "userAgent": user_agent or "",
             "expiresAt": _clearance_expiry(cookies),
             "preferFlare": prefer,
+            "preferFlareAt": prefer_at if prefer else 0,
         }
     _flush_persist_clearance()
 
 
 def mark_prefer_flare(url: str, prefer: bool = True) -> None:
-    """curl 无法吃下 Flare 凭证时，后续直接走 Flare 会话，避免每次再烧 curl→全量过盾。"""
+    """curl 无法吃下 Flare 凭证时，后续直接走 Flare 会话，避免每次再烧 curl→全量过盾。
+
+    粘性带 TTL（见 get_cached_clearance）：到期后恢复优先 curl，避免跑越久越慢。
+    """
     _ensure_clearance_loaded()
     key = _host_key(url)
     if not key:
@@ -509,9 +724,15 @@ def mark_prefer_flare(url: str, prefer: bool = True) -> None:
         hit = _clearance_by_host.get(key)
         if not hit:
             return
-        if bool(hit.get("preferFlare")) == bool(prefer):
+        now_ms = int(time.time() * 1000)
+        want = bool(prefer)
+        cur = bool(hit.get("preferFlare"))
+        if cur == want and (
+            not want or int(hit.get("preferFlareAt") or 0) > 0
+        ):
             return
-        hit["preferFlare"] = bool(prefer)
+        hit["preferFlare"] = want
+        hit["preferFlareAt"] = now_ms if want else 0
     _schedule_persist_clearance()
 
 
@@ -1151,19 +1372,19 @@ def fetch_page(
     """
     对齐 MDCS fetchPage 阶梯：
     clearance + curl-impersonate →（adaptive 短探）→ FlareSolverr。
+
+    同站闸只罩直连/curl；过盾在闸外跑，避免 FS 单飞时占满 host slot 拖死整批。
     """
-    host = _host_key(url)
-    with _with_host_gate(host):
-        return _fetch_page_unlocked(
-            url,
-            referer=referer,
-            cookie=cookie,
-            user_agent=user_agent,
-            access=access,
-            timeout=timeout,
-            fresh_probe=fresh_probe,
-            source_id=source_id,
-        )
+    return _fetch_page_unlocked(
+        url,
+        referer=referer,
+        cookie=cookie,
+        user_agent=user_agent,
+        access=access,
+        timeout=timeout,
+        fresh_probe=fresh_probe,
+        source_id=source_id,
+    )
 
 
 def _fetch_page_unlocked(
@@ -1276,70 +1497,117 @@ def _fetch_page_unlocked(
         attempts.append({"proxy": None, "verify": False})
         attempts.append({"proxy": None, "verify": True})
         seen: set[str] = set()
-        for opts in attempts:
-            key = repr(sorted(opts.items()))
-            if key in seen:
-                continue
-            seen.add(key)
-            # 对齐 MDCS curlOpts：至少 15s（有 clearance 12s+），勿把 adaptive 压成 8s 导致误进 Flare
-            base_read = float(getattr(to, "read", 22) or 22)
-            if has_clearance:
-                direct_to = httpx.Timeout(max(12.0, base_read), connect=8.0)
-            else:
-                direct_to = httpx.Timeout(max(15.0, base_read), connect=8.0)
-            hit = _http_get_once(
-                url,
-                headers=headers,
-                timeout=direct_to,
-                proxy=opts.get("proxy"),
-                verify=bool(opts.get("verify")),
-            )
-            if hit:
-                html, final_url, via = hit
-                accepted = _accept_or_bypass_r18(
-                    html, final_url, via, opts=opts, direct_to=direct_to
+        # 同站闸只包直连；成功即返回，失败后释放再进过盾
+        with _page_slot(url, timeout=90.0):
+            last_miss: dict[str, Any] | None = None
+            for opts in attempts:
+                # 该源已被上层放弃（早停/暂停）：别再试剩余组合，白占 page 槽
+                if thread_is_cancelled():
+                    last_err = RuntimeError("已放弃(早停)")
+                    break
+                key = repr(sorted(opts.items()))
+                if key in seen:
+                    continue
+                seen.add(key)
+                # 对齐 MDCS curlOpts；有策略单源超时时不再强制抬到 ≥15s
+                base_read = float(getattr(to, "read", 22) or 22)
+                if tls_to is not None:
+                    read_s = max(3.0, min(base_read, float(tls_to)))
+                    # 连接更快失败，避免死站把预算耗在 connect 上
+                    direct_to = httpx.Timeout(
+                        read_s, connect=min(4.0, read_s)
+                    )
+                elif has_clearance:
+                    direct_to = httpx.Timeout(max(12.0, base_read), connect=8.0)
+                else:
+                    direct_to = httpx.Timeout(max(15.0, base_read), connect=8.0)
+                hit = _http_get_once(
+                    url,
+                    headers=headers,
+                    timeout=direct_to,
+                    proxy=opts.get("proxy"),
+                    verify=bool(opts.get("verify")),
                 )
-                if accepted:
-                    if has_clearance:
-                        mark_prefer_flare(url, False)
-                        log.info(
-                            "clearance-curl-ok host=%s %sb via=%s",
-                            _host_key(url),
-                            len(accepted.html),
-                            accepted.via,
-                        )
-                    else:
-                        log.info(
-                            "curl-ok host=%s %sb via=%s",
-                            _host_key(url),
-                            len(accepted.html),
-                            accepted.via,
-                        )
-                    if no_flare:
-                        mark_prefer_flare(url, False)
-                    return accepted
-        miss = _take_http_miss(url)
-        st = int((miss or {}).get("status") or 0)
-        if st == 404:
-            last_err = RuntimeError("未找到影片 (HTTP 404)")
-        elif st in (401, 403):
-            last_err = RuntimeError(f"拒绝访问 (HTTP {st})")
-        elif st >= 500:
-            last_err = RuntimeError(f"站点错误 (HTTP {st})")
-        elif (miss or {}).get("reason") == "blocked":
-            last_err = RuntimeError("curl/直连遇盾")
-        else:
-            last_err = RuntimeError("curl/直连失败或遇盾")
-        # 404/5xx 不是盾：不要 sticky preferFlare，也不必为 404 烧 Flare
-        if has_clearance and not no_flare and (miss or {}).get("reason") == "blocked":
-            mark_prefer_flare(url, True)
-            log.info("clearance-curl-miss host=%s → preferFlare", _host_key(url))
+                if hit:
+                    html, final_url, via = hit
+                    accepted = _accept_or_bypass_r18(
+                        html, final_url, via, opts=opts, direct_to=direct_to
+                    )
+                    if accepted:
+                        if has_clearance:
+                            mark_prefer_flare(url, False)
+                            log.info(
+                                "clearance-curl-ok host=%s %sb via=%s",
+                                _host_key(url),
+                                len(accepted.html),
+                                accepted.via,
+                            )
+                        else:
+                            log.info(
+                                "curl-ok host=%s %sb via=%s",
+                                _host_key(url),
+                                len(accepted.html),
+                                accepted.via,
+                            )
+                        if no_flare:
+                            mark_prefer_flare(url, False)
+                        return accepted
+                miss_now = _take_http_miss(url)
+                if miss_now:
+                    last_miss = miss_now
+                st_now = int((last_miss or {}).get("status") or 0)
+                # 硬错误立刻停重试（对齐 mdc-ng：未找到/拒绝秒级返回）
+                if st_now in {401, 403, 404} or (500 <= st_now < 600):
+                    break
+            miss = last_miss
+            st = int((miss or {}).get("status") or 0)
+            if st in {429, 503}:
+                try:
+                    from app.core.outbound_scheduler import get_scheduler
 
-    # HTTP 404：直接失败，禁止回落 Flare（对齐「未找到」语义）
-    if isinstance(last_err, RuntimeError) and "HTTP 404" in str(last_err):
+                    get_scheduler().note_status(url, st)
+                except Exception:  # noqa: BLE001
+                    pass
+            if st == 404:
+                last_err = RuntimeError("未找到影片 (HTTP 404)")
+            elif st in (401, 403):
+                last_err = RuntimeError(f"拒绝访问 (HTTP {st})")
+            elif st >= 500:
+                last_err = RuntimeError(f"站点错误 (HTTP {st})")
+            elif (miss or {}).get("reason") == "blocked":
+                last_err = RuntimeError("curl/直连遇盾")
+            else:
+                last_err = RuntimeError("curl/直连失败或遇盾")
+            if (
+                has_clearance
+                and not no_flare
+                and (miss or {}).get("reason") == "blocked"
+            ):
+                mark_prefer_flare(url, True)
+                log.info(
+                    "clearance-curl-miss host=%s → preferFlare",
+                    _host_key(url),
+                )
+
+    # HTTP 404/403/401：直接失败，禁止回落 Flare
+    if isinstance(last_err, RuntimeError) and (
+        "HTTP 404" in str(last_err)
+        or "HTTP 403" in str(last_err)
+        or "HTTP 401" in str(last_err)
+        or "拒绝访问" in str(last_err)
+        or "未找到影片" in str(last_err)
+    ):
         raise last_err
 
     if flare_on:
+        # 自适应回落：过盾排队深时直接失败，让其它源/番号先走（proxy_flare 仍进盾）
+        if mode != "proxy_flare" and _flare_queue_depth > 2:
+            log.info(
+                "curl-miss → skip flare (busy depth=%s) host=%s",
+                _flare_queue_depth,
+                _host_key(url),
+            )
+            raise last_err or RuntimeError("curl/直连失败 · 过盾繁忙跳过")
         log.info(
             "curl-miss → flare host=%s access=%s err=%s",
             _host_key(url),

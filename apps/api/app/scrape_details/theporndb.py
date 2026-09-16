@@ -8,15 +8,12 @@ from typing import Any
 from urllib.parse import quote
 
 from .common import clean_title, code_key, fetch_json, is_junk_title, make_detail, std_code, strip_tags
+from app.core.maps_paths import load_str_map
 
 THEPORNDB_API_BASE = "https://api.theporndb.net"
 
-WESTERN_STUDIO_ALIASES: dict[str, str] = {
-    "puretaboo": "Pure Taboo",
-    "rk": "Reality Kings",
-    "sexmex": "SexMex",
-    "pornworld": "Porn World",
-}
+WESTERN_STUDIO_ALIASES: dict[str, str] = load_str_map("western-studio-search-aliases.json")
+
 
 
 def _looks_jav(code: str) -> bool:

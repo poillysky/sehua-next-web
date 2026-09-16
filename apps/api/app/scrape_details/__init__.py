@@ -18,58 +18,6 @@ def _legacy_javbus(code: str, *, base_url: str = "", cookie: str = "", api_key: 
     return _javbus_detail(code, base_url=base_url, cookie=cookie)
 
 
-def _legacy_sevenmm(code: str, *, base_url: str = "", cookie: str = "", api_key: str = "") -> dict[str, Any]:
-    import re
-
-    from .. import makers_providers_extra as extra
-    from ..makers_catalog_routes import _fetch_html
-
-    del cookie, api_key
-    # apply_provider_link_for_fetch 已写入 mirror；base_url 再置顶
-    if base_url:
-        try:
-            from .. import site_mirror
-
-            o = str(base_url).rstrip("/")
-            o = re.sub(r"/zh/?$", "", o, flags=re.I) or o
-            site_mirror.remember("7mmtv", o, discovered_from=o)
-        except Exception:
-            pass
-    return extra.sevenmm_detail(code, fetch_html=_fetch_html)
-
-
-def _legacy_missav(code: str, *, base_url: str = "", cookie: str = "", api_key: str = "") -> dict[str, Any]:
-    from .. import makers_providers_extra as extra
-    from ..makers_catalog_routes import _fetch_html
-
-    del cookie, api_key
-    if base_url:
-        try:
-            from .. import site_mirror
-
-            o = str(base_url).rstrip("/")
-            site_mirror.remember("missav", o, discovered_from=o)
-        except Exception:
-            pass
-    return extra.missav_detail(code, fetch_html=_fetch_html)
-
-
-def _legacy_madou(code: str, *, base_url: str = "", cookie: str = "", api_key: str = "") -> dict[str, Any]:
-    from .. import makers_providers_extra as extra
-    from ..makers_catalog_routes import _fetch_html
-
-    del cookie, api_key
-    if base_url:
-        try:
-            from .. import site_mirror
-
-            o = str(base_url).rstrip("/")
-            site_mirror.remember("madou", o, discovered_from=o)
-        except Exception:
-            pass
-    return extra.madou_detail(code, fetch_html=_fetch_html)
-
-
 def _load_fn(module: str, attr: str = "scrape_detail") -> DetailFn:
     import importlib
 
@@ -79,14 +27,12 @@ def _load_fn(module: str, attr: str = "scrape_detail") -> DetailFn:
 
 
 # catalog id → (lazy module name | legacy callable)
-# module name means apps.api.app.scrape_details.<name>.scrape_detail
 _PROVIDER_SPEC: dict[str, str | DetailFn] = {
-    "javbus": _legacy_javbus,
+    "javbus": _legacy_javbus,  # 仍走 makers 桥；其余已迁 scrape_details.<id>
     "iqqtv": "iqqtv",
     "sevenmmtv": "sevenmmtv",
     "miss_av": "miss_av",
     "madou": "madou",
-    # ported modules (filled as files land)
     "r18dev": "r18dev",
     "avwikidb": "avwikidb",
     "libredmm": "libredmm",

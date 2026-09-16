@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from app.core.maps_paths import regions_doc
+
 SearchRegion = Literal[
     "japan",
     "japan_censored",
@@ -24,26 +26,10 @@ SearchRegion = Literal[
 ]
 
 REGION_ALIASES: dict[str, SearchRegion] = {
-    "japan": "japan",
-    "jp": "japan",
-    "gravure": "japan",
-    "japan_censored": "japan_censored",
-    "yc": "japan_censored",
-    "censored": "japan_censored",
-    "japan_uncensored": "japan_uncensored",
-    "uncensored": "japan_uncensored",
-    "japan_amateur": "japan_amateur",
-    "amateur": "japan_amateur",
-    "素人": "japan_amateur",
-    "fc2": "fc2",
-    "fc2ppv": "fc2",
-    "china": "china",
-    "domestic": "china",
-    "western": "western",
-    "europe": "western",
+    str(k): str(v)  # type: ignore[misc]
+    for k, v in dict(regions_doc().get("aliases") or {}).items()
 }
 
-# 已废弃：放行逻辑见 forum_region_tags
 GLOBAL_EXCLUDE: list[str] = []
 REGION_BOARD_ALLOWLIST: dict[str, dict[str, Any]] = {
     "japan": {"label": "日本", "primary": [], "optional": [], "exclude": []},
