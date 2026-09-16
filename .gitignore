@@ -6,6 +6,8 @@ apps/**/node_modules/
 apps/web/.next/
 apps/web/out/
 **/.next/
+# sync-maps.mjs 生成的本地副本（源在 apps/maps）
+apps/web/maps/
 
 # python
 apps/api/.venv/
@@ -41,6 +43,8 @@ apps/api/_*.png
 apps/api/_*.webp
 apps/api/_*.log
 apps/api/_gap_reports/
+apps/api/_tmp_*.py
+apps/api/_tmp_*/
 apps/api/_local_refs/
 apps/api/__pycache__/
 
@@ -72,13 +76,18 @@ apps/web/next-env.d.ts
 /data/*.db-wal
 /data/library/
 /data/maker-fs/
+/data/mirrors/
+/data/prefix/
+/data/cache/
+/data/debug/
+/data/meta/
+/data/presets/
+/data/*.json
+# legacy flat names (pre-reorg)
 /data/scrape_maps/
 /data/cover-cache/
 /data/_debug/
-/data/meta/
 /data/prefix_catalog/
-/data/presets/
-/data/*.json
 /data/scrap_facets_snap/
 !/data/.gitkeep
 !/data/README.md
@@ -93,3 +102,7 @@ apps/web/next-env.d.ts
 # local overrides
 /config/app.local.json
 /config/_export/
+
+# scratch / bench 临时产物（性能探针的本地输出）
+.tmp_*
+.tmp_posters/
