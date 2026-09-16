@@ -194,6 +194,14 @@ if (-not (Test-Path $webMods)) {
   exit 1
 }
 
+Write-Step "Syncing apps/maps → apps/web/maps ..."
+& $npm run sync-maps --prefix (Join-Path $Root "apps\web")
+if ($LASTEXITCODE -ne 0) {
+  Write-Err "sync-maps failed"
+  Pause-IfInteractive
+  exit 1
+}
+
 $ports = @($ApiPort, $WebPort)
 
 if (-not $NoKill) {

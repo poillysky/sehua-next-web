@@ -9,11 +9,12 @@ sehua-next-web/
 ├── apps/
 │   ├── web/          # 前端 — Next.js PWA              :3020
 │   └── api/          # 后端 — FastAPI                  :8020
-├── config/           # 管理员种子 / 默认 settings
-├── data/             # 本机运行时（映射、快照、catalog…）
+├── config/           # 管理员种子 / 默认 settings · sql 参考
+├── data/             # 本机运行时（mirrors / prefix / cache …）
 ├── media/            # 刮削库 / STRM（大文件，勿提交）
+├── docker/           # 镜像内脚本（Dockerfile / compose 在根）
 ├── docs/             # 仓库文档
-├── backups/          # 本机备份（勿提交）
+├── backups/          # 本机备份：db/ + workspace/（勿提交）
 ├── package.json      # 根脚本（转发到各 app）
 └── README.md
 ```
