@@ -19,8 +19,8 @@ from app import prefix_ranges as pr  # noqa: E402
 from app.search.av import is_western_studio_prefix  # noqa: E402
 from app.core.region_meta import REGION_META, REGION_ORDER, std_prefix  # noqa: E402
 
-SEED = ROOT / "apps" / "web" / "src" / "config" / "prefix-catalog.seed.json"
-REPORT = ROOT / "data" / "_debug" / "prefix-from-local-dbs.json"
+SEED = ROOT / "apps" / "maps" / "prefixes" / "catalog.seed.json"
+REPORT = ROOT / "data" / "debug" / "prefix-from-local-dbs.json"
 
 CODE_RE = re.compile(
     r"(?<![A-Z0-9])([0-9]{0,3}[A-Z]{2,12})[-_ ](\d{2,6})(?![A-Z0-9])",
@@ -256,7 +256,7 @@ def load_kind_maps() -> dict[str, str]:
     mapping: dict[str, str] = {}
     files = [
         (
-            ROOT / "apps/web/src/config/av-makers.japan.json",
+            ROOT / "apps/maps/makers/av-makers.japan.json",
             {
                 "有码": "japan_censored",
                 "写真": "japan_gravure",
@@ -265,8 +265,8 @@ def load_kind_maps() -> dict[str, str]:
                 "FC2": "fc2",
             },
         ),
-        (ROOT / "apps/web/src/config/av-makers.china.json", {"国产": "china"}),
-        (ROOT / "apps/web/src/config/av-makers.western.json", {"欧美": "western"}),
+        (ROOT / "apps/maps/makers/av-makers.china.json", {"国产": "china"}),
+        (ROOT / "apps/maps/makers/av-makers.western.json", {"欧美": "western"}),
     ]
     for path, kinds in files:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -350,7 +350,7 @@ def merge(prefs: dict[str, Counter], kind_map: dict[str, str]) -> dict:
     added = defaultdict(list)
     # also add ranges-missing + digitalplayground
     ranges = json.loads(
-        (ROOT / "apps/web/src/config/prefix-code-ranges.json").read_text(encoding="utf-8")
+        (ROOT / "apps/maps/prefixes/code-ranges.json").read_text(encoding="utf-8")
     )["ranges"]
     for k in ranges:
         prefs.setdefault("ranges", Counter())[clean(k)] += 3

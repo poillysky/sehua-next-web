@@ -52,7 +52,7 @@ def main() -> None:
     snap = (
         ROOT
         / "data"
-        / "scrap_facets_snap"
+        / "cache" / "facets"
         / "japan_censored"
         / "studio.json"
     )

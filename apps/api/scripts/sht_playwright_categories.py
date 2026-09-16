@@ -16,7 +16,7 @@ from playwright.sync_api import sync_playwright  # noqa: E402
 
 from app import outbound_http as o  # noqa: E402
 
-OUT = ROOT / "data" / "_debug"
+OUT = ROOT / "data" / "debug"
 URL = "https://www.sehuatang.net/portal.php?mod=index&mobile=2"
 URL_FORUM = "https://www.sehuatang.net/forum.php?mobile=2"
 

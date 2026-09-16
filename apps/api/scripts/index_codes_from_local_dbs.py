@@ -38,7 +38,7 @@ from app.search.av import (  # noqa: E402
 from app import search_av as _search_av  # noqa: E402
 
 
-REPORT = ROOT / "data" / "_debug" / "prefix-codes-from-local-dbs.json"
+REPORT = ROOT / "data" / "debug" / "prefix-codes-from-local-dbs.json"
 SPECIAL_SHAPES = {"fc2", "fc2ppv", "date6", "alnum_id", "western_date", "western_ep"}
 DIGIT_HEAD_RE = re.compile(r"^(\d{2,3})([A-Z]{2,14})$")
 # 左侧边界不含 -/_ ：避免 jukujo-club-983 被当成 CLUB-983

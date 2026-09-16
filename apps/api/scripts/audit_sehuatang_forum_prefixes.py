@@ -18,9 +18,9 @@ sys.path.insert(0, str(ROOT / "apps" / "api"))
 from app import outbound_http as o  # noqa: E402
 from app import prefix_catalog_store as store  # noqa: E402
 
-REPORT = ROOT / "data" / "_debug" / "prefix-sehuatang-forum-sync.json"
-LIVE = ROOT / "data" / "_debug" / "sht_forum_types_live.json"
-OUT = ROOT / "data" / "_debug" / "prefix-sehuatang-verify.json"
+REPORT = ROOT / "data" / "debug" / "prefix-sehuatang-forum-sync.json"
+LIVE = ROOT / "data" / "debug" / "sht_forum_types_live.json"
+OUT = ROOT / "data" / "debug" / "prefix-sehuatang-verify.json"
 
 GQL = "https://api.video.dmm.co.jp/graphql"
 QUERY = """

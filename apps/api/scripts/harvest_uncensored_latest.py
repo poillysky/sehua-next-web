@@ -16,7 +16,7 @@ from app import makers_settings as ms  # noqa: E402
 from app import outbound_http as o  # noqa: E402
 from app import prefix_catalog_store as store  # noqa: E402
 
-OUT = ROOT / "data" / "_debug" / "prefix-uncensored-latest.json"
+OUT = ROOT / "data" / "debug" / "prefix-uncensored-latest.json"
 
 # 前缀 → 搜索词 + 从 HTML 抽 latest 的规则
 # kind: serial = PREFIX-N 取最大；date6 = MMDDYY 日期号取最新

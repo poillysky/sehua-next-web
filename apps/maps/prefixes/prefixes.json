@@ -1,0 +1,3905 @@
+{
+ "prefixes": {
+  "10MU": {
+   "i18n": [
+    "天然少女",
+    "天然むすめ",
+    "10musume"
+   ],
+   "intro": "10musume。"
+  },
+  "10MUSUME": {
+   "i18n": [
+    "天然少女",
+    "天然むすめ",
+    "10musume"
+   ],
+   "intro": "10musume（10娘），日期番号，一本道系。"
+  },
+  "1PON": {
+   "i18n": [
+    "一本道",
+    "一本道",
+    "1pondo"
+   ],
+   "intro": "日期番号。"
+  },
+  "200GANA": {
+   "i18n": [
+    "Nanpa TV",
+    "ナンパTV",
+    "Nanpa TV"
+   ],
+   "intro": "ナンパTV マジ軟派。"
+  },
+  "230ORECO": {
+   "i18n": [
+    "Ore no Shirouto / 俺的素人",
+    "俺の素人",
+    "Ore no Shirouto"
+   ]
+  },
+  "230OREX": {
+   "i18n": [
+    "俺的素人",
+    "俺の素人Z",
+    "Ore no Shirouto"
+   ],
+   "intro": "俺の素人。"
+  },
+  "259LUXU": {
+   "i18n": [
+    "Luxury TV",
+    "ラグジュTV",
+    "Luxu TV"
+   ],
+   "intro": "ラグジュTV。"
+  },
+  "300MAAN": {
+   "i18n": [
+    "真面目软派",
+    "マジ軟派、初撮。",
+    "Maji Nanpa"
+   ],
+   "intro": "Prestige Premium 素人约拍。"
+  },
+  "300MIUM": {
+   "i18n": [
+    "Prestige Premium",
+    "プレステージプレミアム",
+    "Prestige Premium"
+   ],
+   "intro": "Prestige Premium 都市约拍。"
+  },
+  "300NTK": {
+   "i18n": [
+    "Nanpa天国",
+    "ナンパ天国",
+    "Nanpa Tengoku"
+   ],
+   "intro": "Prestige Premium ナンパ系。"
+  },
+  "328HMDN": {
+   "i18n": [
+    "ハメ撮り",
+    "ハメ撮りナンパ",
+    "Hamedori"
+   ],
+   "intro": "Prestige Premium。"
+  },
+  "336KNB": {
+   "i18n": [
+    "恋慕",
+    "恋慕",
+    "Koi no Bo"
+   ],
+   "intro": "ナンパ系 KNB 流水号。"
+  },
+  "390JAC": {
+   "i18n": [
+    "Jackson / 杰克逊",
+    "ジャクソン",
+    "Jackson"
+   ],
+   "intro": "Prestige Premium。"
+  },
+  "AARM": {
+   "i18n": [
+    "阿洛玛企划 / 芳香企划",
+    "アロマ企画",
+    "Aroma Planning"
+   ],
+   "intro": "アロマ企画。"
+  },
+  "ABF": {
+   "i18n": [
+    "Prestige / 普雷斯提奇",
+    "プレステージ",
+    "PRESTIGE"
+   ],
+   "intro": "专属现行。"
+  },
+  "ABP": {
+   "i18n": [
+    "Prestige / 普雷斯提奇",
+    "プレステージ",
+    "PRESTIGE"
+   ],
+   "intro": "Prestige 专属女优主力线"
+  },
+  "ABS": {
+   "i18n": [
+    "Prestige / 普雷斯提奇",
+    "プレステージ",
+    "PRESTIGE"
+   ],
+   "intro": "更早专属。"
+  },
+  "ABW": {
+   "i18n": [
+    "Prestige / 普雷斯提奇",
+    "プレステージ",
+    "PRESTIGE"
+   ],
+   "intro": "过渡线。"
+  },
+  "ACHJ": {
+   "i18n": [
+    "Madonna / 麦当娜",
+    "マドンナ",
+    "Madonna"
+   ],
+   "intro": "Madonna 痴女人妻向"
+  },
+  "ADN": {
+   "i18n": [
+    "Attackers / 攻击者",
+    "アタッカーズ",
+    "Attackers"
+   ],
+   "intro": "Attackers 不倫/禁忌情感剧"
+  },
+  "ADULTTIME": {
+   "i18n": [
+    "Adult Time / 成人时间",
+    "アダルトタイム",
+    "Adult Time"
+   ],
+   "intro": "Adult Time。"
+  },
+  "AED": {
+   "i18n": [
+    "Attackers / 攻击者",
+    "アタッカーズ",
+    "Attackers"
+   ],
+   "intro": "Attackers 早期关联番号"
+  },
+  "AKDL": {
+   "i18n": [
+    "AKNR / 明纪",
+    "アキノリ",
+    "AKNR"
+   ],
+   "intro": "恶搞情景企划。"
+  },
+  "AKNR": {
+   "i18n": [
+    "AKNR / 明纪",
+    "アキノリ",
+    "AKNR"
+   ],
+   "intro": "アキノリ，多段式剧情企划。"
+  },
+  "ALDN": {
+   "i18n": [
+    "Madonna / 麦当娜",
+    "マドンナ",
+    "Madonna"
+   ],
+   "intro": "Madonna 关联熟女线"
+  },
+  "ANALVIDS": {
+   "i18n": [
+    "Anal Vids / 肛门视频",
+    "アナルvids",
+    "Anal Vids"
+   ],
+   "intro": "欧美厂牌，日期式番号（名称.YYYY.MM.DD）。"
+  },
+  "ANB": {
+   "i18n": [
+    "Anbai / 安排",
+    "あんばい",
+    "ANB"
+   ],
+   "intro": "小众企划系（前缀 ANB），公开资料有限。"
+  },
+  "APAK": {
+   "i18n": [
+    "APAKA / 阿帕卡",
+    "アパカ",
+    "APAKA"
+   ],
+   "intro": "APAKA 系（前缀 APAK），小众企划，公开资料有限。"
+  },
+  "ARA": {
+   "i18n": [
+    "募集酱",
+    "募集ちゃん",
+    "261ARA"
+   ],
+   "intro": "募集ちゃん。"
+  },
+  "ARM": {
+   "i18n": [
+    "阿洛玛企划 / 芳香企划",
+    "アロマ企画",
+    "Aroma Planning"
+   ],
+   "intro": "アロマ企画。"
+  },
+  "ATID": {
+   "i18n": [
+    "Attackers / 攻击者",
+    "アタッカーズ",
+    "Attackers"
+   ],
+   "intro": "Attackers 攻击/凌辱剧情"
+  },
+  "ATKD": {
+   "i18n": [
+    "Attackers / 攻击者",
+    "アタッカーズ",
+    "Attackers"
+   ],
+   "intro": "精选打包。"
+  },
+  "AVOP": {
+   "i18n": [
+    "AVS / 收藏家",
+    "AVScollector",
+    "AVS collector"
+   ],
+   "intro": "AV OPEN 评审赛作品专用番号。"
+  },
+  "AVSA": {
+   "i18n": [
+    "AVS / 收藏家",
+    "AVScollector",
+    "AVS collector"
+   ],
+   "intro": "AVS 集团精选合集线，收录旗下各标签名作。"
+  },
+  "BACJ": {
+   "i18n": [
+    "Bermuda / 百慕大",
+    "バミューダ",
+    "Bermuda"
+   ],
+   "intro": "Bermuda（バミューダ，前缀 BACJ），小众企划，公开资料有限。"
+  },
+  "BAGR": {
+   "i18n": [
+    "BAGUS / 巴古斯",
+    "バグース",
+    "BAGUS"
+   ],
+   "intro": "小众独立系（バグス，前缀 BAGR），公开资料有限。"
+  },
+  "BANGBROS": {
+   "i18n": [
+    "Bang Bros / 砰兄弟",
+    "バングブロス",
+    "Bang Bros"
+   ],
+   "intro": "Bang Bros 主站。"
+  },
+  "BANGBUS": {
+   "i18n": [
+    "Bang Bros / 砰兄弟",
+    "バングブロス",
+    "Bang Bus"
+   ],
+   "intro": "Bang Bus 系列。"
+  },
+  "BBAN": {
+   "i18n": [
+    "Bibian",
+    "ビビアン",
+    "Bibian"
+   ],
+   "intro": "女同主线。"
+  },
+  "BF": {
+   "i18n": [
+    "BeFree / 比弗利",
+    "ビーフリー",
+    "BeFree"
+   ],
+   "intro": "BeFree 都市风单体/剧情"
+  },
+  "BFIT": {
+   "i18n": [
+    "Fitch",
+    "フィッチ",
+    "Fitch"
+   ]
+  },
+  "BGN": {
+   "i18n": [
+    "Prestige / 普雷斯提奇",
+    "プレステージ",
+    "PRESTIGE"
+   ],
+   "intro": "Prestige 专属出道作"
+  },
+  "BLACKED": {
+   "i18n": [
+    "Blacked / 黑蚀",
+    "ブラックド",
+    "Blacked"
+   ],
+   "intro": "欧美厂牌，日期式番号（名称.YYYY.MM.DD）。"
+  },
+  "BLACKEDRAW": {
+   "i18n": [
+    "Blacked Raw / 黑蚀生",
+    "ブラックドロー",
+    "Blacked Raw"
+   ],
+   "intro": "Blacked Raw。"
+  },
+  "BLK": {
+   "i18n": [
+    "Kira Kira",
+    "キラ☆キラ",
+    "kira☆kira"
+   ],
+   "intro": "辣妹黑系主线。"
+  },
+  "BLO": {
+   "i18n": [
+    "Prestige / 普雷斯提奇",
+    "プレステージ",
+    "PRESTIGE"
+   ],
+   "intro": "人妻向。"
+  },
+  "BRATTYSIS": {
+   "i18n": [
+    "Bratty Sis / 顽皮姐妹",
+    "ブラッティシス",
+    "Bratty Sis"
+   ],
+   "intro": "欧美厂牌，日期式番号（名称.YYYY.MM.DD）。"
+  },
+  "BRAZZERS": {
+   "i18n": [
+    "Brazzers / 布拉泽斯",
+    "ブラザーズ",
+    "Brazzers"
+   ],
+   "intro": "站点片名；无统一字母流水。"
+  },
+  "C0930": {
+   "i18n": [
+    "人妻0930",
+    "人妻斬り/C0930",
+    "C0930"
+   ],
+   "intro": "C0930-hitozuma…。"
+  },
+  "CARIB": {
+   "i18n": [
+    "加勒比",
+    "カリビアンコム",
+    "Caribbeancom"
+   ],
+   "intro": "日期番号 YYYYMMDD-XXX。"
+  },
+  "CARIBPR": {
+   "i18n": [
+    "加勒比Premium",
+    "カリビアンコムプレミアム",
+    "Caribbeancom Premium"
+   ],
+   "intro": "Premium，库内较少。"
+  },
+  "CAWD": {
+   "i18n": [
+    "kawaii* / 卡哇伊",
+    "kawaii*",
+    "kawaii"
+   ],
+   "intro": "现行主线。"
+  },
+  "CHN": {
+   "i18n": [
+    "Prestige / 普雷斯提奇",
+    "プレステージ",
+    "PRESTIGE"
+   ],
+   "intro": "Prestige「到自宅」企划"
+  },
+  "CJOD": {
+   "i18n": [
+    "痴女天堂",
+    "痴女ヘブン",
+    "Chijo Heaven"
+   ],
+   "intro": "现行主线。"
+  },
+  "CLOT": {
+   "i18n": [
+    "Cloth / 布料",
+    "クロース",
+    "CLOTH"
+   ],
+   "intro": "CLOTH 系（前缀 CLOT），小众企划，公开资料有限。"
+  },
+  "CMN": {
+   "i18n": [
+    "Cinemagic / 电影魔术",
+    "シネマジック",
+    "Cinemagic"
+   ]
+  },
+  "DANDY": {
+   "i18n": [
+    "Dandy / 丹迪",
+    "ダンディ",
+    "DANDY"
+   ],
+   "intro": "厂牌同名主线。"
+  },
+  "DASD": {
+   "i18n": [
+    "Das! / 达斯",
+    "ダスッ！",
+    "Das!"
+   ],
+   "intro": "上一代。"
+  },
+  "DASS": {
+   "i18n": [
+    "Das! / 达斯",
+    "ダスッ！",
+    "Das!"
+   ],
+   "intro": "现行主线。"
+  },
+  "DAVK": {
+   "i18n": [
+    "Dark / 暗黑",
+    "ダーク",
+    "DAVK"
+   ],
+   "intro": "小众独立系（前缀 DAVK），公开资料有限。"
+  },
+  "DAZD": {
+   "i18n": [
+    "Das! / 达斯",
+    "ダスッ！",
+    "Das!"
+   ],
+   "intro": "精选。"
+  },
+  "DEEPER": {
+   "i18n": [
+    "Deeper / 更深",
+    "ディーパー",
+    "Deeper"
+   ],
+   "intro": "Deeper。"
+  },
+  "DEL": {
+   "i18n": [
+    "Delicious / 美味",
+    "デリシャス",
+    "DEL"
+   ],
+   "intro": "厂牌 DEL（前缀 DEL）。小众独立厂牌，公开资料有限，简介待核实后补充。"
+  },
+  "DIC": {
+   "i18n": [
+    "Prestige / 普雷斯提奇",
+    "プレステージ",
+    "PRESTIGE"
+   ],
+   "intro": "Prestige 职业设定企划"
+  },
+  "DIGITALPLAYGROUND": {
+   "i18n": [
+    "Digital Playground / 数字乐园",
+    "デジタルプレイグラウンド",
+    "Digital Playground"
+   ],
+   "intro": "欧美厂牌，日期式番号（名称.YYYY.MM.DD）。"
+  },
+  "DLDSS": {
+   "i18n": [
+    "DAHLIA / 大丽花",
+    "ダリア",
+    "DAHLIA"
+   ],
+   "intro": "人妻戏剧单片。"
+  },
+  "DOJN": {
+   "i18n": [
+    "Dojin / 同人",
+    "同人",
+    "DOJN"
+   ],
+   "intro": "厂牌 DOJN（前缀 DOJN）。小众独立厂牌，公开资料有限，简介待核实后补充。"
+  },
+  "DORCEL": {
+   "i18n": [
+    "Dorcel / 多塞尔",
+    "ドーセル",
+    "Dorcel"
+   ],
+   "intro": "Marc Dorcel。"
+  },
+  "DORCELCLUB": {
+   "i18n": [
+    "Dorcel Club / 多塞尔俱乐部",
+    "ドーセルクラブ",
+    "Dorcel Club"
+   ],
+   "intro": "Dorcel Club。"
+  },
+  "DSVR": {
+   "i18n": [
+    "SOD Create / SOD制作",
+    "SODクリエイト",
+    "SOD Create"
+   ],
+   "intro": "VR。"
+  },
+  "DVAJ": {
+   "i18n": [
+    "Alice Japan / 爱丽丝日本",
+    "アリスJAPAN",
+    "Alice Japan"
+   ],
+   "intro": "较新常见。"
+  },
+  "DVDES": {
+   "i18n": [
+    "Deeps",
+    "ディープス",
+    "DEEP'S"
+   ],
+   "intro": "较早。"
+  },
+  "DVDMS": {
+   "i18n": [
+    "Deeps",
+    "ディープス",
+    "DEEP'S"
+   ],
+   "intro": "魔镜号等。"
+  },
+  "DVMM": {
+   "i18n": [
+    "Deeps",
+    "ディープス",
+    "DEEP'S"
+   ],
+   "intro": "现行企划。"
+  },
+  "EBOD": {
+   "i18n": [
+    "E-BODY / 好身材",
+    "E-BODY",
+    "E-BODY"
+   ],
+   "intro": "E-BODY 身材特化专属"
+  },
+  "EBWH": {
+   "i18n": [
+    "E-BODY / 好身材",
+    "E-BODY",
+    "E-BODY"
+   ],
+   "intro": "现行主线。"
+  },
+  "EKDV": {
+   "i18n": [
+    "Crystal / 水晶映像",
+    "クリスタル映像",
+    "Crystal Eizou"
+   ],
+   "intro": "老牌综合厂，现主力前缀 NITR。"
+  },
+  "ELEGANTANGEL": {
+   "i18n": [
+    "Elegant Angel / 优雅天使",
+    "エレガントエンジェル",
+    "Elegant Angel"
+   ],
+   "intro": "欧美厂牌，日期式番号（名称.YYYY.MM.DD）。"
+  },
+  "EMBZ": {
+   "i18n": [
+    "EMBZ / 淫美",
+    "エムビーズ",
+    "EMBZ"
+   ],
+   "intro": "小众独立系（前缀 EMBZ），公开资料有限。"
+  },
+  "ESK": {
+   "i18n": [
+    "Prestige / 普雷斯提奇",
+    "プレステージ",
+    "PRESTIGE"
+   ],
+   "intro": "Prestige 专属单片主线（素人流水号见「素人企划」）。"
+  },
+  "EVILANGEL": {
+   "i18n": [
+    "Evil Angel / 邪恶天使",
+    "イービルエンジェル",
+    "Evil Angel"
+   ],
+   "intro": "Evil Angel。"
+  },
+  "EVO": {
+   "i18n": [
+    "Prestige / 普雷斯提奇",
+    "プレステージ",
+    "PRESTIGE"
+   ],
+   "intro": "Prestige 专属单片主线（素人流水号见「素人企划」）。"
+  },
+  "EYAN": {
+   "intro": "E-BODY 人妻身材向",
+   "i18n": [
+    "E-BODY / 人妻线",
+    "EYAN"
+   ]
+  },
+  "FAKETAXI": {
+   "i18n": [
+    "Fake Taxi / 假出租车",
+    "フェイクタクシー",
+    "Fake Taxi"
+   ],
+   "intro": "Fake Taxi。"
+  },
+  "FAMILYSTROKES": {
+   "i18n": [
+    "Family Strokes / 家庭爱抚",
+    "ファミリーストロークス",
+    "Family Strokes"
+   ],
+   "intro": "欧美厂牌，日期式番号（名称.YYYY.MM.DD）。"
+  },
+  "FC2": {
+   "i18n": [
+    "FC2 / 同人平台",
+    "FC2",
+    "FC2"
+   ],
+   "intro": "FC2 素人付费配信，库内体量最大。"
+  },
+  "FC2PPV": {
+   "i18n": [
+    "FC2PPV / 付费同人",
+    "FC2PPV",
+    "FC2PPV"
+   ],
+   "intro": "FC2 素人付费配信，库内体量最大。"
+  },
+  "FCDSS": {
+   "i18n": [
+    "FALENO / 法雷诺",
+    "ファレノ",
+    "FALENO"
+   ],
+   "intro": "精选。"
+  },
+  "FCX": {
+   "i18n": [
+    "Fitch",
+    "フィッチ",
+    "Fitch"
+   ]
+  },
+  "FELLATIOJAPAN": {
+   "i18n": [
+    "Fellatio Japan",
+    "フェラチオジャパン",
+    "Fellatio Japan"
+   ],
+   "intro": "fellatioJapan，口交专门站，日期式番号。"
+  },
+  "FLAV": {
+   "i18n": [
+    "Flavor / 风味",
+    "フレイバー",
+    "FLAVOUR"
+   ],
+   "intro": "FLAVOUR 系（前缀 FLAV），小众企划，公开资料有限。"
+  },
+  "FLNS": {
+   "i18n": [
+    "FALENO / 法雷诺",
+    "ファレノ",
+    "FALENO"
+   ],
+   "intro": "少量旁支。"
+  },
+  "FNS": {
+   "i18n": [
+    "FALENO / 法雷诺",
+    "ファレノ",
+    "FALENO"
+   ],
+   "intro": "数字星线。"
+  },
+  "FSDSS": {
+   "i18n": [
+    "FALENO / 法雷诺",
+    "ファレノ",
+    "FALENO"
+   ],
+   "intro": "专属单片。"
+  },
+  "FSET": {
+   "i18n": [
+    "AKNR / 明纪",
+    "アキノリ",
+    "AKNR"
+   ],
+   "intro": "常见企划。"
+  },
+  "FSVSS": {
+   "i18n": [
+    "FALENO / 法雷诺",
+    "ファレノ",
+    "FALENO"
+   ],
+   "intro": "新锐高规格厂，少而精的专属路线。"
+  },
+  "FTN": {
+   "i18n": [
+    "SOD Create / SOD制作",
+    "SODクリエイト",
+    "SOD Create"
+   ],
+   "intro": "Prestige 专属单片主线（素人流水号见「素人企划」）。"
+  },
+  "GAJK": {
+   "i18n": [
+    "Garage / 车库",
+    "ガレージ",
+    "Garage"
+   ],
+   "intro": "Garage 系（前缀 GAJK），小众企划，公开资料有限。"
+  },
+  "GANA": {
+   "i18n": [
+    "Nanpa TV",
+    "ナンパTV",
+    "Nanpa TV"
+   ],
+   "intro": "200GANA 简写。"
+  },
+  "GARA": {
+   "i18n": [
+    "GARA / 加拉",
+    "ガラ",
+    "GARA"
+   ],
+   "intro": "小众独立系（前缀 GARA），公开资料有限。"
+  },
+  "GAREA": {
+   "i18n": [
+    "G-area / G区",
+    "ジーエリア",
+    "G-area"
+   ],
+   "intro": "G AREA，裏系素人站点，日期式番号。"
+  },
+  "GMA": {
+   "i18n": [
+    "Global Media / 全球媒体",
+    "グローバルメディアアネックス",
+    "Global Media Annex"
+   ]
+  },
+  "GS": {
+   "i18n": [
+    "GOGOS / 走光",
+    "ゴーゴーズ",
+    "GOGOS"
+   ],
+   "intro": "GOGOS 系（使用前缀 GS），公开资料有限。"
+  },
+  "H0930": {
+   "i18n": [
+    "好色0930",
+    "エッチな0930",
+    "H0930"
+   ],
+   "intro": "H0930-ki日期。"
+  },
+  "H4610": {
+   "i18n": [
+    "好色4610",
+    "エッチな4610",
+    "H4610"
+   ],
+   "intro": "H4610-…。"
+  },
+  "HAME": {
+   "i18n": [
+    "白ハメ",
+    "しろハメ",
+    "Siro Hame"
+   ],
+   "intro": "ハメ撮り系站点，日期式番号。"
+  },
+  "HANDJOBJAPAN": {
+   "i18n": [
+    "Handjob Japan",
+    "ハンドジョブジャパン",
+    "Handjob Japan"
+   ],
+   "intro": "handjobjapan，手交专门站，日期式番号。"
+  },
+  "HEYDOUGA": {
+   "i18n": [
+    "Heydouga / 嘿动画",
+    "ヘイ動画",
+    "Heydouga"
+   ],
+   "intro": "有货、量中等。"
+  },
+  "HEYZO": {
+   "i18n": [
+    "HEYZO",
+    "ヘイゾー",
+    "HEYZO"
+   ],
+   "intro": "HEYZO-四位"
+  },
+  "HHF": {
+   "i18n": [
+    "High High / 嗨嗨",
+    "ハイハイ",
+    "HHF"
+   ],
+   "intro": "小众独立系（前缀 HHF），公开资料有限。"
+  },
+  "HIMEMIX": {
+   "i18n": [
+    "Hime Mix / 姬混",
+    "ひめみっくす",
+    "himemix"
+   ]
+  },
+  "HKG": {
+   "i18n": [
+    "Xingkong / 星空无限",
+    "星空無限傳媒",
+    "Star Unlimited"
+   ],
+   "intro": "国产前缀锚点（来源较弱），待样本核实后归位。"
+  },
+  "HMDN": {
+   "i18n": [
+    "ハメ撮り",
+    "ハメ撮り",
+    "Hamedori"
+   ]
+  },
+  "HMN": {
+   "i18n": [
+    "本中",
+    "本中",
+    "Hon-Naka"
+   ],
+   "intro": "本中 较新中出线"
+  },
+  "HND": {
+   "i18n": [
+    "本中",
+    "本中",
+    "Hon-Naka"
+   ],
+   "intro": "本中 中出专题主力"
+  },
+  "HNDB": {
+   "i18n": [
+    "本中",
+    "本中",
+    "Hon-Naka"
+   ],
+   "intro": "少量打包。"
+  },
+  "HNDS": {
+   "i18n": [
+    "本中",
+    "本中",
+    "Hon-Naka"
+   ],
+   "intro": "系列/合集。"
+  },
+  "HODV": {
+   "i18n": [
+    "h.m.p",
+    "エイチエムピー",
+    "h.m.p"
+   ],
+   "intro": "常见主线。"
+  },
+  "HUNBL": {
+   "i18n": [
+    "Hunter / 猎人",
+    "ハンター",
+    "Hunter"
+   ],
+   "intro": "蓝光/特别版一类。"
+  },
+  "HUNT": {
+   "i18n": [
+    "Hunter / 猎人",
+    "ハンター",
+    "Hunter"
+   ],
+   "intro": "短前缀。"
+  },
+  "HUNTA": {
+   "i18n": [
+    "Hunter / 猎人",
+    "ハンター",
+    "Hunter"
+   ],
+   "intro": "较早企划。"
+  },
+  "HUNTB": {
+   "i18n": [
+    "Hunter / 猎人",
+    "ハンター",
+    "Hunter"
+   ],
+   "intro": "常见企划。"
+  },
+  "HUNTC": {
+   "i18n": [
+    "Hunter / 猎人",
+    "ハンター",
+    "Hunter"
+   ],
+   "intro": "较新企划。"
+  },
+  "IDBD": {
+   "i18n": [
+    "Idea Pocket",
+    "アイデアポケット",
+    "IDEA POCKET"
+   ],
+   "intro": "精选合集。"
+  },
+  "INU": {
+   "i18n": [
+    "Prestige / 普雷斯提奇",
+    "プレステージ",
+    "PRESTIGE"
+   ],
+   "intro": "Prestige 专属单片主线（素人流水号见「素人企划」）。"
+  },
+  "IPBD": {
+   "i18n": [
+    "Idea Pocket",
+    "アイデアポケット",
+    "IDEA POCKET"
+   ]
+  },
+  "IPSD": {
+   "i18n": [
+    "Idea Pocket",
+    "アイデアポケット",
+    "IDEA POCKET"
+   ],
+   "intro": "少量旁支。"
+  },
+  "IPTD": {
+   "i18n": [
+    "Idea Pocket",
+    "アイデアポケット",
+    "IDEA POCKET"
+   ],
+   "intro": "IdeaPocket 早期专属"
+  },
+  "IPVR": {
+   "i18n": [
+    "Idea Pocket",
+    "アイデアポケット",
+    "IDEA POCKET"
+   ],
+   "intro": "VR。"
+  },
+  "IPX": {
+   "i18n": [
+    "Idea Pocket",
+    "アイデアポケット",
+    "IDEA POCKET"
+   ],
+   "intro": "IdeaPocket 主力专属单体"
+  },
+  "IPZ": {
+   "i18n": [
+    "Idea Pocket",
+    "アイデアポケット",
+    "IDEA POCKET"
+   ],
+   "intro": "IdeaPocket 较早专属单体"
+  },
+  "IPZZ": {
+   "i18n": [
+    "Idea Pocket",
+    "アイデアポケット",
+    "IDEA POCKET"
+   ],
+   "intro": "IdeaPocket 现行专属线"
+  },
+  "JAN": {
+   "i18n": [
+    "Prestige / 普雷斯提奇",
+    "プレステージ",
+    "PRESTIGE"
+   ],
+   "intro": "Prestige 专属单片主线（素人流水号见「素人企划」）。"
+  },
+  "JAPORNXXX": {
+   "i18n": [
+    "JapornXXX / 日产无码",
+    "ジャポルノ",
+    "JapornXXX"
+   ],
+   "intro": "JAPORN 系无码站点集团番号。"
+  },
+  "JBD": {
+   "i18n": [
+    "Attackers / 攻击者",
+    "アタッカーズ",
+    "Attackers"
+   ],
+   "intro": "Attackers 蛇缚等硬调教线"
+  },
+  "JUC": {
+   "i18n": [
+    "Madonna / 麦当娜",
+    "マドンナ",
+    "Madonna"
+   ],
+   "intro": "较早 DVD。"
+  },
+  "JUFD": {
+   "i18n": [
+    "Fitch",
+    "フィッチ",
+    "Fitch"
+   ],
+   "intro": "Fitch 巨乳肉感主力"
+  },
+  "JUFE": {
+   "i18n": [
+    "Fitch",
+    "フィッチ",
+    "Fitch"
+   ],
+   "intro": "Fitch 较新肉感线"
+  },
+  "JUKD": {
+   "i18n": [
+    "Madonna / 麦当娜",
+    "マドンナ",
+    "Madonna"
+   ],
+   "intro": "最早主线。"
+  },
+  "JUL": {
+   "i18n": [
+    "Madonna / 麦当娜",
+    "マドンナ",
+    "Madonna"
+   ],
+   "intro": "Madonna 主力人妻专属线"
+  },
+  "JULESJORDAN": {
+   "i18n": [
+    "Jules Jordan / 朱尔斯",
+    "ジュールス・ジョーダン",
+    "Jules Jordan"
+   ],
+   "intro": "Jules Jordan。"
+  },
+  "JUNY": {
+   "i18n": [
+    "Madonna / 麦当娜",
+    "マドンナ",
+    "Madonna"
+   ],
+   "intro": "丰满旁支。"
+  },
+  "JUQ": {
+   "i18n": [
+    "Madonna / 麦当娜",
+    "マドンナ",
+    "Madonna"
+   ],
+   "intro": "Madonna 现行人妻专属线"
+  },
+  "JUR": {
+   "i18n": [
+    "Madonna / 麦当娜",
+    "マドンナ",
+    "Madonna"
+   ],
+   "intro": "Madonna 人妻剧情线"
+  },
+  "JURA": {
+   "i18n": [
+    "Madonna / 麦当娜",
+    "マドンナ",
+    "Madonna"
+   ],
+   "intro": "五十路纪录片线 系列号。"
+  },
+  "JUSD": {
+   "i18n": [
+    "Madonna / 麦当娜",
+    "マドンナ",
+    "Madonna"
+   ],
+   "intro": "Madonna 人妻合集盘"
+  },
+  "JUX": {
+   "i18n": [
+    "Madonna / 麦当娜",
+    "マドンナ",
+    "Madonna"
+   ],
+   "intro": "Madonna 较早人妻专属"
+  },
+  "JUY": {
+   "i18n": [
+    "Madonna / 麦当娜",
+    "マドンナ",
+    "Madonna"
+   ],
+   "intro": "Madonna 人妻专属线"
+  },
+  "JVID": {
+   "i18n": [
+    "JVID / 台湾写真",
+    "ジェイヴィッド",
+    "JVID"
+   ],
+   "intro": "作者/作品 ID。"
+  },
+  "KAVR": {
+   "i18n": [
+    "kawaii* / 卡哇伊",
+    "kawaii*",
+    "kawaii"
+   ],
+   "intro": "VR。"
+  },
+  "KAWD": {
+   "i18n": [
+    "kawaii* / 卡哇伊",
+    "kawaii*",
+    "kawaii"
+   ],
+   "intro": "kawaii* 清纯可爱专属"
+  },
+  "KDMN": {
+   "i18n": [
+    "SOD Create / SOD制作",
+    "SODクリエイト",
+    "SOD Create"
+   ],
+   "intro": "SOD 创作线：魔镜号、素人纪实、专属并存。"
+  },
+  "KFNE": {
+   "i18n": [
+    "SOD Create / SOD制作",
+    "SODクリエイト",
+    "SOD Create"
+   ],
+   "intro": "SOD 创作线：魔镜号、素人纪实、专属并存。"
+  },
+  "KIN8": {
+   "i18n": [
+    "金8天国",
+    "金髪天国",
+    "Kin8tengoku"
+   ],
+   "intro": "kin8-四位"
+  },
+  "KNB": {
+   "i18n": [
+    "恋慕",
+    "恋慕",
+    "Koi no Bo"
+   ],
+   "intro": "ナンパ系。"
+  },
+  "KOJA": {
+   "i18n": [
+    "Koujo / 皇女",
+    "皇女",
+    "KOJA"
+   ],
+   "intro": "小众独立系（前缀 KOJA），公开资料有限。"
+  },
+  "KTRA": {
+   "i18n": [
+    "K-Tribe / K部落",
+    "ケートライブ",
+    "K-Tribe"
+   ]
+  },
+  "KWBD": {
+   "i18n": [
+    "kawaii* / 卡哇伊",
+    "kawaii*",
+    "kawaii"
+   ],
+   "intro": "精选。"
+  },
+  "LEGALPORNO": {
+   "i18n": [
+    "LegalPorno / 合法色情",
+    "リーガルポルノ",
+    "LegalPorno"
+   ],
+   "intro": "LegalPorno。"
+  },
+  "LEGSJAPAN": {
+   "i18n": [
+    "Legs Japan",
+    "レッグスジャパン",
+    "Legs Japan"
+   ],
+   "intro": "LegsJapan，美腿专门站，日期式番号。"
+  },
+  "LETHALHARDCORE": {
+   "i18n": [
+    "Lethal Hardcore / 致命硬核",
+    "リーサルハードコア",
+    "Lethal Hardcore"
+   ],
+   "intro": "欧美厂牌，日期式番号（名称.YYYY.MM.DD）。"
+  },
+  "MAAN": {
+   "i18n": [
+    "真面目软派",
+    "マジ軟派、初撮。",
+    "Maji Nanpa"
+   ],
+   "intro": "300MAAN 简写。"
+  },
+  "MANYVIDS": {
+   "i18n": [
+    "ManyVids / 多视频",
+    "メニーvids",
+    "ManyVids"
+   ],
+   "intro": "ManyVids。"
+  },
+  "MAS": {
+   "i18n": [
+    "Prestige / 普雷斯提奇",
+    "プレステージ",
+    "PRESTIGE"
+   ],
+   "intro": "Prestige 专属单片主线（素人流水号见「素人企划」）。"
+  },
+  "MDVR": {
+   "intro": "Moodyz VR",
+   "i18n": [
+    "Moodyz / 慕迪斯 VR",
+    "ムーディーズ"
+   ]
+  },
+  "MIAA": {
+   "i18n": [
+    "Moodyz / 慕迪斯",
+    "ムーディーズ",
+    "MOODYZ"
+   ],
+   "intro": "Moodyz 非专属企划上一代"
+  },
+  "MIAB": {
+   "i18n": [
+    "Moodyz / 慕迪斯",
+    "ムーディーズ",
+    "MOODYZ"
+   ],
+   "intro": "Moodyz 非专属企划现行"
+  },
+  "MIAD": {
+   "i18n": [
+    "Moodyz / 慕迪斯",
+    "ムーディーズ",
+    "MOODYZ"
+   ],
+   "intro": "Moodyz 早期 Acid 线"
+  },
+  "MIAE": {
+   "i18n": [
+    "Moodyz / 慕迪斯",
+    "ムーディーズ",
+    "MOODYZ"
+   ],
+   "intro": "Moodyz Acid 更早"
+  },
+  "MIBD": {
+   "i18n": [
+    "Moodyz / 慕迪斯",
+    "ムーディーズ",
+    "MOODYZ"
+   ],
+   "intro": "Moodyz 旧作精选"
+  },
+  "MIDA": {
+   "i18n": [
+    "Moodyz / 慕迪斯",
+    "ムーディーズ",
+    "MOODYZ"
+   ],
+   "intro": "Moodyz 现行专属单体"
+  },
+  "MIDD": {
+   "i18n": [
+    "Moodyz / 慕迪斯",
+    "ムーディーズ",
+    "MOODYZ"
+   ],
+   "intro": "Moodyz 早期专属单体"
+  },
+  "MIDE": {
+   "i18n": [
+    "Moodyz / 慕迪斯",
+    "ムーディーズ",
+    "MOODYZ"
+   ],
+   "intro": "Moodyz 更早专属单体"
+  },
+  "MIDV": {
+   "i18n": [
+    "Moodyz / 慕迪斯",
+    "ムーディーズ",
+    "MOODYZ"
+   ],
+   "intro": "Moodyz 上一代专属单体"
+  },
+  "MIFD": {
+   "i18n": [
+    "Moodyz / 慕迪斯",
+    "ムーディーズ",
+    "MOODYZ"
+   ],
+   "intro": "Moodyz 新人出道线"
+  },
+  "MIGD": {
+   "i18n": [
+    "Moodyz / 慕迪斯",
+    "ムーディーズ",
+    "MOODYZ"
+   ],
+   "intro": "Moodyz 硬核/解禁企划"
+  },
+  "MIKR": {
+   "i18n": [
+    "Moodyz / 慕迪斯",
+    "ムーディーズ",
+    "MOODYZ"
+   ],
+   "intro": "Moodyz 相关线"
+  },
+  "MILD": {
+   "i18n": [
+    "Moodyz / 慕迪斯",
+    "ムーディーズ",
+    "MOODYZ"
+   ],
+   "intro": "Moodyz 相关线"
+  },
+  "MILFY": {
+   "i18n": [
+    "MILFY / 熟女",
+    "ミルフィー",
+    "MILFY"
+   ],
+   "intro": "Milfy。"
+  },
+  "MIMK": {
+   "i18n": [
+    "Moodyz / 慕迪斯",
+    "ムーディーズ",
+    "MOODYZ"
+   ],
+   "intro": "Moodyz 漫画改编企划"
+  },
+  "MIRD": {
+   "i18n": [
+    "Moodyz / 慕迪斯",
+    "ムーディーズ",
+    "MOODYZ"
+   ],
+   "intro": "Moodyz 大型企划"
+  },
+  "MISM": {
+   "i18n": [
+    "Moodyz / 慕迪斯",
+    "ムーディーズ",
+    "MOODYZ"
+   ],
+   "intro": "Moodyz 相关线"
+  },
+  "MIST": {
+   "i18n": [
+    "Mr.Michiru / 美汁流",
+    "ミスターミチル",
+    "Mr.Michiru"
+   ],
+   "intro": "Moodyz 相关线"
+  },
+  "MIUM": {
+   "i18n": [
+    "Prestige Premium",
+    "プレステージプレミアム",
+    "Prestige Premium"
+   ],
+   "intro": "300MIUM 简写。"
+  },
+  "MIZD": {
+   "i18n": [
+    "Moodyz / 慕迪斯",
+    "ムーディーズ",
+    "MOODYZ"
+   ],
+   "intro": "Moodyz 新作精选"
+  },
+  "MKD": {
+   "i18n": [
+    "Mothers / 母亲们",
+    "マザーズ",
+    "Mothers"
+   ],
+   "intro": "Mothers（マザーズ，前缀 MKD），小众熟女/企划系，公开资料有限。"
+  },
+  "MKMP": {
+   "i18n": [
+    "Million",
+    "ミリオン",
+    "Million"
+   ],
+   "intro": "现行更常见。"
+  },
+  "MKY": {
+   "i18n": [
+    "Toyohiko / 豊彦",
+    "Toyohiko",
+    "豊彦"
+   ],
+   "intro": "熟女纪实系列。注意与国产麻豆传媒 MKY（MKY-AP/MKY-SL）撞号"
+  },
+  "MOFOS": {
+   "i18n": [
+    "Mofos / 莫福斯",
+    "モーフォス",
+    "Mofos"
+   ],
+   "intro": "Mofos。"
+  },
+  "MOGI": {
+   "i18n": [
+    "Moodyz / 慕迪斯",
+    "ムーディーズ",
+    "MOODYZ"
+   ],
+   "intro": "Moodyz 相关线"
+  },
+  "MOND": {
+   "intro": "宝映像 周一剧场等人妻剧",
+   "i18n": [
+    "タカラ镜像 / 宝映像",
+    "MOND"
+   ]
+  },
+  "MOOC": {
+   "i18n": [
+    "Mook / 穆克",
+    "ムーク",
+    "MOOC"
+   ],
+   "intro": "厂牌 MOOC（前缀 MOOC）。小众独立厂牌，公开资料有限，简介待核实后补充。"
+  },
+  "MSQ": {
+   "i18n": [
+    "Mrs Queen / 人妻女王",
+    "ミセスクイーン",
+    "MSQ"
+   ],
+   "intro": "厂牌 MSQ（前缀 MSQ）。小众独立厂牌，公开资料有限，简介待核实后补充。"
+  },
+  "MVG": {
+   "i18n": [
+    "Movie Gate / 电影门",
+    "ムービーゲート",
+    "MVG"
+   ],
+   "intro": "Movie Gate 系（前缀 MVG），公开资料有限。"
+  },
+  "MVSD": {
+   "i18n": [
+    "Moodyz / 慕迪斯",
+    "ムーディーズ",
+    "MOODYZ"
+   ],
+   "intro": "Moodyz 相关线"
+  },
+  "MZQ": {
+   "i18n": [
+    "Bishoujo / 美少女",
+    "美少女",
+    "MZQ"
+   ],
+   "intro": "厂牌 MZQ（前缀 MZQ）。小众独立厂牌，公开资料有限，简介待核实后补充。"
+  },
+  "NADE": {
+   "i18n": [
+    "Nadeshiko / 抚子",
+    "なでしこ",
+    "Nadeshiko"
+   ],
+   "intro": "なでしこ 经典人妻线"
+  },
+  "NAMH": {
+   "i18n": [
+    "Nama Nama",
+    "なまなま",
+    "Nama Nama"
+   ],
+   "intro": "老牌综合标签（DOC），素人、人妻、剧情等题材均有涉猎。"
+  },
+  "NASH": {
+   "i18n": [
+    "Nadeshiko / 抚子",
+    "なでしこ",
+    "Nadeshiko"
+   ],
+   "intro": "なでしこ 人妻熟女主力线"
+  },
+  "NASK": {
+   "intro": "なでしこ 寝取/剪辑企划向",
+   "i18n": [
+    "なでしこ / Nadeshiko",
+    "NASK"
+   ]
+  },
+  "NASS": {
+   "i18n": [
+    "Nadeshiko / 抚子",
+    "なでしこ",
+    "Nadeshiko"
+   ],
+   "intro": "なでしこ 精选/特别篇"
+  },
+  "NATR": {
+   "i18n": [
+    "Nadeshiko / 抚子",
+    "なでしこ",
+    "Nadeshiko"
+   ],
+   "intro": "なでしこ 人妻剧情线"
+  },
+  "NAUGHTYAMERICA": {
+   "i18n": [
+    "Naughty America / 顽皮美国",
+    "ノーティーアメリカ",
+    "Naughty America"
+   ],
+   "intro": "Naughty America。"
+  },
+  "NGHJ": {
+   "i18n": [
+    "Nanpa / 搭讪",
+    "ナンパ",
+    "NGHJ"
+   ],
+   "intro": "小众企划系（前缀 NGHJ），公开资料有限。"
+  },
+  "NHDT": {
+   "i18n": [
+    "Natural High / 自然高",
+    "ナチュラルハイ",
+    "Natural High"
+   ],
+   "intro": "自然高经典痴汉/露出企划"
+  },
+  "NHDTA": {
+   "i18n": [
+    "Natural High / 自然高",
+    "ナチュラルハイ",
+    "Natural High"
+   ],
+   "intro": "自然高现行企划线"
+  },
+  "NHDTB": {
+   "i18n": [
+    "Natural High / 自然高",
+    "ナチュラルハイ",
+    "Natural High"
+   ],
+   "intro": "自然高现行主力：痴汉/车内等极限企划"
+  },
+  "NHDTC": {
+   "i18n": [
+    "Natural High / 自然高",
+    "ナチュラルハイ",
+    "Natural High"
+   ],
+   "intro": "自然高较新企划线"
+  },
+  "NNOD": {
+   "i18n": [
+    "NNOD / 诺德",
+    "ノード",
+    "NNOD"
+   ],
+   "intro": "小众独立系（前缀 NNOD），公开资料有限。"
+  },
+  "NNPJ": {
+   "i18n": [
+    "Nanpa Japan / 搭讪日本",
+    "ナンパJAPAN",
+    "Nanpa Japan"
+   ],
+   "intro": "片商表/ranges/DMM/权威站。"
+  },
+  "NON": {
+   "i18n": [
+    "NON",
+    "ノン",
+    "NON"
+   ]
+  },
+  "NPJ": {
+   "i18n": [
+    "Nanpa Japan / 搭讪日本",
+    "ナンパJAPAN",
+    "Nanpa Japan"
+   ]
+  },
+  "NPJS": {
+   "i18n": [
+    "Nanpa Japan / 搭讪日本",
+    "ナンパJAPAN",
+    "Nanpa Japan"
+   ],
+   "intro": "片商表/ranges/DMM/权威站。"
+  },
+  "NSFS": {
+   "intro": "永江 STYLE 现行背德剧情",
+   "i18n": [
+    "ながえSTYLE / Nagae Style",
+    "NSFS"
+   ]
+  },
+  "NSPS": {
+   "intro": "永江 STYLE 经典背德剧情",
+   "i18n": [
+    "ながえSTYLE / Nagae Style",
+    "NSPS"
+   ]
+  },
+  "NUBILEFILMS": {
+   "i18n": [
+    "Nubile Films / 嫩模电影",
+    "ヌーバイルフィルムズ",
+    "Nubile Films"
+   ],
+   "intro": "Nubile Films。"
+  },
+  "NUBILES": {
+   "i18n": [
+    "Nubiles / 嫩模",
+    "ヌーバイルズ",
+    "Nubiles"
+   ],
+   "intro": "Nubiles 系。"
+  },
+  "NYOSHIN": {
+   "i18n": [
+    "女体神秘",
+    "女体のしんぴ",
+    "Nyoshin"
+   ]
+  },
+  "OAE": {
+   "i18n": [
+    "Air Control",
+    "エアコントロール",
+    "Air Control"
+   ],
+   "intro": "片商表/ranges/DMM/权威站。"
+  },
+  "OBA": {
+   "i18n": [
+    "Madonna / 麦当娜",
+    "マドンナ",
+    "Madonna"
+   ],
+   "intro": "Madonna 叔母/年长女性向"
+  },
+  "OERO": {
+   "i18n": [
+    "Oero / 哦エロ",
+    "おエロ",
+    "OERO"
+   ],
+   "intro": "厂牌 OERO（前缀 OERO）。小众独立厂牌，公开资料有限，简介待核实后补充。"
+  },
+  "OFES": {
+   "i18n": [
+    "S1 / 第一风格",
+    "エスワン ナンバーワンスタイル",
+    "S1 NO.1 STYLE"
+   ],
+   "intro": "S1 特别篇与企划合集"
+  },
+  "OFJE": {
+   "i18n": [
+    "S1 / 第一风格",
+    "エスワン ナンバーワンスタイル",
+    "S1 NO.1 STYLE"
+   ],
+   "intro": "S1 精选集/合集盘"
+  },
+  "ONED": {
+   "i18n": [
+    "S1 / 第一风格",
+    "エスワン ナンバーワンスタイル",
+    "S1 NO.1 STYLE"
+   ],
+   "intro": "S1 草创期专属线，早期单体"
+  },
+  "ONEZ": {
+   "i18n": [
+    "Prestige / 普雷斯提奇",
+    "プレステージ",
+    "PRESTIGE"
+   ],
+   "intro": "Prestige 专属单片主线（素人流水号见「素人企划」）。"
+  },
+  "ONLYFANS": {
+   "i18n": [
+    "OnlyFans / 订阅粉丝",
+    "オンリーファンズ",
+    "OnlyFans"
+   ],
+   "intro": "OnlyFans。"
+  },
+  "ONSD": {
+   "i18n": [
+    "S1 / 第一风格",
+    "エスワン ナンバーワンスタイル",
+    "S1 NO.1 STYLE"
+   ],
+   "intro": "早期精选。"
+  },
+  "ORECO": {
+   "i18n": [
+    "俺的素人",
+    "俺の素人",
+    "Ore no Shirouto"
+   ],
+   "intro": "素人/搭讪/约拍流水号合集入口（シロウトTV・ナンパTV・Prestige Premium 等）。"
+  },
+  "ORECS": {
+   "i18n": [
+    "俺的素人",
+    "俺の素人",
+    "Ore no Shirouto"
+   ],
+   "intro": "素人/搭讪/约拍流水号合集入口（シロウトTV・ナンパTV・Prestige Premium 等）。"
+  },
+  "ORECZ": {
+   "i18n": [
+    "俺的素人",
+    "俺の素人",
+    "Ore no Shirouto"
+   ],
+   "intro": "素人/搭讪/约拍流水号合集入口（シロウトTV・ナンパTV・Prestige Premium 等）。"
+  },
+  "OREX": {
+   "i18n": [
+    "俺的素人",
+    "俺の素人",
+    "Ore no Shirouto"
+   ]
+  },
+  "PACO": {
+   "i18n": [
+    "啪啪妈妈",
+    "パコパコママ",
+    "Pacopacomama"
+   ],
+   "intro": "pacoma 系。"
+  },
+  "PACOMA": {
+   "i18n": [
+    "啪啪妈妈",
+    "パコパコママ",
+    "Pacopacomama"
+   ]
+  },
+  "PBD": {
+   "i18n": [
+    "Premium / 高级",
+    "プレミアム",
+    "PREMIUM"
+   ],
+   "intro": "Premium 精选合集"
+  },
+  "PFES": {
+   "intro": "Premium 特别篇/祭典企划",
+   "i18n": [
+    "Premium / プレミアム",
+    "PFES"
+   ]
+  },
+  "PGD": {
+   "i18n": [
+    "Premium / 高级",
+    "プレミアム",
+    "PREMIUM"
+   ],
+   "intro": "Premium 旧 Glamorous 专属线"
+  },
+  "PJD": {
+   "intro": "Premium Jewel 线",
+   "i18n": [
+    "Premium / プレミアム",
+    "PJD"
+   ]
+  },
+  "PLAYBOYPLUS": {
+   "i18n": [
+    "Playboy Plus / 花花公子+",
+    "プレイボーイプラス",
+    "Playboy Plus"
+   ],
+   "intro": "Playboy Plus。"
+  },
+  "PORNWORLD": {
+   "i18n": [
+    "PornWorld / 色情世界",
+    "ポルノワールド",
+    "PornWorld"
+   ],
+   "intro": "PornWorld。"
+  },
+  "PPBD": {
+   "i18n": [
+    "OPPAI",
+    "おっぱい",
+    "OPPAI"
+   ],
+   "intro": "OPPAI 巨乳精选合集"
+  },
+  "PPPD": {
+   "i18n": [
+    "OPPAI",
+    "おっぱい",
+    "OPPAI"
+   ],
+   "intro": "OPPAI 主力巨乳专属线"
+  },
+  "PPPDV": {
+   "i18n": [
+    "OPPAI",
+    "おっぱい",
+    "OPPAI"
+   ]
+  },
+  "PPPE": {
+   "i18n": [
+    "OPPAI",
+    "おっぱい",
+    "OPPAI"
+   ],
+   "intro": "OPPAI 较新巨乳专属线"
+  },
+  "PPSD": {
+   "i18n": [
+    "OPPAI",
+    "おっぱい",
+    "OPPAI"
+   ],
+   "intro": "OPPAI 特别篇"
+  },
+  "PPT": {
+   "i18n": [
+    "Prestige / 普雷斯提奇",
+    "プレステージ",
+    "PRESTIGE"
+   ],
+   "intro": "Prestige 专属单片主线（素人流水号见「素人企划」）。"
+  },
+  "PRED": {
+   "i18n": [
+    "Premium / 高级",
+    "プレミアム",
+    "PREMIUM"
+   ],
+   "intro": "Premium 现行 Elegance 专属线"
+  },
+  "PRIVATE": {
+   "i18n": [
+    "Private / 私人",
+    "プライベート",
+    "Private"
+   ],
+   "intro": "Private。"
+  },
+  "PRST": {
+   "i18n": [
+    "Premium / 高级",
+    "プレミアム",
+    "PREMIUM"
+   ],
+   "intro": "Premium 关联特别番号"
+  },
+  "PUBLICAGENT": {
+   "i18n": [
+    "Public Agent / 公共探员",
+    "パブリックエージェント",
+    "Public Agent"
+   ],
+   "intro": "欧美厂牌，日期式番号（名称.YYYY.MM.DD）。"
+  },
+  "PURETABOO": {
+   "i18n": [
+    "Pure Taboo / 纯禁忌",
+    "ピュアタブー",
+    "Pure Taboo"
+   ],
+   "intro": "Pure Taboo。"
+  },
+  "PXD": {
+   "i18n": [
+    "Premium / 高级",
+    "プレミアム",
+    "PREMIUM"
+   ],
+   "intro": "Premium XANADU 线"
+  },
+  "PXVR": {
+   "i18n": [
+    "P-BOX VR",
+    "ピーボックスVR",
+    "P-BOX VR"
+   ],
+   "intro": "VR。"
+  },
+  "RBD": {
+   "i18n": [
+    "Attackers / 攻击者",
+    "アタッカーズ",
+    "Attackers"
+   ],
+   "intro": "Attackers 束缚/调教氛围剧情"
+  },
+  "RBK": {
+   "i18n": [
+    "Attackers / 攻击者",
+    "アタッカーズ",
+    "Attackers"
+   ],
+   "intro": "Attackers 调教向关联线"
+  },
+  "RCT": {
+   "i18n": [
+    "Rocket",
+    "ロケット",
+    "ROCKET"
+   ],
+   "intro": "ROCKET 奇葩道具与脑洞企划"
+  },
+  "RCTD": {
+   "i18n": [
+    "Rocket",
+    "ロケット",
+    "ROCKET"
+   ],
+   "intro": "ROCKET 较新奇葩企划线"
+  },
+  "REAL": {
+   "i18n": [
+    "REAL",
+    "レアルワークス",
+    "REAL"
+   ],
+   "intro": "レアル（REAL）。"
+  },
+  "REALITYKINGS": {
+   "i18n": [
+    "Reality Kings / 现实国王",
+    "リアリティキングス",
+    "Reality Kings"
+   ],
+   "intro": "全称写法。"
+  },
+  "REBD": {
+   "i18n": [
+    "REbecca / 丽贝卡",
+    "レベッカ",
+    "REbecca"
+   ],
+   "intro": "REbecca 写真级美艳单体（BD）"
+  },
+  "REBDB": {
+   "i18n": [
+    "REbecca / 丽贝卡",
+    "レベッカ",
+    "REbecca"
+   ],
+   "intro": "REbecca 写真单体另一编号"
+  },
+  "RFILE": {
+   "i18n": [
+    "R-file / R档案",
+    "アールファイル",
+    "r-file"
+   ]
+  },
+  "RHJ": {
+   "i18n": [
+    "Red Hot Jam",
+    "レッドホットジャム",
+    "Red Hot Jam"
+   ],
+   "intro": "极少。"
+  },
+  "RK": {
+   "i18n": [
+    "Reality Kings / 现实国王",
+    "リアリティキングス",
+    "Reality Kings"
+   ],
+   "intro": "缩写常见于文件名。"
+  },
+  "RKPRIME": {
+   "i18n": [
+    "RK Prime / 现实国王精选",
+    "RKプライム",
+    "RK Prime"
+   ],
+   "intro": "RK Prime。"
+  },
+  "RLMP": {
+   "i18n": [
+    "Real / 真实",
+    "リアル",
+    "RLMP"
+   ],
+   "intro": "レアル（REAL）。"
+  },
+  "ROE": {
+   "i18n": [
+    "Madonna / 麦当娜",
+    "マドンナ",
+    "Madonna"
+   ],
+   "intro": "Madonna 熟女/母亲向线"
+  },
+  "ROSELIP": {
+   "i18n": [
+    "Rose Lip",
+    "ローゼリップ",
+    "Rose Lip"
+   ],
+   "intro": "裏系站点（Roselip），百合向，日期式番号。"
+  },
+  "ROSELIPFETISH": {
+   "i18n": [
+    "Rose Lip Fetish",
+    "ローゼリップフェティシ",
+    "Rose Lip Fetish"
+   ],
+   "intro": "裏系站点（Roselip Fetish），百合向，日期式番号。"
+  },
+  "SABA": {
+   "i18n": [
+    "S级素人",
+    "S級素人",
+    "S-Class Amateur"
+   ],
+   "intro": "S级素人 约拍/访谈风素人"
+  },
+  "SACE": {
+   "i18n": [
+    "SOD Create / SOD制作",
+    "SODクリエイト",
+    "SOD Create"
+   ],
+   "intro": "综合型老牌厂，题材不极端偏科，女优单片与系列都有。"
+  },
+  "SAL": {
+   "i18n": [
+    "SAL / 萨尔",
+    "サル",
+    "SAL"
+   ],
+   "intro": "小众独立系（前缀 SAL），公开资料有限。"
+  },
+  "SAME": {
+   "i18n": [
+    "Attackers / 攻击者",
+    "アタッカーズ",
+    "Attackers"
+   ],
+   "intro": "Attackers 现行剧情线"
+  },
+  "SAVR": {
+   "i18n": [
+    "SOD Create / SOD制作",
+    "SODクリエイト",
+    "SOD Create"
+   ],
+   "intro": "SOD 的 VR 企划与专属"
+  },
+  "SCUTE": {
+   "i18n": [
+    "S-Cute",
+    "エスキュート",
+    "S-Cute"
+   ],
+   "intro": "S-cute。"
+  },
+  "SDAB": {
+   "i18n": [
+    "SOD Create / SOD制作",
+    "SODクリエイト",
+    "SOD Create"
+   ],
+   "intro": "制服/学生企划。"
+  },
+  "SDAM": {
+   "i18n": [
+    "SOD Create / SOD制作",
+    "SODクリエイト",
+    "SOD Create"
+   ],
+   "intro": "SOD 业余纪实企划"
+  },
+  "SDDE": {
+   "i18n": [
+    "SOD Create / SOD制作",
+    "SODクリエイト",
+    "SOD Create"
+   ],
+   "intro": "SOD 脑洞企划，情境实验味重"
+  },
+  "SDJS": {
+   "i18n": [
+    "SOD Create / SOD制作",
+    "SODクリエイト",
+    "SOD Create"
+   ],
+   "intro": "SOD 女子社员企划"
+  },
+  "SDMM": {
+   "i18n": [
+    "SOD Create / SOD制作",
+    "SODクリエイト",
+    "SOD Create"
+   ],
+   "intro": "魔镜号相关。"
+  },
+  "SDMT": {
+   "i18n": [
+    "SOD Create / SOD制作",
+    "SODクリエイト",
+    "SOD Create"
+   ],
+   "intro": "SOD 剧场向企划与情境片"
+  },
+  "SDMU": {
+   "i18n": [
+    "SOD Create / SOD制作",
+    "SODクリエイト",
+    "SOD Create"
+   ],
+   "intro": "SOD 魔术/街头素人企划"
+  },
+  "SDNM": {
+   "i18n": [
+    "SOD Create / SOD制作",
+    "SODクリエイト",
+    "SOD Create"
+   ],
+   "intro": "SOD 人妻/素人「初次拍摄」向"
+  },
+  "SEXART": {
+   "i18n": [
+    "SexArt / 性艺术",
+    "セックスアート",
+    "SexArt"
+   ],
+   "intro": "SexArt。"
+  },
+  "SEXMEX": {
+   "i18n": [
+    "SexMex / 墨西哥性",
+    "セックスメックス",
+    "SexMex"
+   ],
+   "intro": "SexMex。"
+  },
+  "SGA": {
+   "i18n": [
+    "Prestige / 普雷斯提奇",
+    "プレステージ",
+    "PRESTIGE"
+   ],
+   "intro": "Prestige 轻熟女向"
+  },
+  "SHKD": {
+   "i18n": [
+    "Attackers / 攻击者",
+    "アタッカーズ",
+    "Attackers"
+   ],
+   "intro": "Attackers 凌辱剧情主力线"
+  },
+  "SIRO": {
+   "i18n": [
+    "素人TV",
+    "シロウトTV",
+    "Shirouto TV"
+   ],
+   "intro": "シロウトTV。"
+  },
+  "SIROHAME": {
+   "i18n": [
+    "白ハメ",
+    "しろハメ",
+    "Siro Hame"
+   ],
+   "intro": "素人投稿系站点（シロハメ），日期式番号。"
+  },
+  "SITW": {
+   "i18n": [
+    "SITW / 西特",
+    "シット",
+    "SITW"
+   ],
+   "intro": "小众独立系（前缀 SITW），公开资料有限。"
+  },
+  "SIVR": {
+   "i18n": [
+    "S1 / 第一风格",
+    "エスワン ナンバーワンスタイル",
+    "S1 NO.1 STYLE"
+   ],
+   "intro": "S1 的 VR 专属作品"
+  },
+  "SKTH": {
+   "i18n": [
+    "AKNR / 明纪",
+    "アキノリ",
+    "AKNR"
+   ],
+   "intro": "恶搞情景企划。"
+  },
+  "SMMIRACLE": {
+   "i18n": [
+    "SM-Miracle / SM奇迹",
+    "SM-miracle",
+    "SM-Miracle"
+   ],
+   "intro": "SM 系站点（SM Miracle），日期式番号。"
+  },
+  "SNIS": {
+   "i18n": [
+    "S1 / 第一风格",
+    "エスワン ナンバーワンスタイル",
+    "S1 NO.1 STYLE"
+   ],
+   "intro": "S1 较早专属番号，单体成长期作品"
+  },
+  "SNOS": {
+   "i18n": [
+    "S1 / 第一风格",
+    "エスワン ナンバーワンスタイル",
+    "S1 NO.1 STYLE"
+   ],
+   "intro": "S1 过渡期专属线"
+  },
+  "SODS": {
+   "i18n": [
+    "SOD Create / SOD制作",
+    "SODクリエイト",
+    "SOD Create"
+   ],
+   "intro": "SOD 创作线：魔镜号、素人纪实、专属并存。"
+  },
+  "SOE": {
+   "i18n": [
+    "S1 / 第一风格",
+    "エスワン ナンバーワンスタイル",
+    "S1 NO.1 STYLE"
+   ],
+   "intro": "S1 早期经典专属，老番号名作多"
+  },
+  "SONE": {
+   "i18n": [
+    "S1 / 第一风格",
+    "エスワン ナンバーワンスタイル",
+    "S1 NO.1 STYLE"
+   ],
+   "intro": "S1 现行主力专属线，新人与一线单体"
+  },
+  "SPERMMANIA": {
+   "i18n": [
+    "Sperm Mania",
+    "スペルママニア",
+    "Sperm Mania"
+   ],
+   "intro": "spermmania。"
+  },
+  "SPIVR": {
+   "i18n": [
+    "SPICY VR / 辣味VR",
+    "スパイシーVR",
+    "SPICY VR"
+   ],
+   "intro": "凌辱・羞耻系剧情企划（原 SOD 系，SVDVD）。"
+  },
+  "SPND": {
+   "i18n": [
+    "Suspend / 悬停",
+    "サスペンド",
+    "SPND"
+   ],
+   "intro": "厂牌 SPND（前缀 SPND）。小众独立厂牌，公开资料有限，简介待核实后补充。"
+  },
+  "SPRD": {
+   "intro": "宝映像 人妻家庭伦理剧主力",
+   "i18n": [
+    "タカラ镜像 / 宝映像",
+    "SPRD"
+   ]
+  },
+  "SRXV": {
+   "i18n": [
+    "Max-A",
+    "マックスエー",
+    "MAX-A"
+   ],
+   "intro": "综合型老牌厂，题材不极端偏科，女优单片与系列都有。"
+  },
+  "SSIS": {
+   "i18n": [
+    "S1 / 第一风格",
+    "エスワン ナンバーワンスタイル",
+    "S1 NO.1 STYLE"
+   ],
+   "intro": "S1 上一代主力专属，美人单体高制作"
+  },
+  "SSNI": {
+   "i18n": [
+    "S1 / 第一风格",
+    "エスワン ナンバーワンスタイル",
+    "S1 NO.1 STYLE"
+   ],
+   "intro": "S1 经典专属线，偶像级单体全盛期"
+  },
+  "SSPD": {
+   "intro": "Attackers 高规格特别篇",
+   "i18n": [
+    "Attackers / 攻击者",
+    "アタッカーズ"
+   ]
+  },
+  "STAR": {
+   "i18n": [
+    "SOD Create / SOD制作",
+    "SODクリエイト",
+    "SOD Create"
+   ],
+   "intro": "SOD STAR 较早专属线"
+  },
+  "STARS": {
+   "i18n": [
+    "SOD Create / SOD制作",
+    "SODクリエイト",
+    "SOD Create"
+   ],
+   "intro": "SOD STAR 现行专属女优线"
+  },
+  "START": {
+   "i18n": [
+    "SOD Create / SOD制作",
+    "SODクリエイト",
+    "SOD Create"
+   ],
+   "intro": "SOD STAR 系列变体番号"
+  },
+  "SUPA": {
+   "i18n": [
+    "S级素人",
+    "S級素人",
+    "S-Class Amateur"
+   ],
+   "intro": "S级素人 街头高颜值素人"
+  },
+  "SVDVD": {
+   "i18n": [
+    "Sadistic Village / 残酷村",
+    "サディスティックヴィレッジ",
+    "Sadistic Village"
+   ],
+   "intro": "凌辱・羞耻系剧情企划（原 SOD 系，SVDVD）。"
+  },
+  "SVVRT": {
+   "i18n": [
+    "Sadistic Village / 残酷村",
+    "サディスティックヴィレッジ",
+    "Sadistic Village"
+   ],
+   "intro": "凌辱・羞耻系剧情企划（原 SOD 系，SVDVD）。"
+  },
+  "SW": {
+   "i18n": [
+    "SWITCH / 开关",
+    "スイッチ",
+    "SWITCH"
+   ],
+   "intro": "系列旁支。"
+  },
+  "TCD": {
+   "i18n": [
+    "Trans Club",
+    "トランスクラブ",
+    "Trans Club"
+   ]
+  },
+  "TEAMSKEET": {
+   "i18n": [
+    "TeamSkeet / 队小子",
+    "チームスキート",
+    "TeamSkeet"
+   ],
+   "intro": "Team Skeet。"
+  },
+  "TEK": {
+   "intro": "Muteki 艺能人跨界出道",
+   "i18n": [
+    "Muteki / 无敌",
+    "ムテキ"
+   ]
+  },
+  "TRE": {
+   "i18n": [
+    "Prestige / 普雷斯提奇",
+    "プレステージ",
+    "PRESTIGE"
+   ],
+   "intro": "Prestige 专属单片主线（素人流水号见「素人企划」）。"
+  },
+  "TUSHY": {
+   "i18n": [
+    "Tushy / 塔希",
+    "タッシー",
+    "Tushy"
+   ],
+   "intro": "Tushy。"
+  },
+  "TUSHYRAW": {
+   "i18n": [
+    "Tushy Raw / 塔希生",
+    "タッシーロー",
+    "Tushy Raw"
+   ],
+   "intro": "Tushy Raw。"
+  },
+  "UMAN": {
+   "i18n": [
+    "Umanami / 马浪",
+    "ウマナミ",
+    "UMAN"
+   ],
+   "intro": "UMAN（うまなみ？，前缀 UMAN），小众企划，公开资料有限。"
+  },
+  "URABUKKAKE": {
+   "i18n": [
+    "Ura Bukkake",
+    "ウラブッカケ",
+    "Ura Bukkake"
+   ],
+   "intro": "裏系无码站点（UraBukkake），日期式番号。"
+  },
+  "URALESBIAN": {
+   "i18n": [
+    "Ura Lesbian",
+    "ウラレズビアン",
+    "Ura Lesbian"
+   ],
+   "intro": "裏系无码站点（UraLesbian），百合向，日期式番号。"
+  },
+  "URE": {
+   "i18n": [
+    "Madonna / 麦当娜",
+    "マドンナ",
+    "Madonna"
+   ],
+   "intro": "Madonna 漫画改编/熟女特别线"
+  },
+  "URVRSP": {
+   "i18n": [
+    "Unfinished",
+    "アンフィニッシュド",
+    "Unfinished"
+   ],
+   "intro": "VR 企划。"
+  },
+  "USAG": {
+   "i18n": [
+    "Usagi / 兔子",
+    "うさぎ",
+    "USAG"
+   ],
+   "intro": "小众独立系（うさぎ？，前缀 USAG），公开资料有限。"
+  },
+  "VAGU": {
+   "i18n": [
+    "Venus / 维纳斯",
+    "ヴィーナス",
+    "Venus"
+   ],
+   "intro": "Venus 岳母/义母题材"
+  },
+  "VEC": {
+   "i18n": [
+    "Venus / 维纳斯",
+    "ヴィーナス",
+    "Venus"
+   ],
+   "intro": "Venus 熟女职场与人妻剧情"
+  },
+  "VEMA": {
+   "i18n": [
+    "Venus / 维纳斯",
+    "ヴィーナス",
+    "Venus"
+   ],
+   "intro": "Venus 人妻出轨与家庭剧"
+  },
+  "VENU": {
+   "i18n": [
+    "Venus / 维纳斯",
+    "ヴィーナス",
+    "Venus"
+   ],
+   "intro": "Venus 主力：婆媳/亲属禁忌剧情"
+  },
+  "VENX": {
+   "i18n": [
+    "Venus / 维纳斯",
+    "ヴィーナス",
+    "Venus"
+   ],
+   "intro": "Venus 较新剧情线"
+  },
+  "VICD": {
+   "i18n": [
+    "Vi",
+    "ヴィ",
+    "Vi"
+   ],
+   "intro": "企划单产出品（V&R PRODUCE），兼营 VR 线（VRKM）。"
+  },
+  "VIXEN": {
+   "i18n": [
+    "Vixen / 狐狸精",
+    "ヴィクセン",
+    "Vixen"
+   ],
+   "intro": "Vixen。"
+  },
+  "VNDS": {
+   "i18n": [
+    "NEXTGROUP",
+    "ネクストグループ",
+    "Next Group"
+   ],
+   "intro": "企划单产出品（V&R PRODUCE），兼营 VR 线（VRKM）。"
+  },
+  "WAAA": {
+   "i18n": [
+    "Wanz Factory / 顽姿",
+    "ワンズファクトリー",
+    "WANZ FACTORY"
+   ],
+   "intro": "WANZ 较新主力线"
+  },
+  "WANZ": {
+   "i18n": [
+    "Wanz Factory / 顽姿",
+    "ワンズファクトリー",
+    "WANZ FACTORY"
+   ],
+   "intro": "WANZ 主力：痴女与强势女向"
+  },
+  "WATCH4BEAUTY": {
+   "i18n": [
+    "Watch4Beauty / 赏美",
+    "ウォッチフォービューティー",
+    "Watch4Beauty"
+   ],
+   "intro": "Watch4Beauty。"
+  },
+  "WICKED": {
+   "i18n": [
+    "Wicked / 邪恶",
+    "ウィキッド",
+    "Wicked"
+   ],
+   "intro": "Wicked。"
+  },
+  "XRW": {
+   "i18n": [
+    "REAL",
+    "レアルワークス",
+    "REAL"
+   ],
+   "intro": "现行多见。"
+  },
+  "XVSR": {
+   "i18n": [
+    "Max-A",
+    "マックスエー",
+    "MAX-A"
+   ],
+   "intro": "综合型老牌厂，题材不极端偏科，女优单片与系列都有。"
+  },
+  "XXXAV": {
+   "i18n": [
+    "XXX-AV / 解禁AV",
+    "XXX-AV",
+    "XXX-AV"
+   ],
+   "intro": "xxx-av-五位"
+  },
+  "YDNS": {
+   "i18n": [
+    "Yadons / 亚冬",
+    "ヤドンス",
+    "YDNS"
+   ],
+   "intro": "小众独立系（前缀 YDNS），公开资料有限。"
+  },
+  "YMDD": {
+   "i18n": [
+    "桃太郎映像",
+    "桃太郎映像出版",
+    "Momotaro"
+   ],
+   "intro": "常见主线。"
+  },
+  "YRZ": {
+   "intro": "Prestige OL/上班族向",
+   "i18n": [
+    "Prestige / 普雷斯提奇",
+    "プレステージ"
+   ]
+  },
+  "YSN": {
+   "i18n": [
+    "NON",
+    "ノン",
+    "NON"
+   ],
+   "intro": "常见主线。"
+  },
+  "AKA": {
+   "i18n": [
+    "PRESTIGE",
+    "AKA"
+   ],
+   "intro": "Prestige 专属单片主线（素人流水号见「素人企划」）。"
+  },
+  "APNS": {
+   "i18n": [
+    "オーロラプロジェクト",
+    "APNS"
+   ],
+   "intro": "オーロラプロジェクト（APNS）。"
+  },
+  "AUKG": {
+   "i18n": [
+    "U＆K",
+    "AUKG"
+   ],
+   "intro": "U&K（女同系 AUKG）。"
+  },
+  "BBI": {
+   "i18n": [
+    "痴女ヘブン",
+    "BBI"
+   ],
+   "intro": "痴女主动进攻向。"
+  },
+  "BDSR": {
+   "i18n": [
+    "ビッグモーカル",
+    "BDSR"
+   ],
+   "intro": "ビッグモーカル 旗下番号前缀（japan），公开资料有限。"
+  },
+  "BID": {
+   "i18n": [
+    "痴女ヘブン",
+    "BID"
+   ],
+   "intro": "痴女主动进攻向。"
+  },
+  "BIJN": {
+   "i18n": [
+    "美人魔女",
+    "BIJN"
+   ],
+   "intro": "美人魔女（BIJN）。"
+  },
+  "BMW": {
+   "i18n": [
+    "WANZ",
+    "BMW"
+   ],
+   "intro": "综合企划厂，节奏明快题材杂。"
+  },
+  "BOBB": {
+   "i18n": [
+    "Boin Box",
+    "BOBB"
+   ],
+   "intro": "ABC/Boin「Boin Box」系（BOBB）。"
+  },
+  "BONY": {
+   "i18n": [
+    "ボニータ",
+    "BONY"
+   ],
+   "intro": "ボニータ / 妄想族系（BONY）。"
+  },
+  "CEMD": {
+   "i18n": [
+    "セレブの友",
+    "CEMD"
+   ],
+   "intro": "熟女戏剧向，偏贵妇人设与成熟魅力。"
+  },
+  "CESD": {
+   "i18n": [
+    "セレブの友",
+    "CESD"
+   ],
+   "intro": "熟女戏剧向，偏贵妇人设与成熟魅力。"
+  },
+  "CLUB": {
+   "i18n": [
+    "変態紳士倶楽部",
+    "CLUB"
+   ],
+   "intro": "偷拍风邻居人妻企划。"
+  },
+  "CVDX": {
+   "i18n": [
+    "セレブの友",
+    "CVDX"
+   ],
+   "intro": "熟女戏剧向，偏贵妇人设与成熟魅力。"
+  },
+  "CWM": {
+   "i18n": [
+    "ドリームチケット",
+    "CWM"
+   ],
+   "intro": "ドリームチケット（CWM / VDD）。"
+  },
+  "DV": {
+   "i18n": [
+    "アリスJAPAN",
+    "DV"
+   ],
+   "intro": "老牌女优单片厂。"
+  },
+  "ENFD": {
+   "i18n": [
+    "其它写真",
+    "ENFD"
+   ],
+   "intro": "其它常见日本写真 / 偶像映像前缀，题材与画幅不一。"
+  },
+  "FAX": {
+   "i18n": [
+    "FAプロ",
+    "FAX"
+   ],
+   "intro": "FAプロ（ヘンリー塚本系 FAX）。"
+  },
+  "FJIN": {
+   "i18n": [
+    "その他有码",
+    "FJIN"
+   ],
+   "intro": "库内稳定品番、厂牌署名待补全。"
+  },
+  "FOCS": {
+   "i18n": [
+    "フォーカス",
+    "FOCS"
+   ],
+   "intro": "NTR、关系戏。"
+  },
+  "FPRE": {
+   "i18n": [
+    "Fitch",
+    "FPRE"
+   ],
+   "intro": "丰满肉感专精，体型厚度就是卖点。"
+  },
+  "GIGL": {
+   "i18n": [
+    "GIGOLO",
+    "GIGL"
+   ],
+   "intro": "GIGOLO / 熟女系（GIGL）。"
+  },
+  "GVG": {
+   "i18n": [
+    "Glory Quest",
+    "GVG"
+   ],
+   "intro": "老牌综合，题材覆盖广。"
+  },
+  "GVH": {
+   "i18n": [
+    "Glory Quest",
+    "GVH"
+   ],
+   "intro": "老牌综合，题材覆盖广。"
+  },
+  "HAVD": {
+   "i18n": [
+    "ヒビノ",
+    "HAVD"
+   ],
+   "intro": "剧情老厂，人妻与凌辱常见。"
+  },
+  "HAWA": {
+   "i18n": [
+    "コスモス映像",
+    "HAWA"
+   ],
+   "intro": "コスモス映像（HAWA 人妻系）。"
+  },
+  "HBAD": {
+   "i18n": [
+    "ヒビノ",
+    "HBAD"
+   ],
+   "intro": "剧情老厂，人妻与凌辱常见。"
+  },
+  "HIKR": {
+   "i18n": [
+    "Fitch",
+    "HIKR"
+   ],
+   "intro": "丰满肉感专精，体型厚度就是卖点。"
+  },
+  "HRDV": {
+   "i18n": [
+    "h.m.p",
+    "HRDV"
+   ],
+   "intro": "历史悠久的综合老厂。"
+  },
+  "HTHD": {
+   "i18n": [
+    "センタービレッジ",
+    "HTHD"
+   ],
+   "intro": "センタービレッジ 旗下番号前缀（japan），公开资料有限。"
+  },
+  "HZGD": {
+   "i18n": [
+    "人妻花園劇場",
+    "HZGD"
+   ],
+   "intro": "人妻花園劇場（HZGD）。"
+  },
+  "IENF": {
+   "i18n": [
+    "アイエナジー",
+    "IENF"
+   ],
+   "intro": "アイエナジー。"
+  },
+  "IESP": {
+   "i18n": [
+    "アイエナジー",
+    "IESP"
+   ],
+   "intro": "アイエナジー。"
+  },
+  "JBS": {
+   "i18n": [
+    "PRESTIGE",
+    "JBS"
+   ],
+   "intro": "Prestige 专属单片主线（素人流水号见「素人企划」）。"
+  },
+  "JCN": {
+   "i18n": [
+    "PRESTIGE",
+    "JCN"
+   ],
+   "intro": "Prestige 专属单片主线（素人流水号见「素人企划」）。"
+  },
+  "JFB": {
+   "i18n": [
+    "Fitch",
+    "JFB"
+   ],
+   "intro": "丰满肉感专精，体型厚度就是卖点。"
+  },
+  "JKSR": {
+   "i18n": [
+    "ビッグモーカル",
+    "JKSR"
+   ],
+   "intro": "ビッグモーカル 旗下番号前缀（japan），公开资料有限。"
+  },
+  "JRZE": {
+   "i18n": [
+    "センタービレッジ",
+    "JRZE"
+   ],
+   "intro": "センタービレッジ 旗下番号前缀（japan），公开资料有限。"
+  },
+  "KAGP": {
+   "i18n": [
+    "かぐや姫Pt",
+    "KAGP"
+   ],
+   "intro": "かぐや姫Pt / Kaguya（KAGP）。"
+  },
+  "KAPD": {
+   "i18n": [
+    "kawaii / 合辑",
+    "KAPD"
+   ],
+   "intro": "kawaii 合辑番号。"
+  },
+  "KIWVR": {
+   "i18n": [
+    "Million",
+    "KIWVR"
+   ],
+   "intro": "KMP/Million 综合出品。"
+  },
+  "KRND": {
+   "i18n": [
+    "本中",
+    "KRND"
+   ],
+   "intro": "中出题材本家，直球不做遮。"
+  },
+  "KSBJ": {
+   "i18n": [
+    "KSB企画",
+    "KSBJ"
+   ],
+   "intro": "KSB企画 旗下番号前缀（japan），公开资料有限。"
+  },
+  "LULU": {
+   "i18n": [
+    "LUNATICS",
+    "LULU"
+   ],
+   "intro": "LUNATICS 旗下番号前缀（japan），公开资料有限。"
+  },
+  "MBDD": {
+   "i18n": [
+    "其它写真",
+    "MBDD"
+   ],
+   "intro": "其它常见日本写真 / 偶像映像前缀，题材与画幅不一。"
+  },
+  "MBRAA": {
+   "i18n": [
+    "其它写真",
+    "MBRAA"
+   ],
+   "intro": "其它常见日本写真 / 偶像映像前缀，题材与画幅不一。"
+  },
+  "MBRBA": {
+   "i18n": [
+    "其它写真",
+    "MBRBA"
+   ],
+   "intro": "其它常见日本写真 / 偶像映像前缀，题材与画幅不一。"
+  },
+  "MDB": {
+   "i18n": [
+    "BAZOOKA",
+    "MDB"
+   ],
+   "intro": "KMP/BAZOOKA（MDB / MDBK）。"
+  },
+  "MDBK": {
+   "i18n": [
+    "BAZOOKA",
+    "MDBK"
+   ],
+   "intro": "KMP/BAZOOKA（MDB / MDBK）。"
+  },
+  "MDON": {
+   "i18n": [
+    "Madonna / 麦当娜",
+    "マドンナ"
+   ],
+   "intro": "Madonna 配信限定线。"
+  },
+  "MDS": {
+   "i18n": [
+    "宇宙企画",
+    "MDS"
+   ],
+   "intro": "KMP 老牌宇宙企画（MDS 勿与国产混淆）。"
+  },
+  "MDYD": {
+   "i18n": [
+    "溜池ゴロー / 溜池五郎",
+    "溜池ゴロー"
+   ],
+   "intro": "溜池ゴロー 主线番号（原 MOODYZ 系，后独立）。"
+  },
+  "MEYD": {
+   "i18n": [
+    "溜池ゴロー / 溜池五郎",
+    "溜池ゴロー"
+   ],
+   "intro": "溜池ゴロー 现行主线。"
+  },
+  "MFYD": {
+   "i18n": [
+    "溜池ゴロー / 溜池五郎",
+    "溜池ゴロー"
+   ],
+   "intro": "溜池ゴロー 旁支番号。"
+  },
+  "MGOLD": {
+   "i18n": [
+    "Million",
+    "MGOLD"
+   ],
+   "intro": "KMP/Million 综合出品。"
+  },
+  "MKCK": {
+   "i18n": [
+    "E-BODY / 精选合集",
+    "MKCK"
+   ],
+   "intro": "E-BODY 精选合集线。"
+  },
+  "MOT": {
+   "i18n": [
+    "マザー",
+    "MOT"
+   ],
+   "intro": "マザー（MOT）。"
+  },
+  "MRSS": {
+   "i18n": [
+    "ミセスの素顔",
+    "MRSS"
+   ],
+   "intro": "ミセスの素顔（MRSS）。"
+  },
+  "MTALL": {
+   "i18n": [
+    "Materiall",
+    "MTALL"
+   ],
+   "intro": "Materiall（MTALL）。"
+  },
+  "MUCD": {
+   "i18n": [
+    "無垢",
+    "MUCD"
+   ],
+   "intro": "清纯外表下的禁忌感。"
+  },
+  "MUDR": {
+   "i18n": [
+    "無垢",
+    "MUDR"
+   ],
+   "intro": "清纯外表下的禁忌感。"
+  },
+  "MUKC": {
+   "i18n": [
+    "無垢",
+    "MUKC"
+   ],
+   "intro": "清纯外表下的禁忌感。"
+  },
+  "MUKD": {
+   "i18n": [
+    "無垢",
+    "MUKD"
+   ],
+   "intro": "清纯外表下的禁忌感。"
+  },
+  "MXGS": {
+   "i18n": [
+    "MAXING",
+    "MXGS"
+   ],
+   "intro": "主流综合单片厂。"
+  },
+  "MXSPS": {
+   "i18n": [
+    "MAXING",
+    "MXSPS"
+   ],
+   "intro": "主流综合单片厂。"
+  },
+  "NACR": {
+   "i18n": [
+    "プラネットプラス",
+    "NACR"
+   ],
+   "intro": "人妻家政妇角色企划。"
+  },
+  "NACT": {
+   "i18n": [
+    "プラネットプラス",
+    "NACT"
+   ],
+   "intro": "人妻家政妇角色企划。"
+  },
+  "NAD": {
+   "i18n": [
+    "DOC",
+    "NAD"
+   ],
+   "intro": "DOC 旗下番号前缀（japan），公开资料有限。"
+  },
+  "NDRA": {
+   "i18n": [
+    "JET映像",
+    "NDRA"
+   ],
+   "intro": "人妻 NTR / 出轨偷情。"
+  },
+  "NFDM": {
+   "i18n": [
+    "フリーダム",
+    "NFDM"
+   ],
+   "intro": "フリーダム（NFDM）。"
+  },
+  "NGOD": {
+   "i18n": [
+    "JET映像",
+    "NGOD"
+   ],
+   "intro": "人妻 NTR / 出轨偷情。"
+  },
+  "NIMA": {
+   "i18n": [
+    "Fitch",
+    "NIMA"
+   ],
+   "intro": "丰满肉感专精，体型厚度就是卖点。"
+  },
+  "NITR": {
+   "i18n": [
+    "クリスタル映像",
+    "NITR"
+   ],
+   "intro": "クリスタル映像 旗下番号前缀（japan），公开资料有限。"
+  },
+  "NKKD": {
+   "i18n": [
+    "JET映像",
+    "NKKD"
+   ],
+   "intro": "人妻 NTR / 出轨偷情。"
+  },
+  "NUKA": {
+   "i18n": [
+    "センタービレッジ",
+    "NUKA"
+   ],
+   "intro": "センタービレッジ 旗下番号前缀（japan），公开资料有限。"
+  },
+  "OVG": {
+   "i18n": [
+    "Glory Quest",
+    "OVG"
+   ],
+   "intro": "老牌综合，题材覆盖广。"
+  },
+  "RBB": {
+   "i18n": [
+    "ROOKIE",
+    "RBB"
+   ],
+   "intro": "综合企划与精选。"
+  },
+  "RKI": {
+   "i18n": [
+    "ROOKIE",
+    "RKI"
+   ],
+   "intro": "综合企划与精选。"
+  },
+  "ROYD": {
+   "i18n": [
+    "ROYD",
+    "ROYD"
+   ],
+   "intro": "关系崩坏戏剧企划。"
+  },
+  "SAMA": {
+   "i18n": [
+    "S级素人",
+    "SAMA"
+   ],
+   "intro": "S级素人常规番号（素人合集锚点，勿与国产 SAMA 混淆）。"
+  },
+  "SCPX": {
+   "i18n": [
+    "SCOOP",
+    "SCPX"
+   ],
+   "intro": "スクープ（SCOOP）。"
+  },
+  "SKMJ": {
+   "i18n": [
+    "赤面女子",
+    "SKMJ"
+   ],
+   "intro": "赤面女子（SKMJ，素人纪实向）。"
+  },
+  "SMA": {
+   "i18n": [
+    "マルクス兄弟",
+    "SMA"
+   ],
+   "intro": "マルクス兄弟（SMA）。"
+  },
+  "SORA": {
+   "i18n": [
+    "山と空",
+    "SORA"
+   ],
+   "intro": "户外露出企划。"
+  },
+  "SPS": {
+   "i18n": [
+    "S1 / 新人番号",
+    "SPS"
+   ],
+   "intro": "S1 专为新人女优开辟的番号，以真爱系列为起点。"
+  },
+  "SQTE": {
+   "i18n": [
+    "S-Cute",
+    "SQTE"
+   ],
+   "intro": "清新短片风格，节奏轻、妆造自然，偏日常感。"
+  },
+  "SUPD": {
+   "i18n": [
+    "IdeaPocket / 数字频道",
+    "アイデアポケット"
+   ],
+   "intro": "IdeaPocket 数字频道线（资料记为已废，存量历史片）。"
+  },
+  "TDT": {
+   "i18n": [
+    "PRESTIGE",
+    "TDT"
+   ],
+   "intro": "Prestige 专属单片主线（素人流水号见「素人企划」）。"
+  },
+  "TPPN": {
+   "i18n": [
+    "TEPPAN",
+    "TPPN"
+   ],
+   "intro": "大汗淋漓的高强度纪实感。"
+  },
+  "UMD": {
+   "i18n": [
+    "LEO",
+    "UMD"
+   ],
+   "intro": "LEO。"
+  },
+  "VDD": {
+   "i18n": [
+    "ドリームチケット",
+    "VDD"
+   ],
+   "intro": "ドリームチケット（CWM / VDD）。"
+  },
+  "VRKM": {
+   "i18n": [
+    "V＆R PRODUCE",
+    "VRKM"
+   ],
+   "intro": "V＆R PRODUCE 旗下番号前缀（japan），公开资料有限。"
+  },
+  "VRTM": {
+   "i18n": [
+    "V＆R PRODUCE",
+    "VRTM"
+   ],
+   "intro": "V＆R PRODUCE 旗下番号前缀（japan），公开资料有限。"
+  },
+  "XV": {
+   "i18n": [
+    "MAX-A",
+    "XV"
+   ],
+   "intro": "综合型老牌厂，题材不极端偏科，女优单片与系列都有。"
+  },
+  "YRH": {
+   "i18n": [
+    "PRESTIGE",
+    "YRH"
+   ],
+   "intro": "Prestige 专属单片主线（素人流水号见「素人企划」）。"
+  },
+  "326EVA": {
+   "i18n": [
+    "素人企划",
+    "326EVA"
+   ],
+   "intro": "素人/搭讪/约拍流水号合集入口（シロウトTV・ナンパTV・Prestige Premium 等）。"
+  },
+  "326SCP": {
+   "i18n": [
+    "素人企划",
+    "326SCP"
+   ],
+   "intro": "素人/搭讪/约拍流水号合集入口（シロウトTV・ナンパTV・Prestige Premium 等）。"
+  },
+  "332NAMA": {
+   "i18n": [
+    "素人企划",
+    "332NAMA"
+   ],
+   "intro": "素人/搭讪/约拍流水号合集入口（シロウトTV・ナンパTV・Prestige Premium 等）。"
+  },
+  "DA": {
+   "i18n": [
+    "大象传媒",
+    "DA"
+   ],
+   "intro": "国产大象传媒（标题署名「大象传媒」，品番 DA）。"
+  },
+  "DCV": {
+   "i18n": [
+    "素人企划",
+    "DCV"
+   ],
+   "intro": "素人/搭讪/约拍流水号合集入口（シロウトTV・ナンパTV・Prestige Premium 等）。"
+  },
+  "MYWIFE": {
+   "i18n": [
+    "舞ワイフ / Mywife",
+    "舞ワイフ"
+   ],
+   "intro": "素人妻介绍系老牌（舞ワイフ / Mywife）。"
+  },
+  "91CM": {
+   "i18n": [
+    "91制片厂",
+    "91CM"
+   ],
+   "intro": "作品常见署「91制片厂」；同番号亦见果冻传媒署名。"
+  },
+  "DOM": {
+   "i18n": [
+    "其它国产",
+    "DOM"
+   ],
+   "intro": "库内仍见、但署名混杂的国产前缀；无可靠厂牌对照时不写臆测文案。"
+  },
+  "EMX": {
+   "i18n": [
+    "其它国产",
+    "EMX"
+   ],
+   "intro": "库内仍见、但署名混杂的国产前缀；无可靠厂牌对照时不写臆测文案。"
+  },
+  "FSOG": {
+   "i18n": [
+    "扣扣传媒",
+    "FSOG"
+   ],
+   "intro": "作品常见署「扣扣传媒」。"
+  },
+  "GDCM": {
+   "i18n": [
+    "果冻传媒",
+    "GDCM"
+   ],
+   "intro": "作品常见署「果冻传媒」。"
+  },
+  "HPP": {
+   "i18n": [
+    "辣椒原创",
+    "HPP"
+   ],
+   "intro": "作品常见署「辣椒原创」。"
+  },
+  "ID": {
+   "i18n": [
+    "爱豆传媒",
+    "ID"
+   ],
+   "intro": "标题署名「爱豆传媒」；品番 ID+数字。"
+  },
+  "IDG": {
+   "i18n": [
+    "其它国产",
+    "IDG"
+   ],
+   "intro": "库内仍见、但署名混杂的国产前缀；无可靠厂牌对照时不写臆测文案。"
+  },
+  "JD": {
+   "i18n": [
+    "精东影业",
+    "JD"
+   ],
+   "intro": "作品常见署「精东影业」。"
+  },
+  "JDSY": {
+   "i18n": [
+    "精东影业",
+    "JDSY"
+   ],
+   "intro": "作品常见署「精东影业」。"
+  },
+  "KCM": {
+   "i18n": [
+    "其它国产",
+    "KCM"
+   ],
+   "intro": "库内仍见、但署名混杂的国产前缀；无可靠厂牌对照时不写臆测文案。"
+  },
+  "LAA": {
+   "i18n": [
+    "其它国产",
+    "LAA"
+   ],
+   "intro": "库内仍见、但署名混杂的国产前缀；无可靠厂牌对照时不写臆测文案。"
+  },
+  "LLS": {
+   "i18n": [
+    "萝莉社",
+    "LLS"
+   ],
+   "intro": "标题署名「蘿莉社/萝莉社」；品番 LLS。"
+  },
+  "LY": {
+   "i18n": [
+    "绝对领域",
+    "LY"
+   ],
+   "intro": "作品常见署「绝对领域」。"
+  },
+  "MAD": {
+   "i18n": [
+    "麻豆传媒",
+    "MAD"
+   ],
+   "intro": "华语片商。"
+  },
+  "MCY": {
+   "i18n": [
+    "其它国产",
+    "MCY"
+   ],
+   "intro": "库内仍见、但署名混杂的国产前缀；无可靠厂牌对照时不写臆测文案。"
+  },
+  "MD": {
+   "i18n": [
+    "麻豆传媒",
+    "MD"
+   ],
+   "intro": "华语片商。"
+  },
+  "MDCM": {
+   "i18n": [
+    "麻豆传媒",
+    "MDCM"
+   ],
+   "intro": "华语片商。"
+  },
+  "MDHG": {
+   "i18n": [
+    "麻豆传媒",
+    "MDHG"
+   ],
+   "intro": "华语片商。"
+  },
+  "MDHT": {
+   "i18n": [
+    "麻豆传媒",
+    "MDHT"
+   ],
+   "intro": "华语片商。"
+  },
+  "MDL": {
+   "i18n": [
+    "Moodies Legend? / 麻豆剧情长篇",
+    "MDL"
+   ],
+   "intro": "双区撞号：国产侧为麻豆剧情长篇系列；日本侧记录为 MOODYZ 系（Legend 相关，通行品番为 MDLD）。"
+  },
+  "MDSR": {
+   "i18n": [
+    "麻豆传媒",
+    "MDSR"
+   ],
+   "intro": "华语片商。"
+  },
+  "MDWP": {
+   "i18n": [
+    "麻豆传媒",
+    "MDWP"
+   ],
+   "intro": "华语片商。"
+  },
+  "MDX": {
+   "i18n": [
+    "麻豆传媒",
+    "MDX"
+   ],
+   "intro": "华语片商。"
+  },
+  "MMZ": {
+   "i18n": [
+    "猫爪影像",
+    "MMZ"
+   ],
+   "intro": "作品常见署「猫爪影像」「猫爪传媒」。"
+  },
+  "MPG": {
+   "i18n": [
+    "其它国产",
+    "MPG"
+   ],
+   "intro": "库内仍见、但署名混杂的国产前缀；无可靠厂牌对照时不写臆测文案。"
+  },
+  "MSD": {
+   "i18n": [
+    "猫爪影像",
+    "MSD"
+   ],
+   "intro": "作品常见署「猫爪影像」「猫爪传媒」。"
+  },
+  "MSG": {
+   "i18n": [
+    "其它国产",
+    "MSG"
+   ],
+   "intro": "库内仍见、但署名混杂的国产前缀；无可靠厂牌对照时不写臆测文案。"
+  },
+  "MTVQ": {
+   "i18n": [
+    "其它国产",
+    "MTVQ"
+   ],
+   "intro": "库内仍见、但署名混杂的国产前缀；无可靠厂牌对照时不写臆测文案。"
+  },
+  "MXJ": {
+   "i18n": [
+    "其它国产",
+    "MXJ"
+   ],
+   "intro": "库内仍见、但署名混杂的国产前缀；无可靠厂牌对照时不写臆测文案。"
+  },
+  "PH": {
+   "i18n": [
+    "色控传媒",
+    "PH"
+   ],
+   "intro": "标题署名 PsychoPorn/色控；品番 PH。"
+  },
+  "PM": {
+   "i18n": [
+    "蜜桃影像",
+    "PM"
+   ],
+   "intro": "作品常见署「蜜桃影像」「蜜桃传媒」「蜜桃影像传媒」。"
+  },
+  "PMC": {
+   "i18n": [
+    "蜜桃影像",
+    "PMC"
+   ],
+   "intro": "作品常见署「蜜桃影像」「蜜桃传媒」「蜜桃影像传媒」。"
+  },
+  "PME": {
+   "i18n": [
+    "蜜桃影像",
+    "PME"
+   ],
+   "intro": "作品常见署「蜜桃影像」「蜜桃传媒」「蜜桃影像传媒」。"
+  },
+  "PMS": {
+   "i18n": [
+    "蜜桃影像",
+    "PMS"
+   ],
+   "intro": "作品常见署「蜜桃影像」「蜜桃传媒」「蜜桃影像传媒」。"
+  },
+  "PMX": {
+   "i18n": [
+    "蜜桃影像",
+    "PMX"
+   ],
+   "intro": "作品常见署「蜜桃影像」「蜜桃传媒」「蜜桃影像传媒」。"
+  },
+  "QQOG": {
+   "i18n": [
+    "扣扣传媒",
+    "QQOG"
+   ],
+   "intro": "作品常见署「扣扣传媒」。"
+  },
+  "RAS": {
+   "i18n": [
+    "皇家华人",
+    "RAS"
+   ],
+   "intro": "作品常见署「皇家华人」。"
+  },
+  "SAT": {
+   "i18n": [
+    "其它国产",
+    "SAT"
+   ],
+   "intro": "库内仍见、但署名混杂的国产前缀；无可靠厂牌对照时不写臆测文案。"
+  },
+  "SZL": {
+   "i18n": [
+    "三只狼",
+    "SZL"
+   ],
+   "intro": "作品常见署「三只狼」。"
+  },
+  "TM": {
+   "i18n": [
+    "天美传媒",
+    "TM"
+   ],
+   "intro": "作品常见署「天美传媒」。"
+  },
+  "TMA": {
+   "i18n": [
+    "TMA / ティーエムエー",
+    "TMA"
+   ],
+   "intro": "日本老牌 TMA，主打 cosplay 题材（目录中现挂在国产区，待核）。"
+  },
+  "TMG": {
+   "i18n": [
+    "其它国产",
+    "TMG"
+   ],
+   "intro": "库内仍见、但署名混杂的国产前缀；无可靠厂牌对照时不写臆测文案。"
+  },
+  "TMW": {
+   "i18n": [
+    "天美传媒",
+    "TMW"
+   ],
+   "intro": "作品常见署「天美传媒」。"
+  },
+  "TMY": {
+   "i18n": [
+    "天美传媒",
+    "TMY"
+   ],
+   "intro": "作品常见署「天美传媒」。"
+  },
+  "TZ": {
+   "i18n": [
+    "兔子先生",
+    "TZ"
+   ],
+   "intro": "作品常见署「兔子先生」「兔子先生系列」。"
+  },
+  "XB": {
+   "i18n": [
+    "杏吧传媒",
+    "XB"
+   ],
+   "intro": "作品常见署「杏吧傳媒」。"
+  },
+  "XJX": {
+   "i18n": [
+    "香蕉秀",
+    "XJX"
+   ],
+   "intro": "作品常见署「香蕉秀」。"
+  },
+  "XK": {
+   "i18n": [
+    "星空无限传媒",
+    "XK"
+   ],
+   "intro": "作品常见署「星空传媒」「星空无限传媒」。"
+  },
+  "XKG": {
+   "i18n": [
+    "星空无限传媒",
+    "XKG"
+   ],
+   "intro": "作品常见署「星空传媒」「星空无限传媒」。"
+  },
+  "XKKY": {
+   "i18n": [
+    "星空无限传媒",
+    "XKKY"
+   ],
+   "intro": "作品常见署「星空传媒」「星空无限传媒」。"
+  },
+  "XKTC": {
+   "i18n": [
+    "星空无限传媒",
+    "XKTC"
+   ],
+   "intro": "作品常见署「星空传媒」「星空无限传媒」。"
+  },
+  "XKVP": {
+   "i18n": [
+    "星空无限传媒",
+    "XKVP"
+   ],
+   "intro": "作品常见署「星空传媒」「星空无限传媒」。"
+  },
+  "XSJ": {
+   "i18n": [
+    "起点传媒",
+    "XSJ"
+   ],
+   "intro": "作品常见署「起点传媒」。"
+  },
+  "XSJKY": {
+   "i18n": [
+    "性视界传媒",
+    "XSJKY"
+   ],
+   "intro": "标题署名「性视界传媒」；品番 XSJKY。"
+  },
+  "YCM": {
+   "i18n": [
+    "91制片厂",
+    "YCM"
+   ],
+   "intro": "作品常见署「91制片厂」；同番号亦见果冻传媒署名。"
+  }
+ },
+ "studioOverrides": {
+  "AARM": "アロマ企画",
+  "ARM": "アロマ企画",
+  "ATID": "Attackers",
+  "ATKD": "Attackers",
+  "BID": "痴女ヘブン",
+  "DSVR": "SOD Create",
+  "HBAD": "ヒビノ",
+  "IESP": "アイエナジー",
+  "JUFD": "Fitch",
+  "JUFE": "Fitch",
+  "KDMN": "SOD Create",
+  "KFNE": "SOD Create",
+  "MDB": "BAZOOKA",
+  "MKMP": "KMP",
+  "NADE": "なでしこ",
+  "NAMH": "Nama Nama",
+  "NASH": "クリスタル映像",
+  "NASS": "なでしこ",
+  "NATR": "ビッグモーカル",
+  "NGHJ": "NuPenis",
+  "NHDT": "ナチュラルハイ",
+  "NHDTA": "ナチュラルハイ",
+  "NHDTB": "ナチュラルハイ",
+  "NHDTC": "ナチュラルハイ",
+  "NHJ": "精东影业",
+  "NNPJ": "Nanpa Japan",
+  "NPJ": "Nanpa Japan",
+  "NPJS": "Nanpa Japan",
+  "NSPS": "ながえSTYLE",
+  "OAE": "Air Control",
+  "ONED": "S1 NO.1 STYLE",
+  "ONEZ": "PRESTIGE",
+  "ONSD": "S1 NO.1 STYLE",
+  "OVG": "Glory Quest",
+  "PBD": "プレミアム",
+  "PGD": "プレミアム",
+  "PPBD": "OPPAI",
+  "PPPD": "OPPAI",
+  "PPPE": "OPPAI",
+  "PPSD": "OPPAI",
+  "PRED": "プレミアム",
+  "PXD": "プレミアム",
+  "PXVR": "P-BOX VR",
+  "RBD": "Attackers",
+  "RCT": "ROCKET",
+  "RCTD": "ROCKET",
+  "REBD": "REbecca",
+  "REBDB": "REbecca",
+  "RLMP": "REAL",
+  "SABA": "S级素人",
+  "SACE": "MAX-A",
+  "SAL": "SHEMALE a la carte",
+  "SAVR": "SOD Create",
+  "SDDE": "SOD Create",
+  "SDMT": "SOD Create",
+  "SHKD": "Attackers",
+  "SITW": "Spartan",
+  "SOE": "S1 NO.1 STYLE",
+  "SPIVR": "SPICY VR",
+  "SRXV": "MAX-A",
+  "SSPD": "Attackers",
+  "STAR": "SOD Create",
+  "STARS": "SOD Create",
+  "SUPA": "S级素人",
+  "SUPD": "IDEA POCKET",
+  "SVDVD": "サディスティックヴィレッジ",
+  "SW": "SWITCH",
+  "TCD": "Trans Club",
+  "TMA": "天美传媒",
+  "UMAN": "Ureman",
+  "UMD": "LEO",
+  "URVRSP": "Unfinished",
+  "USAG": "Usagi",
+  "VEC": "Venus",
+  "VENU": "Venus",
+  "VENX": "Venus",
+  "VICD": "Vi",
+  "VNDS": "NEXTGROUP",
+  "VRKM": "KMP",
+  "VRTM": "V＆R PRODUCE",
+  "XRW": "REAL",
+  "XVSR": "MAX-A",
+  "YMDD": "桃太郎映像",
+  "YSN": "NON"
+ },
+ "version": 1
+}

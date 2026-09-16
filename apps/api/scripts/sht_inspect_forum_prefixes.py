@@ -16,7 +16,7 @@ from bs4 import BeautifulSoup
 
 from app import outbound_http as o
 
-OUT = ROOT / "data" / "_debug"
+OUT = ROOT / "data" / "debug"
 LIVE = OUT / "sht_forum_types_live.json"
 
 CODE_RE = re.compile(r"\b([A-Z]{2,10})-?(\d{2,5})\b", re.I)

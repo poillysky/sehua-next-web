@@ -18,7 +18,7 @@ from app import prefix_catalog_store as store  # noqa: E402
 from app.core.region_meta import REGION_ORDER, std_prefix  # noqa: E402
 from app.search.av import resolve_maker_shape  # noqa: E402
 
-OUT = ROOT / "data" / "_debug" / "prefix-random-sample-audit.json"
+OUT = ROOT / "data" / "debug" / "prefix-random-sample-audit.json"
 DIGIT_HEAD_RE = re.compile(r"^(\d{2,3})([A-Z]{2,14})$")
 SEED = 20260906
 PREFIXES_PER_REGION = 10

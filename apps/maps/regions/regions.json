@@ -1,0 +1,75 @@
+{
+  "aliases": {
+    "amateur": "japan_amateur",
+    "censored": "japan_censored",
+    "china": "china",
+    "domestic": "china",
+    "europe": "western",
+    "fc2": "fc2",
+    "fc2ppv": "fc2",
+    "gravure": "japan",
+    "japan": "japan",
+    "japan_amateur": "japan_amateur",
+    "japan_censored": "japan_censored",
+    "japan_uncensored": "japan_uncensored",
+    "jp": "japan",
+    "uncensored": "japan_uncensored",
+    "western": "western",
+    "yc": "japan_censored",
+    "素人": "japan_amateur"
+  },
+  "order": [
+    "japan_censored",
+    "japan_gravure",
+    "japan_uncensored",
+    "japan_amateur",
+    "fc2",
+    "china",
+    "western"
+  ],
+  "regions": {
+    "china": {
+      "db_region": "china",
+      "id": "china",
+      "label": "国产无码",
+      "navPath": "片区/国产/无码"
+    },
+    "fc2": {
+      "db_region": "fc2",
+      "id": "fc2",
+      "label": "FC2",
+      "navPath": "片区/日本/FC2"
+    },
+    "japan_amateur": {
+      "db_region": "japan_amateur",
+      "id": "japan_amateur",
+      "label": "日本素人",
+      "navPath": "片区/日本/素人"
+    },
+    "japan_censored": {
+      "db_region": "japan_censored",
+      "id": "japan_censored",
+      "label": "日本有码",
+      "navPath": "片区/日本/有码"
+    },
+    "japan_gravure": {
+      "db_region": "japan",
+      "id": "japan_gravure",
+      "label": "日本写真",
+      "navPath": "片区/日本/写真"
+    },
+    "japan_uncensored": {
+      "db_region": "japan_uncensored",
+      "id": "japan_uncensored",
+      "label": "日本无码",
+      "navPath": "片区/日本/无码"
+    },
+    "western": {
+      "db_region": "western",
+      "id": "western",
+      "label": "欧美无码",
+      "navPath": "片区/欧美/无码"
+    }
+  },
+  "version": 1
+}

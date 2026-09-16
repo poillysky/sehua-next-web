@@ -23,107 +23,13 @@ from app import prefix_catalog_store as store  # noqa: E402
 from app import prefix_maker_names as maker_names  # noqa: E402
 from app.core.region_meta import std_prefix  # noqa: E402
 
-AV_MAKERS = ROOT / "apps" / "web" / "src" / "config" / "av-makers.japan.json"
-IPPA_PARSED = ROOT / "data" / "_debug" / "ippa_parsed_makers.json"
+AV_MAKERS = ROOT / "apps" / "maps" / "makers" / "av-makers.japan.json"
+IPPA_PARSED = ROOT / "data" / "debug" / "ippa_parsed_makers.json"
 
 # 口语/日文别称 → MAKER_I18N 主 key
-HARD_ALIAS: dict[str, str] = {
-    "S1": "S1 NO.1 STYLE",
-    "エスワン": "S1 NO.1 STYLE",
-    "エスワン ナンバーワンスタイル": "S1 NO.1 STYLE",
-    "邪恶帝国": "S1 NO.1 STYLE",
-    "MOODYZ": "MOODYZ",
-    "ムーディーズ": "MOODYZ",
-    "魔笛": "MOODYZ",
-    "Madonna": "Madonna",
-    "マドンナ": "Madonna",
-    "麦当娜": "Madonna",
-    "IDEA POCKET": "IDEA POCKET",
-    "IDEAPOCKET": "IDEA POCKET",
-    "アイデアポケット": "IDEA POCKET",
-    "IP社": "IDEA POCKET",
-    "IP": "IDEA POCKET",
-    "Attackers": "Attackers",
-    "アタッカーズ": "Attackers",
-    "A社": "Attackers",
-    "PRESTIGE": "PRESTIGE",
-    "プレステージ": "PRESTIGE",
-    "SOD Create": "SOD Create",
-    "SODクリエイト": "SOD Create",
-    "大宝": "SOD Create",
-    "PREMIUM": "プレミアム",
-    "プレミアム": "プレミアム",
-    "小仙女": "プレミアム",
-    "WANZ": "WANZ",
-    "ワンズファクトリー": "WANZ",
-    "E-BODY": "E-BODY",
-    "OPPAI": "OPPAI",
-    "Fitch": "Fitch",
-    "フィッチ": "Fitch",
-    "FALENO": "FALENO",
-    "ファレノ": "FALENO",
-    "本中": "本中",
-    "Hon-Naka": "本中",
-    "kawaii": "kawaii",
-    "kawaii*": "kawaii",
-    "卡哇伊": "kawaii",
-    "痴女ヘブン": "痴女ヘブン",
-    "痴女社": "痴女ヘブン",
-    "ダスッ！": "ダスッ！",
-    "Das!": "ダスッ！",
-    "溜池ゴロー": "溜池ゴロー",
-    "溜池五郎": "溜池ゴロー",
-    "MUTEKI": "Muteki",
-    "Muteki": "Muteki",
-    "无敌社": "Muteki",
-    "kira☆kira": "kira☆kira",
-    "黑妹社": "kira☆kira",
-    "無垢": "無垢",
-    "Muku": "無垢",
-    "ビビアン": "ビビアン",
-    "Bibian": "ビビアン",
-    "ROOKIE": "ROOKIE",
-    "Hunter": "Hunter",
-    "ハンター": "Hunter",
-    "ナンパJAPAN": "ナンパJAPAN",
-    "Venus": "Venus",
-    "ヴィーナス": "Venus",
-    "维纳斯": "Venus",
-    "MAXING": "MAXING",
-    "マキシング": "MAXING",
-    "BeFree": "BeFree",
-    "Alice Japan": "アリスJAPAN",
-    "アリスJAPAN": "アリスJAPAN",
-    "h.m.p": "h.m.p",
-    "DEEP'S": "DEEP'S",
-    "ディープス": "DEEP'S",
-    "DANDY": "DANDY",
-    "ダンディ": "DANDY",
-    "Natural High": "ナチュラルハイ",
-    "ナチュラルハイ": "ナチュラルハイ",
-    "AKNR": "アキノリ",
-    "アキノリ": "アキノリ",
-    "IEnergy": "アイエナジー",
-    "アイエナジー": "アイエナジー",
-    "Glory Quest": "Glory Quest",
-    "Sadistic Village": "サディスティックヴィレッジ",
-    "サディスティックヴィレッジ": "サディスティックヴィレッジ",
-    "Mr.Michiru": "Mr.Michiru",
-    "ミスターミチル": "Mr.Michiru",
-    "Mr.michiru": "Mr.Michiru",
-    "美汁流": "Mr.Michiru",
-    "REAL": "REAL",
-    "レアル": "REAL",
-    "MILK": "MILK",
-    "ミルク": "MILK",
-    "マザー": "マザー",
-    "Mother": "マザー",
-    "マルクス兄弟": "マルクス兄弟",
-    "Marx Brothers": "マルクス兄弟",
-    "h.m.p": "h.m.p",
-    "MAX-A": "MAX-A",
-    "マックスエー": "MAX-A",
-}
+from app.core.maps_paths import studio_alias_map  # noqa: E402
+
+HARD_ALIAS: dict[str, str] = studio_alias_map()
 
 
 def _norm(s: str) -> str:
@@ -382,7 +288,7 @@ def main() -> int:
     ap.add_argument("--apply", action="store_true")
     args = ap.parse_args()
     result = run(apply=args.apply)
-    out = ROOT / "data" / "_debug" / "maker_normalize_report.json"
+    out = ROOT / "data" / "debug" / "maker_normalize_report.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(

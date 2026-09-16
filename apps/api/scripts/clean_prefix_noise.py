@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT / "apps" / "api"))
 from app import prefix_catalog_store as store  # noqa: E402
 from app.core.region_meta import REGION_META, REGION_ORDER, std_prefix  # noqa: E402
 
-SEED = ROOT / "apps" / "web" / "src" / "config" / "prefix-catalog.seed.json"
+SEED = ROOT / "apps" / "maps" / "prefixes" / "catalog.seed.json"
 
 NOISE = {
     "HTTP",
@@ -277,9 +277,9 @@ def western_keep(p: str, allow: set[str]) -> bool:
 
 
 def main() -> None:
-    japan = ROOT / "apps/web/src/config/av-makers.japan.json"
-    china_f = ROOT / "apps/web/src/config/av-makers.china.json"
-    west_f = ROOT / "apps/web/src/config/av-makers.western.json"
+    japan = ROOT / "apps/maps/makers/av-makers.japan.json"
+    china_f = ROOT / "apps/maps/makers/av-makers.china.json"
+    west_f = ROOT / "apps/maps/makers/av-makers.western.json"
 
     allow_china = maker_prefixes(china_f, {"国产"})
     allow_west = maker_prefixes(west_f, {"欧美"})

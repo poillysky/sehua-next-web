@@ -15,7 +15,7 @@ from app import prefix_catalog_store as store  # noqa: E402
 from app import prefix_ranges as pr  # noqa: E402
 from app.core.region_meta import REGION_META, REGION_ORDER, std_prefix  # noqa: E402
 
-SEED = ROOT / "apps" / "web" / "src" / "config" / "prefix-catalog.seed.json"
+SEED = ROOT / "apps" / "maps" / "prefixes" / "catalog.seed.json"
 
 # Common English words that appear in western torrent titles as fake "PREFIX-123"
 EN_WORDS = {
@@ -409,19 +409,19 @@ def known_set() -> set[str]:
         "av-makers.western.json",
     ):
         data = json.loads(
-            (ROOT / "apps/web/src/config" / name).read_text(encoding="utf-8")
+            (ROOT / "apps" / "maps" / "makers" / name).read_text(encoding="utf-8")
         )
         for m in data:
             for p in m.get("prefixes") or []:
                 out.add(clean(p))
     ranges = json.loads(
-        (ROOT / "apps/web/src/config/prefix-code-ranges.json").read_text(
+        (ROOT / "apps/maps/prefixes/code-ranges.json").read_text(
             encoding="utf-8"
         )
     )["ranges"]
     out |= {clean(k) for k in ranges}
     verify = json.loads(
-        (ROOT / "data/_debug/dmm-prefix-verify.json").read_text(encoding="utf-8")
+        (ROOT / "data/debug/dmm-prefix-verify.json").read_text(encoding="utf-8")
     )
     out |= {clean(x["prefix"]) for x in verify.get("ok_list") or []}
     # short but real

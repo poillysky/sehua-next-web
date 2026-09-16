@@ -16,10 +16,10 @@ from app import prefix_catalog_harvest as harvest  # noqa: E402
 from app import prefix_catalog_store as store  # noqa: E402
 from app.core.region_meta import std_prefix  # noqa: E402
 
-SEED = ROOT / "apps" / "web" / "src" / "config" / "prefix-catalog.seed.json"
-MAKERS = ROOT / "apps" / "web" / "src" / "config" / "av-makers.japan.json"
-VERIFY = ROOT / "data" / "_debug" / "dmm-prefix-verify.json"
-OUT = ROOT / "data" / "_debug" / "expand-censored.log"
+SEED = ROOT / "apps" / "maps" / "prefixes" / "catalog.seed.json"
+MAKERS = ROOT / "apps" / "maps" / "makers" / "av-makers.japan.json"
+VERIFY = ROOT / "data" / "debug" / "dmm-prefix-verify.json"
+OUT = ROOT / "data" / "debug" / "expand-censored.log"
 
 # Research supplements: active / recent major series not always in local makers
 EXTRA_PREFIXES: dict[str, dict] = {
@@ -200,40 +200,18 @@ def merge_catalog(entries: dict[str, dict]) -> dict:
 def patch_series_digit_file(digits: dict[str, str]) -> int:
     path = ROOT / "apps" / "api" / "app" / "prefix_catalog_dmm.py"
     text = path.read_text(encoding="utf-8")
-    # find SERIES_DIGIT block end before closing }
-    m = re.search(r"SERIES_DIGIT: dict\[str, str\] = \{([\s\S]*?)\n\}", text)
-    if not m:
-        return 0
-    block = m.group(1)
-    existing = set(re.findall(r'"([a-z0-9_]+)"\s*:', block))
-    lines = []
-    for pref, dig in sorted(digits.items()):
-        sk = dmm.series_key(pref)
-        if sk in existing:
-            continue
-        lines.append(f'    "{sk}": "{dig}",')
-    if not lines:
-        return 0
-    insert = "\n".join(lines)
-    new_block = block.rstrip() + "\n" + insert + "\n"
-    text2 = text[: m.start(1)] + new_block + text[m.end(1) :]
-    path.write_text(text2, encoding="utf-8")
-    return len(lines)
+    # persist SERIES_DIGIT map JSON (no longer hardcoded in catalog_dmm.py)
+    from app.core.maps_paths import maps_seed, clear_maps_cache
 
-
-def main() -> None:
-    log_lines: list[str] = []
-
-    def log(msg: str) -> None:
-        print(msg, flush=True)
-        log_lines.append(msg)
-
-    entries, digits = build_entries()
-    log(f"entries={len(entries)} digit_known={len(digits)}")
-    write_seed(entries)
-    log(f"seed written: {SEED}")
-    n = patch_series_digit_file(digits)
-    log(f"SERIES_DIGIT appended={n}")
+    path = maps_seed("dmm-series-digit.json")
+    path.write_text(
+        __import__("json").dumps(dict(dmm.SERIES_DIGIT), ensure_ascii=False, indent=2, sort_keys=True)
+        + "
+",
+        encoding="utf-8",
+    )
+    clear_maps_cache()
+    log(f"SERIES_DIGIT appended={n} -> {path}")
     merge = merge_catalog(entries)
     log(f"catalog merge {merge}")
 

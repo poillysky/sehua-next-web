@@ -20,92 +20,38 @@ from app import prefix_catalog_store as store  # noqa: E402
 from app.core.region_meta import REGION_META, REGION_ORDER, std_prefix  # noqa: E402
 from app.search.av import is_western_studio_prefix  # noqa: E402
 
-SEED = ROOT / "apps" / "web" / "src" / "config" / "prefix-catalog.seed.json"
-FORUM_TS = ROOT / "apps" / "web" / "src" / "config" / "sehuatangForum.ts"
-LIVE = ROOT / "data" / "_debug" / "sht_forum_types_live.json"
-REPORT = ROOT / "data" / "_debug" / "prefix-sehuatang-forum-sync.json"
+SEED = ROOT / "apps" / "maps" / "prefixes" / "catalog.seed.json"
+FORUM_JSON = ROOT / "apps" / "maps" / "sites" / "sehuatang-forum.json"
+FORUM_TS = FORUM_JSON  # compat: sync 优先读 JSON
+LIVE = ROOT / "data" / "debug" / "sht_forum_types_live.json"
+REPORT = ROOT / "data" / "debug" / "prefix-sehuatang-forum-sync.json"
 
 SRC = "sehuatangForum"
 TAG = "色花堂论坛子分类"
 
 # 子分类显示名 → (region, prefix, maker?)；非字母数字名需映射
-NAME_MAP: dict[str, tuple[str, str, str]] = {
-    "FC2PPV": ("fc2", "FC2PPV", "FC2 PPV"),
-    "FC2": ("fc2", "FC2", "FC2"),
-    "HEYZO": ("japan_uncensored", "HEYZO", "HEYZO"),
-    "加勒比系列": ("japan_uncensored", "CARIB", "Caribbeancom"),
-    "加勒比系": ("japan_uncensored", "CARIB", "Caribbeancom"),
-    "加勒比PPV": ("japan_uncensored", "CARIBPR", "Caribbeancom Premium"),
-    "一本道系列": ("japan_uncensored", "1PON", "1pondo"),
-    "一本道系": ("japan_uncensored", "1PON", "1pondo"),
-    "10musume": ("japan_uncensored", "10MU", "10musume"),
-    "10musu": ("japan_uncensored", "10MU", "10musume"),
-    "pacoma": ("japan_uncensored", "PACO", "Pacopacomama"),
-    "heyppv": ("japan_uncensored", "HEYPPV", "HeyPPV"),
-    "xxx-av": ("japan_uncensored", "XXXAV", "xxx-av"),
-    "エッチな0930": ("japan_uncensored", "H0930", "エッチな0930"),
-    "エッチな4610": ("japan_uncensored", "H4610", "エッチな4610"),
-    "金髪天國": ("japan_uncensored", "KIN8", "Kin8tengoku"),
-    "legsjapan": ("japan_uncensored", "LEGSJAPAN", "Legs Japan"),
-    "uralesbian": ("japan_uncensored", "URALESBIAN", "Ura Lesbian"),
-    "fellatiojapan": ("japan_uncensored", "FELLATIOJAPAN", "Fellatio Japan"),
-    "spermmania": ("japan_uncensored", "SPERMMANIA", "Sperm Mania"),
-    "handjobjapan": ("japan_uncensored", "HANDJOBJAPAN", "Handjob Japan"),
-    "urabukkake": ("japan_uncensored", "URABUKKAKE", "Ura Bukkake"),
-    "sm-miracle": ("japan_uncensored", "SMMIRACLE", "sm-miracle"),
-    "roselip-fetish": ("japan_uncensored", "ROSELIP", "roselip-fetish"),
-    "japornxxx": ("japan_uncensored", "JAPORNXXX", "japornxxx"),
-    "cospuri": ("japan_uncensored", "COSPURI", "cospuri"),
-    "女体のしんぴ": ("japan_uncensored", "NYOSHIN", "女体のしんぴ"),
-    # 素人有码系列
-    "SIRO": ("japan_amateur", "SIRO", "シロウトTV"),
-    "259LUXU": ("japan_amateur", "259LUXU", "ラグジュTV"),
-    "300MIUM": ("japan_amateur", "300MIUM", "みうめい"),
-    "332NAMA": ("japan_amateur", "332NAMA", ""),
-    "326EVA": ("japan_amateur", "326EVA", ""),
-    "328HMDN": ("japan_amateur", "328HMDN", ""),
-    "336KNB": ("japan_amateur", "336KNB", ""),
-    "200GANA": ("japan_amateur", "200GANA", "ナンパTV"),
-    "300MAAN": ("japan_amateur", "300MAAN", "マジ軟派"),
-    "300NTK": ("japan_amateur", "300NTK", ""),
-    "390JAC": ("japan_amateur", "390JAC", "Jackson"),
-    "326SCP": ("japan_amateur", "326SCP", ""),
-    "230OREX": ("japan_amateur", "230OREX", "俺の素人"),
-    "G-area": ("japan_amateur", "GAREA", "G-area"),
-    "Mywife": ("japan_amateur", "MYWIFE", "Mywife"),
-    "S-cute": ("japan_amateur", "SCUTE", "S-Cute"),
-    "himemix": ("japan_amateur", "HIMEMIX", "himemix"),
-    "siro-hame": ("japan_amateur", "SIROHAME", "siro-hame"),
-    "getchu": ("japan_amateur", "GETCHU", "getchu"),
-    "r-file": ("japan_amateur", "RFILE", "r-file"),
-    "giga-web": ("japan_amateur", "GIGAWEB", "giga-web"),
-}
+def _load_name_map() -> dict[str, tuple[str, str, str]]:
+    raw = json.loads(
+        (ROOT / "apps" / "maps" / "sites" / "sehuatang-forum-prefix-map.json").read_text(encoding="utf-8")
+    )
+    return {
+        str(k): (
+            str(v.get("region") or ""),
+            str(v.get("prefix") or ""),
+            str(v.get("maker") or ""),
+        )
+        for k, v in raw.items()
+    }
+
+
+NAME_MAP: dict[str, tuple[str, str, str]] = _load_name_map()
 
 # 题材/非前缀子类：跳过（含「栏目名≠番号前缀」）
-SKIP_NAMES = {
-    "国产无码",
-    "主播录制",
-    "360水滴",
-    "厕所偷拍",
-    "店長推薦",
-    "无码流出",
-    "无码破解",
-    "盗窃系列",
-    "其他系列",
-    "有码",
-    "无码",
-    "有码高清",
-    "无码高清",
-    "日本写真",
-    "国产写真",
-    # 论坛栏目名，不是 CODE-123 前缀
-    "东京热",
-    "熟女俱樂部",
-    "人妻斬り",
-    "本生素人TV",
-    "レズのしんぴ",
-    "knights-visual",
-}
+SKIP_NAMES = set(
+    json.loads(
+        (ROOT / "apps" / "maps" / "sites" / "sehuatang-forum-skip-names.json").read_text(encoding="utf-8")
+    )
+)
 
 BLOCK = {
     "HTTP",
@@ -163,21 +109,24 @@ def strip_count(name: str) -> str:
 
 
 def load_forum_types() -> list[dict[str, Any]]:
-    """优先 live JSON；否则从 sehuatangForum.ts 抽 types。"""
+    """优先 live JSON；否则读 apps/maps/sites/sehuatang-forum.json。"""
     if LIVE.exists():
         return json.loads(LIVE.read_text(encoding="utf-8"))
-    text = FORUM_TS.read_text(encoding="utf-8")
+    cats = json.loads(FORUM_JSON.read_text(encoding="utf-8"))
     boards: list[dict[str, Any]] = []
-    for m in re.finditer(
-        r'board\((\d+),\s*"([^"]+)"(?:,\s*\[(.*?)\])?\)',
-        text,
-        re.S,
-    ):
-        fid, bname, body = m.group(1), m.group(2), m.group(3) or ""
-        types = []
-        for tm in re.finditer(r'\["(\d+)",\s*"([^"]+)"\]', body):
-            types.append({"typeid": tm.group(1), "name": tm.group(2)})
-        boards.append({"fid": int(fid), "board": bname, "types": types})
+    for cat in cats:
+        for b in cat.get("boards") or []:
+            types = [
+                {"typeid": str(t.get("typeid") or ""), "name": str(t.get("type_name") or t.get("name") or "")}
+                for t in (b.get("types") or [])
+            ]
+            boards.append(
+                {
+                    "fid": int(b.get("fid") or 0),
+                    "board": str(b.get("name") or ""),
+                    "types": types,
+                }
+            )
     return boards
 
 

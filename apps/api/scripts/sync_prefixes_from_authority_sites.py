@@ -29,8 +29,8 @@ from app import prefix_catalog_store as store  # noqa: E402
 from app import scrape_sources_settings as sources  # noqa: E402
 from app.core.region_meta import REGION_META, REGION_ORDER, std_prefix  # noqa: E402
 
-SEED = ROOT / "apps" / "web" / "src" / "config" / "prefix-catalog.seed.json"
-REPORT = ROOT / "data" / "_debug" / "prefix-authority-sync.json"
+SEED = ROOT / "apps" / "maps" / "prefixes" / "catalog.seed.json"
+REPORT = ROOT / "data" / "debug" / "prefix-authority-sync.json"
 
 # dvd/id style: SSIS-001 / 200GANA-123 / ABP-1000
 CODE_RE = re.compile(

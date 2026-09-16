@@ -12,7 +12,7 @@ sys.path.insert(0, str(ROOT / "apps" / "api"))
 
 from app import outbound_http as o
 
-OUT = ROOT / "data" / "_debug"
+OUT = ROOT / "data" / "debug"
 URL = "https://www.sehuatang.net/forum.php"
 
 

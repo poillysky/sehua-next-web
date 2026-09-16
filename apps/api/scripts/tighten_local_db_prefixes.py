@@ -19,8 +19,8 @@ from app import prefix_ranges as pr  # noqa: E402
 from app.search.av import is_western_studio_prefix  # noqa: E402
 from app.core.region_meta import REGION_META, REGION_ORDER, std_prefix  # noqa: E402
 
-SEED = ROOT / "apps" / "web" / "src" / "config" / "prefix-catalog.seed.json"
-REPORT = ROOT / "data" / "_debug" / "prefix-from-local-dbs.json"
+SEED = ROOT / "apps" / "maps" / "prefixes" / "catalog.seed.json"
+REPORT = ROOT / "data" / "debug" / "prefix-from-local-dbs.json"
 
 CODE_RE = re.compile(
     r"(?<![A-Z0-9])([0-9]{0,3}[A-Z]{2,12})[-_ ](\d{2,6})(?![A-Z0-9])",
@@ -81,13 +81,13 @@ def maker_set() -> set[str]:
         "av-makers.western.json",
     ):
         data = json.loads(
-            (ROOT / "apps/web/src/config" / name).read_text(encoding="utf-8")
+            (ROOT / "apps" / "maps" / "makers" / name).read_text(encoding="utf-8")
         )
         for m in data:
             for p in m.get("prefixes") or []:
                 out.add(clean(p))
     ranges = json.loads(
-        (ROOT / "apps/web/src/config/prefix-code-ranges.json").read_text(encoding="utf-8")
+        (ROOT / "apps/maps/prefixes/code-ranges.json").read_text(encoding="utf-8")
     )["ranges"]
     out |= {clean(k) for k in ranges}
     out |= {clean(k) for k in pr.SKIP_PREFIXES}
@@ -128,7 +128,7 @@ def load_maker_regions() -> dict[str, str]:
     ]
     for name, kinds in files:
         data = json.loads(
-            (ROOT / "apps/web/src/config" / name).read_text(encoding="utf-8")
+            (ROOT / "apps" / "maps" / "makers" / name).read_text(encoding="utf-8")
         )
         for m in data:
             rid = kinds.get(m.get("kind"))

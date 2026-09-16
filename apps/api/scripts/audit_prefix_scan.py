@@ -18,7 +18,7 @@ from app import prefix_ranges as pr  # noqa: E402
 from app.core.region_meta import REGION_ORDER  # noqa: E402
 from app.search.av import extract_maker_codes, resolve_maker_shape  # noqa: E402
 
-OUT = ROOT / "data" / "_debug" / "prefix-scan-audit.json"
+OUT = ROOT / "data" / "debug" / "prefix-scan-audit.json"
 
 
 def sehua_count(pat: str) -> int:

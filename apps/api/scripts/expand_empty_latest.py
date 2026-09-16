@@ -19,7 +19,7 @@ from app import prefix_catalog_store as store  # noqa: E402
 from app.core.region_meta import std_prefix  # noqa: E402
 from app.scrape.source_catalog import MIRROR_SEEDS  # noqa: E402
 
-OUT = ROOT / "data" / "_debug" / "prefix-empty-expand.json"
+OUT = ROOT / "data" / "debug" / "prefix-empty-expand.json"
 
 # 额外别名（相对原 miss 复核）
 ALIASES: dict[str, list[str]] = {

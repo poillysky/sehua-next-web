@@ -1,0 +1,1196 @@
+[
+  {
+    "category": "综合讨论区",
+    "boards": [
+      {
+        "name": "综合讨论区",
+        "fid": "95",
+        "types": [
+          {
+            "key": "95:716",
+            "fid": "95",
+            "typeid": "716",
+            "name": "综合讨论区 · 情色分享",
+            "type_name": "情色分享",
+            "board_name": "综合讨论区"
+          }
+        ]
+      },
+      {
+        "name": "网友原创区",
+        "fid": "141",
+        "types": [
+          {
+            "key": "141:689",
+            "fid": "141",
+            "typeid": "689",
+            "name": "网友原创区 · 国产合集",
+            "type_name": "国产合集",
+            "board_name": "网友原创区"
+          },
+          {
+            "key": "141:690",
+            "fid": "141",
+            "typeid": "690",
+            "name": "网友原创区 · 欧美合集",
+            "type_name": "欧美合集",
+            "board_name": "网友原创区"
+          },
+          {
+            "key": "141:691",
+            "fid": "141",
+            "typeid": "691",
+            "name": "网友原创区 · 日本合集",
+            "type_name": "日本合集",
+            "board_name": "网友原创区"
+          },
+          {
+            "key": "141:844",
+            "fid": "141",
+            "typeid": "844",
+            "name": "网友原创区 · 合集推荐",
+            "type_name": "合集推荐",
+            "board_name": "网友原创区"
+          },
+          {
+            "key": "141:692",
+            "fid": "141",
+            "typeid": "692",
+            "name": "网友原创区 · 破解",
+            "type_name": "破解",
+            "board_name": "网友原创区"
+          },
+          {
+            "key": "141:705",
+            "fid": "141",
+            "typeid": "705",
+            "name": "网友原创区 · 增强",
+            "type_name": "增强",
+            "board_name": "网友原创区"
+          },
+          {
+            "key": "141:867",
+            "fid": "141",
+            "typeid": "867",
+            "name": "网友原创区 · 换脸",
+            "type_name": "换脸",
+            "board_name": "网友原创区"
+          },
+          {
+            "key": "141:866",
+            "fid": "141",
+            "typeid": "866",
+            "name": "网友原创区 · 自压",
+            "type_name": "自压",
+            "board_name": "网友原创区"
+          },
+          {
+            "key": "141:879",
+            "fid": "141",
+            "typeid": "879",
+            "name": "网友原创区 · 主播录播",
+            "type_name": "主播录播",
+            "board_name": "网友原创区"
+          },
+          {
+            "key": "141:695",
+            "fid": "141",
+            "typeid": "695",
+            "name": "网友原创区 · 套图",
+            "type_name": "套图",
+            "board_name": "网友原创区"
+          },
+          {
+            "key": "141:694",
+            "fid": "141",
+            "typeid": "694",
+            "name": "网友原创区 · 蓝光原盘",
+            "type_name": "蓝光原盘",
+            "board_name": "网友原创区"
+          },
+          {
+            "key": "141:693",
+            "fid": "141",
+            "typeid": "693",
+            "name": "网友原创区 · 二次元",
+            "type_name": "二次元",
+            "board_name": "网友原创区"
+          },
+          {
+            "key": "141:696",
+            "fid": "141",
+            "typeid": "696",
+            "name": "网友原创区 · 其它",
+            "type_name": "其它",
+            "board_name": "网友原创区"
+          }
+        ]
+      },
+      {
+        "name": "转帖交流区",
+        "fid": "142",
+        "types": [
+          {
+            "key": "142:697",
+            "fid": "142",
+            "typeid": "697",
+            "name": "转帖交流区 · 国产自拍",
+            "type_name": "国产自拍",
+            "board_name": "转帖交流区"
+          },
+          {
+            "key": "142:698",
+            "fid": "142",
+            "typeid": "698",
+            "name": "转帖交流区 · 直播视频",
+            "type_name": "直播视频",
+            "board_name": "转帖交流区"
+          },
+          {
+            "key": "142:699",
+            "fid": "142",
+            "typeid": "699",
+            "name": "转帖交流区 · 亚洲无码",
+            "type_name": "亚洲无码",
+            "board_name": "转帖交流区"
+          },
+          {
+            "key": "142:700",
+            "fid": "142",
+            "typeid": "700",
+            "name": "转帖交流区 · 亚洲有码",
+            "type_name": "亚洲有码",
+            "board_name": "转帖交流区"
+          },
+          {
+            "key": "142:701",
+            "fid": "142",
+            "typeid": "701",
+            "name": "转帖交流区 · 偷拍視頻",
+            "type_name": "偷拍視頻",
+            "board_name": "转帖交流区"
+          },
+          {
+            "key": "142:702",
+            "fid": "142",
+            "typeid": "702",
+            "name": "转帖交流区 · 动漫/二次元",
+            "type_name": "动漫/二次元",
+            "board_name": "转帖交流区"
+          },
+          {
+            "key": "142:703",
+            "fid": "142",
+            "typeid": "703",
+            "name": "转帖交流区 · 欧美风情",
+            "type_name": "欧美风情",
+            "board_name": "转帖交流区"
+          },
+          {
+            "key": "142:704",
+            "fid": "142",
+            "typeid": "704",
+            "name": "转帖交流区 · 其他資源",
+            "type_name": "其他資源",
+            "board_name": "转帖交流区"
+          },
+          {
+            "key": "142:706",
+            "fid": "142",
+            "typeid": "706",
+            "name": "转帖交流区 · 合集资源",
+            "type_name": "合集资源",
+            "board_name": "转帖交流区"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "category": "原创BT电影",
+    "boards": [
+      {
+        "name": "国产原创",
+        "fid": "2",
+        "types": [
+          {
+            "key": "2:684",
+            "fid": "2",
+            "typeid": "684",
+            "name": "国产原创 · 国产无码",
+            "type_name": "国产无码",
+            "board_name": "国产原创"
+          },
+          {
+            "key": "2:685",
+            "fid": "2",
+            "typeid": "685",
+            "name": "国产原创 · 主播录制",
+            "type_name": "主播录制",
+            "board_name": "国产原创"
+          },
+          {
+            "key": "2:686",
+            "fid": "2",
+            "typeid": "686",
+            "name": "国产原创 · 360水滴",
+            "type_name": "360水滴",
+            "board_name": "国产原创"
+          },
+          {
+            "key": "2:687",
+            "fid": "2",
+            "typeid": "687",
+            "name": "国产原创 · 厕所偷拍",
+            "type_name": "厕所偷拍",
+            "board_name": "国产原创"
+          }
+        ]
+      },
+      {
+        "name": "亚洲无码原创",
+        "fid": "36",
+        "types": [
+          {
+            "key": "36:368",
+            "fid": "36",
+            "typeid": "368",
+            "name": "亚洲无码原创 · FC2PPV",
+            "type_name": "FC2PPV",
+            "board_name": "亚洲无码原创"
+          },
+          {
+            "key": "36:369",
+            "fid": "36",
+            "typeid": "369",
+            "name": "亚洲无码原创 · HEYZO",
+            "type_name": "HEYZO",
+            "board_name": "亚洲无码原创"
+          },
+          {
+            "key": "36:370",
+            "fid": "36",
+            "typeid": "370",
+            "name": "亚洲无码原创 · 加勒比系列",
+            "type_name": "加勒比系列",
+            "board_name": "亚洲无码原创"
+          },
+          {
+            "key": "36:371",
+            "fid": "36",
+            "typeid": "371",
+            "name": "亚洲无码原创 · 一本道系列",
+            "type_name": "一本道系列",
+            "board_name": "亚洲无码原创"
+          },
+          {
+            "key": "36:372",
+            "fid": "36",
+            "typeid": "372",
+            "name": "亚洲无码原创 · 10musume",
+            "type_name": "10musume",
+            "board_name": "亚洲无码原创"
+          },
+          {
+            "key": "36:373",
+            "fid": "36",
+            "typeid": "373",
+            "name": "亚洲无码原创 · 女体のしんぴ",
+            "type_name": "女体のしんぴ",
+            "board_name": "亚洲无码原创"
+          },
+          {
+            "key": "36:374",
+            "fid": "36",
+            "typeid": "374",
+            "name": "亚洲无码原创 · pacoma",
+            "type_name": "pacoma",
+            "board_name": "亚洲无码原创"
+          },
+          {
+            "key": "36:375",
+            "fid": "36",
+            "typeid": "375",
+            "name": "亚洲无码原创 · heyppv",
+            "type_name": "heyppv",
+            "board_name": "亚洲无码原创"
+          },
+          {
+            "key": "36:379",
+            "fid": "36",
+            "typeid": "379",
+            "name": "亚洲无码原创 · 店長推薦",
+            "type_name": "店長推薦",
+            "board_name": "亚洲无码原创"
+          },
+          {
+            "key": "36:449",
+            "fid": "36",
+            "typeid": "449",
+            "name": "亚洲无码原创 · 东京热",
+            "type_name": "东京热",
+            "board_name": "亚洲无码原创"
+          },
+          {
+            "key": "36:523",
+            "fid": "36",
+            "typeid": "523",
+            "name": "亚洲无码原创 · 熟女俱樂部",
+            "type_name": "熟女俱樂部",
+            "board_name": "亚洲无码原创"
+          },
+          {
+            "key": "36:537",
+            "fid": "36",
+            "typeid": "537",
+            "name": "亚洲无码原创 · xxx-av",
+            "type_name": "xxx-av",
+            "board_name": "亚洲无码原创"
+          },
+          {
+            "key": "36:551",
+            "fid": "36",
+            "typeid": "551",
+            "name": "亚洲无码原创 · 人妻斬り",
+            "type_name": "人妻斬り",
+            "board_name": "亚洲无码原创"
+          },
+          {
+            "key": "36:552",
+            "fid": "36",
+            "typeid": "552",
+            "name": "亚洲无码原创 · エッチな0930",
+            "type_name": "エッチな0930",
+            "board_name": "亚洲无码原创"
+          },
+          {
+            "key": "36:553",
+            "fid": "36",
+            "typeid": "553",
+            "name": "亚洲无码原创 · エッチな4610",
+            "type_name": "エッチな4610",
+            "board_name": "亚洲无码原创"
+          },
+          {
+            "key": "36:583",
+            "fid": "36",
+            "typeid": "583",
+            "name": "亚洲无码原创 · 本生素人TV",
+            "type_name": "本生素人TV",
+            "board_name": "亚洲无码原创"
+          },
+          {
+            "key": "36:586",
+            "fid": "36",
+            "typeid": "586",
+            "name": "亚洲无码原创 · sm-miracle",
+            "type_name": "sm-miracle",
+            "board_name": "亚洲无码原创"
+          },
+          {
+            "key": "36:587",
+            "fid": "36",
+            "typeid": "587",
+            "name": "亚洲无码原创 · roselip-fetish",
+            "type_name": "roselip-fetish",
+            "board_name": "亚洲无码原创"
+          },
+          {
+            "key": "36:589",
+            "fid": "36",
+            "typeid": "589",
+            "name": "亚洲无码原创 · legsjapan",
+            "type_name": "legsjapan",
+            "board_name": "亚洲无码原创"
+          },
+          {
+            "key": "36:590",
+            "fid": "36",
+            "typeid": "590",
+            "name": "亚洲无码原创 · uralesbian",
+            "type_name": "uralesbian",
+            "board_name": "亚洲无码原创"
+          },
+          {
+            "key": "36:591",
+            "fid": "36",
+            "typeid": "591",
+            "name": "亚洲无码原创 · fellatiojapan",
+            "type_name": "fellatiojapan",
+            "board_name": "亚洲无码原创"
+          },
+          {
+            "key": "36:618",
+            "fid": "36",
+            "typeid": "618",
+            "name": "亚洲无码原创 · spermmania",
+            "type_name": "spermmania",
+            "board_name": "亚洲无码原创"
+          },
+          {
+            "key": "36:619",
+            "fid": "36",
+            "typeid": "619",
+            "name": "亚洲无码原创 · handjobjapan",
+            "type_name": "handjobjapan",
+            "board_name": "亚洲无码原创"
+          },
+          {
+            "key": "36:631",
+            "fid": "36",
+            "typeid": "631",
+            "name": "亚洲无码原创 · urabukkake",
+            "type_name": "urabukkake",
+            "board_name": "亚洲无码原创"
+          },
+          {
+            "key": "36:654",
+            "fid": "36",
+            "typeid": "654",
+            "name": "亚洲无码原创 · 无码流出",
+            "type_name": "无码流出",
+            "board_name": "亚洲无码原创"
+          },
+          {
+            "key": "36:660",
+            "fid": "36",
+            "typeid": "660",
+            "name": "亚洲无码原创 · 金髪天國",
+            "type_name": "金髪天國",
+            "board_name": "亚洲无码原创"
+          },
+          {
+            "key": "36:671",
+            "fid": "36",
+            "typeid": "671",
+            "name": "亚洲无码原创 · 加勒比PPV",
+            "type_name": "加勒比PPV",
+            "board_name": "亚洲无码原创"
+          },
+          {
+            "key": "36:672",
+            "fid": "36",
+            "typeid": "672",
+            "name": "亚洲无码原创 · 无码破解",
+            "type_name": "无码破解",
+            "board_name": "亚洲无码原创"
+          },
+          {
+            "key": "36:683",
+            "fid": "36",
+            "typeid": "683",
+            "name": "亚洲无码原创 · レズのしんぴ",
+            "type_name": "レズのしんぴ",
+            "board_name": "亚洲无码原创"
+          },
+          {
+            "key": "36:723",
+            "fid": "36",
+            "typeid": "723",
+            "name": "亚洲无码原创 · japornxxx",
+            "type_name": "japornxxx",
+            "board_name": "亚洲无码原创"
+          },
+          {
+            "key": "36:724",
+            "fid": "36",
+            "typeid": "724",
+            "name": "亚洲无码原创 · 盗窃系列",
+            "type_name": "盗窃系列",
+            "board_name": "亚洲无码原创"
+          },
+          {
+            "key": "36:822",
+            "fid": "36",
+            "typeid": "822",
+            "name": "亚洲无码原创 · cospuri",
+            "type_name": "cospuri",
+            "board_name": "亚洲无码原创"
+          }
+        ]
+      },
+      {
+        "name": "亚洲有码原创",
+        "fid": "37",
+        "types": []
+      },
+      {
+        "name": "高清中文字幕",
+        "fid": "103",
+        "types": [
+          {
+            "key": "103:480",
+            "fid": "103",
+            "typeid": "480",
+            "name": "高清中文字幕 · 有码高清",
+            "type_name": "有码高清",
+            "board_name": "高清中文字幕"
+          },
+          {
+            "key": "103:481",
+            "fid": "103",
+            "typeid": "481",
+            "name": "高清中文字幕 · 无码高清",
+            "type_name": "无码高清",
+            "board_name": "高清中文字幕"
+          }
+        ]
+      },
+      {
+        "name": "三级写真",
+        "fid": "107",
+        "types": [
+          {
+            "key": "107:592",
+            "fid": "107",
+            "typeid": "592",
+            "name": "三级写真 · 日本写真",
+            "type_name": "日本写真",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:593",
+            "fid": "107",
+            "typeid": "593",
+            "name": "三级写真 · 韩国三级",
+            "type_name": "韩国三级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:594",
+            "fid": "107",
+            "typeid": "594",
+            "name": "三级写真 · 日本三级",
+            "type_name": "日本三级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:595",
+            "fid": "107",
+            "typeid": "595",
+            "name": "三级写真 · 美国三级",
+            "type_name": "美国三级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:596",
+            "fid": "107",
+            "typeid": "596",
+            "name": "三级写真 · 香港三级",
+            "type_name": "香港三级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:597",
+            "fid": "107",
+            "typeid": "597",
+            "name": "三级写真 · 国产三级",
+            "type_name": "国产三级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:598",
+            "fid": "107",
+            "typeid": "598",
+            "name": "三级写真 · 法国三级",
+            "type_name": "法国三级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:599",
+            "fid": "107",
+            "typeid": "599",
+            "name": "三级写真 · 美国四级",
+            "type_name": "美国四级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:600",
+            "fid": "107",
+            "typeid": "600",
+            "name": "三级写真 · 国产四级",
+            "type_name": "国产四级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:601",
+            "fid": "107",
+            "typeid": "601",
+            "name": "三级写真 · 英国四级",
+            "type_name": "英国四级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:602",
+            "fid": "107",
+            "typeid": "602",
+            "name": "三级写真 · 英国三级",
+            "type_name": "英国三级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:603",
+            "fid": "107",
+            "typeid": "603",
+            "name": "三级写真 · 台湾四级",
+            "type_name": "台湾四级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:604",
+            "fid": "107",
+            "typeid": "604",
+            "name": "三级写真 · 泰国三级",
+            "type_name": "泰国三级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:605",
+            "fid": "107",
+            "typeid": "605",
+            "name": "三级写真 · 法国四级",
+            "type_name": "法国四级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:606",
+            "fid": "107",
+            "typeid": "606",
+            "name": "三级写真 · 加拿大三级",
+            "type_name": "加拿大三级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:607",
+            "fid": "107",
+            "typeid": "607",
+            "name": "三级写真 · 意大利三级",
+            "type_name": "意大利三级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:608",
+            "fid": "107",
+            "typeid": "608",
+            "name": "三级写真 · 荷兰三级",
+            "type_name": "荷兰三级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:609",
+            "fid": "107",
+            "typeid": "609",
+            "name": "三级写真 · 台湾三级",
+            "type_name": "台湾三级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:610",
+            "fid": "107",
+            "typeid": "610",
+            "name": "三级写真 · 挪威三级",
+            "type_name": "挪威三级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:611",
+            "fid": "107",
+            "typeid": "611",
+            "name": "三级写真 · 瑞士三级",
+            "type_name": "瑞士三级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:612",
+            "fid": "107",
+            "typeid": "612",
+            "name": "三级写真 · 瑞士四级",
+            "type_name": "瑞士四级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:613",
+            "fid": "107",
+            "typeid": "613",
+            "name": "三级写真 · 香港四级",
+            "type_name": "香港四级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:614",
+            "fid": "107",
+            "typeid": "614",
+            "name": "三级写真 · 阿根廷三级",
+            "type_name": "阿根廷三级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:615",
+            "fid": "107",
+            "typeid": "615",
+            "name": "三级写真 · 泰国四级",
+            "type_name": "泰国四级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:616",
+            "fid": "107",
+            "typeid": "616",
+            "name": "三级写真 · 波兰三级",
+            "type_name": "波兰三级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:617",
+            "fid": "107",
+            "typeid": "617",
+            "name": "三级写真 · 国产写真",
+            "type_name": "国产写真",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:620",
+            "fid": "107",
+            "typeid": "620",
+            "name": "三级写真 · 西班牙三级",
+            "type_name": "西班牙三级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:621",
+            "fid": "107",
+            "typeid": "621",
+            "name": "三级写真 · 墨西哥三级",
+            "type_name": "墨西哥三级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:622",
+            "fid": "107",
+            "typeid": "622",
+            "name": "三级写真 · 俄罗斯三级",
+            "type_name": "俄罗斯三级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:623",
+            "fid": "107",
+            "typeid": "623",
+            "name": "三级写真 · 美国写真",
+            "type_name": "美国写真",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:624",
+            "fid": "107",
+            "typeid": "624",
+            "name": "三级写真 · 德国三级",
+            "type_name": "德国三级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:625",
+            "fid": "107",
+            "typeid": "625",
+            "name": "三级写真 · 丹麦三级",
+            "type_name": "丹麦三级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:628",
+            "fid": "107",
+            "typeid": "628",
+            "name": "三级写真 · 克罗地亚三级",
+            "type_name": "克罗地亚三级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:629",
+            "fid": "107",
+            "typeid": "629",
+            "name": "三级写真 · 巴西三级",
+            "type_name": "巴西三级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:630",
+            "fid": "107",
+            "typeid": "630",
+            "name": "三级写真 · 意大利四级",
+            "type_name": "意大利四级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:633",
+            "fid": "107",
+            "typeid": "633",
+            "name": "三级写真 · 德国四级",
+            "type_name": "德国四级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:634",
+            "fid": "107",
+            "typeid": "634",
+            "name": "三级写真 · 瑞典四级",
+            "type_name": "瑞典四级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:645",
+            "fid": "107",
+            "typeid": "645",
+            "name": "三级写真 · 丹麦四级",
+            "type_name": "丹麦四级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:646",
+            "fid": "107",
+            "typeid": "646",
+            "name": "三级写真 · 荷兰写真",
+            "type_name": "荷兰写真",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:650",
+            "fid": "107",
+            "typeid": "650",
+            "name": "三级写真 · 比利时四级",
+            "type_name": "比利时四级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:655",
+            "fid": "107",
+            "typeid": "655",
+            "name": "三级写真 · 澳大利亚三级",
+            "type_name": "澳大利亚三级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:656",
+            "fid": "107",
+            "typeid": "656",
+            "name": "三级写真 · 印度三级",
+            "type_name": "印度三级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:657",
+            "fid": "107",
+            "typeid": "657",
+            "name": "三级写真 · 菲律宾三级",
+            "type_name": "菲律宾三级",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:658",
+            "fid": "107",
+            "typeid": "658",
+            "name": "三级写真 · 新加坡写真",
+            "type_name": "新加坡写真",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:659",
+            "fid": "107",
+            "typeid": "659",
+            "name": "三级写真 · 韩国写真",
+            "type_name": "韩国写真",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:667",
+            "fid": "107",
+            "typeid": "667",
+            "name": "三级写真 · 法国写真",
+            "type_name": "法国写真",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:668",
+            "fid": "107",
+            "typeid": "668",
+            "name": "三级写真 · 英国写真",
+            "type_name": "英国写真",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:669",
+            "fid": "107",
+            "typeid": "669",
+            "name": "三级写真 · 俄罗斯写真",
+            "type_name": "俄罗斯写真",
+            "board_name": "三级写真"
+          },
+          {
+            "key": "107:670",
+            "fid": "107",
+            "typeid": "670",
+            "name": "三级写真 · 智利三级",
+            "type_name": "智利三级",
+            "board_name": "三级写真"
+          }
+        ]
+      },
+      {
+        "name": "VR视频区",
+        "fid": "160",
+        "types": []
+      },
+      {
+        "name": "素人有码系列",
+        "fid": "104",
+        "types": [
+          {
+            "key": "104:726",
+            "fid": "104",
+            "typeid": "726",
+            "name": "素人有码系列 · SIRO",
+            "type_name": "SIRO",
+            "board_name": "素人有码系列"
+          },
+          {
+            "key": "104:727",
+            "fid": "104",
+            "typeid": "727",
+            "name": "素人有码系列 · 259LUXU",
+            "type_name": "259LUXU",
+            "board_name": "素人有码系列"
+          },
+          {
+            "key": "104:728",
+            "fid": "104",
+            "typeid": "728",
+            "name": "素人有码系列 · 300MIUM",
+            "type_name": "300MIUM",
+            "board_name": "素人有码系列"
+          },
+          {
+            "key": "104:729",
+            "fid": "104",
+            "typeid": "729",
+            "name": "素人有码系列 · 332NAMA",
+            "type_name": "332NAMA",
+            "board_name": "素人有码系列"
+          },
+          {
+            "key": "104:730",
+            "fid": "104",
+            "typeid": "730",
+            "name": "素人有码系列 · 326EVA",
+            "type_name": "326EVA",
+            "board_name": "素人有码系列"
+          },
+          {
+            "key": "104:731",
+            "fid": "104",
+            "typeid": "731",
+            "name": "素人有码系列 · 328HMDN",
+            "type_name": "328HMDN",
+            "board_name": "素人有码系列"
+          },
+          {
+            "key": "104:533",
+            "fid": "104",
+            "typeid": "533",
+            "name": "素人有码系列 · G-area",
+            "type_name": "G-area",
+            "board_name": "素人有码系列"
+          },
+          {
+            "key": "104:534",
+            "fid": "104",
+            "typeid": "534",
+            "name": "素人有码系列 · Mywife",
+            "type_name": "Mywife",
+            "board_name": "素人有码系列"
+          },
+          {
+            "key": "104:535",
+            "fid": "104",
+            "typeid": "535",
+            "name": "素人有码系列 · S-cute",
+            "type_name": "S-cute",
+            "board_name": "素人有码系列"
+          },
+          {
+            "key": "104:536",
+            "fid": "104",
+            "typeid": "536",
+            "name": "素人有码系列 · FC2",
+            "type_name": "FC2",
+            "board_name": "素人有码系列"
+          },
+          {
+            "key": "104:557",
+            "fid": "104",
+            "typeid": "557",
+            "name": "素人有码系列 · himemix",
+            "type_name": "himemix",
+            "board_name": "素人有码系列"
+          },
+          {
+            "key": "104:563",
+            "fid": "104",
+            "typeid": "563",
+            "name": "素人有码系列 · getchu",
+            "type_name": "getchu",
+            "board_name": "素人有码系列"
+          },
+          {
+            "key": "104:588",
+            "fid": "104",
+            "typeid": "588",
+            "name": "素人有码系列 · siro-hame",
+            "type_name": "siro-hame",
+            "board_name": "素人有码系列"
+          },
+          {
+            "key": "104:626",
+            "fid": "104",
+            "typeid": "626",
+            "name": "素人有码系列 · r-file",
+            "type_name": "r-file",
+            "board_name": "素人有码系列"
+          },
+          {
+            "key": "104:627",
+            "fid": "104",
+            "typeid": "627",
+            "name": "素人有码系列 · giga-web",
+            "type_name": "giga-web",
+            "board_name": "素人有码系列"
+          },
+          {
+            "key": "104:632",
+            "fid": "104",
+            "typeid": "632",
+            "name": "素人有码系列 · knights-visual",
+            "type_name": "knights-visual",
+            "board_name": "素人有码系列"
+          },
+          {
+            "key": "104:725",
+            "fid": "104",
+            "typeid": "725",
+            "name": "素人有码系列 · 230OREX",
+            "type_name": "230OREX",
+            "board_name": "素人有码系列"
+          },
+          {
+            "key": "104:807",
+            "fid": "104",
+            "typeid": "807",
+            "name": "素人有码系列 · 336KNB",
+            "type_name": "336KNB",
+            "board_name": "素人有码系列"
+          },
+          {
+            "key": "104:808",
+            "fid": "104",
+            "typeid": "808",
+            "name": "素人有码系列 · 200GANA",
+            "type_name": "200GANA",
+            "board_name": "素人有码系列"
+          },
+          {
+            "key": "104:809",
+            "fid": "104",
+            "typeid": "809",
+            "name": "素人有码系列 · 300MAAN",
+            "type_name": "300MAAN",
+            "board_name": "素人有码系列"
+          },
+          {
+            "key": "104:810",
+            "fid": "104",
+            "typeid": "810",
+            "name": "素人有码系列 · 300NTK",
+            "type_name": "300NTK",
+            "board_name": "素人有码系列"
+          },
+          {
+            "key": "104:811",
+            "fid": "104",
+            "typeid": "811",
+            "name": "素人有码系列 · 390JAC",
+            "type_name": "390JAC",
+            "board_name": "素人有码系列"
+          },
+          {
+            "key": "104:812",
+            "fid": "104",
+            "typeid": "812",
+            "name": "素人有码系列 · 326SCP",
+            "type_name": "326SCP",
+            "board_name": "素人有码系列"
+          },
+          {
+            "key": "104:813",
+            "fid": "104",
+            "typeid": "813",
+            "name": "素人有码系列 · 其他系列",
+            "type_name": "其他系列",
+            "board_name": "素人有码系列"
+          }
+        ]
+      },
+      {
+        "name": "欧美无码",
+        "fid": "38",
+        "types": []
+      },
+      {
+        "name": "4K原版",
+        "fid": "151",
+        "types": [
+          {
+            "key": "151:823",
+            "fid": "151",
+            "typeid": "823",
+            "name": "4K原版 · 无码",
+            "type_name": "无码",
+            "board_name": "4K原版"
+          },
+          {
+            "key": "151:824",
+            "fid": "151",
+            "typeid": "824",
+            "name": "4K原版 · 有码",
+            "type_name": "有码",
+            "board_name": "4K原版"
+          }
+        ]
+      },
+      {
+        "name": "韩国主播",
+        "fid": "152",
+        "types": []
+      },
+      {
+        "name": "动漫原创",
+        "fid": "39",
+        "types": [
+          {
+            "key": "39:404",
+            "fid": "39",
+            "typeid": "404",
+            "name": "动漫原创 · 无码",
+            "type_name": "无码",
+            "board_name": "动漫原创"
+          },
+          {
+            "key": "39:405",
+            "fid": "39",
+            "typeid": "405",
+            "name": "动漫原创 · 有码",
+            "type_name": "有码",
+            "board_name": "动漫原创"
+          }
+        ]
+      }
+    ]
+  }
+]

@@ -14,8 +14,8 @@ sys.path.insert(0, str(ROOT / "apps" / "api"))
 from app import prefix_maker_names as mn  # noqa: E402
 from app.core.region_meta import std_prefix  # noqa: E402
 
-AV = ROOT / "apps" / "web" / "src" / "config" / "av-makers.japan.json"
-CAT = ROOT / "data" / "prefix_catalog" / "catalog.json"
+AV = ROOT / "apps" / "maps" / "makers" / "av-makers.japan.json"
+CAT = ROOT / "data" / "prefix" / "catalog" / "catalog.json"
 
 SKIP_LABELS = {
     "Other Gravure / 其他写真",

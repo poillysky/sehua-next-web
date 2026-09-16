@@ -490,7 +490,7 @@ def main() -> int:
 
     records, all_makers = parse_ippa(xlsx)
     pmap = build_prefix_map(records)
-    report_dir = ROOT / "data" / "_debug"
+    report_dir = ROOT / "data" / "debug"
     report_dir.mkdir(parents=True, exist_ok=True)
     (report_dir / "ippa_parsed_makers.json").write_text(
         json.dumps(all_makers, ensure_ascii=False, indent=2) + "\n",

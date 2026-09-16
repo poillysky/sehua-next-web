@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT / "apps" / "api"))
 from app import prefix_catalog_harvest as harvest  # noqa: E402
 from app import prefix_catalog_store as store  # noqa: E402
 
-OUT = ROOT / "data" / "_debug" / "prefix-latest-codes.json"
+OUT = ROOT / "data" / "debug" / "prefix-latest-codes.json"
 
 
 def main() -> None:

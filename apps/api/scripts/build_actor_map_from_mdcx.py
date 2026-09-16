@@ -2,13 +2,12 @@
 # -*- coding: utf-8 -*-
 """从 MDCx mapping_actor.xml（+ 可选 Actress.db）生成 sehua 用 actors.zh-CN.json。
 
-输出：<repo>/data/scrape_maps/actors.zh-CN.json
+输出：apps/maps/scrape/actors.zh-CN.json（唯一完整表；人工修正也直接改此文件）
 策略（偏稳，宁漏勿错）：
 - 标准名取 zh_cn，再 zhconv → 简体
 - 丢弃占位/泛化词（女优/素人/错误…）
 - 丢弃含「誤認注意」「同名異人」的别名
 - 无假名且繁简不等的「汉字↔汉字」别名默认跳过（防羽田希→羽月希）
-- 本地 seed 覆盖（drop / 已知修正）优先
 """
 
 from __future__ import annotations
@@ -32,8 +31,8 @@ if not DEFAULT_XML.is_file() and _LEGACY_XML.is_file():
     DEFAULT_XML = _LEGACY_XML
 if not DEFAULT_DB.is_file() and _LEGACY_DB.is_file():
     DEFAULT_DB = _LEGACY_DB
-SEED = API / "app" / "scrape_maps_seed" / "actors.zh-CN.json"
-OUT = ROOT / "data" / "scrape_maps" / "actors.zh-CN.json"
+SEED = ROOT / "apps" / "maps" / "scrape" / "actors.zh-CN.json"
+OUT = SEED
 
 KANA_RE = re.compile(r"[\u3040-\u30ff]")
 CJK_RE = re.compile(r"[\u4e00-\u9fff]")
@@ -64,6 +63,10 @@ PLACEHOLDER_NAMES = frozenset(
 )
 
 SKIP_KEYWORD_MARKERS = ("誤認注意", "同名異人", "誤認", "误认")
+
+# MDCX 源里没有、只在主表上人工维护的字段；重导时按旧表带回（见 _carry_over_manual_fields）
+# avatar 跟标准名走；drop/role/sex 跟具体键走
+MANUAL_FIELDS = ("avatar", "drop", "role", "sex")
 
 
 def to_zh_cn(s: str) -> str:
@@ -203,16 +206,6 @@ def _put(
     return True
 
 
-def load_seed_overrides() -> dict[str, object]:
-    if not SEED.is_file():
-        return {}
-    try:
-        raw = json.loads(SEED.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-    return raw if isinstance(raw, dict) else {}
-
-
 def from_mdcx_xml(xml_path: Path) -> tuple[dict[str, dict], dict[str, int]]:
     root = ET.fromstring(xml_path.read_text(encoding="utf-8"))
     table: dict[str, dict] = {}
@@ -330,39 +323,61 @@ def enrich_from_actress_db(db_path: Path, table: dict[str, dict]) -> dict[str, i
     return stats
 
 
-def apply_overrides(table: dict[str, dict], overrides: dict[str, object]) -> int:
-    n = 0
-    for k, v in overrides.items():
-        key = str(k).strip()
-        if not key:
+def _carry_over_manual_fields(path: Path, table: dict[str, dict]) -> dict[str, int]:
+    """把旧表里的人工字段带回新表，避免 MDCX 重导整表重建时冲掉。
+
+    锚点分两种：
+    - **按 key**：``drop`` / ``role`` / ``sex`` —— 男优、导演等在具体键上打标
+    - **按标准名**：``avatar`` —— 头像直链跟人走，别名换写法也不丢
+
+    旧表里只有人工字段、新表已无该键时整条补回（人工新增条目）。
+    返回 ``{"fields": n, "entries": n}``。
+    """
+    stats = {"fields": 0, "entries": 0}
+    if not path.is_file():
+        return stats
+    try:
+        old = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return stats
+    if not isinstance(old, dict):
+        return stats
+
+    keyed: dict[str, dict] = {}
+    by_name: dict[str, str] = {}
+    for k, v in old.items():
+        if not isinstance(v, dict):
             continue
-        if isinstance(v, dict) and (
-            v.get("drop")
-            or v.get("exclude")
-            or str(v.get("role") or "").lower()
-            in {"director", "author", "male", "writer", "artist", "staff"}
-            or str(v.get("sex") or "").lower() in {"m", "male", "man"}
-        ):
-            table[key] = dict(v)
-            n += 1
+        fields = {f: v[f] for f in MANUAL_FIELDS if f in v}
+        if not fields:
             continue
-        if isinstance(v, str):
-            name = to_zh_cn(v)
-            if name and name != key:
-                table[key] = {"name": name, "zh": name}
-                n += 1
+        keyed[str(k)] = fields
+        avatar = str(fields.get("avatar") or "").strip()
+        name = str(v.get("name") or "").strip()
+        if avatar and name:
+            by_name.setdefault(name, avatar)
+    if not keyed:
+        return stats
+
+    for k, fields in keyed.items():
+        entry = table.get(k)
+        if entry is None:
+            table[k] = dict(old[k])  # 人工条目整条补回
+            stats["entries"] += 1
             continue
-        if isinstance(v, dict):
-            name = to_zh_cn(str(v.get("name") or v.get("zh") or "").strip())
-            if not name:
-                continue
-            entry = {"name": name, "zh": name}
-            for fld in ("url", "javdb", "javdbUrl", "link"):
-                if v.get(fld):
-                    entry[fld] = str(v.get(fld)).strip()
-            table[key] = entry
-            n += 1
-    return n
+        for f, val in fields.items():
+            if entry.get(f) != val:
+                entry[f] = val
+                stats["fields"] += 1
+
+    for entry in table.values():
+        if not isinstance(entry, dict) or "avatar" in entry:
+            continue
+        avatar = by_name.get(str(entry.get("name") or "").strip())
+        if avatar:
+            entry["avatar"] = avatar
+            stats["fields"] += 1
+    return stats
 
 
 def main() -> int:
@@ -382,10 +397,9 @@ def main() -> int:
     if not args.no_db:
         db_stats = enrich_from_actress_db(args.db, table)
 
-    overrides = load_seed_overrides()
-    ov_n = apply_overrides(table, overrides)
+    carried = _carry_over_manual_fields(args.out, table)
 
-    # 稳定排序写出
+    # 稳定排序写出（人工修正请直接改输出主表）
     ordered = {k: table[k] for k in sorted(table.keys(), key=lambda s: (s.casefold(), s))}
     atomic_write_json(args.out, ordered)
 
@@ -401,9 +415,9 @@ def main() -> int:
                 "out": str(args.out),
                 "entries": len(ordered),
                 "drop_like": drop_n,
+                "manual_carried": carried,
                 "xml": xml_stats,
                 "db": db_stats,
-                "seed_overrides": ov_n,
                 "bytes": args.out.stat().st_size,
             },
             ensure_ascii=False,

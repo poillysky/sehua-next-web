@@ -20,7 +20,7 @@ from app import prefix_catalog_dmm as dmm  # noqa: E402
 from app import prefix_catalog_store as store  # noqa: E402
 from app.core.region_meta import std_prefix  # noqa: E402
 
-OUT = ROOT / "data" / "_debug" / "prefix-miss-recheck.json"
+OUT = ROOT / "data" / "debug" / "prefix-miss-recheck.json"
 
 # 明显不是日本有码/素人番号前缀
 NOISE = {

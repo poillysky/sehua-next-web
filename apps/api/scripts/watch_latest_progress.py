@@ -10,9 +10,9 @@ from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-LOG = ROOT / "data" / "_debug" / "prefix-latest-harvest.log"
-OUT_HTML = ROOT / "data" / "_debug" / "prefix-latest-progress.html"
-OUT_JSON = ROOT / "data" / "_debug" / "prefix-latest-progress.json"
+LOG = ROOT / "data" / "debug" / "prefix-latest-harvest.log"
+OUT_HTML = ROOT / "data" / "debug" / "prefix-latest-progress.html"
+OUT_JSON = ROOT / "data" / "debug" / "prefix-latest-progress.json"
 
 STEP_RE = re.compile(r"\[(\d+)/(\d+)\]\s+(\S+)")
 OK_RE = re.compile(r"\[(\d+)/(\d+)\]\s+OK\s+(\S+)")

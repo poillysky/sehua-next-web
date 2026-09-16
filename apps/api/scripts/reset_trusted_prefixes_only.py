@@ -16,7 +16,7 @@ from app import prefix_ranges as pr  # noqa: E402
 from app.core.region_meta import REGION_META, REGION_ORDER, std_prefix  # noqa: E402
 from app.search.av import is_western_studio_prefix  # noqa: E402
 
-SEED = ROOT / "apps" / "web" / "src" / "config" / "prefix-catalog.seed.json"
+SEED = ROOT / "apps" / "maps" / "prefixes" / "catalog.seed.json"
 
 
 def clean(p: str) -> str:
@@ -42,7 +42,7 @@ def trusted_by_region() -> dict[str, set[str]]:
     ]
     for name, kinds in files:
         data = json.loads(
-            (ROOT / "apps/web/src/config" / name).read_text(encoding="utf-8")
+            (ROOT / "apps" / "maps" / "makers" / name).read_text(encoding="utf-8")
         )
         for m in data:
             rid = kinds.get(m.get("kind"))
@@ -53,7 +53,7 @@ def trusted_by_region() -> dict[str, set[str]]:
 
     # dmm ok → censored (and amateur if digit)
     verify = json.loads(
-        (ROOT / "data/_debug/dmm-prefix-verify.json").read_text(encoding="utf-8")
+        (ROOT / "data/debug/dmm-prefix-verify.json").read_text(encoding="utf-8")
     )
     for row in verify.get("ok_list") or []:
         p = clean(row.get("prefix") or "")
@@ -69,7 +69,7 @@ def trusted_by_region() -> dict[str, set[str]]:
 
     # ranges: assign digit→amateur else censored (skip western/uncensored shells)
     ranges = json.loads(
-        (ROOT / "apps/web/src/config/prefix-code-ranges.json").read_text(encoding="utf-8")
+        (ROOT / "apps/maps/prefixes/code-ranges.json").read_text(encoding="utf-8")
     )["ranges"]
     skip = {clean(x) for x in pr.SKIP_PREFIXES}
     china = pr.load_china_prefixes()
