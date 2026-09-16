@@ -1387,16 +1387,40 @@ def _clear_local_status_totals(region: str = "") -> None:
 
 
 def _apply_local_status_totals(counts: dict[str, int], region: str) -> dict[str, int]:
+    """扫描角标与库内进度取大，禁止用全 0 的扫描缓存盖掉已刮成功/失败。"""
     _ensure_local_status_totals_loaded()
     rid = _queue_log_region(region)
     tip = _LOCAL_STATUS_TOTALS.get(rid) if rid else None
     if not tip:
         return counts
     out = dict(counts)
-    out["done"] = int(tip.get("done") or 0)
-    out["soft"] = int(tip.get("soft") or 0)
-    out["fail"] = int(tip.get("fail") or 0)
+    out["done"] = max(int(tip.get("done") or 0), int(counts.get("done") or 0))
+    out["soft"] = max(int(tip.get("soft") or 0), int(counts.get("soft") or 0))
+    out["fail"] = max(int(tip.get("fail") or 0), int(counts.get("fail") or 0))
     return out
+
+
+def _lift_local_status_totals_from_counts(
+    region: str, counts: dict[str, int] | None
+) -> None:
+    """刮削推进后把扫描角标抬到至少不低于库内真实值。"""
+    rid = _queue_log_region(region)
+    if not rid or not isinstance(counts, dict):
+        return
+    _ensure_local_status_totals_loaded()
+    tip = _LOCAL_STATUS_TOTALS.get(rid)
+    if not tip:
+        return
+    done = max(int(tip.get("done") or 0), int(counts.get("done") or 0))
+    soft = max(int(tip.get("soft") or 0), int(counts.get("soft") or 0))
+    fail = max(int(tip.get("fail") or 0), int(counts.get("fail") or 0))
+    if (
+        done == int(tip.get("done") or 0)
+        and soft == int(tip.get("soft") or 0)
+        and fail == int(tip.get("fail") or 0)
+    ):
+        return
+    _set_local_status_totals(rid, done=done, soft=soft, fail=fail)
 
 
 # 队列扫描进度（供 SSE/状态接口边扫边看；与刮削 progress 分开）
@@ -3233,6 +3257,10 @@ def _recover_done_from_enrich_logs(region: str) -> int:
     recovered = 0
     for code in codes:
         try:
+            # 本地已删 → 不回填 done（否则重扫 demote 后又被日志捞回）
+            folder = _resolve_enrich_folder(region=rid, code=code, item_id="")
+            if folder is None or not _local_poster_ok(folder):
+                continue
             # 已有 pending/running → 改 done；已有 done 跳过；没有则插入
             from app.core.db import connect, init_db
 
@@ -4268,6 +4296,7 @@ def iter_enrich_pending_items(
 ) -> tuple[list[dict[str, Any]], int]:
     """未处理 = 向量库所有番号 − 本地成功 − 软成功 − 失败。
 
+    含「向量已齐但本地已删」：二次入队后重刮并覆盖向量行。
     limit>0（扫描）：只取样例；角标用向量 total 扣本地已分类。
     limit<=0（开刮）：枚举可处理项。
     local_maps：可传入已扫结果，避免二次磁盘遍历。
@@ -4309,14 +4338,14 @@ def iter_enrich_pending_items(
         if lim <= 0 or len(samples) < lim:
             samples.append(item)
 
-    # 扫描只要样例：带 limit 查库；开刮 limit=0 才尽量全量
+    # 全库有番号行（空壳 + 已齐）；本地已分类排除 → 本地已删也会回未处理
     try:
-        rows = embed_svc.quality_incomplete_items(
+        rows = embed_svc.list_region_code_items(
             region=rid or region,
             limit=lim if lim > 0 else 0,
         )
     except Exception as e:  # noqa: BLE001
-        log.warning("quality_incomplete_items failed region=%s: %s", rid, e)
+        log.warning("list_region_code_items failed region=%s: %s", rid, e)
         rows = []
 
     for r in rows or []:
@@ -4422,9 +4451,9 @@ def iter_enrich_pending_batches(
     skip_item_ids: set[str] | None = None,
     skip_codes: set[str] | None = None,
 ) -> Any:
-    """分批产出未处理：向量骨架空壳 − 本地成功/软成功/失败。
+    """分批产出未处理：向量库全部番号 − 本地成功/软成功/失败。
 
-    不把 12 万行一次载入内存。limit<=0 表示一直扫到库空。
+    含「向量已齐、本地已删」回填。不把 12 万行一次载入内存。limit<=0 表示一直扫到库空。
     """
     from app.scrap_library import embed as embed_svc
 
@@ -4630,28 +4659,37 @@ def iter_enrich_pending_batches(
         if len(rows) < bs:
             break
 
-    # 2) 非骨架缺字段（少量）
-    try:
-        extra = embed_svc.quality_incomplete_items(
-            region=rid or region, limit=bs * 2, offset=0
-        )
-    except Exception:  # noqa: BLE001
-        extra = []
-    batch = []
-    for r in extra or []:
-        if not isinstance(r, dict):
-            continue
-        if r.get("shell"):
-            continue
-        packed = _pack(r)
-        if not packed:
-            continue
-        batch.append(packed)
-        emitted += 1
-        if cap > 0 and emitted >= cap:
+    # 2) 向量库全部有番号行（含已齐但本地已删）— 按 code 分页回填未处理
+    off = 0
+    while True:
+        if _halt_kind():
+            return
+        try:
+            extra = embed_svc.list_region_code_items(
+                region=rid or region, limit=bs, offset=off
+            )
+        except Exception:  # noqa: BLE001
+            extra = []
+        if not extra:
             break
-    if batch:
-        yield batch
+        off += len(extra)
+        batch = []
+        for r in extra or []:
+            if not isinstance(r, dict):
+                continue
+            packed = _pack(r)
+            if not packed:
+                continue
+            batch.append(packed)
+            emitted += 1
+            if cap > 0 and emitted >= cap:
+                break
+        if batch:
+            yield batch
+        if cap > 0 and emitted >= cap:
+            return
+        if len(extra) < bs:
+            break
 
 
 def scan_enrich_queue(
@@ -4661,8 +4699,9 @@ def scan_enrich_queue(
 ) -> dict[str, Any]:
     """打开日志页：重建队列（不启动刮削）。
 
-    增量：向量骨架 − 本地成功/软成功/失败 → 未处理；本地三类按磁盘回填角标。
+    增量：向量全部番号 − 本地成功/软成功/失败 → 未处理（含本地已删回填）；
     覆盖：本地分区全部 NFO 进未处理。
+    每次扫描强制把「成功/失败但本地已删」回滚为 pending。
     """
     rid = _queue_log_region(region)
     empty = {
@@ -4706,6 +4745,19 @@ def scan_enrich_queue(
         fetch_lim = 0
     else:
         fetch_lim = max(1, min(_SCAN_WRITE, fetch_lim))
+
+    # 每次重扫强制回滚：本地已删的 done/fail → pending（不限频）
+    try:
+        _demoted_false_dones.discard(rid)
+        demoted_scan = _queue_log_demote_false_dones(rid)
+        _demoted_false_dones.add(rid)
+        if demoted_scan:
+            log.info(
+                "scan demote missing-local region=%s n=%s", rid, demoted_scan
+            )
+    except Exception as e:  # noqa: BLE001
+        log.warning("scan demote failed region=%s: %s", rid, e)
+        demoted_scan = 0
 
     skip_done_iids, skip_done_codes = (
         (set(), set()) if overwrite else _queue_log_done_keys(rid)
@@ -4812,7 +4864,7 @@ def scan_enrich_queue(
                 skip_codes=skip_done_codes,
                 local_maps=local_maps,
             )
-            source = "vector_shells_minus_local"
+            source = "vector_all_minus_local"
 
         seen_q: set[str] = set()
         queue_view: list[dict[str, Any]] = []
@@ -4935,6 +4987,7 @@ def scan_enrich_queue(
         out["pendingTotal"] = int(pending_total)
         out["prunedN"] = int(pruned or 0)
         out["recoveredDone"] = int(recovered or 0)
+        out["demotedN"] = int(demoted_scan or 0)
         out["localDone"] = int(counts.get("done") or 0)
         out["localSoft"] = int(counts.get("soft") or 0)
         out["localFail"] = int(counts.get("fail") or 0)
@@ -5859,13 +5912,25 @@ def get_enrich_status() -> dict[str, Any]:
         for rid_counts in count_regions:
             lib = _region_library_progress(rid_counts)
             tip = _LOCAL_STATUS_TOTALS.get(rid_counts)
-            done_n = int((tip or {}).get("done") or ui_counts.get("done") or 0)
-            soft_n = int((tip or {}).get("soft") or ui_counts.get("soft") or 0)
-            fail_n = int((tip or {}).get("fail") or ui_counts.get("fail") or 0)
-            if tip:
-                ui_counts["done"] = done_n
-                ui_counts["soft"] = soft_n
-                ui_counts["fail"] = fail_n
+            db_done = int(ui_counts.get("done") or 0)
+            db_soft = int(ui_counts.get("soft") or 0)
+            db_fail = int(ui_counts.get("fail") or 0)
+            # 扫描缓存与库内取大：避免 tip=0 把真实成功钉死
+            done_n = max(int((tip or {}).get("done") or 0), db_done)
+            soft_n = max(int((tip or {}).get("soft") or 0), db_soft)
+            fail_n = max(int((tip or {}).get("fail") or 0), db_fail)
+            if tip and (
+                done_n > int(tip.get("done") or 0)
+                or soft_n > int(tip.get("soft") or 0)
+                or fail_n > int(tip.get("fail") or 0)
+            ):
+                _lift_local_status_totals_from_counts(
+                    rid_counts,
+                    {"done": done_n, "soft": soft_n, "fail": fail_n},
+                )
+            ui_counts["done"] = done_n
+            ui_counts["soft"] = soft_n
+            ui_counts["fail"] = fail_n
             vector_total = int(lib.get("total") or 0)
             # 成功含软成功：所有番号 − 成功 − 失败 ≡ total − done − soft − fail
             ui_counts["pending"] = max(0, vector_total - done_n - soft_n - fail_n)
@@ -6198,6 +6263,15 @@ def _patch_queue_item(
             region = str(
                 row.get("region") or _enrich_job.get("currentRegion") or ""
             )
+            if old_st != new_st and new_st in {"done", "fail"}:
+                _lift_local_status_totals_from_counts(
+                    region,
+                    {
+                        "done": int(counts.get("done") or 0),
+                        "soft": int(counts.get("soft") or 0),
+                        "fail": int(counts.get("fail") or 0),
+                    },
+                )
     if updated is not None:
         # 预览不落库，但内存态照改 —— UI 仍要看到「本行将被补齐」
         if persist:
@@ -7181,7 +7255,7 @@ def _payload_field_code(payload: dict[str, Any] | None) -> str:
 
 
 def _queue_log_demote_false_dones(region: str) -> int:
-    """成功/软成功但无本地目录或字段番号串号 → 退回 pending 重刮。"""
+    """成功/软成功/失败但无本地目录或字段番号串号 → 退回 pending 重刮。"""
     rid = _queue_log_region(region)
     if not rid:
         return 0
@@ -7192,9 +7266,9 @@ def _queue_log_demote_false_dones(region: str) -> int:
         with connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, code, item_id, error, gaps_json, payload_json
+                SELECT id, code, item_id, error, gaps_json, payload_json, status
                 FROM enrich_queue_log
-                WHERE region=? AND status='done'
+                WHERE region=? AND status IN ('done', 'fail')
                 """,
                 (rid,),
             ).fetchall()
@@ -7205,11 +7279,13 @@ def _queue_log_demote_false_dones(region: str) -> int:
                     code = str(raw.get("code") or "").strip().upper()
                     iid = str(raw.get("item_id") or "").strip()
                     payload_raw = raw.get("payload_json")
+                    st = str(raw.get("status") or "").strip().lower()
                 else:
                     lid = int(raw[0] or 0)
                     code = str(raw[1] or "").strip().upper()
                     iid = str(raw[2] or "").strip()
                     payload_raw = raw[5]
+                    st = str(raw[6] if len(raw) > 6 else "").strip().lower()
                 if lid <= 0:
                     continue
                 try:
@@ -7230,6 +7306,9 @@ def _queue_log_demote_false_dones(region: str) -> int:
                     region=rid, code=code, item_id=iid
                 )
                 missing_disk = folder is None or not _local_poster_ok(folder)
+                # fail：仅本地已删才回 pending（仍缺封面的 fail 保持失败）
+                if st == "fail" and not missing_disk and not code_mismatch:
+                    continue
                 if not code_mismatch and not missing_disk:
                     continue
                 reason = (
@@ -7251,7 +7330,7 @@ def _queue_log_demote_false_dones(region: str) -> int:
                     UPDATE enrich_queue_log
                     SET status='pending', error=?, gaps_json=?, payload_json=?,
                         updated_at=NOW()
-                    WHERE id=? AND status='done'
+                    WHERE id=? AND status IN ('done', 'fail')
                     """,
                     (
                         reason[:500],
@@ -10372,6 +10451,15 @@ def _merge_got(
                     merged["titleMapApplied"] = True
             except Exception:  # noqa: BLE001
                 pass
+        # 轻量补系列/发行/官网等，供早停判断「元数据是否已齐」
+        try:
+            from app.scrap_library.enrich_extras import pick_secondary_fields
+
+            for k, v in pick_secondary_fields(details).items():
+                if v and not merged.get(k):
+                    merged[k] = v
+        except Exception:  # noqa: BLE001
+            pass
         return merged
 
     # MDCX 映射段：色花堂标题 → 演员 → 标签 → 简介换行（封面下载之前）
@@ -10798,6 +10886,31 @@ def _got_has_zh_plot(got: dict[str, dict[str, Any]]) -> bool:
     return False
 
 
+# 常能补齐系列/发行/官网/预告的源：缺口齐后仍稍等它们，避免主源早停把这些字段丢掉
+_META_FILL_SOURCE_IDS = frozenset(
+    {
+        "dmm",
+        "mgstage",
+        "r18dev",
+        "jav321",
+        "libredmm",
+        "avbase",
+        "avwikidb",
+        "prestige",
+    }
+)
+
+
+def _detail_meta_incomplete(detail: dict[str, Any] | None) -> bool:
+    """系列 / 发行 / 官网 任一仍缺则视为元数据未齐（预告可选，不挡早停）。"""
+    if not detail or not isinstance(detail, dict):
+        return True
+    series = str(detail.get("series") or detail.get("set") or "").strip()
+    publisher = str(detail.get("publisher") or detail.get("label") or "").strip()
+    website = str(detail.get("website") or detail.get("url") or "").strip()
+    return not (series and publisher and website.startswith(("http://", "https://")))
+
+
 def _may_early_stop(
     detail: dict[str, Any] | None,
     gaps: list[str] | None,
@@ -10806,23 +10919,36 @@ def _may_early_stop(
     batch: list[dict[str, Any]],
     finished: set[str],
 ) -> bool:
-    """缺口齐了才可早停；缺标题/剧情时优先等中文源，避免日文先回就掐掉 airav/iqqtv。"""
+    """缺口齐了才可早停；缺标题/剧情时优先等中文源；元数据未齐时再等 DMM/MGS 等。"""
+    import app.scrape.source_catalog as catalog
+
     if not _detail_satisfies_gaps(detail, gaps, code=code):
         return False
     gap_set = {str(g).strip() for g in (gaps or []) if str(g).strip()}
     need_zh = bool(gap_set & {"thin_title", "no_plot"})
-    if not need_zh or not detail:
-        return True
-    title_ok = True
-    plot_ok = True
-    if "thin_title" in gap_set:
-        title_ok = _zh_prefer_bonus(str(detail.get("title") or "")) > 0
-    if "no_plot" in gap_set:
-        plot_ok = _zh_prefer_bonus(str(detail.get("overview") or "")) > 0
-    if title_ok and plot_ok:
-        return True
-    pending = _cn_text_ids_in_batch(batch) - finished
-    return not pending
+    if need_zh and detail:
+        title_ok = True
+        plot_ok = True
+        if "thin_title" in gap_set:
+            title_ok = _zh_prefer_bonus(str(detail.get("title") or "")) > 0
+        if "no_plot" in gap_set:
+            plot_ok = _zh_prefer_bonus(str(detail.get("overview") or "")) > 0
+        if not (title_ok and plot_ok):
+            pending = _cn_text_ids_in_batch(batch) - finished
+            if pending:
+                return False
+    # 主缺口已齐，但系列/发行/官网仍缺：若本批还有元数据源未回，继续等
+    if _detail_meta_incomplete(detail):
+        pending_meta: set[str] = set()
+        for src in batch:
+            sid = catalog.canonicalize_id(str(src.get("id") or ""))
+            if not sid or sid in finished:
+                continue
+            if sid in _META_FILL_SOURCE_IDS:
+                pending_meta.add(sid)
+        if pending_meta:
+            return False
+    return True
 
 
 def _gaps_likely_ready(
@@ -12100,7 +12226,9 @@ def merge_nfo_with_detail(
     if publisher:
         _put("publisher", publisher, do_force=force)
         _put("label", publisher, do_force=force)
-    trailer = str(detail.get("trailer") or "").strip()
+    trailer = str(
+        detail.get("trailer") or detail.get("trailerUrl") or ""
+    ).strip()
     if trailer:
         _put("trailer", trailer, do_force=force)
     website = str(detail.get("website") or detail.get("url") or "").strip()
@@ -12785,10 +12913,10 @@ def reingest_folder(folder: Path) -> dict[str, Any] | None:
 
 
 def patch_folder_meta_no_embed(folder: Path) -> dict[str, Any]:
-    """本地刮削后：只回写标题/source_text/封面路径，不重嵌。
+    """本地刮削后：回写标题/source_text/封面路径，并覆盖旧 embedding。
 
     分区批量 sync_vector=False 时必须调用，否则缺口仍按旧向量行计算，
-    再启动会把刚刮过的番号又排进队。
+    再启动会把刚刮过的番号又排进队。二次刮削直接覆盖向量库已有行（embedding 置零待再同步）。
     """
     nfo = _find_nfo(folder)
     if not nfo:
@@ -12822,7 +12950,7 @@ def patch_folder_meta_no_embed(folder: Path) -> dict[str, Any]:
     iid = str(item.get("item_id") or "").strip()
     if not iid:
         return {"ok": False, "patched": False, "error": "missing_item_id"}
-    # 无行时占位零向量；已有行不改 embedding
+    # 无行时占位零向量；二次刮削：已有行也覆盖 embedding（清旧向量，待再同步）
     zero_lit = embed_svc._vec_literal([0.0] * dim)  # noqa: SLF001
     pool = get_meta_pool()
     with pool.connection() as conn, conn.cursor() as cur:
@@ -12848,6 +12976,7 @@ def patch_folder_meta_no_embed(folder: Path) -> dict[str, Any]:
               dim = EXCLUDED.dim,
               content_sha = EXCLUDED.content_sha,
               source_text = EXCLUDED.source_text,
+              embedding = EXCLUDED.embedding,
               updated_at = now()
             """,
             (
@@ -12873,6 +13002,7 @@ def patch_folder_meta_no_embed(folder: Path) -> dict[str, Any]:
         "ok": True,
         "patched": True,
         "embedded": False,
+        "overwritten": True,
         "itemId": iid,
         "code": item.get("code"),
         "title": item.get("title"),
@@ -13780,6 +13910,18 @@ def run_enrich(
             _push_log(f"队列 {len(queue)} 条", region=region)
         else:
             # 增量/弱项：边扫边刮——扫描线程分批入队，worker 立刻开刮
+            # 开刮前再 demote 一次：本地已删的 done/fail → pending
+            try:
+                _demoted_false_dones.discard(region)
+                demoted_run = _queue_log_demote_false_dones(region)
+                _demoted_false_dones.add(region)
+                if demoted_run:
+                    _push_log(
+                        f"本地已删回滚 · {demoted_run} 条 → 未处理",
+                        region=region,
+                    )
+            except Exception as e:  # noqa: BLE001
+                log.warning("enrich start demote failed: %s", e)
             skip_done_iids, skip_done_codes = _queue_log_done_keys(region)
             try:
                 lib = _region_library_progress(region)

@@ -1460,6 +1460,58 @@ def enrich_all_items(
     return out
 
 
+def list_region_code_items(
+    *,
+    region: str = "",
+    limit: int = 0,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    """分区全部有番号行，按 code ASC（含已齐元数据）。
+
+    用于「向量有、本地无」回填未处理；与 quality_incomplete 不同，不按缺口过滤。
+    """
+    ensure_schema()
+    raw_lim = int(limit) if limit is not None else 0
+    off = max(0, int(offset or 0))
+    unlimited = raw_lim <= 0
+    lim = None if unlimited else max(1, min(20_000, raw_lim))
+    region_sql, params = _quality_region_sql(region)
+    sql_params: list[Any] = [*params]
+    sql_limit = ""
+    if not unlimited:
+        sql_limit = " LIMIT %s OFFSET %s"
+        sql_params.extend([int(lim), off])
+    elif off > 0:
+        # 无上限但带 offset：用大 LIMIT + OFFSET
+        sql_limit = " LIMIT %s OFFSET %s"
+        sql_params.extend([2_000_000, off])
+    pool = get_meta_pool()
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT item_id, region, prefix, code, title, rel_path,
+                   poster_path, thumb_path, cover_url, source_text, content_sha
+            FROM {TABLE}
+            WHERE coalesce(trim(code), '') <> ''
+              {region_sql}
+            ORDER BY code ASC
+            {sql_limit}
+            """,
+            sql_params,
+        )
+        rows = cur.fetchall() or []
+    out: list[dict[str, Any]] = []
+    for raw in rows:
+        d = dict(raw) if isinstance(raw, dict) else {}
+        if not d:
+            continue
+        shell = bool(
+            str(d.get("content_sha") or "").startswith(f"{SKELETON_SHA_PREFIX}:")
+        )
+        out.append(_queue_item_from_row(d, shell=shell))
+    return out
+
+
 def _media_rel(path: Path, *, media_root: Path | None = None) -> str:
     """绝对路径 → 相对 media/；失败则空。"""
     try:

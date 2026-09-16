@@ -135,7 +135,11 @@ class NfoAtomicWriteTest(unittest.TestCase):
                 ET.SubElement(root, "title").text = f"t{i}"
                 write_nfo(path, root)
                 ET.fromstring(path.read_text(encoding="utf-8"))
-            self.assertEqual(format_nfo_xml(ET.fromstring(path.read_text(encoding="utf-8"))).endswith(b"\n"), True)
+            self.assertTrue(
+                format_nfo_xml(ET.fromstring(path.read_text(encoding="utf-8"))).endswith(
+                    b"</movie>"
+                )
+            )
 
 
 class AtomicIoToolTest(unittest.TestCase):

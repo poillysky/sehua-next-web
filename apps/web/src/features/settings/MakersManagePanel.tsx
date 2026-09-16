@@ -217,11 +217,17 @@ export function MakersManagePanel({
   const enrichPollingRef = useRef(false);
   /** 用户点了停止：禁止轮询把开关又拨开 */
   const enrichStopRequestedRef = useRef(false);
-  /** 本轮补齐速度：按 (成功+失败) 增量 / 分钟 */
+  /** 本轮补齐速度：平滑显示，避免部/分与阶段文案来回闪 */
   const enrichSpeedRef = useRef<{
     regionId: string;
     t0: number;
     fin0: number;
+    /** 已进入补齐后不再退回「筛选/排队」 */
+    lockedEnrich: boolean;
+    /** 平滑后的部/分 */
+    rateEma: number | null;
+    /** 上次展示的速率文案 */
+    rateText: string;
   } | null>(null);
   const [scanLogModal, setScanLogModal] = useState<ScanLogModal>(null);
   const [gateBusy, setGateBusy] = useState(false);
@@ -1172,6 +1178,9 @@ export function MakersManagePanel({
                 regionId: speedRid,
                 t0: Date.now(),
                 fin0: fin,
+                lockedEnrich: false,
+                rateEma: null,
+                rateText: '',
               };
             }
           } else {
@@ -2121,8 +2130,25 @@ export function MakersManagePanel({
                 Boolean(cp) ||
                 (prog != null &&
                   (remainLabel || okN != null || failN != null));
-              const stageLabel = active
-                ? queueStage
+              const finN = Number(okN || 0) + Number(failN || 0);
+              const speedState =
+                enrichSpeedRef.current?.regionId === region.id
+                  ? enrichSpeedRef.current
+                  : null;
+              // 一旦真正开始补齐（有完成数，或 stage=enrich），锁住「补齐中」，避免 queue 心跳闪回筛选
+              if (
+                active &&
+                speedState &&
+                (finN > 0 ||
+                  prog?.stage === 'enrich' ||
+                  prog?.stage === 'disk' ||
+                  prog?.stage === 'write')
+              ) {
+                speedState.lockedEnrich = true;
+              }
+              const stickEnrich = Boolean(active && speedState?.lockedEnrich);
+              let stageLabel = active
+                ? queueStage && !stickEnrich
                   ? String(prog?.label || '').trim() ||
                     (enrichMode === 'overwrite' ? '排队' : '筛选')
                   : prog?.stage === 'done'
@@ -2134,17 +2160,42 @@ export function MakersManagePanel({
                     ? '已完成'
                     : '进度';
               const rateLabel = (() => {
-                if (!active || queueStage || stageLabel !== '补齐中') return '';
-                const sp = enrichSpeedRef.current;
-                if (!sp || sp.regionId !== region.id) return '';
-                const fin = Number(okN || 0) + Number(failN || 0);
+                if (!active) return '';
+                if (stageLabel !== '补齐中') {
+                  // 短暂非补齐阶段仍保留已显示的速率，避免「· 25部/分」闪没
+                  return stickEnrich && speedState?.rateText
+                    ? speedState.rateText
+                    : '';
+                }
+                const sp = speedState;
+                if (!sp) return '';
                 const mins = (Date.now() - sp.t0) / 60000;
-                if (mins < 0.05) return '';
-                const perMin = Math.max(0, fin - sp.fin0) / mins;
-                if (perMin < 0.05 && mins < 0.5) return '';
-                return perMin >= 10
-                  ? `${Math.round(perMin)} 部/分`
-                  : `${perMin.toFixed(1).replace(/\.0$/, '')} 部/分`;
+                if (mins < 0.08) return sp.rateText || '';
+                const instant = Math.max(0, finN - sp.fin0) / mins;
+                if (instant < 0.05 && mins < 0.6 && sp.rateEma == null) {
+                  return sp.rateText || '';
+                }
+                // EMA 平滑，避免部/分来回跳
+                const next =
+                  sp.rateEma == null
+                    ? instant
+                    : sp.rateEma * 0.72 + instant * 0.28;
+                sp.rateEma = next;
+                // 整数档位滞后：变化不足 1 不改展示数字
+                const prevShown = Number.parseFloat(sp.rateText) || 0;
+                let show = next;
+                if (sp.rateText) {
+                  if (Math.abs(next - prevShown) < 1.0) show = prevShown;
+                  else show = Math.round(next);
+                } else {
+                  show = next >= 10 ? Math.round(next) : next;
+                }
+                const text =
+                  show >= 10 || Number.isInteger(show)
+                    ? `${Math.round(show)} 部/分`
+                    : `${show.toFixed(1).replace(/\.0$/, '')} 部/分`;
+                sp.rateText = text;
+                return text;
               })();
 
               return (

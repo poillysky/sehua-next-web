@@ -535,7 +535,7 @@ def format_nfo_xml(root: ET.Element) -> bytes:
     for child in list(root):
         _emit(child, 1)
     lines.append("</movie>")
-    lines.append("")
+    # 参考库无文件尾空行
     return "\n".join(lines).encode("utf-8")
 
 
@@ -651,6 +651,7 @@ def build_mdcx_tag_genre_list(
     series: str = "",
     studio: str = "",
     publisher: str = "",
+    director: str = "",
 ) -> list[str]:
     """参考库 tag/genre 镜像列表。"""
     out: list[str] = []
@@ -668,6 +669,12 @@ def build_mdcx_tag_genre_list(
 
     pref = _num_prefix(num)
     actor_fold = {a.casefold() for a in (actors or []) if str(a).strip()}
+    # 卖家/片商当 actor 时（FC2 常见）不进 tag/genre，参考库只留「片商:」
+    meta_fold = {
+        str(x).strip().casefold()
+        for x in (studio, publisher, director)
+        if str(x).strip()
+    }
     for item in genres or []:
         s = str(item or "").strip()
         if not s:
@@ -682,7 +689,12 @@ def build_mdcx_tag_genre_list(
     if pref:
         push(pref)
     for a in actors or []:
-        push(str(a))
+        name = str(a).strip()
+        if not name:
+            continue
+        if name.casefold() in meta_fold:
+            continue
+        push(name)
     if series:
         push(f"系列: {series}")
     if studio:
@@ -869,6 +881,8 @@ def build_mdcx_nfo_root(fields: dict[str, Any]) -> ET.Element:
     label = str(f.get("label") or publisher).strip()
     actors = [str(a).strip() for a in (f.get("actors") or []) if str(a).strip()]
     genres = [str(g).strip() for g in (f.get("genres") or []) if str(g).strip()]
+    # 参考库常把系列名塞进 director；有真导演则用真导演，否则系列；都空则用片商（FC2）
+    director = str(f.get("director") or "").strip() or series or studio
     tag_genre = build_mdcx_tag_genre_list(
         genres=genres,
         actors=actors,
@@ -876,6 +890,7 @@ def build_mdcx_nfo_root(fields: dict[str, Any]) -> ET.Element:
         series=series,
         studio=studio,
         publisher=publisher,
+        director=director,
     )
     rating = str(f.get("rating") or "").strip()
     criticrating = str(f.get("criticrating") or "").strip()
@@ -901,11 +916,12 @@ def build_mdcx_nfo_root(fields: dict[str, Any]) -> ET.Element:
     _append_text(movie, "countrycode", str(f.get("countrycode") or "JP"))
     _append_text(movie, "customrating", str(f.get("customrating") or "JP-18+"))
     _append_text(movie, "mpaa", str(f.get("mpaa") or "JP-18+"))
+    # 有系列才写 set；无系列仍保留空 <series/>（与参考库一致）
     if series:
         set_el = ET.SubElement(movie, "set")
         set_name = ET.SubElement(set_el, "name")
         set_name.text = series
-    _append_text(movie, "series", series)
+    _append_text(movie, "series", series, empty_ok=True)
     _append_text(movie, "studio", studio)
     _append_text(movie, "maker", maker or studio)
     _append_text(movie, "year", year)
@@ -913,24 +929,24 @@ def build_mdcx_nfo_root(fields: dict[str, Any]) -> ET.Element:
     _append_text(movie, "plot", plot)
     _append_text(movie, "originalplot", originalplot)
     _append_text(movie, "runtime", str(f.get("runtime") or ""))
-    # 参考库常把系列名塞进 director；有真导演则用真导演，否则系列
-    director = str(f.get("director") or "").strip() or series
     _append_text(movie, "director", director)
     _append_text(movie, "poster", str(f.get("poster") or "poster.jpg"))
     _append_text(movie, "thumb", str(f.get("thumb") or "thumb.jpg"))
     _append_text(movie, "fanart", str(f.get("fanart") or "fanart.jpg"))
     _append_text(movie, "trailer", str(f.get("trailer") or ""))
     _append_actors_mdcx(movie, actors)
-    _append_text(movie, "publisher", publisher)
-    _append_text(movie, "label", label or publisher)
+    # 空也写 <publisher/><label/>（FC2 参考库如此）
+    _append_text(movie, "publisher", publisher, empty_ok=True)
+    _append_text(movie, "label", label or publisher, empty_ok=True)
     _append_many(movie, "tag", tag_genre)
     _append_many(movie, "genre", tag_genre)
     _append_text(movie, "num", num)
     _append_text(movie, "premiered", premiered)
     _append_text(movie, "releasedate", releasedate)
     _append_text(movie, "release", release)
-    _append_text(movie, "rating", rating)
-    _append_text(movie, "criticrating", criticrating)
+    # 无评分也保留空节点
+    _append_text(movie, "rating", rating, empty_ok=True)
+    _append_text(movie, "criticrating", criticrating, empty_ok=True)
     # ratings + 空 votes（与参考一致）
     ratings = ET.SubElement(movie, "ratings")
     rating_el = ET.SubElement(

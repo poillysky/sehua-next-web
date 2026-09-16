@@ -178,10 +178,24 @@ def pick_fc2_seller(details: list[tuple[str, dict[str, Any]]]) -> str:
 def pick_secondary_fields(
     details: list[tuple[str, dict[str, Any]]],
 ) -> dict[str, str]:
-    """I52：director / runtime / score，有则取，不阻断。"""
+    """次要字段：director / runtime / score / series / publisher / trailer / website。
+
+    跨源「缺则补」：主源没有时，后面源有就取。不阻断主流程。
+    """
     out: dict[str, str] = {}
+
+    def _need(key: str) -> bool:
+        return not str(out.get(key) or "").strip()
+
+    def _put(key: str, value: str) -> None:
+        v = str(value or "").strip()
+        if v and _need(key):
+            out[key] = v
+
     for _sid, d in details:
-        if not out.get("director"):
+        if not isinstance(d, dict):
+            continue
+        if _need("director"):
             director = str(d.get("director") or "").strip()
             if not director:
                 for x in d.get("directors") or []:
@@ -191,26 +205,62 @@ def pick_secondary_fields(
                         director = str(x or "").strip()
                     if director:
                         break
-            if director:
-                out["director"] = director
-        if not out.get("runtime"):
+            _put("director", director)
+        if _need("runtime"):
             rt = d.get("runtime") or d.get("duration") or d.get("length")
             if rt is not None and str(rt).strip():
-                # 统一成分钟数字串
                 s = str(rt).strip()
                 m = re.search(r"(\d{2,4})", s)
-                out["runtime"] = m.group(1) if m else s[:16]
-        if not out.get("score"):
+                _put("runtime", m.group(1) if m else s[:16])
+        if _need("score"):
             sc = d.get("score") or d.get("rating") or d.get("ratingValue")
             if sc is not None and str(sc).strip():
                 try:
                     f = float(str(sc).strip())
                     if 0 < f <= 10:
-                        out["score"] = f"{f:.2f}".rstrip("0").rstrip(".")
+                        _put("score", f"{f:.2f}".rstrip("0").rstrip("."))
                 except ValueError:
                     pass
-        if len(out) >= 3:
+        if _need("series"):
+            series = str(d.get("series") or d.get("set") or "").strip()
+            # 拒掉纯占位
+            if series and series not in {"-", "—", "N/A", "n/a"}:
+                _put("series", series)
+        if _need("publisher"):
+            pub = str(d.get("publisher") or d.get("label") or "").strip()
+            if pub:
+                _put("publisher", pub)
+        if _need("label"):
+            lab = str(d.get("label") or d.get("publisher") or "").strip()
+            if lab:
+                _put("label", lab)
+        if _need("trailer"):
+            trail = str(
+                d.get("trailer") or d.get("trailerUrl") or d.get("preview") or ""
+            ).strip()
+            if trail.startswith(("http://", "https://")):
+                _put("trailer", trail)
+        if _need("website"):
+            web = str(
+                d.get("website") or d.get("url") or d.get("pageUrl") or ""
+            ).strip()
+            if web.startswith(("http://", "https://")):
+                _put("website", web)
+        # 系列/发行/官网齐了就可提前结束扫源；预告可选
+        if (
+            not _need("director")
+            and not _need("runtime")
+            and not _need("score")
+            and not _need("series")
+            and not _need("publisher")
+            and not _need("website")
+        ):
             break
+    # label 与 publisher 互相同步
+    if out.get("publisher") and not out.get("label"):
+        out["label"] = out["publisher"]
+    if out.get("label") and not out.get("publisher"):
+        out["publisher"] = out["label"]
     return out
 
 
@@ -277,11 +327,14 @@ def apply_merge_extras(
                 merged["actorRole"] = "seller"
                 acts = [seller]
 
-    # I52
+    # I52：director/runtime/score + 系列/发行/预告/官网（主源缺则后源补）
     sec = pick_secondary_fields(details)
     for k, v in sec.items():
         if v and not merged.get(k):
             merged[k] = v
+    # rating 别名：NFO 写 score；保留两者
+    if merged.get("score") and not merged.get("rating"):
+        merged["rating"] = merged["score"]
 
     # I47 / I50：从 tags 抽 badge/facet
     tags = list(merged.get("tags") or [])
