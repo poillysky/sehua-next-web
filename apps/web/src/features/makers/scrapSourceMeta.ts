@@ -6,6 +6,12 @@ export type ScrapSourceMeta = {
   code: string;
   title: string;
   originalTitle: string;
+  originalPlot: string;
+  outlineShow: string;
+  badges: string[];
+  cnsub: boolean;
+  definition: string;
+  mosaic: string;
   actresses: string[];
   studio: string;
   label: string;
@@ -20,6 +26,11 @@ const LINE_RE: Record<string, RegExp> = {
   code: /^番号：(.+)$/m,
   title: /^标题：(.+)$/m,
   originalTitle: /^原标题：(.+)$/m,
+  originalPlot: /^原剧情：([\s\S]+?)(?=\n[^\s][^：\n]*：|$)/m,
+  outlineShow: /^双语：(.+)$/m,
+  badges: /^角标：(.+)$/m,
+  definition: /^清晰度：(.+)$/m,
+  mosaic: /^马赛克：(.+)$/m,
   actress: /^女优：(.+)$/m,
   studio: /^片商：(.+)$/m,
   label: /^发行：(.+)$/m,
@@ -86,6 +97,11 @@ const JUNK_ACTRESS = new Set(
     '美少女',
     '单体作品',
     '單體作品',
+    '出道',
+    '出道作品',
+    'AV出道',
+    'デビュー',
+    '新人',
     '收藏',
     '字幕',
     '翻译',
@@ -177,12 +193,28 @@ export function parseScrapSourceText(sourceText?: string | null): ScrapSourceMet
     const m = /^剧情：(.+)$/m.exec(text);
     plot = m?.[1]?.trim() || '';
   }
+  let originalPlot = line(text, 'originalPlot');
+  if (!originalPlot) {
+    const m = /^原剧情：(.+)$/m.exec(text);
+    originalPlot = m?.[1]?.trim() || '';
+  }
+  const badgeRaw = line(text, 'badges');
+  const badges = badgeRaw ? splitTokens(badgeRaw) : [];
+  const cnsub =
+    /^字幕：中字$/m.test(text) ||
+    badges.some((b) => /中字|字幕|cnsub/i.test(b));
   return {
     region: line(text, 'region'),
     prefix,
     code: line(text, 'code'),
     title: line(text, 'title'),
     originalTitle: line(text, 'originalTitle'),
+    originalPlot,
+    outlineShow: line(text, 'outlineShow') || 'zh',
+    badges,
+    cnsub,
+    definition: line(text, 'definition'),
+    mosaic: line(text, 'mosaic'),
     actresses,
     studio: line(text, 'studio'),
     label: line(text, 'label'),

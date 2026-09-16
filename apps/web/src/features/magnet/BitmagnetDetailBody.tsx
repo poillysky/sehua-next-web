@@ -2,12 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { Copy } from 'lucide-react';
-import {
-  fetchMagnetDetail,
-  fetchMagnetPreview,
-  proxiedCoverUrl,
-  type MagnetHit,
-} from '@/lib/api';
+import { fetchMagnetDetail, fetchMagnetPreview, proxiedCoverUrl, type MagnetHit } from '@/lib/api';
+import { SoftImg } from '@/components/SoftImg';
 import { copyText } from '@/lib/clipboard';
 import { formatByteSize, formatDate } from '@/lib/format';
 import { AppMsg } from '@/components/ui/AppMsg';
@@ -36,11 +32,9 @@ function PreviewGrid({ images }: { images: string[] }) {
       <div className="bm-card__body bm-card__body--preview">
         <div className="detail-preview-grid detail-preview-grid--video">
           {visible.map(({ src, index }) => (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
+            <SoftImg
               key={`${src}-${index}`}
               src={src}
-              alt=""
               loading="lazy"
               className="detail-preview-grid__img"
               onError={() =>

@@ -81,12 +81,14 @@
   box-shadow: var(--shadow-soft);
   -webkit-backdrop-filter: saturate(180%) blur(14px);
   backdrop-filter: saturate(180%) blur(14px);
+  /* 层提升：真机 WebKit 合成缝防渗线 */
+  transform: translateZ(0);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
 
 .home-landing__chip:active {
-  transform: scale(0.97);
+  transform: translateZ(0) scale(0.97);
   background: rgba(0, 122, 255, 0.08);
 }
 
@@ -422,6 +424,8 @@
   box-sizing: border-box;
   border: 0.5px solid var(--hairline);
   background: rgba(255, 255, 255, 0.92);
+  /* 层提升：顶栏搜索框独立图层，加载/滚动时底缘不再闪横向层缝线 */
+  transform: translateZ(0);
   transition: border-color 0.15s var(--ease-ios), box-shadow 0.2s var(--ease-ios);
 }
 
@@ -696,6 +700,8 @@
   background: rgba(255, 255, 255, 0.96);
   -webkit-backdrop-filter: saturate(180%) blur(16px);
   backdrop-filter: saturate(180%) blur(16px);
+  /* 层提升：真机 WebKit 合成缝防渗线 */
+  transform: translateZ(0);
   box-shadow:
     0 8px 28px rgba(var(--shadow-color), 0.14),
     0 0 0 0.5px var(--hairline);
@@ -750,7 +756,8 @@
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    /* 保留 translateZ：动画 fill 结束后仍维持层提升，防止 WebKit 合成缝渗线 */
+    transform: translateZ(0) translateY(0) scale(1);
   }
 }
 
@@ -2541,8 +2548,41 @@
   padding: 8px 14px 10px;
 }
 
-.bm-card__preview-hit {
-  width: 100%;
+/* 色花列表卡片：中间链接行 */
+.bm-card__body--links {
+  padding: 4px 14px 6px;
+}
+
+.bm-card__links {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.bm-card__link-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 6px 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  border-bottom: 0.5px solid color-mix(in srgb, var(--hairline) 85%, transparent);
+}
+
+.bm-card__link-row:last-child {
+  border-bottom: 0;
+}
+
+.bm-card__link-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 0;
   padding: 0;
   border: 0;
@@ -2554,53 +2594,76 @@
   touch-action: pan-y;
 }
 
-.bm-card__preview-hit:active {
-  opacity: 0.92;
+.bm-card__link-main:active {
+  opacity: 0.72;
 }
 
-/* 列表卡片预览：单行 5 格，竖图 1 格、横图 2 格；不 stretch，单图也保持同高 */
-.bm-card__preview-strip {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 4px;
-  width: 100%;
-  justify-items: stretch;
-  align-items: start;
-}
-
-.bm-card__preview-slot {
-  position: relative;
-  grid-column: span 1;
-  width: 100%;
+.bm-card__link-text {
+  flex: 1;
   min-width: 0;
-  aspect-ratio: 3 / 4;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bm-card__link-primary {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+  color: var(--ink);
+  white-space: nowrap;
   overflow: hidden;
-  border-radius: 6px;
-  background: var(--bg-soft);
-  box-shadow: inset 0 0 0 0.5px var(--hairline);
+  text-overflow: ellipsis;
 }
 
-.bm-card__preview-slot--landscape {
-  grid-column: span 2;
-  aspect-ratio: 3 / 2;
+.bm-card__link-primary--uri {
+  font-weight: 400;
+  font-size: 12px;
+  white-space: normal;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 
-.bm-card__preview-slot--pending {
-  background: color-mix(in srgb, var(--bg-soft) 70%, var(--hairline));
+.bm-card__link-secondary {
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  color: var(--mute);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.bm-card__preview-img {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+.bm-card__links-empty {
+  margin: 4px 2px;
+  font-size: 12px;
+  color: var(--mute);
+}
+
+.bm-card__links-more {
   display: block;
+  width: 100%;
+  margin: 4px 0 0;
+  padding: 6px 2px 2px;
   border: 0;
+  background: none;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 550;
+  color: var(--mute);
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.bm-card__preview-img--loading {
-  opacity: 0;
+.bm-card__links-more:active {
+  opacity: 0.7;
 }
 
 .bm-action-btn,

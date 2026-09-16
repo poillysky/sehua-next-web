@@ -34,6 +34,9 @@ function toToastKind(tone: AppMsgTone): ToastKind {
 }
 
 /** 页面提示：走全局 Toast 弹层，不再挤占正文布局 */
+const recentToastKeys = new Map<string, number>();
+const TOAST_DEDUPE_MS = 8000;
+
 export function AppMsg({
   children,
   tone,
@@ -63,7 +66,20 @@ export function AppMsg({
     }
     const key = `${tone ?? ''}|${duration}|${text}`;
     if (key === lastKey.current) return;
+    // 热重载 / 组件 remount 会清掉 ref，用模块级短窗去重避免「完成」提示再弹一次
+    const now = Date.now();
+    const prevAt = recentToastKeys.get(key) || 0;
+    if (now - prevAt < TOAST_DEDUPE_MS) {
+      lastKey.current = key;
+      return;
+    }
     lastKey.current = key;
+    recentToastKeys.set(key, now);
+    if (recentToastKeys.size > 40) {
+      for (const [k, t] of recentToastKeys) {
+        if (now - t > TOAST_DEDUPE_MS) recentToastKeys.delete(k);
+      }
+    }
 
     const resolved = tone ?? inferTone(text);
     toast(text, toToastKind(resolved), {

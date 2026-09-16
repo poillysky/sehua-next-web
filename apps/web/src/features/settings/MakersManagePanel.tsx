@@ -16,9 +16,11 @@ import {
   getScrapActressOptimizeStatus,
   getScrapActressAvatarStatus,
   getScrapLibraryEnrichStatus,
+  subscribeScrapLibraryEnrichStatus,
   pauseScrapLibraryEnrich,
-  stopScrapLibraryEnrich,
   getScrapLibraryQuality,
+  getScrapLibraryQualityGate,
+  getScrapLibraryQualityItems,
   getScrapEnrichStrategy,
   putScrapEnrichStrategy,
   mkdirPrefixCatalogStrmDir,
@@ -75,6 +77,14 @@ type CatalogNav =
       regionLabel: string;
       prefix: string;
     };
+
+function normalizeEnrichFillMode(
+  raw: string | undefined,
+): 'incremental' | 'refresh_weak' | 'overwrite' {
+  if (raw === 'overwrite') return 'overwrite';
+  if (raw === 'refresh_weak') return 'refresh_weak';
+  return 'incremental';
+}
 
 export function MakersManagePanel({
   onBack,
@@ -182,16 +192,28 @@ export function MakersManagePanel({
     pending: number;
     running: number;
     done: number;
+    soft: number;
     fail: number;
   } | null>(null);
-  const [enrichMode, setEnrichMode] = useState<'incremental' | 'overwrite'>(
-    'incremental',
-  );
+  const [enrichLibrary, setEnrichLibrary] = useState<
+    Record<
+      string,
+      {
+        total?: number;
+        incomplete?: number;
+        complete?: number;
+        percent?: number;
+      }
+    >
+  >({});
+  const [enrichMode, setEnrichMode] = useState<
+    'incremental' | 'refresh_weak' | 'overwrite'
+  >('incremental');
   const [enrichRegions, setEnrichRegions] = useState<
     Array<{ id: string; label: string; enabled: boolean }>
   >([]);
   const [enrichRegionBusy, setEnrichRegionBusy] = useState(false);
-  const enrichPollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const enrichPollRef = useRef<AbortController | null>(null);
   const enrichPollingRef = useRef(false);
   /** 用户点了停止：禁止轮询把开关又拨开 */
   const enrichStopRequestedRef = useRef(false);
@@ -202,6 +224,8 @@ export function MakersManagePanel({
     fin0: number;
   } | null>(null);
   const [scanLogModal, setScanLogModal] = useState<ScanLogModal>(null);
+  const [gateBusy, setGateBusy] = useState(false);
+  const [gateSummary, setGateSummary] = useState('');
 
   async function refreshScrapQuality(regionIds?: string[]) {
     const ids =
@@ -227,6 +251,8 @@ export function MakersManagePanel({
   }
 
   useEffect(() => {
+    // 热重载会保留旧 msg，避免进页再弹一次完成 Toast
+    setMsg('');
     void (async () => {
       try {
         setCatalogSummary(await getPrefixCatalogSummary());
@@ -253,13 +279,8 @@ export function MakersManagePanel({
           setScrapProgress(st.progress || null);
           setScrapLog(Array.isArray(st.log) ? st.log.slice(-40) : []);
           void pollScrapEmbedUntilDone();
-        } else if (st.result && !st.error) {
-          // 刚完成：保留结果文案，进度条可空
-          const written = st.result.written ?? 0;
-          const total = st.result.total ?? 0;
-          setScrapLog(Array.isArray(st.log) ? st.log.slice(-40) : []);
-          setMsg(`刮削库已写入元库 · ${written}/${total}`);
         }
+        // 已完成的结果不在每次打开时再弹提示（完成时已提示过）
       } catch {
         /* ignore */
       }
@@ -282,6 +303,55 @@ export function MakersManagePanel({
             ? st.checkpoints
             : {},
         );
+        if (st.queueCounts) {
+          setEnrichQueueCounts({
+            pending: Number(st.queueCounts.pending || 0),
+            running: Number(st.queueCounts.running || 0),
+            done: Number(st.queueCounts.done || 0),
+            soft: Number(st.queueCounts.soft || 0),
+            fail: Number(st.queueCounts.fail || 0),
+          });
+        }
+        if (st.library && typeof st.library === 'object') {
+          setEnrichLibrary(st.library);
+        }
+        // 暂停检查点：用库回填后的 ok/failed/remaining 画分区进度
+        if (!st.running && st.checkpoints) {
+          const byRegion: Record<
+            string,
+            PrefixCatalogLocalIndexProgress | null
+          > = {};
+          for (const [rid, cp] of Object.entries(st.checkpoints)) {
+            if (!cp) continue;
+            const lib = st.library?.[rid];
+            const done = Number(
+              lib?.complete ?? cp.ok ?? cp.done ?? 0,
+            );
+            const failed = Number(cp.failed ?? 0);
+            const total = Number(
+              lib?.total ??
+                cp.total ??
+                done + failed + Number(cp.remaining ?? 0),
+            );
+            byRegion[rid] = {
+              stage: 'done',
+              label: '已暂停',
+              done,
+              total,
+              ok: Number(cp.ok ?? 0),
+              failed,
+              percent:
+                typeof lib?.percent === 'number'
+                  ? Math.round(lib.percent)
+                  : total > 0
+                    ? Math.round((100 * done) / total)
+                    : 0,
+            };
+          }
+          if (Object.keys(byRegion).length) {
+            setEnrichProgressByRegion(byRegion);
+          }
+        }
         const runningRegion = String(st.currentRegion || '').trim();
         if (st.running) {
           setEnrichBusy(true);
@@ -304,8 +374,11 @@ export function MakersManagePanel({
         }
         try {
           const strat = await getScrapEnrichStrategy();
-          setEnrichMode(
-            strat.fillMode === 'overwrite' ? 'overwrite' : 'incremental',
+          setEnrichMode(normalizeEnrichFillMode(strat.fillMode));
+          setActressAvatarMode(
+            strat.actressAvatarMode === 'overwrite'
+              ? 'overwrite'
+              : 'incremental',
           );
           // 开关 = 开始/暂停：仅当前正在跑的分区保持开
           setEnrichRegions(
@@ -329,8 +402,11 @@ export function MakersManagePanel({
       } catch {
         try {
           const strat = await getScrapEnrichStrategy();
-          setEnrichMode(
-            strat.fillMode === 'overwrite' ? 'overwrite' : 'incremental',
+          setEnrichMode(normalizeEnrichFillMode(strat.fillMode));
+          setActressAvatarMode(
+            strat.actressAvatarMode === 'overwrite'
+              ? 'overwrite'
+              : 'incremental',
           );
           setEnrichRegions(
             (strat.regions || MAKER_KIND_TABS.map((t) => ({ id: t.id, label: t.label }))).map(
@@ -363,7 +439,7 @@ export function MakersManagePanel({
       if (actressOptPollRef.current) clearTimeout(actressOptPollRef.current);
       if (actressAvatarPollRef.current)
         clearTimeout(actressAvatarPollRef.current);
-      if (enrichPollRef.current) clearTimeout(enrichPollRef.current);
+      enrichPollRef.current?.abort();
     };
   }, []);
 
@@ -652,34 +728,37 @@ export function MakersManagePanel({
     }
   }
 
-  async function pollScrapEmbedUntilDone() {
+  async function pollScrapEmbedUntilDone(opts?: { notify?: boolean }) {
     if (scrapPollingRef.current) return;
     scrapPollingRef.current = true;
+    // 用户刚点的同步：即使首轮已结束也要提示；挂载续跑则必须亲眼见过 running
+    let seenRunning = Boolean(opts?.notify);
     try {
       for (;;) {
         const st = await getScrapLibraryEmbedStatus();
+        if (st.running) seenRunning = true;
         setScrapBusy(st.running);
         setScrapPhase(st.phase || (st.running ? '同步中…' : ''));
         setScrapProgress(st.progress || null);
         setScrapLog(Array.isArray(st.log) ? st.log.slice(-40) : []);
         if (!st.running) {
-          if (st.error) {
-            setMsg(st.error);
-            onStatus('刮削库向量同步失败', 'warn');
-            setScrapBusy(false);
-            return;
+          if (seenRunning) {
+            if (st.error) {
+              setMsg(st.error);
+              onStatus('刮削库向量同步失败', 'warn');
+            } else if (st.result) {
+              const written = st.result.written ?? 0;
+              const total = st.result.total ?? 0;
+              const deleted = st.result.deleted ?? 0;
+              setMsg(
+                deleted > 0
+                  ? `刮削库已写入元库 · ${written}/${total} · 删多余 ${deleted}`
+                  : `刮削库已写入元库 · ${written}/${total}`,
+              );
+              onStatus('刮削库向量已同步', 'ok');
+            }
           }
-          if (st.result) {
-            const written = st.result.written ?? 0;
-            const total = st.result.total ?? 0;
-            const deleted = st.result.deleted ?? 0;
-            setMsg(
-              deleted > 0
-                ? `刮削库已写入元库 · ${written}/${total} · 删多余 ${deleted}`
-                : `刮削库已写入元库 · ${written}/${total}`,
-            );
-            onStatus('刮削库向量已同步', 'ok');
-          }
+          setScrapBusy(false);
           setScrapPhase('');
           setScrapProgress(null);
           // 保留日志供弹窗回看
@@ -694,7 +773,7 @@ export function MakersManagePanel({
     }
   }
 
-  async function onScrapEmbedSync() {
+  async function onScrapEmbedSync(force = false) {
     if (
       strmBusy ||
       localIndexBusy ||
@@ -708,13 +787,16 @@ export function MakersManagePanel({
     const root = scrapRoot.trim() || 'scrap-library';
     setMsg('');
     setScrapBusy(true);
-    setScrapPhase('starting');
+    setScrapPhase(force ? '全量同步…' : '增量同步…');
     setScrapProgress({ stage: 'prepare', percent: 0, label: 'starting' });
     setScrapLog([]);
-    onStatus('刮削库向量同步中…', 'mute');
+    onStatus(
+      force ? '刮削库全量向量同步中…' : '刮削库增量向量同步中（跳过已有）…',
+      'mute',
+    );
     try {
-      await startScrapLibraryEmbed({ root });
-      await pollScrapEmbedUntilDone();
+      await startScrapLibraryEmbed({ root, force });
+      await pollScrapEmbedUntilDone({ notify: true });
     } catch (e) {
       setScrapBusy(false);
       setScrapPhase('');
@@ -725,32 +807,35 @@ export function MakersManagePanel({
     }
   }
 
-  async function pollActressOptUntilDone() {
+  async function pollActressOptUntilDone(opts?: { notify?: boolean }) {
     if (actressOptPollingRef.current) return;
     actressOptPollingRef.current = true;
+    let seenRunning = Boolean(opts?.notify);
     try {
       for (;;) {
         const st = await getScrapActressOptimizeStatus();
+        if (st.running) seenRunning = true;
         setActressOptBusy(st.running);
         setActressOptPhase(st.phase || (st.running ? '优化中…' : ''));
         setActressOptProgress(st.progress || null);
         setActressOptLog(Array.isArray(st.log) ? st.log.slice(-40) : []);
         if (!st.running) {
-          if (st.error) {
-            setMsg(st.error);
-            onStatus('女优元数据优化失败', 'warn');
-            setActressOptBusy(false);
-            return;
+          if (seenRunning) {
+            if (st.error) {
+              setMsg(st.error);
+              onStatus('对齐向量库女优名失败', 'warn');
+            } else if (st.result) {
+              const updated = st.result.updated ?? 0;
+              const total = st.result.total ?? 0;
+              const reemb = st.result.reembedded ?? 0;
+              const maps = st.result.maps?.count ?? 0;
+              setMsg(
+                `女优名已对齐 · 更新 ${updated}/${total} · 重嵌 ${reemb} · 映射表 ${maps} 条`,
+              );
+              onStatus('女优名已对齐', 'ok');
+            }
           }
-          if (st.result) {
-            const updated = st.result.updated ?? 0;
-            const total = st.result.total ?? 0;
-            const maps = st.result.maps?.count ?? 0;
-            setMsg(
-              `女优元数据已优化 · 更新 ${updated}/${total} · 映射表 ${maps} 条`,
-            );
-            onStatus('女优元数据已优化', 'ok');
-          }
+          setActressOptBusy(false);
           setActressOptPhase('');
           setActressOptProgress(null);
           return;
@@ -764,7 +849,7 @@ export function MakersManagePanel({
     }
   }
 
-  async function onActressOptimize() {
+  async function onActressOptimize(force = false) {
     if (
       strmBusy ||
       localIndexBusy ||
@@ -777,13 +862,18 @@ export function MakersManagePanel({
       return;
     setMsg('');
     setActressOptBusy(true);
-    setActressOptPhase('starting');
+    setActressOptPhase(force ? '全量重嵌…' : '增量对齐…');
     setActressOptProgress({ stage: 'prepare', percent: 0, label: 'starting' });
     setActressOptLog([]);
-    onStatus('女优元数据优化中…', 'mute');
+    onStatus(
+      force
+        ? '全量重嵌标题向量女优名…'
+        : '增量对齐标题向量女优名（跳过已对齐）…',
+      'mute',
+    );
     try {
-      await startScrapActressOptimize({ reembed: true });
-      await pollActressOptUntilDone();
+      await startScrapActressOptimize({ reembed: true, force });
+      await pollActressOptUntilDone({ notify: true });
     } catch (e) {
       setActressOptBusy(false);
       setActressOptPhase('');
@@ -794,38 +884,68 @@ export function MakersManagePanel({
     }
   }
 
-  async function pollActressAvatarUntilDone() {
+  async function pollActressAvatarUntilDone(opts?: { notify?: boolean }) {
     if (actressAvatarPollingRef.current) return;
     actressAvatarPollingRef.current = true;
+    let seenRunning = Boolean(opts?.notify);
     try {
       for (;;) {
         const st: ScrapActressAvatarJobStatus =
           await getScrapActressAvatarStatus();
+        if (st.running) seenRunning = true;
         setActressAvatarBusy(st.running);
         setActressAvatarPhase(st.phase || (st.running ? '刮削中…' : ''));
         setActressAvatarProgress(st.progress || null);
         setActressAvatarLog(Array.isArray(st.log) ? st.log.slice(-40) : []);
         if (!st.running) {
-          if (st.error) {
-            setMsg(st.error);
-            onStatus('女优头像刮削失败', 'warn');
-            setActressAvatarBusy(false);
-            return;
+          if (seenRunning) {
+            if (st.error) {
+              setMsg(st.error);
+              onStatus('女优刮削失败', 'warn');
+            } else if (st.result) {
+              const downloaded = st.result.downloaded ?? 0;
+              const skipped = st.result.skipped ?? 0;
+              const missed = st.result.missed ?? 0;
+              const total = st.result.total ?? 0;
+              const gf = st.result.downloadedGfriends ?? 0;
+              const jb = st.result.downloadedJavbus ?? 0;
+              const srcHint =
+                gf || jb ? `（GFriends ${gf} · JavBus ${jb}）` : '';
+              const polish = st.result.polish;
+              const polishHint =
+                polish && typeof polish.updated === 'number'
+                  ? ` · 元数据更新 ${polish.updated}/${polish.total ?? '?'}`
+                  : '';
+              const bio = (
+                st.result as {
+                  bio?: { n?: number; bioOk?: number };
+                  gaps?: {
+                    missingAvatarN?: number;
+                    missingBioN?: number;
+                  };
+                }
+              ).bio;
+              const gaps = (
+                st.result as {
+                  gaps?: { missingAvatarN?: number; missingBioN?: number };
+                }
+              ).gaps;
+              const bioHint =
+                bio && typeof bio.bioOk === 'number'
+                  ? ` · 资料齐 ${bio.bioOk}/${bio.n ?? '?'}`
+                  : '';
+              const gapHint =
+                gaps &&
+                ((gaps.missingAvatarN ?? 0) > 0 || (gaps.missingBioN ?? 0) > 0)
+                  ? ` · 仍缺头像 ${gaps.missingAvatarN ?? 0} / 资料 ${gaps.missingBioN ?? 0}`
+                  : '';
+              setMsg(
+                `女优刮削完成${polishHint} · 头像新下 ${downloaded}${srcHint} · 跳过 ${skipped} · 未命中 ${missed} / 共 ${total}${bioHint}${gapHint}`,
+              );
+              onStatus('女优刮削完成', 'ok');
+            }
           }
-          if (st.result) {
-            const downloaded = st.result.downloaded ?? 0;
-            const skipped = st.result.skipped ?? 0;
-            const missed = st.result.missed ?? 0;
-            const total = st.result.total ?? 0;
-            const gf = st.result.downloadedGfriends ?? 0;
-            const jb = st.result.downloadedJavbus ?? 0;
-            const srcHint =
-              gf || jb ? `（GFriends ${gf} · JavBus ${jb}）` : '';
-            setMsg(
-              `女优头像已刮削 · 新下 ${downloaded}${srcHint} · 跳过 ${skipped} · 未命中 ${missed} / 共 ${total}`,
-            );
-            onStatus('女优头像已刮削', 'ok');
-          }
+          setActressAvatarBusy(false);
           setActressAvatarPhase('');
           setActressAvatarProgress(null);
           return;
@@ -839,7 +959,7 @@ export function MakersManagePanel({
     }
   }
 
-  async function onActressAvatarScrape() {
+  async function onActressAvatarScrape(force = false) {
     if (
       strmBusy ||
       localIndexBusy ||
@@ -852,7 +972,7 @@ export function MakersManagePanel({
       return;
     setMsg('');
     setActressAvatarBusy(true);
-    setActressAvatarPhase('starting');
+    setActressAvatarPhase(force ? '全量覆盖刮削…' : '增量刮削…');
     setActressAvatarProgress({
       stage: 'prepare',
       percent: 0,
@@ -860,113 +980,84 @@ export function MakersManagePanel({
     });
     setActressAvatarLog([]);
     onStatus(
-      actressAvatarMode === 'overwrite'
-        ? '女优头像覆盖刮削中…'
-        : '女优头像增量刮削中…',
+      force
+        ? '女优全量覆盖刮削中（仅本地）…'
+        : '女优增量刮削中（跳过已有头像·仅本地）…',
       'mute',
     );
     try {
       await startScrapActressAvatar({
-        force: actressAvatarMode === 'overwrite',
+        force,
+        // 只落本地 + Meta；标题向量女优名对齐用下方「对齐向量库女优名」
+        polishMeta: false,
       });
-      await pollActressAvatarUntilDone();
+      await pollActressAvatarUntilDone({ notify: true });
     } catch (e) {
       setActressAvatarBusy(false);
       setActressAvatarPhase('');
       setActressAvatarProgress(null);
-      const text = e instanceof Error ? e.message : '启动女优头像刮削失败';
+      const text = e instanceof Error ? e.message : '启动女优刮削失败';
       setMsg(text);
       onStatus(text, 'warn');
     }
   }
 
-  async function pollEnrichUntilDone() {
+  async function pollEnrichUntilDone(opts?: { notify?: boolean }) {
     if (enrichPollingRef.current) return;
     enrichPollingRef.current = true;
-    try {
-      for (;;) {
-        const st = await getScrapLibraryEnrichStatus();
-        setEnrichBusy(st.running);
-        setEnrichPhase(st.phase || (st.running ? '补齐中…' : ''));
-        setEnrichProgress(st.progress || null);
-        setEnrichLog(Array.isArray(st.log) ? st.log.slice(-40) : []);
-        setEnrichRegionLogs(
-          st.regionLogs && typeof st.regionLogs === 'object' ? st.regionLogs : {},
+    let seenRunning = Boolean(opts?.notify);
+    const ac = new AbortController();
+    enrichPollRef.current?.abort();
+    enrichPollRef.current = ac;
+
+    const applyTerminal = (st: ScrapLibraryEnrichJobStatus) => {
+      if (st.halt === 'pause' || st.phase === 'paused') {
+        setEnrichBusy(false);
+        setEnrichPhase('paused');
+        setEnrichRegions((prev) =>
+          prev.map((r) => ({ ...r, enabled: false })),
         );
-        setEnrichCurrentRegion(String(st.currentRegion || ''));
-        setEnrichCheckpoints(
-          st.checkpoints && typeof st.checkpoints === 'object'
-            ? st.checkpoints
-            : {},
-        );
-        setEnrichQueueCounts((prev) => {
-          if (st.running && st.queueCounts) {
-            return {
-              pending: Number(st.queueCounts.pending || 0),
-              running: Number(st.queueCounts.running || 0),
-              done: Number(st.queueCounts.done || 0),
-              fail: Number(st.queueCounts.fail || 0),
-            };
-          }
-          // 运行中偶发缺字段时保留上次计数，避免进度条闪跳
-          if (st.running && prev) return prev;
-          return null;
-        });
-        if (st.running) {
-          const speedRid = String(st.currentRegion || '').trim() || '_';
-          const fin =
-            Number(st.queueCounts?.done || 0) +
-            Number(st.queueCounts?.fail || 0);
-          const prevSp = enrichSpeedRef.current;
-          if (!prevSp || prevSp.regionId !== speedRid) {
-            enrichSpeedRef.current = {
-              regionId: speedRid,
-              t0: Date.now(),
-              fin0: fin,
-            };
-          }
-        } else {
-          enrichSpeedRef.current = null;
-        }
-        const rid = String(st.currentRegion || '').trim();
-        if (rid && st.progress) {
+        const pausedRid =
+          String(st.currentRegion || '').trim() ||
+          Object.keys(st.checkpoints || {})[0] ||
+          '';
+        if (pausedRid && st.checkpoints?.[pausedRid]) {
+          const cp = st.checkpoints[pausedRid];
           setEnrichProgressByRegion((prev) => ({
             ...prev,
-            [rid]: st.progress || null,
+            [pausedRid]: {
+              stage: 'done',
+              label: '已暂停',
+              done: cp.done ?? 0,
+              total: cp.total ?? 0,
+              ok: cp.ok ?? 0,
+              failed: cp.failed ?? 0,
+              percent:
+                cp.total && cp.total > 0
+                  ? Math.round((100 * (cp.done ?? 0)) / cp.total)
+                  : 0,
+            },
           }));
         }
-        // 运行中对应分区开关保持开（停止请求后不再拨开）
-        if (
-          st.running &&
-          rid &&
-          !enrichStopRequestedRef.current &&
-          st.halt !== 'stop'
-        ) {
-          setEnrichRegions((prev) =>
-            prev.map((r) => ({
-              ...r,
-              enabled: r.id === rid,
-            })),
-          );
-        }
-        if (!st.running) {
+        enrichStopRequestedRef.current = false;
+        return true;
+      }
+      if (!st.running) {
+        if (seenRunning) {
           if (st.error) {
             setMsg(st.error);
             onStatus('刮削补齐失败', 'warn');
-            setEnrichBusy(false);
-            enrichStopRequestedRef.current = false;
-            return;
-          }
-          if (st.result) {
+          } else if (st.result) {
             const ok = st.result.ok ?? 0;
             const failed = st.result.failed ?? 0;
-            const queued = st.result.queued ?? 0;
+            // ⚠️ 分母必须用 processed（本轮实际处理数）。queued 在增量模式下是
+            // 「库内待处理预估」（可到十万级），会把提示写成「成功 30/123000」。
+            const processed = st.result.processed ?? st.result.queued ?? 0;
             if (st.result.paused) {
               setMsg(
-                `已暂停 · 成功 ${ok}/${queued}${failed ? ` · 失败 ${failed}` : ''} · 再开继续`,
+                `已暂停 · 成功 ${ok}/${processed}${failed ? ` · 失败 ${failed}` : ''} · 再开继续`,
               );
               onStatus('已暂停刮削（队列已保留）', 'ok');
-              // 暂停：保留分区进度，不清队列展示；开关保持关
               setEnrichRegions((prev) =>
                 prev.map((r) => ({ ...r, enabled: false })),
               );
@@ -994,9 +1085,9 @@ export function MakersManagePanel({
               }
             } else if (st.result.cancelled) {
               setMsg(
-                `已停止 · 成功 ${ok}/${queued}${failed ? ` · 失败 ${failed}` : ''} · 队列与日志已清除`,
+                `已停止 · 成功 ${ok}/${processed}${failed ? ` · 失败 ${failed}` : ''} · 队列已清除 · 历史日志保留`,
               );
-              onStatus('已停止刮削', 'ok');
+              onStatus('已停止刮削（历史日志保留）', 'ok');
               setEnrichProgress(null);
               setEnrichProgressByRegion({});
               setEnrichCheckpoints({});
@@ -1009,7 +1100,7 @@ export function MakersManagePanel({
             } else {
               const prefix = st.result.dryRun ? '预览' : '补齐';
               setMsg(
-                `${prefix}完成 · 成功 ${ok}/${queued}${failed ? ` · 失败 ${failed}` : ''}`,
+                `${prefix}完成 · 成功 ${ok}/${processed}${failed ? ` · 失败 ${failed}` : ''}`,
               );
               onStatus(
                 st.result.dryRun ? '刮削补齐预览完成' : '刮削补齐完成',
@@ -1021,16 +1112,106 @@ export function MakersManagePanel({
               );
             }
           }
-          setEnrichPhase('');
-          enrichStopRequestedRef.current = false;
-          return;
         }
-        await new Promise<void>((resolve) => {
-          enrichPollRef.current = setTimeout(resolve, 450);
-        });
+        setEnrichBusy(false);
+        setEnrichPhase('');
+        enrichStopRequestedRef.current = false;
+        return true;
       }
+      return false;
+    };
+
+    try {
+      await subscribeScrapLibraryEnrichStatus(
+        (st) => {
+          if (st.running) seenRunning = true;
+          setEnrichBusy(st.running);
+          setEnrichPhase(st.phase || (st.running ? '补齐中…' : ''));
+          setEnrichProgress(st.progress || null);
+          setEnrichLog(Array.isArray(st.log) ? st.log.slice(-40) : []);
+          setEnrichRegionLogs(
+            st.regionLogs && typeof st.regionLogs === 'object'
+              ? st.regionLogs
+              : {},
+          );
+          setEnrichCurrentRegion(String(st.currentRegion || ''));
+          setEnrichCheckpoints(
+            st.checkpoints && typeof st.checkpoints === 'object'
+              ? st.checkpoints
+              : {},
+          );
+          setEnrichQueueCounts((prev) => {
+            if (st.queueCounts) {
+              return {
+                pending: Number(st.queueCounts.pending || 0),
+                running: Number(st.queueCounts.running || 0),
+                done: Number(st.queueCounts.done || 0),
+                soft: Number(st.queueCounts.soft || 0),
+                fail: Number(st.queueCounts.fail || 0),
+              };
+            }
+            // 运行中偶发缺字段时保留上次计数，避免进度条闪跳
+            if (st.running && prev) return prev;
+            if (st.paused || st.phase === 'paused' || st.halt === 'pause') {
+              return prev;
+            }
+            return null;
+          });
+          if (st.library && typeof st.library === 'object') {
+            setEnrichLibrary(st.library);
+          }
+          if (st.running) {
+            const speedRid = String(st.currentRegion || '').trim() || '_';
+            const fin =
+              Number(st.queueCounts?.done || 0) +
+              Number(st.queueCounts?.soft || 0) +
+              Number(st.queueCounts?.fail || 0);
+            const prevSp = enrichSpeedRef.current;
+            if (!prevSp || prevSp.regionId !== speedRid) {
+              enrichSpeedRef.current = {
+                regionId: speedRid,
+                t0: Date.now(),
+                fin0: fin,
+              };
+            }
+          } else {
+            enrichSpeedRef.current = null;
+          }
+          const rid = String(st.currentRegion || '').trim();
+          if (rid && st.progress) {
+            setEnrichProgressByRegion((prev) => ({
+              ...prev,
+              [rid]: st.progress || null,
+            }));
+          }
+          if (
+            st.running &&
+            rid &&
+            !enrichStopRequestedRef.current &&
+            st.halt !== 'stop' &&
+            st.halt !== 'pause' &&
+            st.phase !== 'paused'
+          ) {
+            setEnrichRegions((prev) =>
+              prev.map((r) => ({
+                ...r,
+                enabled: r.id === rid,
+              })),
+            );
+          }
+          if (applyTerminal(st)) {
+            ac.abort();
+          }
+        },
+        { signal: ac.signal },
+      );
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') return;
+      if (e instanceof Error && e.name === 'AbortError') return;
+      throw e;
     } finally {
       enrichPollingRef.current = false;
+      if (enrichPollRef.current === ac) enrichPollRef.current = null;
     }
   }
 
@@ -1061,21 +1242,38 @@ export function MakersManagePanel({
     setMsg('');
     setEnrichBusy(true);
     enrichStopRequestedRef.current = false;
-    setEnrichPhase('starting');
-    setEnrichProgress({ stage: 'prepare', percent: 0, label: 'starting' });
-    setEnrichLog([]);
+    const resuming = Boolean(target && enrichCheckpoints[target]);
+    setEnrichPhase(resuming ? '继续' : 'starting');
+    setEnrichProgress({
+      stage: 'prepare',
+      percent: 0,
+      label: resuming ? '继续' : 'starting',
+    });
+    // 续跑保留日志/进度；全新开才清空，避免看起来像「队列被清了」
+    if (!resuming) {
+      setEnrichLog([]);
+    }
     if (target) {
       setEnrichCurrentRegion(target);
-      setEnrichRegionLogs((prev) => ({ ...prev, [target]: [] }));
-      setEnrichProgressByRegion((prev) => ({ ...prev, [target]: null }));
+      if (!resuming) {
+        setEnrichRegionLogs((prev) => ({ ...prev, [target]: [] }));
+        setEnrichProgressByRegion((prev) => ({ ...prev, [target]: null }));
+      }
     }
-    const modeLabel = enrichMode === 'overwrite' ? '覆盖' : '增量';
+    const modeLabel =
+      enrichMode === 'overwrite'
+        ? '覆盖'
+        : enrichMode === 'refresh_weak'
+          ? '弱项重刮'
+          : '增量';
     const regionLabel =
       (target && enrichRegions.find((r) => r.id === target)?.label) || '';
     onStatus(
       dryRun
         ? `刮削补齐预览中（${modeLabel}${regionLabel ? ` · ${regionLabel}` : ''}）…`
-        : `刮削补齐中（${modeLabel}${regionLabel ? ` · ${regionLabel}` : ''}）…`,
+        : resuming
+          ? `继续刮削（${modeLabel}${regionLabel ? ` · ${regionLabel}` : ''} · 保留队列）…`
+          : `刮削补齐中（${modeLabel}${regionLabel ? ` · ${regionLabel}` : ''}）…`,
       'mute',
     );
     try {
@@ -1093,33 +1291,12 @@ export function MakersManagePanel({
         dryRun,
         mode: enrichMode,
       });
-      await pollEnrichUntilDone();
+      await pollEnrichUntilDone({ notify: true });
     } catch (e) {
       setEnrichBusy(false);
       setEnrichPhase('');
       setEnrichProgress(null);
       const text = e instanceof Error ? e.message : '启动刮削补齐失败';
-      setMsg(text);
-      onStatus(text, 'warn');
-    }
-  }
-
-  async function setEnrichFillMode(next: 'incremental' | 'overwrite') {
-    if (enrichBusy || next === enrichMode) return;
-    const prev = enrichMode;
-    setEnrichMode(next);
-    try {
-      const cur = await getScrapEnrichStrategy();
-      const saved = await putScrapEnrichStrategy({
-        ...cur,
-        fillMode: next,
-      });
-      setEnrichMode(
-        saved.fillMode === 'overwrite' ? 'overwrite' : 'incremental',
-      );
-    } catch (e) {
-      setEnrichMode(prev);
-      const text = e instanceof Error ? e.message : '保存补齐模式失败';
       setMsg(text);
       onStatus(text, 'warn');
     }
@@ -1135,81 +1312,51 @@ export function MakersManagePanel({
         prev.map((r) => (r.id === regionId ? { ...r, enabled: false } : r)),
       );
       setEnrichRegionBusy(true);
+      // 立刻关忙态：后端 pause 已写检查点并把进行中退回未处理
+      setEnrichBusy(false);
+      setEnrichPhase('paused');
+      setEnrichCurrentRegion('');
+      onStatus('正在暂停刮削…', 'mute');
       try {
         await pauseScrapLibraryEnrich();
-        onStatus('正在暂停刮削…', 'mute');
-        let last: Awaited<ReturnType<typeof getScrapLibraryEnrichStatus>> | null =
-          null;
-        for (let i = 0; i < 40; i++) {
-          const st = await getScrapLibraryEnrichStatus();
-          last = st;
-          setEnrichBusy(st.running);
-          setEnrichPhase(st.phase || '');
-          setEnrichProgress(st.progress || null);
-          setEnrichLog(Array.isArray(st.log) ? st.log.slice(-40) : []);
-          setEnrichRegionLogs(
-            st.regionLogs && typeof st.regionLogs === 'object'
-              ? st.regionLogs
-              : {},
-          );
-          setEnrichCurrentRegion(String(st.currentRegion || ''));
-          setEnrichCheckpoints(
-            st.checkpoints && typeof st.checkpoints === 'object'
-              ? st.checkpoints
-              : {},
-          );
-          // 暂停：保留分区进度条与队列信息
-          if (st.progress || st.checkpoints?.[regionId]) {
-            const cp = st.checkpoints?.[regionId];
-            setEnrichProgressByRegion((prev) => ({
-              ...prev,
-              [regionId]:
-                st.progress ||
-                (cp
-                  ? {
-                      stage: 'done',
-                      label: '已暂停',
-                      done: cp.done ?? 0,
-                      total: cp.total ?? 0,
-                      ok: cp.ok ?? 0,
-                      failed: cp.failed ?? 0,
-                      percent:
-                        cp.total && cp.total > 0
-                          ? Math.round((100 * (cp.done ?? 0)) / cp.total)
-                          : 0,
-                    }
-                  : prev[regionId] || null),
-            }));
-          }
-          if (!st.running) break;
-          await new Promise<void>((r) => setTimeout(r, 400));
-        }
+        const st = await getScrapLibraryEnrichStatus();
+        setEnrichPhase('paused');
         setEnrichBusy(false);
-        setEnrichCurrentRegion('');
-        setEnrichPhase(last?.phase === 'paused' ? 'paused' : '');
-        // 最终再刷一次检查点，确保「已暂停」进度还在
-        if (last?.checkpoints && typeof last.checkpoints === 'object') {
-          setEnrichCheckpoints(last.checkpoints);
-          const cp = last.checkpoints[regionId];
-          if (cp) {
-            setEnrichProgressByRegion((prev) => ({
-              ...prev,
-              [regionId]: {
-                stage: 'done',
-                label: '已暂停',
-                done: cp.done ?? 0,
-                total: cp.total ?? 0,
-                ok: cp.ok ?? 0,
-                failed: cp.failed ?? 0,
-                percent:
-                  cp.total && cp.total > 0
-                    ? Math.round((100 * (cp.done ?? 0)) / cp.total)
-                    : 0,
-              },
-            }));
-          }
+        setEnrichProgress(st.progress || null);
+        setEnrichLog(Array.isArray(st.log) ? st.log.slice(-40) : []);
+        setEnrichRegionLogs(
+          st.regionLogs && typeof st.regionLogs === 'object' ? st.regionLogs : {},
+        );
+        setEnrichCheckpoints(
+          st.checkpoints && typeof st.checkpoints === 'object'
+            ? st.checkpoints
+            : {},
+        );
+        const cp = st.checkpoints?.[regionId];
+        if (cp || st.progress) {
+          setEnrichProgressByRegion((prev) => ({
+            ...prev,
+            [regionId]: cp
+              ? {
+                  stage: 'done',
+                  label: '已暂停',
+                  done: cp.done ?? 0,
+                  total: cp.total ?? 0,
+                  ok: cp.ok ?? 0,
+                  failed: cp.failed ?? 0,
+                  percent:
+                    cp.total && cp.total > 0
+                      ? Math.round((100 * (cp.done ?? 0)) / cp.total)
+                      : 0,
+                }
+              : {
+                  ...(st.progress || {}),
+                  stage: 'done',
+                  label: '已暂停',
+                },
+          }));
         }
-        onStatus('已暂停刮削（队列已保留）', 'ok');
+        onStatus('已暂停刮削（进行中已退回未处理）', 'ok');
       } catch (e) {
         const text = e instanceof Error ? e.message : '暂停失败';
         setMsg(text);
@@ -1276,103 +1423,6 @@ export function MakersManagePanel({
       setMsg(text);
       onStatus(text, 'warn');
     }
-  }
-
-  async function stopEnrichRegion(regionId: string) {
-    if (enrichRegionBusy) return;
-    const hasCp = Boolean(enrichCheckpoints[regionId]);
-    const isRunningHere =
-      enrichBusy && enrichCurrentRegion === regionId;
-    if (!hasCp && !isRunningHere) return;
-
-    // 立刻 UI 反馈：关开关、清进度/队列/日志
-    enrichStopRequestedRef.current = true;
-    setEnrichRegions((prev) =>
-      prev.map((r) => (r.id === regionId ? { ...r, enabled: false } : r)),
-    );
-    setEnrichBusy(false);
-    setEnrichCurrentRegion('');
-    setEnrichPhase('');
-    setEnrichProgress(null);
-    setEnrichCheckpoints((prev) => {
-      const next = { ...prev };
-      delete next[regionId];
-      return next;
-    });
-    setEnrichProgressByRegion((prev) => {
-      const next = { ...prev };
-      delete next[regionId];
-      return next;
-    });
-    setEnrichRegionLogs((prev) => {
-      const next = { ...prev };
-      delete next[regionId];
-      return next;
-    });
-    setMsg('已停止 · 队列与日志已清除 · 下次从头开始');
-    onStatus('已停止刮削（队列与日志已清除）', 'ok');
-
-    setEnrichRegionBusy(true);
-    try {
-      await stopScrapLibraryEnrich({ region: regionId });
-      // 后台等任务收尾，不再挡 UI
-      for (let i = 0; i < 20; i++) {
-        const st = await getScrapLibraryEnrichStatus();
-        if (!st.running) {
-          setEnrichCheckpoints(
-            st.checkpoints && typeof st.checkpoints === 'object'
-              ? st.checkpoints
-              : {},
-          );
-          break;
-        }
-        await new Promise<void>((r) => setTimeout(r, 300));
-      }
-      try {
-        const after = await getScrapEnrichStrategy();
-        await putScrapEnrichStrategy({
-          ...after,
-          regionsEnabled: {
-            ...(after.regionsEnabled || {}),
-            [regionId]: false,
-          },
-        });
-      } catch {
-        /* ignore */
-      }
-    } catch (e) {
-      const text = e instanceof Error ? e.message : '停止失败';
-      setMsg(text);
-      onStatus(text, 'warn');
-    } finally {
-      setEnrichRegionBusy(false);
-    }
-  }
-
-  function applyEnrichStoppedUi(regionId: string) {
-    enrichStopRequestedRef.current = true;
-    setEnrichRegions((prev) =>
-      prev.map((r) => (r.id === regionId ? { ...r, enabled: false } : r)),
-    );
-    setEnrichBusy(false);
-    setEnrichCurrentRegion('');
-    setEnrichPhase('');
-    setEnrichProgress(null);
-    setEnrichCheckpoints((prev) => {
-      const next = { ...prev };
-      delete next[regionId];
-      return next;
-    });
-    setEnrichProgressByRegion((prev) => {
-      const next = { ...prev };
-      delete next[regionId];
-      return next;
-    });
-    setEnrichRegionLogs((prev) => {
-      const next = { ...prev };
-      delete next[regionId];
-      return next;
-    });
   }
 
   useEffect(() => {
@@ -1514,6 +1564,14 @@ export function MakersManagePanel({
       <EnrichStrategyPanel
         onBack={() => setEnrichStrategyOpen(false)}
         onStatus={onStatus}
+        onSaved={(saved) => {
+          setEnrichMode(normalizeEnrichFillMode(saved.fillMode));
+          setActressAvatarMode(
+            saved.actressAvatarMode === 'overwrite'
+              ? 'overwrite'
+              : 'incremental',
+          );
+        }}
       />
     );
   }
@@ -1527,7 +1585,6 @@ export function MakersManagePanel({
         initialLogs={enrichLive.initialLogs}
         onBack={() => setEnrichLive(null)}
         onStatus={onStatus}
-        onStopped={() => applyEnrichStoppedUi(enrichLive.regionId)}
       />
     );
   }
@@ -1846,14 +1903,10 @@ export function MakersManagePanel({
     ];
     return { total, done, remain, embedTotal, shells, rows };
   };
-  const enrichModeHint =
-    enrichMode === 'overwrite'
-      ? '全部重跑覆盖；队列先空壳再其余'
-      : '先刮空壳（仅骨架），再补缺数据';
   const actressAvatarModeHint =
     actressAvatarMode === 'overwrite'
-      ? '已有头像也重新下载覆盖'
-      : '跳过已有头像，只补缺';
+      ? '覆盖头像 + 回填资料（别名穷举）'
+      : '补缺头像 + 回填资料 · 已有头像跳过';
   const qualityDetailModal =
     typeof scanLogModal === 'object' &&
     scanLogModal &&
@@ -1897,7 +1950,7 @@ export function MakersManagePanel({
                 <span className="settings-nav__main">
                   <span className="settings-nav__title">刮削策略</span>
                   <span className="settings-nav__desc">
-                    调度模式 · 并发参数 · 七区数据源
+                    增量/覆盖 · 头像模式 · 调度 · 七区数据源
                   </span>
                 </span>
                 <ChevronRight
@@ -1932,180 +1985,6 @@ export function MakersManagePanel({
                 </button>
               </div>
             </li>
-            <li>
-              <div className="settings-nav makers-manage__status">
-                <span className="settings-nav__main">
-                  <span className="settings-nav__title">刮削补齐</span>
-                  <span className="settings-nav__desc">
-                    {enrichModeHint}
-                  </span>
-                </span>
-                <div
-                  className="app-seg makers-manage__enrich-mode"
-                  role="radiogroup"
-                  aria-label="刮削补齐模式"
-                >
-                  <button
-                    type="button"
-                    className={cn(
-                      'app-seg__btn',
-                      enrichMode === 'incremental' && 'app-seg__btn--active',
-                    )}
-                    disabled={enrichBusy}
-                    role="radio"
-                    aria-checked={enrichMode === 'incremental'}
-                    onClick={() => void setEnrichFillMode('incremental')}
-                  >
-                    增量
-                  </button>
-                  <button
-                    type="button"
-                    className={cn(
-                      'app-seg__btn',
-                      enrichMode === 'overwrite' && 'app-seg__btn--active',
-                    )}
-                    disabled={enrichBusy}
-                    role="radio"
-                    aria-checked={enrichMode === 'overwrite'}
-                    onClick={() => void setEnrichFillMode('overwrite')}
-                  >
-                    覆盖
-                  </button>
-                </div>
-              </div>
-            </li>
-            <li>
-              <div className="settings-nav makers-manage__status">
-                <span className="settings-nav__main">
-                  <span className="settings-nav__title">女优头像刮削</span>
-                  <span className="settings-nav__desc">
-                    {actressAvatarBusy
-                      ? actressAvatarPhase || '刮削中…'
-                      : actressAvatarModeHint}
-                  </span>
-                </span>
-                <span className="makers-manage__status-actions">
-                  <div
-                    className="app-seg makers-manage__enrich-mode"
-                    role="radiogroup"
-                    aria-label="女优头像刮削模式"
-                  >
-                    <button
-                      type="button"
-                      className={cn(
-                        'app-seg__btn',
-                        actressAvatarMode === 'incremental' &&
-                          'app-seg__btn--active',
-                      )}
-                      disabled={actressAvatarBusy}
-                      role="radio"
-                      aria-checked={actressAvatarMode === 'incremental'}
-                      onClick={() => setActressAvatarMode('incremental')}
-                    >
-                      增量
-                    </button>
-                    <button
-                      type="button"
-                      className={cn(
-                        'app-seg__btn',
-                        actressAvatarMode === 'overwrite' &&
-                          'app-seg__btn--active',
-                      )}
-                      disabled={actressAvatarBusy}
-                      role="radio"
-                      aria-checked={actressAvatarMode === 'overwrite'}
-                      onClick={() => setActressAvatarMode('overwrite')}
-                    >
-                      覆盖
-                    </button>
-                  </div>
-                  <button
-                    type="button"
-                    className="makers-manage__probe-btn"
-                    disabled={
-                      strmBusy ||
-                      localIndexBusy ||
-                      catalogBusy ||
-                      scrapBusy ||
-                      enrichBusy ||
-                      actressOptBusy ||
-                      actressAvatarBusy
-                    }
-                    onClick={() => void onActressAvatarScrape()}
-                  >
-                    {actressAvatarBusy
-                      ? typeof actressAvatarProgress?.percent === 'number'
-                        ? `${Math.round(actressAvatarProgress.percent)}%`
-                        : '刮削中…'
-                      : actressAvatarMode === 'overwrite'
-                        ? '覆盖刮削'
-                        : '开始刮削'}
-                  </button>
-                </span>
-              </div>
-              {actressAvatarBusy ||
-              actressAvatarProgress ||
-              actressAvatarLog.length > 0 ? (
-                <div
-                  className="makers-manage__scan-progress makers-manage__scan-progress--meta-first"
-                  aria-live="polite"
-                >
-                  <div className="makers-manage__scan-meta">
-                    <span>
-                      {actressAvatarBusy || actressAvatarProgress
-                        ? actressAvatarProgress?.stage === 'done'
-                          ? '完成'
-                          : actressAvatarProgress?.stage === 'download'
-                            ? '下载'
-                            : actressAvatarProgress?.stage === 'scan'
-                              ? '索引'
-                              : '准备'
-                        : '已完成'}
-                      {typeof actressAvatarProgress?.done === 'number' &&
-                      typeof actressAvatarProgress?.total === 'number' &&
-                      actressAvatarProgress.total > 0
-                        ? ` · ${actressAvatarProgress.done.toLocaleString()} / ${actressAvatarProgress.total.toLocaleString()}`
-                        : ''}
-                    </span>
-                    <span className="makers-manage__scan-meta-actions">
-                      {actressAvatarLog.length > 0 ? (
-                        <button
-                          type="button"
-                          className="makers-manage__log-btn"
-                          onClick={() => setScanLogModal('actressAvatar')}
-                        >
-                          日志
-                        </button>
-                      ) : null}
-                    </span>
-                  </div>
-                  {actressAvatarBusy || actressAvatarProgress ? (
-                    <div
-                      className="makers-manage__scan-bar"
-                      role="progressbar"
-                      aria-valuemin={0}
-                      aria-valuemax={100}
-                      aria-valuenow={
-                        typeof actressAvatarProgress?.percent === 'number'
-                          ? Math.round(actressAvatarProgress.percent)
-                          : 0
-                      }
-                      aria-label="女优头像刮削进度"
-                    >
-                      <span
-                        style={{
-                          width: `${
-                            typeof actressAvatarProgress?.percent === 'number'
-                              ? actressAvatarProgress.percent
-                              : 0
-                          }%`,
-                        }}
-                      />
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-            </li>
           </ul>
 
           <p className="settings-group-label">刮削分区</p>
@@ -2124,9 +2003,14 @@ export function MakersManagePanel({
               const prog = active
                 ? enrichProgress
                 : enrichProgressByRegion[region.id] || null;
-              const qc = active ? enrichQueueCounts : null;
+              // 暂停态也用队列表角标（成功/失败），勿只信本轮 checkpoint.ok=15
+              const qc =
+                (active || Boolean(cp)) && enrichQueueCounts
+                  ? enrichQueueCounts
+                  : null;
               const okN = (() => {
-                if (qc) return Number(qc.done || 0);
+                if (qc)
+                  return Number(qc.done || 0) + Number(qc.soft || 0);
                 if (typeof prog?.ok === 'number') return prog.ok;
                 if (typeof cp?.ok === 'number') return cp.ok;
                 return null;
@@ -2138,34 +2022,60 @@ export function MakersManagePanel({
                 return null;
               })();
               const remainingN = (() => {
+                const libInc = Number(
+                  enrichLibrary[region.id]?.incomplete || 0,
+                );
                 if (qc) {
-                  return Number(qc.pending || 0) + Number(qc.running || 0);
+                  return Math.max(
+                    Number(qc.pending || 0) + Number(qc.running || 0),
+                    libInc,
+                  );
                 }
                 if (!active && typeof cp?.remaining === 'number') {
-                  return cp.remaining;
+                  return Math.max(cp.remaining, libInc);
                 }
                 const tot =
                   typeof prog?.total === 'number' && prog.total > 0
                     ? prog.total
                     : typeof cp?.total === 'number' && cp.total > 0
                       ? cp.total
-                      : null;
+                      : Number(enrichLibrary[region.id]?.total || 0) || null;
                 const fin =
                   okN != null || failN != null
                     ? Number(okN || 0) + Number(failN || 0)
                     : typeof prog?.done === 'number'
                       ? prog.done
                       : null;
-                if (tot != null && fin != null) return Math.max(0, tot - fin);
-                return null;
+                if (tot != null && fin != null) {
+                  return Math.max(0, tot - fin, libInc);
+                }
+                return libInc > 0 ? libInc : null;
               })();
-              // 进度%与文案同一套数字：已完成/(已完成+未处理)，禁止再用可能脱节的 progress.percent
+              // 进度%：优先库内已齐比例；避免队列表样例把进度撑到 50%+
               const pct = (() => {
+                const lib = enrichLibrary[region.id];
+                if (
+                  lib &&
+                  typeof lib.percent === 'number' &&
+                  Number(lib.total || 0) > 0
+                ) {
+                  return Math.max(0, Math.min(100, Math.round(lib.percent)));
+                }
+                const rem = remainingN;
+                const complete = Number(lib?.complete || 0);
+                if (rem != null && (complete > 0 || rem > 0)) {
+                  const tot = complete + rem;
+                  if (tot > 0) {
+                    return Math.max(
+                      0,
+                      Math.min(100, Math.round((100 * complete) / tot)),
+                    );
+                  }
+                }
                 const fin =
                   okN != null || failN != null
                     ? Number(okN || 0) + Number(failN || 0)
                     : null;
-                const rem = remainingN;
                 if (fin != null && rem != null) {
                   const tot = fin + rem;
                   if (tot > 0) {
@@ -2199,7 +2109,7 @@ export function MakersManagePanel({
                   : null;
               const queueStage = prog?.stage === 'queue';
               const remainLabel =
-                enrichMode === 'incremental'
+                enrichMode === 'incremental' || enrichMode === 'refresh_weak'
                   ? remainingN != null && !queueStage
                     ? `未处理 ${remainingN.toLocaleString()}`
                     : ''
@@ -2213,9 +2123,8 @@ export function MakersManagePanel({
                   (remainLabel || okN != null || failN != null));
               const stageLabel = active
                 ? queueStage
-                  ? enrichMode === 'overwrite'
-                    ? '排队'
-                    : '筛选'
+                  ? String(prog?.label || '').trim() ||
+                    (enrichMode === 'overwrite' ? '排队' : '筛选')
                   : prog?.stage === 'done'
                     ? '完成'
                     : '补齐中'
@@ -2237,15 +2146,6 @@ export function MakersManagePanel({
                   ? `${Math.round(perMin)} 部/分`
                   : `${perMin.toFixed(1).replace(/\.0$/, '')} 部/分`;
               })();
-              const statsParts: string[] = [];
-              if (!queueStage && okN != null) {
-                statsParts.push(`成功 ${okN.toLocaleString()}`);
-              }
-              if (!queueStage && failN != null) {
-                statsParts.push(`失败 ${failN.toLocaleString()}`);
-              }
-              if (remainLabel) statsParts.push(remainLabel);
-              const statsLabel = statsParts.join(' · ');
 
               return (
               <li key={region.id}>
@@ -2289,6 +2189,7 @@ export function MakersManagePanel({
                           qualityRegion: region.id,
                           label: region.label,
                         });
+                        setGateSummary('');
                         void refreshScrapQuality([region.id]);
                       }}
                     >
@@ -2334,22 +2235,6 @@ export function MakersManagePanel({
                     >
                       日志
                     </button>
-                    <button
-                      type="button"
-                      className="makers-manage__probe-btn makers-manage__probe-btn--danger"
-                      disabled={(() => {
-                        const activeHere =
-                          enrichBusy && enrichCurrentRegion === region.id;
-                        // 跑着时可随时停止；不要被 enrichRegionBusy 卡住
-                        if (activeHere) return false;
-                        return (
-                          enrichRegionBusy || !enrichCheckpoints[region.id]
-                        );
-                      })()}
-                      onClick={() => void stopEnrichRegion(region.id)}
-                    >
-                      停止
-                    </button>
                   </span>
                 </div>
                 {showProgress ? (
@@ -2379,11 +2264,6 @@ export function MakersManagePanel({
                           {stageLabel}
                           {rateLabel ? ` · ${rateLabel}` : ''}
                         </span>
-                        {statsLabel ? (
-                          <span className="makers-manage__scan-stats">
-                            {statsLabel}
-                          </span>
-                        ) : null}
                       </span>
                       {pct != null ? (
                         <span className="makers-manage__scan-pct">
@@ -2407,29 +2287,47 @@ export function MakersManagePanel({
                   <span className="settings-nav__desc">
                     {scrapBusy
                       ? scrapPhase || '同步中…'
-                      : '少补多删 · NFO→向量 + HNSW（磁盘无则删库）'}
+                      : '本地 NFO→向量 · 增量跳过已有 · 全量重写（磁盘无则删库）'}
                   </span>
                 </span>
-                <button
-                  type="button"
-                  className="makers-manage__probe-btn"
-                  disabled={
-                    strmBusy ||
-                    localIndexBusy ||
-                    catalogBusy ||
-                    scrapBusy ||
-                    enrichBusy ||
-                    actressOptBusy ||
-                    actressAvatarBusy
-                  }
-                  onClick={() => void onScrapEmbedSync()}
-                >
-                  {scrapBusy
-                    ? scrapPct != null
-                      ? `${Math.round(scrapPct)}%`
-                      : '同步中…'
-                    : '开始同步'}
-                </button>
+                <span className="makers-manage__status-actions">
+                  <button
+                    type="button"
+                    className="makers-manage__probe-btn"
+                    disabled={
+                      strmBusy ||
+                      localIndexBusy ||
+                      catalogBusy ||
+                      scrapBusy ||
+                      enrichBusy ||
+                      actressOptBusy ||
+                      actressAvatarBusy
+                    }
+                    onClick={() => void onScrapEmbedSync(false)}
+                  >
+                    {scrapBusy
+                      ? scrapPct != null
+                        ? `${Math.round(scrapPct)}%`
+                        : '同步中…'
+                      : '增量同步'}
+                  </button>
+                  <button
+                    type="button"
+                    className="makers-manage__probe-btn"
+                    disabled={
+                      strmBusy ||
+                      localIndexBusy ||
+                      catalogBusy ||
+                      scrapBusy ||
+                      enrichBusy ||
+                      actressOptBusy ||
+                      actressAvatarBusy
+                    }
+                    onClick={() => void onScrapEmbedSync(true)}
+                  >
+                    {scrapBusy ? '…' : '全量同步'}
+                  </button>
+                </span>
               </div>
               {scrapBusy || scrapProgress || scrapLog.length > 0 ? (
                 <div
@@ -2489,36 +2387,178 @@ export function MakersManagePanel({
                 </div>
               ) : null}
             </li>
+          </ul>
+
+          <p className="settings-group-label">女优</p>
+          <ul className="settings-group makers-manage__rise" aria-label="女优元数据与头像">
             <li>
               <div className="settings-nav makers-manage__status">
                 <span className="settings-nav__main">
-                  <span className="settings-nav__title">优化女优元数据</span>
+                  <span className="settings-nav__title">
+                    刮削女优元数据和头像
+                  </span>
                   <span className="settings-nav__desc">
-                    {actressOptBusy
-                      ? actressOptPhase || '优化中…'
-                      : '补优化库内已有条目（刮削/同步时已自动优化）'}
+                    {actressAvatarBusy
+                      ? actressAvatarPhase || '刮削中…'
+                      : '从向量库取女优名 · 头像/资料落本地与 Meta · 增量跳过已有 · 全量覆盖'}
                   </span>
                 </span>
-                <button
-                  type="button"
-                  className="makers-manage__probe-btn"
-                  disabled={
-                    strmBusy ||
-                    localIndexBusy ||
-                    catalogBusy ||
-                    scrapBusy ||
-                    enrichBusy ||
-                    actressOptBusy ||
-                    actressAvatarBusy
-                  }
-                  onClick={() => void onActressOptimize()}
+                <span className="makers-manage__status-actions">
+                  <button
+                    type="button"
+                    className="makers-manage__probe-btn"
+                    disabled={
+                      strmBusy ||
+                      localIndexBusy ||
+                      catalogBusy ||
+                      scrapBusy ||
+                      enrichBusy ||
+                      actressOptBusy ||
+                      actressAvatarBusy
+                    }
+                    onClick={() => void onActressAvatarScrape(false)}
+                  >
+                    {actressAvatarBusy
+                      ? typeof actressAvatarProgress?.percent === 'number'
+                        ? `${Math.round(actressAvatarProgress.percent)}%`
+                        : '刮削中…'
+                      : '增量刮削'}
+                  </button>
+                  <button
+                    type="button"
+                    className="makers-manage__probe-btn"
+                    disabled={
+                      strmBusy ||
+                      localIndexBusy ||
+                      catalogBusy ||
+                      scrapBusy ||
+                      enrichBusy ||
+                      actressOptBusy ||
+                      actressAvatarBusy
+                    }
+                    onClick={() => void onActressAvatarScrape(true)}
+                  >
+                    {actressAvatarBusy ? '…' : '全量覆盖'}
+                  </button>
+                </span>
+              </div>
+              {actressAvatarBusy ||
+              actressAvatarProgress ||
+              actressAvatarLog.length > 0 ? (
+                <div
+                  className="makers-manage__scan-progress makers-manage__scan-progress--meta-first"
+                  aria-live="polite"
                 >
-                  {actressOptBusy
-                    ? actressOptPct != null
-                      ? `${Math.round(actressOptPct)}%`
-                      : '优化中…'
-                    : '开始优化'}
-                </button>
+                  <div className="makers-manage__scan-meta">
+                    <span>
+                      {actressAvatarBusy || actressAvatarProgress
+                        ? actressAvatarProgress?.stage === 'done'
+                          ? '完成'
+                          : actressAvatarProgress?.stage === 'download'
+                            ? '下载头像'
+                            : actressAvatarProgress?.stage === 'bio'
+                              ? '补资料'
+                              : actressAvatarProgress?.stage === 'embed'
+                                ? '写向量'
+                                : actressAvatarProgress?.stage === 'scan'
+                                  ? '索引'
+                                  : '准备'
+                        : '已完成'}
+                      {typeof actressAvatarProgress?.done === 'number' &&
+                      typeof actressAvatarProgress?.total === 'number' &&
+                      actressAvatarProgress.total > 0
+                        ? ` · ${actressAvatarProgress.done.toLocaleString()} / ${actressAvatarProgress.total.toLocaleString()}`
+                        : ''}
+                    </span>
+                    <span className="makers-manage__scan-meta-actions">
+                      {actressAvatarLog.length > 0 ? (
+                        <button
+                          type="button"
+                          className="makers-manage__log-btn"
+                          onClick={() => setScanLogModal('actressAvatar')}
+                        >
+                          日志
+                        </button>
+                      ) : null}
+                    </span>
+                  </div>
+                  {actressAvatarBusy || actressAvatarProgress ? (
+                    <div
+                      className="makers-manage__scan-bar"
+                      role="progressbar"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={
+                        typeof actressAvatarProgress?.percent === 'number'
+                          ? Math.round(actressAvatarProgress.percent)
+                          : 0
+                      }
+                      aria-label="女优刮削进度"
+                    >
+                      <span
+                        style={{
+                          width: `${
+                            typeof actressAvatarProgress?.percent === 'number'
+                              ? actressAvatarProgress.percent
+                              : 0
+                          }%`,
+                        }}
+                      />
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </li>
+            <li>
+              <div className="settings-nav makers-manage__status">
+                <span className="settings-nav__main">
+                  <span className="settings-nav__title">
+                    对齐向量库女优名
+                  </span>
+                  <span className="settings-nav__desc">
+                    {actressOptBusy
+                      ? actressOptPhase || '对齐中…'
+                      : '只改标题「女优：」标准名并重嵌 · 不含头像/资料 · 增量跳过已对齐'}
+                  </span>
+                </span>
+                <span className="makers-manage__status-actions">
+                  <button
+                    type="button"
+                    className="makers-manage__probe-btn"
+                    disabled={
+                      strmBusy ||
+                      localIndexBusy ||
+                      catalogBusy ||
+                      scrapBusy ||
+                      enrichBusy ||
+                      actressOptBusy ||
+                      actressAvatarBusy
+                    }
+                    onClick={() => void onActressOptimize(false)}
+                  >
+                    {actressOptBusy
+                      ? actressOptPct != null
+                        ? `${Math.round(actressOptPct)}%`
+                        : '对齐中…'
+                      : '增量对齐'}
+                  </button>
+                  <button
+                    type="button"
+                    className="makers-manage__probe-btn"
+                    disabled={
+                      strmBusy ||
+                      localIndexBusy ||
+                      catalogBusy ||
+                      scrapBusy ||
+                      enrichBusy ||
+                      actressOptBusy ||
+                      actressAvatarBusy
+                    }
+                    onClick={() => void onActressOptimize(true)}
+                  >
+                    {actressOptBusy ? '…' : '全量重嵌'}
+                  </button>
+                </span>
               </div>
               {actressOptBusy ||
               actressOptProgress ||
@@ -2536,7 +2576,7 @@ export function MakersManagePanel({
                       aria-valuenow={
                         actressOptPct != null ? Math.round(actressOptPct) : 0
                       }
-                      aria-label="女优元数据优化进度"
+                      aria-label="女优向量同步进度"
                     >
                       <span
                         style={{
@@ -2548,28 +2588,19 @@ export function MakersManagePanel({
                   <div className="makers-manage__scan-meta">
                     <span>
                       {actressOptBusy || actressOptProgress
-                        ? actressOptProgress?.stage === 'embed' ||
-                          actressOptProgress?.stage === 'patch'
-                          ? '写入'
-                          : actressOptProgress?.stage === 'diff'
-                            ? '比对'
-                            : actressOptProgress?.stage === 'scan'
-                              ? '扫描'
-                              : actressOptProgress?.stage === 'done'
-                                ? '完成'
+                        ? actressOptProgress?.stage === 'done'
+                          ? '完成'
+                          : actressOptProgress?.stage === 'embed'
+                            ? '重嵌'
+                            : actressOptProgress?.stage === 'diff'
+                              ? '比对'
+                              : actressOptProgress?.stage === 'scan'
+                                ? '扫描'
                                 : '准备'
                         : '已完成'}
-                      {actressOptCountLabel
-                        ? ` · ${actressOptCountLabel}`
-                        : ''}
+                      {actressOptCountLabel ? ` · ${actressOptCountLabel}` : ''}
                     </span>
                     <span className="makers-manage__scan-meta-actions">
-                      {actressOptPct != null &&
-                      (actressOptBusy || actressOptProgress) ? (
-                        <span className="makers-manage__scan-pct">
-                          {`${Math.round(actressOptPct)}%`}
-                        </span>
-                      ) : null}
                       {actressOptLog.length > 0 ? (
                         <button
                           type="button"
@@ -3071,7 +3102,7 @@ export function MakersManagePanel({
                       : enrichBusy
                         ? enrichPhase || '刮削补齐中…'
                         : actressAvatarBusy
-                          ? actressAvatarPhase || '女优头像刮削中…'
+                          ? actressAvatarPhase || '女优刮削中…'
                           : '产物目录 · 刮削补齐 · 向量入库'}
                   </span>
                 </span>
@@ -3101,9 +3132,9 @@ export function MakersManagePanel({
             : scanLogModal === 'scrap'
               ? '刮削库同步日志'
                 : scanLogModal === 'actress'
-                  ? '女优元数据优化日志'
+                  ? '女优同步向量日志'
                   : scanLogModal === 'actressAvatar'
-                    ? '女优头像刮削日志'
+                    ? '女优刮削日志'
               : scanLogModal === 'enrich'
                     ? '刮削补齐日志'
                 : scanLogModal === 'avwikidb'
@@ -3161,6 +3192,86 @@ export function MakersManagePanel({
                   </div>
                 </li>
               ))}
+            </ul>
+            <p className="settings-group-label settings-group-label--spaced">
+              质量门禁抽检
+            </p>
+            <ul className="settings-group">
+              <li>
+                <div className="settings-kv enrich-strategy__fill-row enrich-strategy__fill-row--stack">
+                  <span className="settings-nav__main">
+                    <span className="settings-kv__key">抽样检查</span>
+                    <span className="settings-nav__desc">
+                      {gateSummary ||
+                        '从缺口队列抽 12 条跑 G34 门禁（标题/海报/剧情）'}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    className="makers-manage__probe-btn"
+                    disabled={gateBusy}
+                    onClick={() => {
+                      void (async () => {
+                        if (!qualityDetailModal) return;
+                        setGateBusy(true);
+                        setGateSummary('抽检中…');
+                        try {
+                          const page = await getScrapLibraryQualityItems({
+                            region: qualityDetailModal.qualityRegion,
+                            kind: 'thin_title',
+                            limit: 12,
+                          });
+                          const items = page.items || [];
+                          if (!items.length) {
+                            setGateSummary('缺口队列为空，跳过抽检');
+                            return;
+                          }
+                          let pass = 0;
+                          let fail = 0;
+                          const samples: string[] = [];
+                          for (const it of items) {
+                            try {
+                              const g = await getScrapLibraryQualityGate({
+                                itemId: String(it.itemId || ''),
+                                code: String(it.code || ''),
+                                relPath: String(it.relPath || ''),
+                              });
+                              if (g.ok) pass += 1;
+                              else {
+                                fail += 1;
+                                const reason = (g.hardFail || g.soft || [])
+                                  .slice(0, 2)
+                                  .join('/');
+                                if (samples.length < 3 && it.code) {
+                                  samples.push(
+                                    `${it.code}${reason ? ` (${reason})` : ''}`,
+                                  );
+                                }
+                              }
+                            } catch {
+                              fail += 1;
+                            }
+                          }
+                          setGateSummary(
+                            `抽检 ${items.length}：通过 ${pass} · 未过 ${fail}` +
+                              (samples.length
+                                ? ` · 例 ${samples.join('、')}`
+                                : ''),
+                          );
+                        } catch (e) {
+                          setGateSummary(
+                            e instanceof Error ? e.message : '抽检失败',
+                          );
+                        } finally {
+                          setGateBusy(false);
+                        }
+                      })();
+                    }}
+                  >
+                    {gateBusy ? '…' : '抽检'}
+                  </button>
+                </div>
+              </li>
             </ul>
           </div>
           ) : (

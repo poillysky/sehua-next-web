@@ -8,6 +8,7 @@ import {
   type MediaItem,
   type MediaSourceId,
 } from '@/lib/api';
+import { SoftImg } from '@/components/SoftImg';
 import { MediaPosterCard } from './MediaPosterCard';
 
 function yearOf(item: MediaItem): string {
@@ -98,21 +99,16 @@ export function MediaPersonBody({
     <div className="media-person">
       <header className="media-person__hero">
         <span className="media-person__avatar" aria-hidden>
+          <span className="media-person__avatar-ph">
+            {displayName.slice(0, 1)}
+          </span>
           {avatar && !avatarGone ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
+            <SoftImg
               src={avatar}
-              alt=""
               loading="lazy"
-              decoding="async"
-              referrerPolicy="no-referrer"
               onError={() => setAvatarGone(true)}
             />
-          ) : (
-            <span className="media-person__avatar-ph">
-              {displayName.slice(0, 1)}
-            </span>
-          )}
+          ) : null}
         </span>
         <div className="media-person__meta">
           <h2 className="media-person__name allow-select">{displayName}</h2>

@@ -1,16 +1,24 @@
 'use client';
 
-import { useEffect, useRef, useState, type MouseEvent } from 'react';
+import { useState, type MouseEvent } from 'react';
 import type { ResourceItem } from '@/types/resource';
 import { formatByteSize, formatDate, parseHighlight } from '@/lib/format';
-import { normalizeResourceView } from '@/lib/resourceView';
+import {
+  normalizeResourceView,
+  parseEd2kLink,
+} from '@/lib/resourceView';
 import { copyText } from '@/lib/clipboard';
-import { COVER_LIST_THUMB_W, proxiedCoverUrl } from '@/lib/api';
 import { AppMsg } from '@/components/ui/AppMsg';
 import { ContextMenu } from '@/components/ui/ContextMenu';
 import { useLongPress } from '@/hooks/useLongPress';
 import { useHaptics } from '@/shell';
-import { getEd2kCopyText, normalizeLinkKind } from '@/lib/detailResource';
+import {
+  getEd2kCopyText,
+  linkKindOf,
+  linksForResource,
+  normalizeLinkKind,
+} from '@/lib/detailResource';
+import { SEARCH_DISPLAY_FILES_MAX } from '@/config/search';
 
 const LINK_KIND_LABEL: Record<string, string> = {
   magnet: '磁力',
@@ -21,241 +29,140 @@ const LINK_KIND_LABEL: Record<string, string> = {
   stub: '占位',
 };
 
-const PREVIEW_SLOT_MAX = 5;
-/** 预加载上限：够填满 5 格即可，避免一次打太多图 */
-const PREVIEW_PRELOAD_MAX = 6;
-/** 过小图视为占位/防盗链页；与详情 PreviewGrid 一致 */
-const MIN_PREVIEW_PX = 48;
-/** 单卡并行预载上限（手机弱网少打并发） */
-const PREVIEW_PARALLEL = 2;
-
-type PreviewOrient = 'landscape' | 'portrait';
-
-type PreviewSlot = {
-  src: string;
-  index: number;
-  orient: PreviewOrient;
-  pending?: boolean;
-};
-
-/**
- * 只展示「已加载成功」的前缀，失败跳过；遇到尚未加载的停住并最多留 1 个尾部骨架。
- * 避免：默认竖图多占位 → 横图 onload 后重排；或两侧已出图、中间仍空槽。
- */
-function packPreviewImages(
-  proxied: string[],
-  failed: Record<number, true>,
-  orientations: Record<number, PreviewOrient>,
-): PreviewSlot[] {
-  const picked: PreviewSlot[] = [];
-  let slots = 0;
-  for (let index = 0; index < proxied.length; index++) {
-    if (failed[index]) continue;
-    const orient = orientations[index];
-    if (!orient) {
-      if (slots + 2 <= PREVIEW_SLOT_MAX) {
-        picked.push({
-          src: proxied[index],
-          index,
-          orient: 'landscape',
-          pending: true,
-        });
-      }
-      break;
-    }
-    const cost = orient === 'landscape' ? 2 : 1;
-    if (slots + cost > PREVIEW_SLOT_MAX) break;
-    picked.push({ src: proxied[index], index, orient });
-    slots += cost;
-  }
-  return picked;
+function shortHash(hash: string): string {
+  const h = hash.trim().toUpperCase();
+  if (h.length <= 16) return h;
+  return `${h.slice(0, 8)}…${h.slice(-6)}`;
 }
 
-function CardPreviewBody({
-  images,
+function decodeEd2kName(raw: string): string {
+  try {
+    return decodeURIComponent(raw.replace(/\+/g, ' '));
+  } catch {
+    return raw;
+  }
+}
+
+function summarizeLink(link: string): {
+  kind: ReturnType<typeof normalizeLinkKind>;
+  kindLabel: string;
+  primary: string;
+  secondary: string;
+} {
+  const kind = normalizeLinkKind(linkKindOf(link));
+  if (kind === 'magnet') {
+    return {
+      kind,
+      kindLabel: '磁力',
+      primary: link.trim(),
+      secondary: '',
+    };
+  }
+  if (kind === 'ed2k') {
+    const parsed = parseEd2kLink(link);
+    const name = parsed?.filename ? decodeEd2kName(parsed.filename) : '';
+    const size = parsed?.size ? formatByteSize(Number(parsed.size)) : '';
+    const hash = parsed?.hash || '';
+    return {
+      kind,
+      kindLabel: 'ed2k',
+      primary: name || link.trim(),
+      secondary: [size, hash ? shortHash(hash) : ''].filter(Boolean).join(' · '),
+    };
+  }
+  if (kind === '115share') {
+    let host = '115 分享';
+    try {
+      host = new URL(link).hostname.replace(/^www\./, '');
+    } catch {
+      /* ignore */
+    }
+    return {
+      kind,
+      kindLabel: '115',
+      primary: host,
+      secondary: link.replace(/^https?:\/\//i, ''),
+    };
+  }
+  return {
+    kind,
+    kindLabel: kind === 'stub' ? '占位' : '链接',
+    primary: link.slice(0, 48) || '不可用',
+    secondary: kind === 'stub' ? '暂无可用下载' : link.slice(0, 64),
+  };
+}
+
+function CardLinksBody({
+  links,
+  kind,
   onOpen,
 }: {
-  images: string[];
+  links: string[];
+  kind: ReturnType<typeof normalizeLinkKind>;
   onOpen: () => void;
 }) {
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  const [inView, setInView] = useState(false);
-  const [failed, setFailed] = useState<Record<number, true>>({});
-  const [orientations, setOrientations] = useState<
-    Record<number, PreviewOrient>
-  >({});
-  const proxied = images
-    .map((u) => proxiedCoverUrl(u, { w: COVER_LIST_THUMB_W }))
-    .filter(Boolean);
-  const proxiedKey = proxied.join('\0');
+  const shown = links.slice(0, SEARCH_DISPLAY_FILES_MAX);
+  const hidden = Math.max(0, links.length - shown.length);
 
-  const markFailed = (index: number) => {
-    setFailed((prev) => (prev[index] ? prev : { ...prev, [index]: true }));
-  };
-
-  // 进视口附近再拉图；root 用滚动容器，避免设备框内误判
-  useEffect(() => {
-    const el = rootRef.current;
-    if (!el) return;
-    if (typeof IntersectionObserver === 'undefined') {
-      setInView(true);
-      return;
-    }
-    const scrollRoot =
-      el.closest('.app-body') instanceof HTMLElement
-        ? (el.closest('.app-body') as HTMLElement)
-        : null;
-    const io = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((e) => e.isIntersecting)) {
-          setInView(true);
-          io.disconnect();
-        }
-      },
-      { root: scrollRoot, rootMargin: '240px 0px', threshold: 0.01 },
+  if (!links.length) {
+    return (
+      <div className="bm-card__body">
+        <p className="bm-card__links-empty">
+          {kind === 'stub' ? '暂无可用下载链接' : '暂无链接'}
+        </p>
+      </div>
     );
-    io.observe(el);
-    return () => io.disconnect();
-  }, []);
-
-  // 与详情页一致：并行预探方向；限并发，避免串行超时误杀后续图
-  useEffect(() => {
-    setFailed({});
-    setOrientations({});
-    if (!inView || !proxied.length) return;
-
-    let cancelled = false;
-    const loaders: HTMLImageElement[] = [];
-    const targets = proxied.slice(0, PREVIEW_PRELOAD_MAX);
-    let cursor = 0;
-    let inflight = 0;
-
-    const pump = () => {
-      while (!cancelled && inflight < PREVIEW_PARALLEL && cursor < targets.length) {
-        const index = cursor;
-        const src = targets[index];
-        cursor += 1;
-        inflight += 1;
-        const img = new Image();
-        loaders.push(img);
-        const done = () => {
-          inflight -= 1;
-          pump();
-        };
-        const applyOk = () => {
-          if (cancelled) return;
-          if (
-            !img.naturalWidth ||
-            !img.naturalHeight ||
-            img.naturalWidth < MIN_PREVIEW_PX ||
-            img.naturalHeight < MIN_PREVIEW_PX
-          ) {
-            markFailed(index);
-            done();
-            return;
-          }
-          const next: PreviewOrient =
-            img.naturalWidth > img.naturalHeight ? 'landscape' : 'portrait';
-          setOrientations((prev) =>
-            prev[index] === next ? prev : { ...prev, [index]: next },
-          );
-          done();
-        };
-        const applyErr = () => {
-          if (cancelled) return;
-          markFailed(index);
-          done();
-        };
-        img.onload = applyOk;
-        img.onerror = applyErr;
-        img.src = src;
-        if (img.complete && img.naturalWidth > 0) applyOk();
-      }
-    };
-
-    pump();
-
-    return () => {
-      cancelled = true;
-      for (const img of loaders) {
-        img.onload = null;
-        img.onerror = null;
-        img.src = '';
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inView, proxiedKey]);
-
-  const visible = packPreviewImages(proxied, failed, orientations);
-  if (!proxied.length) return null;
-  const preloadCount = Math.min(proxied.length, PREVIEW_PRELOAD_MAX);
-  const stillLoading =
-    inView &&
-    targetsStillLoading(preloadCount, failed, orientations);
-  if (
-    !visible.length &&
-    !stillLoading &&
-    Array.from({ length: preloadCount }, (_, i) => i).every((i) => failed[i])
-  ) {
-    return null;
   }
 
   return (
-    <div ref={rootRef} className="bm-card__body bm-card__body--preview">
-      {visible.length > 0 ? (
-        <button
-          type="button"
-          className="bm-card__preview-hit bm-card__preview-strip"
-          onClick={onOpen}
-          aria-label="查看详情"
-        >
-          {visible.map(({ src, index, orient, pending }) => (
-            <span
-              key={`${src}-${index}`}
-              className={`bm-card__preview-slot bm-card__preview-slot--${orient}${
-                pending ? ' bm-card__preview-slot--pending' : ''
-              }`}
+    <div className="bm-card__body bm-card__body--links">
+      <ul className="bm-card__links">
+        {shown.map((link, index) => {
+          const row = summarizeLink(link);
+          return (
+            <li
+              key={`${link}-${index}`}
+              className={`bm-card__link-row bm-card__link-row--${row.kind}`}
             >
-              {!pending ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={src}
-                  alt=""
-                  className="bm-card__preview-img"
-                  loading="eager"
-                  decoding="async"
-                  onError={() => markFailed(index)}
-                />
-              ) : null}
-            </span>
-          ))}
-        </button>
-      ) : (
+              <button
+                type="button"
+                className="bm-card__link-main"
+                onClick={onOpen}
+                title={link}
+              >
+                <span className="bm-card__link-text">
+                  <span
+                    className={`bm-card__link-primary allow-select${
+                      row.kind === 'magnet' ? ' bm-card__link-primary--uri' : ''
+                    }`}
+                  >
+                    {row.primary}
+                  </span>
+                  {row.secondary ? (
+                    <span className="bm-card__link-secondary allow-select">
+                      {row.secondary}
+                    </span>
+                  ) : null}
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      {hidden > 0 ? (
         <button
           type="button"
-          className="bm-card__preview-hit bm-card__preview-strip"
+          className="bm-card__links-more"
           onClick={onOpen}
-          aria-label="查看详情"
         >
-          <span className="bm-card__preview-slot bm-card__preview-slot--landscape bm-card__preview-slot--pending" />
+          另有 {hidden} 条，进详情查看
         </button>
-      )}
+      ) : null}
     </div>
   );
 }
 
-function targetsStillLoading(
-  count: number,
-  failed: Record<number, true>,
-  orientations: Record<number, PreviewOrient>,
-) {
-  for (let i = 0; i < count; i += 1) {
-    if (!failed[i] && !orientations[i]) return true;
-  }
-  return false;
-}
-
-/** 对齐 Bitmagnet 卡片：标题 / 预览图 / 链接底栏 */
+/** 色花卡片：标题 / ed2k·磁力链接 / 底栏 */
 export function ResourceCard({
   item,
   keywords = [],
@@ -267,7 +174,7 @@ export function ResourceCard({
   keywords?: string[];
   onOpen: (hash: string) => void;
   badge?: string;
-  /** 保留兼容；列表预览图不裁剪，裁剪下钻到详情 */
+  /** 保留兼容；列表不再展示预览图 */
   cropRegion?: string;
 }) {
   const [msg, setMsg] = useState('');
@@ -278,8 +185,8 @@ export function ResourceCard({
   const kind = normalizeLinkKind(view.link_kind);
   const kindLabel = LINK_KIND_LABEL[view.link_kind] || LINK_KIND_LABEL[kind] || '链接';
   const count = view.files_count || view.files?.length || 0;
+  const links = linksForResource(view);
   const copyTextAll = getEd2kCopyText(view);
-  const previews = view.preview_images || [];
 
   const cardRef = useLongPress<HTMLElement>(() => {
     haptics.trigger('nudge');
@@ -349,8 +256,9 @@ export function ResourceCard({
           />
         </button>
       </header>
-      <CardPreviewBody
-        images={previews}
+      <CardLinksBody
+        links={links}
+        kind={kind}
         onOpen={() => onOpen(view.hash)}
       />
       <footer className="bm-card__foot">

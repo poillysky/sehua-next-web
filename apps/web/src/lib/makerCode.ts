@@ -1,7 +1,9 @@
 /**
  * Minimal maker-code parse for pack-bleed / firstMakerCodeIn.
- * Port of sehua-search makerCodeMatch (no av-makers registry).
+ * 形状表：apps/maps/prefixes/code-shapes.json（与后端共用）
  */
+
+import shapesDoc from "@maps/prefixes/code-shapes.json";
 
 export type MakerCodeShape =
   | "std"
@@ -20,84 +22,22 @@ export type ParsedMakerCode = {
 };
 
 const WESTERN_STUDIO_PREFIXES = new Set(
-  [
-    "BRAZZERS",
-    "BLACKED",
-    "BLACKEDRAW",
-    "TUSHY",
-    "TUSHYRAW",
-    "VIXEN",
-    "DEEPER",
-    "REALITYKINGS",
-    "RK",
-    "RKPRIME",
-    "NAUGHTYAMERICA",
-    "BANGBROS",
-    "BANGBUS",
-    "MOFOS",
-    "FAKETAXI",
-    "FAKEHUB",
-    "EVILANGEL",
-    "JULESJORDAN",
-    "PURETABOO",
-    "ADULTTIME",
-    "DORCEL",
-    "DORCELCLUB",
-    "PRIVATE",
-    "ONLYFANS",
-    "MANYVIDS",
-    "DIGITALPLAYGROUND",
-    "ELEGANTANGEL",
-    "LETHALHARDCORE",
-    "ANALVIDS",
-    "KINK",
-    "PUBLICAGENT",
-    "FAMILYSTROKES",
-    "TEAMSKEET",
-    "BRATTYSIS",
-    "NUBILES",
-    "NUBILEFILMS",
-    "LEGALPORNO",
-    "SEXMEX",
-    "PORNWORLD",
-    "MILFY",
-    "WICKED",
-    "SEXART",
-    "WATCH4BEAUTY",
-    "PLAYBOYPLUS",
-  ].map((s) => s.toUpperCase()),
+  ((shapesDoc as { westernPrefixes?: string[] }).westernPrefixes || []).map((s) =>
+    String(s).toUpperCase(),
+  ),
 );
 
 const DATE6_PREFIX_LABEL: Record<string, string> = {
-  CARIB: "CARIB",
-  CARIBBEAN: "CARIB",
-  CARIBBEANCOM: "CARIB",
-  CARIBPR: "CARIBPR",
-  "1PON": "1PON",
-  "1PONDO": "1PON",
-  PACO: "PACO",
-  PACOPACOMAMA: "PACO",
-  "10MU": "10MU",
-  "10MUSUME": "10MU",
+  ...(((shapesDoc as { date6Labels?: Record<string, string> }).date6Labels ||
+    {}) as Record<string, string>),
 };
 
 const PREFIX_SHAPE: Record<string, MakerCodeShape> = {
-  FC2: "fc2",
-  FC2PPV: "fc2ppv",
-  H0930: "alnum_id",
-  C0930: "alnum_id",
-  H4610: "alnum_id",
-  KIN8: "std",
-  GACHI: "std",
-  GACHINCO: "std",
+  ...(((shapesDoc as { shapes?: Record<string, string> }).shapes || {}) as Record<
+    string,
+    MakerCodeShape
+  >),
 };
-
-for (const p of Object.keys(DATE6_PREFIX_LABEL)) {
-  PREFIX_SHAPE[p] = "date6";
-}
-for (const p of WESTERN_STUDIO_PREFIXES) {
-  PREFIX_SHAPE[p] = "western_date";
-}
 
 export function normalizeMakerCode(keyword: string): string {
   return String(keyword || "")

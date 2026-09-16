@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import type { MediaCategoryId, MediaItem } from '@/lib/api';
 import { proxiedCoverUrl } from '@/lib/api';
+import { SoftImg } from '@/components/SoftImg';
 import { MEDIA_CATEGORY_MARK } from './mediaUi';
 
 function typeMark(
@@ -41,19 +42,16 @@ export function MediaPosterCard({
       onClick={onClick}
     >
       <span className="media-poster__frame">
+        <span className="media-poster__ph" aria-hidden>
+          {item.title.slice(0, 1)}
+        </span>
         {poster && !gone ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <SoftImg
             src={poster}
-            alt=""
             loading="lazy"
-            decoding="async"
-            referrerPolicy="no-referrer"
             onError={() => setGone(true)}
           />
-        ) : (
-          <span className="media-poster__ph">{item.title.slice(0, 1)}</span>
-        )}
+        ) : null}
         <span className="media-poster__type" aria-hidden>
           {mark}
         </span>

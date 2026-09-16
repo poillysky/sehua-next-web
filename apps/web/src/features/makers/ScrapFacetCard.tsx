@@ -1,5 +1,6 @@
 'use client';
 
+import { SoftImg } from '@/components/SoftImg';
 import { useScrapLocalCover, SCRAP_POSTER_COVER_OPTS } from './useScrapLocalCover';
 
 export function ScrapFacetCard({
@@ -31,21 +32,17 @@ export function ScrapFacetCard({
       onClick={onClick}
     >
       <span className="media-poster__frame makers-poster__frame makers-facet__frame">
+        <span className="media-poster__ph" aria-hidden>
+          {(title || '?').slice(0, 1)}
+        </span>
         {src ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <SoftImg
             src={src}
-            alt=""
-            loading="lazy"
-            decoding="async"
-            referrerPolicy="no-referrer"
+            loading="eager"
+            fetchPriority="high"
             onError={onError}
           />
-        ) : (
-          <span className="media-poster__ph">
-            {(title || '?').slice(0, 1)}
-          </span>
-        )}
+        ) : null}
       </span>
       <span className="media-poster__caption makers-poster__caption">
         <span className="makers-poster__code allow-select">{title}</span>

@@ -3,6 +3,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Copy } from 'lucide-react';
 import { fetchResource, proxiedCoverUrl } from '@/lib/api';
+import { SoftImg } from '@/components/SoftImg';
 import { copyText } from '@/lib/clipboard';
 import { formatByteSize, formatDate } from '@/lib/format';
 import {
@@ -147,10 +148,8 @@ function PreviewGrid({ images }: { images: string[] }) {
               key={`${src}-${index}`}
               className={`detail-preview-grid__slot detail-preview-grid__slot--${orient}`}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
+              <SoftImg
                 src={src}
-                alt=""
                 className="detail-preview-grid__img"
                 onError={() => markFailed(index)}
               />

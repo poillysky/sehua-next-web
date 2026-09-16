@@ -13,14 +13,19 @@ import {
   enrichScrapLibraryItem,
   fetchScrapLibrarySubtitles,
   fetchTranslate,
+  getScrapEnrichStrategy,
+  getScrapLibraryQualityGate,
   listScrapLibraryEmbedItems,
   listScrapLibrarySubtitles,
   lookupScrapActressAvatarUrls,
+  peekActressAvatarPosterApi,
+  rememberActressAvatarPosterApis,
   saveScrapLibraryPlot,
   searchScrapLibraryEmbed,
   scrapLibraryCoverUrl,
   type ScrapLibraryEmbedItem,
 } from '@/lib/api';
+import { SoftImg } from '@/components/SoftImg';
 import { useTabNavigation } from '@/shell';
 import { useOverlay } from '@/components/overlay/OverlayContext';
 import { writeP115AttachSubs } from '@/lib/p115AttachSubs';
@@ -30,6 +35,77 @@ import { parseScrapSourceText } from './scrapSourceMeta';
 import { ScrapPosterCard } from './ScrapPosterCard';
 import { useScrapLocalCover, SCRAP_DETAIL_COVER_OPTS } from './useScrapLocalCover';
 
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** 标题尾名与女优栏繁简不一致时仍能对上（辉/輝、绮/綺…）。 */
+function foldActressKey(s: string): string {
+  return String(s || '')
+    .normalize('NFKC')
+    .replace(/[輝]/g, '辉')
+    .replace(/[綺]/g, '绮')
+    .replace(/[羅]/g, '罗')
+    .replace(/[宮]/g, '宫')
+    .replace(/[樹]/g, '树')
+    .replace(/[愛]/g, '爱')
+    .replace(/[麗]/g, '丽')
+    .replace(/[條]/g, '条')
+    .replace(/[絲]/g, '丝')
+    .toLowerCase();
+}
+
+const TITLE_TAIL_NAME_RE =
+  /(?:[\s\u3000！!。．.…⋯—–―－\-]+)([\u4e00-\u9fff]{2,8})\s*$/;
+
+/** 详情标题不展示尾部女优名（女优栏已有）。 */
+function stripTrailingActressName(title: string, names: string[]): string {
+  const s = String(title || '').trim();
+  if (!s || names.length === 0) return s;
+
+  const sorted = [...names]
+    .map((n) => n.trim())
+    .filter((n) => n.length >= 2)
+    .sort((a, b) => b.length - a.length);
+
+  let cur = s;
+  for (let guard = 0; guard < 6; guard += 1) {
+    const m = TITLE_TAIL_NAME_RE.exec(cur);
+    if (!m) break;
+    const tail = m[1];
+    const body = cur.slice(0, m.index).trim();
+    if (body.length < 4) break;
+    const tailFold = foldActressKey(tail);
+    const hit = sorted.some((n) => {
+      const nf = foldActressKey(n);
+      return (
+        tail === n ||
+        tailFold === nf ||
+        (tailFold.length >= 2 && (tailFold.includes(nf) || nf.includes(tailFold)))
+      );
+    });
+    if (!hit) {
+      // 精确后缀
+      let matched = false;
+      for (const n of sorted) {
+        const re = new RegExp(
+          `(?:[\\s\\u3000！!。．.…⋯—–―－\\-]+)${escapeRegExp(n)}\\s*$`,
+        );
+        if (!re.test(cur)) continue;
+        const next = cur.replace(re, '').trim();
+        if (next.length < 4) return cur;
+        cur = next;
+        matched = true;
+        break;
+      }
+      if (!matched) break;
+      continue;
+    }
+    cur = body;
+  }
+  return cur;
+}
+
 function MkdActressAvatar({
   name,
   posterApi,
@@ -37,41 +113,46 @@ function MkdActressAvatar({
 }: {
   name: string;
   posterApi?: string;
-  onOpen?: (name: string) => void;
+  onOpen?: (name: string, posterApi?: string) => void;
 }) {
   const [gone, setGone] = useState(false);
-  const src =
+  const [bust, setBust] = useState(0);
+  const base =
     !gone && posterApi
       ? scrapLibraryCoverUrl(
           { posterApi },
           { w: 128, prefer: 'poster', rp: false },
         )
       : '';
+  const src = base
+    ? `${base}${base.includes('?') ? '&' : '?'}_cb=${bust || 0}`
+    : '';
 
   useEffect(() => {
     setGone(false);
+    setBust(0);
   }, [posterApi, name]);
 
   return (
     <button
       type="button"
       className="mkd-actress"
-      onClick={() => onOpen?.(name)}
+      onClick={() => onOpen?.(name, posterApi)}
     >
       <span className="mkd-actress__avatar" aria-hidden>
+        <span className="mkd-actress__ph">{name.slice(0, 1)}</span>
         {src ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <SoftImg
             src={src}
-            alt=""
-            loading="lazy"
-            decoding="async"
-            referrerPolicy="no-referrer"
-            onError={() => setGone(true)}
+            loading="eager"
+            fetchPriority="high"
+            onError={() => {
+              // push 动画期假失败：先 bust 再放弃
+              if (bust === 0) setBust(Date.now());
+              else setGone(true);
+            }}
           />
-        ) : (
-          <span className="mkd-actress__ph">{name.slice(0, 1)}</span>
-        )}
+        ) : null}
       </span>
       <span className="mkd-actress__name allow-select">{name}</span>
     </button>
@@ -92,7 +173,7 @@ export function ScrapDetailBody({
   /** 当前片商分区，优先于 item.region */
   region?: string;
   onFavoriteChange?: (favorited: boolean) => void;
-  onOpenActress?: (name: string) => void;
+  onOpenActress?: (name: string, posterApi?: string) => void;
   onOpenGenre?: (name: string) => void;
   onOpenStudio?: (name: string) => void;
   onOpenRelated?: (next: ScrapLibraryEmbedItem) => void;
@@ -105,28 +186,44 @@ export function ScrapDetailBody({
     () => parseScrapSourceText(item.sourceText),
     [item.sourceText],
   );
-  const [actressAvatars, setActressAvatars] = useState<Record<string, string>>(
-    {},
-  );
   const actressKey = meta.actresses.join('\0');
+  const actressAvatarsSeed = useMemo(() => {
+    const m: Record<string, string> = {};
+    if (!actressKey) return m;
+    for (const name of actressKey.split('\0')) {
+      const api = peekActressAvatarPosterApi(name);
+      if (api) m[name] = api;
+    }
+    return m;
+  }, [actressKey]);
+  const [actressAvatarsResolved, setActressAvatarsResolved] = useState<
+    Record<string, string>
+  >({});
   useEffect(() => {
     const names = actressKey ? actressKey.split('\0') : [];
-    if (!names.length) {
-      setActressAvatars({});
-      return;
-    }
+    setActressAvatarsResolved({});
+    if (!names.length) return;
     let cancelled = false;
     void lookupScrapActressAvatarUrls(names)
       .then((m) => {
-        if (!cancelled) setActressAvatars(m || {});
+        if (cancelled) return;
+        rememberActressAvatarPosterApis(m || {});
+        setActressAvatarsResolved(m || {});
       })
       .catch(() => {
-        if (!cancelled) setActressAvatars({});
+        /* 保持乐观路径 */
       });
     return () => {
       cancelled = true;
     };
   }, [actressKey]);
+  const actressAvatars = useMemo(() => {
+    const next = { ...actressAvatarsSeed };
+    for (const [name, api] of Object.entries(actressAvatarsResolved)) {
+      if (api) next[name] = api;
+    }
+    return next;
+  }, [actressAvatarsSeed, actressAvatarsResolved]);
   const code = String(item.code || meta.code || '').trim();
   const title = String(item.title || meta.title || '').trim();
   const originalTitle = String(meta.originalTitle || '').trim();
@@ -148,7 +245,43 @@ export function ScrapDetailBody({
     if (b && hasCjk(b)) return b;
     return a || b;
   })();
-  const displayTitle = titleZhOrJa;
+  const displayTitle = useMemo(
+    () => stripTrailingActressName(titleZhOrJa, meta.actresses),
+    [titleZhOrJa, actressKey],
+  );
+  const secondaryTitle = (() => {
+    const a = stripCodePrefix(title);
+    const b = stripCodePrefix(originalTitle);
+    if (!b || !displayTitle) return '';
+    if (b.toLowerCase() === displayTitle.toLowerCase()) return '';
+    if (b === displayTitle) return '';
+    const mainIsCjk = /[\u4e00-\u9fff]/.test(displayTitle);
+    const bIsCjk = /[\u4e00-\u9fff]/.test(b);
+    if (mainIsCjk && !bIsCjk) return b;
+    if (!mainIsCjk && bIsCjk) return b;
+    if (a && a !== displayTitle && a !== b) return a;
+    return b !== displayTitle ? b : '';
+  })();
+  const [outlineShow, setOutlineShow] = useState(
+    meta.outlineShow === 'zh_jp' || meta.outlineShow === 'jp_zh'
+      ? meta.outlineShow
+      : 'zh',
+  );
+  useEffect(() => {
+    let cancelled = false;
+    void getScrapEnrichStrategy()
+      .then((s) => {
+        if (cancelled) return;
+        const v = s.outlineShow;
+        if (v === 'zh_jp' || v === 'jp_zh' || v === 'zh') setOutlineShow(v);
+      })
+      .catch(() => {
+        /* 用 meta 默认 */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [coverRev, setCoverRev] = useState(0);
   const {
     src: posterRaw,
@@ -209,6 +342,26 @@ export function ScrapDetailBody({
       .replace(/\r\n/g, '\n')
       .trim();
   }, [plotZh, meta.plot]);
+
+  const originalPlotText = useMemo(() => {
+    const raw = String(meta.originalPlot || '');
+    return raw
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/\r\n/g, '\n')
+      .trim();
+  }, [meta.originalPlot]);
+
+  const bilingualPlots = useMemo(() => {
+    const zh = displayPlot;
+    const ja = originalPlotText;
+    if (!ja || !zh || ja.toLowerCase() === zh.toLowerCase()) {
+      return { primary: zh || ja, secondary: '' };
+    }
+    if (outlineShow === 'jp_zh') return { primary: ja, secondary: zh };
+    if (outlineShow === 'zh_jp') return { primary: zh, secondary: ja };
+    return { primary: zh || ja, secondary: '' };
+  }, [displayPlot, originalPlotText, outlineShow]);
 
   useEffect(() => {
     setImgGone(false);
@@ -421,6 +574,33 @@ export function ScrapDetailBody({
     }
   }
 
+  async function onCheckQualityGate() {
+    try {
+      const data = await getScrapLibraryQualityGate({
+        itemId: String(item.itemId || ''),
+        code,
+        relPath: String(item.relPath || ''),
+      });
+      const hard = data.hardFail || [];
+      const soft = data.soft || [];
+      if (data.ok && !hard.length) {
+        toast(
+          soft.length
+            ? `门禁通过 · soft ${soft.slice(0, 3).join(' / ')}`
+            : '门禁通过',
+          'success',
+        );
+        return;
+      }
+      toast(
+        `门禁未过：${(hard.length ? hard : soft).slice(0, 4).join(' / ')}`,
+        'error',
+      );
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '门禁检查失败', 'error');
+    }
+  }
+
   async function onTranslatePlot() {
     const raw = String(meta.plot || '')
       .replace(/<br\s*\/?>/gi, '\n')
@@ -575,6 +755,20 @@ export function ScrapDetailBody({
   if (meta.label && meta.label !== meta.studio) {
     facts.push({ k: '发行', v: meta.label });
   }
+  if (meta.definition) facts.push({ k: '清晰度', v: meta.definition });
+  if (meta.mosaic) facts.push({ k: '马赛克', v: meta.mosaic });
+
+  const badgeChips = (() => {
+    const out: string[] = [];
+    if (meta.cnsub) out.push('中字');
+    for (const b of meta.badges || []) {
+      const t = String(b || '').trim();
+      if (!t) continue;
+      if (t === '中字' || t === '字幕' || /^cnsub$/i.test(t)) continue;
+      if (!out.includes(t)) out.push(t);
+    }
+    return out.slice(0, 8);
+  })();
 
   const favFactBtn = (
     <button
@@ -603,42 +797,43 @@ export function ScrapDetailBody({
       <header className="mkd-head">
         {washSrc && !imgGone ? (
           <div className="mkd-head__wash" aria-hidden>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
+            <SoftImg
               src={washSrc}
-              alt=""
               loading="eager"
-              decoding="async"
               fetchPriority="high"
-              referrerPolicy="no-referrer"
+              onError={() => setImgGone(true)}
             />
           </div>
         ) : null}
 
         <div className="mkd-head__row">
           <div className="media-detail__poster mkd-head__poster" aria-hidden>
+            <span className="media-detail__poster-ph">
+              {(code || title || '?').slice(0, 1)}
+            </span>
             {poster ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
+              <SoftImg
                 src={poster}
-                alt=""
                 loading="eager"
-                decoding="async"
                 fetchPriority="high"
-                referrerPolicy="no-referrer"
                 onError={onPosterError}
               />
-            ) : (
-              <span className="media-detail__poster-ph">
-                {(code || title || '?').slice(0, 1)}
-              </span>
-            )}
+            ) : null}
           </div>
 
           <div className="mkd-head__id">
             <div className="mkd-head__code-row">
               <p className="mkd-head__code allow-select">{code || '—'}</p>
               <div className="mkd-head__tools">
+                <button
+                  type="button"
+                  className="mkd-enrich"
+                  onClick={() => void onCheckQualityGate()}
+                  disabled={enrichBusy}
+                  title="按 E2E 门禁检查本条标题/海报/剧情等"
+                >
+                  门禁
+                </button>
                 <button
                   type="button"
                   className={
@@ -660,6 +855,9 @@ export function ScrapDetailBody({
             </div>
             {displayTitle ? (
               <h2 className="mkd-head__title allow-select">{displayTitle}</h2>
+            ) : null}
+            {outlineShow !== 'zh' && secondaryTitle ? (
+              <p className="mkd-head__subtitle allow-select">{secondaryTitle}</p>
             ) : null}
 
             <div className="mkd-facts-row">
@@ -692,6 +890,15 @@ export function ScrapDetailBody({
               ) : null}
               {favFactBtn}
             </div>
+            {badgeChips.length > 0 ? (
+              <div className="mkd-badges" aria-label="角标">
+                {badgeChips.map((b) => (
+                  <span key={b} className="mkd-badge">
+                    {b}
+                  </span>
+                ))}
+              </div>
+            ) : null}
           </div>
         </div>
       </header>
@@ -730,7 +937,7 @@ export function ScrapDetailBody({
         </section>
       ) : null}
 
-      {meta.plot || plotZh ? (
+      {meta.plot || plotZh || meta.originalPlot ? (
         <section className="mkd-section">
           <div className="mkd-section__head">
             <h3 className="media-detail__h mkd-section__h">剧情</h3>
@@ -752,7 +959,16 @@ export function ScrapDetailBody({
               </span>
             )}
           </div>
-          <p className="media-detail__overview allow-select">{displayPlot}</p>
+          {bilingualPlots.primary ? (
+            <p className="media-detail__overview allow-select">
+              {bilingualPlots.primary}
+            </p>
+          ) : null}
+          {bilingualPlots.secondary ? (
+            <p className="media-detail__overview media-detail__overview--alt allow-select">
+              {bilingualPlots.secondary}
+            </p>
+          ) : null}
         </section>
       ) : null}
 

@@ -9,6 +9,7 @@ const apiProxy =
 const nextConfig: NextConfig = {
   output: 'standalone',
   // 热更新用默认 Turbopack。root 锁在 apps/web，避免监听仓库根的 data/library。
+  // 共享 maps：由 scripts/sync-maps.mjs 复制进 apps/web/maps（实体文件，非联接）。
   // resolveAlias：root 收窄后 CSS 解析上下文会落到上级 apps/，必须指向本包 node_modules。
   turbopack: {
     root: webDir,
@@ -16,6 +17,8 @@ const nextConfig: NextConfig = {
       tailwindcss: path.join(webDir, 'node_modules/tailwindcss'),
       'tw-animate-css': path.join(webDir, 'node_modules/tw-animate-css'),
       shadcn: path.join(webDir, 'node_modules/shadcn'),
+      '@maps': path.join(webDir, 'maps'),
+      'app-ui.css': path.join(webDir, 'src/app/app-ui.css'),
     },
   },
   devIndicators: false,
@@ -24,6 +27,12 @@ const nextConfig: NextConfig = {
     proxyTimeout: 3_600_000,
   },
   webpack: (config, { dev }) => {
+    config.resolve = config.resolve || {};
+    config.resolve.alias = {
+      ...(config.resolve.alias || {}),
+      '@maps': path.join(webDir, 'maps'),
+      'app-ui.css': path.join(webDir, 'src/app/app-ui.css'),
+    };
     if (dev) {
       config.watchOptions = {
         poll: 1000,

@@ -1,6 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type SyntheticEvent,
+} from 'react';
 import {
   ensureScrapLibraryPoster,
   scrapLibraryCoverUrl,
@@ -17,7 +23,7 @@ export type ScrapLocalCoverOpts = {
   itemId?: string;
   w?: number;
   rp?: boolean;
-  /** 列表/货架用 thumb（右裁竖图）；详情用 poster 高清 */
+  /** 列表缩略 / 详情高清；选图一律 poster 优先，无 poster 才用 thumb 右裁 */
   prefer?: 'thumb' | 'poster';
   maxPosters?: number;
 };
@@ -27,35 +33,28 @@ function localUrl(
   thumbApi: string | undefined,
   opts: { w: number; prefer: 'thumb' | 'poster'; rp?: boolean },
 ) {
-  const preferThumb = opts.prefer === 'thumb';
   let api = '';
-  let rp = opts.rp;
-  if (preferThumb) {
-    if (thumbApi) {
-      api = thumbApi;
-      rp = true; // 横 thumb → 右裁竖图
-    } else if (posterApi) {
-      // 无 thumb 时常落盘的是横版 jacket（cover→poster.jpg）；
-      // rp=1 仅在 w>h 时右裁，竖版 poster 服务端会 no-op
-      api = posterApi;
-      rp = true;
-    }
-  } else if (posterApi) {
+  let rp = false;
+  let useThumb = false;
+  if (posterApi) {
+    // 入库 poster 已按策略裁好；展示不再右裁
     api = posterApi;
     rp = false;
   } else if (thumbApi) {
+    // 无 poster 才用横 thumb，服务端 rp 右裁竖幅
     api = thumbApi;
-    rp = opts.rp ?? true;
+    useThumb = true;
+    rp = true;
   }
   if (!api) return '';
   return (
     scrapLibraryCoverUrl(
-      preferThumb
+      useThumb
         ? { posterApi: '', thumbApi: api, coverUrl: '' }
         : { posterApi: api, thumbApi: '', coverUrl: '' },
       {
         w: opts.w,
-        prefer: preferThumb ? 'thumb' : 'poster',
+        prefer: useThumb ? 'thumb' : 'poster',
         rp: Boolean(rp),
       },
     ) || ''
@@ -64,12 +63,12 @@ function localUrl(
 
 /**
  * 片商封面统一：
- * - 列表/货架：prefer=thumb + 右裁竖图
- * - 详情：prefer=poster 高清竖图
+ * - 有 poster 用 poster；无 poster 才用 thumb + 右裁
+ * - prefer 只影响默认宽度（列表缩略 / 详情高清）
  * - 只读本地；缺图则落盘后再显示
  */
 export function useScrapLocalCover(opts: ScrapLocalCoverOpts) {
-  const prefer = opts.prefer ?? 'thumb';
+  const prefer = opts.prefer ?? 'poster';
   const w =
     opts.w ??
     (prefer === 'poster' ? 720 : SCRAP_COLLAGE_THUMB_W);
@@ -79,9 +78,13 @@ export function useScrapLocalCover(opts: ScrapLocalCoverOpts) {
     [w, prefer, opts.rp],
   );
 
+  // 调用方常写 posterApis={[api]}，引用每帧都变；用序列化键稳定 memo
+  const posterApisKey = (opts.posterApis || []).join('\0');
+
   const locals = useMemo(() => {
-    // 拼贴多图：路径已由后端按 thumb 优先选出；thumb/fanart 右裁竖图
-    const fromList = (opts.posterApis || [])
+    const apis = posterApisKey ? posterApisKey.split('\0') : [];
+    // 拼贴多图：仅 thumb/fanart/landscape 路径才右裁；poster 原样缩略
+    const fromList = apis
       .map((p) => {
         const looksWide = /thumb|fanart|landscape/i.test(String(p));
         return (
@@ -90,7 +93,7 @@ export function useScrapLocalCover(opts: ScrapLocalCoverOpts) {
             {
               w: coverOpts.w,
               prefer: 'poster',
-              rp: prefer === 'thumb' && looksWide,
+              rp: looksWide,
             },
           ) || ''
         );
@@ -102,7 +105,7 @@ export function useScrapLocalCover(opts: ScrapLocalCoverOpts) {
   }, [
     opts.posterApi,
     opts.thumbApi,
-    opts.posterApis,
+    posterApisKey,
     coverOpts,
     maxPosters,
     prefer,
@@ -112,21 +115,39 @@ export function useScrapLocalCover(opts: ScrapLocalCoverOpts) {
   const [src, setSrc] = useState(locals[0] || '');
   const [ensuring, setEnsuring] = useState(false);
   const ensuredKey = useRef('');
+  /** 换图世代：忽略旧 img 的 onError，避免清空新 src */
+  const srcGen = useRef(0);
+  const retriedGen = useRef(-1);
 
-  const localKey = `${locals.length}:${locals[0] || ''}`;
+  const localKey = locals.join('|');
 
   useEffect(() => {
+    srcGen.current += 1;
+    retriedGen.current = -1;
     setPosters(locals);
     setSrc(locals[0] || '');
-  }, [localKey, locals]);
+    if (locals[0]) setEnsuring(false);
+    // localKey 已覆盖 locals 内容；避免数组引用进依赖导致死循环
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [localKey]);
 
   useEffect(() => {
     const id = String(opts.itemId || '').trim();
     const cover = String(opts.coverUrl || '').trim();
-    if (locals[0]) return;
-    if (!id && !cover) return;
+    if (locals[0]) {
+      setEnsuring(false);
+      return;
+    }
+    if (!id && !cover) {
+      setEnsuring(false);
+      return;
+    }
     const key = `${id}|${cover}|${prefer}`;
-    if (ensuredKey.current === key) return;
+    if (ensuredKey.current === key) {
+      // 同 key 已发起过：若仍无本地图，勿一直转圈
+      setEnsuring(false);
+      return;
+    }
     ensuredKey.current = key;
     let cancelled = false;
     setEnsuring(true);
@@ -137,59 +158,97 @@ export function useScrapLocalCover(opts: ScrapLocalCoverOpts) {
           coverUrl: cover,
         });
         if (cancelled) return;
-        // 落盘的是 poster.jpg；列表无 thumb 时用 poster 竖图兜底
+        // ensure 落盘的是 poster.jpg
         const api = String(data?.posterApi || '').trim();
         if (!api) return;
         const url = localUrl(api, undefined, coverOpts);
         if (!url) return;
+        srcGen.current += 1;
         setSrc(url);
         setPosters([url]);
+      } catch {
+        /* ignore — 由调用方用 coverUrl 远程预览兜底 */
       } finally {
         if (!cancelled) setEnsuring(false);
       }
     })();
     return () => {
       cancelled = true;
+      // 取消时清掉转圈，避免下一轮 early-return 卡死「落盘中」
+      setEnsuring(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opts.itemId, opts.coverUrl, localKey, coverOpts, prefer]);
 
-  const onError = () => {
+  const onError = (ev?: SyntheticEvent<HTMLImageElement>) => {
+    const el = ev?.currentTarget;
+    // 已解码成功却误报 error（合成层/transform）：忽略
+    if (el && el.naturalWidth > 0) return;
+
+    const gen = srcGen.current;
     const id = String(opts.itemId || '').trim();
     const cover = String(opts.coverUrl || '').trim();
-    if (!id && !cover) {
-      setSrc('');
+
+    // AppPush / Tab transform 下首帧常假失败：短延迟后再 bust，避免慢网双请求打架
+    if (retriedGen.current !== gen) {
+      retriedGen.current = gen;
+      window.setTimeout(() => {
+        if (gen !== srcGen.current) return;
+        setSrc((cur) => {
+          if (gen !== srcGen.current || !cur) return cur;
+          const base = cur
+            .replace(/([?&])_cb=\d+/g, '$1')
+            .replace(/[?&]$/, '');
+          const sep = base.includes('?') ? '&' : '?';
+          return `${base}${sep}_cb=${Date.now()}`;
+        });
+      }, 120);
       return;
     }
+
+    if (!id && !cover) {
+      if (gen === srcGen.current) setSrc('');
+      return;
+    }
+
     void (async () => {
-      const data = await ensureScrapLibraryPoster({
-        itemId: id,
-        coverUrl: cover,
-      });
-      const api = String(data?.posterApi || '').trim();
-      const url = api ? localUrl(api, undefined, coverOpts) : '';
-      if (url && url !== src) {
-        setSrc(url);
+      try {
+        const data = await ensureScrapLibraryPoster({
+          itemId: id,
+          coverUrl: cover,
+        });
+        if (gen !== srcGen.current) return;
+        const api = String(data?.posterApi || '').trim();
+        const url = api ? localUrl(api, undefined, coverOpts) : '';
+        if (!url) {
+          if (gen === srcGen.current) setSrc('');
+          return;
+        }
+        // 即使 ensure 回到同一路径，也换世代 + bust，避免「url === src → 直接清空」
+        srcGen.current += 1;
+        retriedGen.current = -1;
+        const sep = url.includes('?') ? '&' : '?';
+        setSrc(`${url}${sep}_cb=${Date.now()}`);
         setPosters([url]);
-        return;
+      } catch {
+        if (gen === srcGen.current) setSrc('');
       }
-      setSrc('');
     })();
   };
 
   return { src, posters, onError, ensuring };
 }
 
-/** 列表 / 货架 / 厂牌墙：thumb 右裁竖图 */
+/** 列表 / 货架 / 厂牌墙：优先 poster；无 poster 时 thumb 右裁 */
 export const SCRAP_POSTER_COVER_OPTS = {
   w: SCRAP_LIST_THUMB_W,
-  prefer: 'thumb' as const,
+  prefer: 'poster' as const,
   rp: true as const,
 };
 
 export const SCRAP_COLLAGE_COVER_OPTS = {
   w: SCRAP_COLLAGE_THUMB_W,
-  prefer: 'thumb' as const,
+  prefer: 'poster' as const,
   rp: true as const,
 };
 

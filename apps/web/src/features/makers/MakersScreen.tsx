@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { ArrowDown, ArrowUp, Check, ChevronRight, RefreshCw, Search, X } from 'lucide-react';
 import {
+  getScrapActressProfile,
   listScrapLibraryEmbedFacets,
   listScrapLibraryEmbedItems,
   listScrapLibraryEmbedPrefixes,
@@ -17,6 +18,7 @@ import {
   refreshScrapLibraryEmbedFacetsSnapshot,
   searchScrapLibraryEmbed,
   type MakerCatalogSourceId,
+  type ScrapActressProfile,
   type ScrapLibraryEmbedFacet,
   type ScrapLibraryEmbedItem,
   type ScrapLibraryEmbedPrefix,
@@ -29,6 +31,7 @@ import { useStackCover } from '@/hooks/useStackCover';
 import { SEARCH_KEYWORD_LENGTH_MIN } from '@/config/search';
 import {
   makerSourceLabel,
+  MAKER_ACTRESS_SORT_OPTS,
   MAKER_FACET_SORT_OPTS,
   MAKER_KIND_TABS,
   MAKER_LIBRARY_VIEWS,
@@ -41,6 +44,7 @@ import {
 } from './makersUi';
 import { ScrapPosterCard } from './ScrapPosterCard';
 import { ScrapActressCard, ScrapCollageCard, ScrapTagCard } from './ScrapCollageCard';
+import { ScrapActressProfileHeader } from './ScrapActressProfileHeader';
 import { ScrapDetailBody } from './ScrapDetailBody';
 import {
   listScrapFavorites,
@@ -59,13 +63,17 @@ type DrillStack =
       value: string;
       /** 从详情芯片跳转时，返回可回到该条目 */
       fromDetail?: ScrapLibraryEmbedItem;
+      /** 女优入口预填（减少头闪烁） */
+      posterApi?: string;
+      count?: number;
     };
 
 type Stack =
   | DrillStack
   | { kind: 'detail'; item: ScrapLibraryEmbedItem; from: DrillStack };
 
-const PAGE_SIZE = 45;
+// 女优墙 4 列、文件夹/合集 3 列：用 48 避免满页末行空格
+const PAGE_SIZE = 48;
 
 function prefixCodeRank(code: string): number {
   const m = String(code || '')
@@ -115,6 +123,8 @@ export function MakersScreen() {
   const [libraryView, setLibraryView] = useState<MakerLibraryView>('recommended');
   const [itemSort, setItemSort] = useState<MakerSortId>('year');
   const [facetSort, setFacetSort] = useState<MakerFacetSortId>('count');
+  /** 女优墙默认：年龄升序（小→大） */
+  const [actressSort, setActressSort] = useState<MakerFacetSortId>('age');
   /** 厂牌→前缀：默认按发行先后（新→旧） */
   const [prefixSort, setPrefixSort] = useState<MakerPrefixSortId>('code');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
@@ -200,6 +210,9 @@ export function MakersScreen() {
   );
   const [loading, setLoading] = useState(false);
   const [snapRefreshing, setSnapRefreshing] = useState(false);
+  const [actressProfile, setActressProfile] =
+    useState<ScrapActressProfile | null>(null);
+  const [actressProfileLoading, setActressProfileLoading] = useState(false);
   const [searchDraft, setSearchDraft] = useState('');
   const [searchHits, setSearchHits] = useState<ScrapLibraryEmbedItem[]>([]);
   const [searchStudios, setSearchStudios] = useState<ScrapLibraryEmbedFacet[]>(
@@ -266,6 +279,12 @@ export function MakersScreen() {
 
   const showSortBar =
     libraryView !== 'recommended' && libraryView !== 'favorites';
+  const isActressHubView = libraryView === 'tags';
+  const activeFacetSort: MakerFacetSortId = isActressHubView
+    ? actressSort
+    : facetSort === 'age'
+      ? 'count'
+      : facetSort;
   const isItemSortView =
     libraryView === 'movies' ||
     stack.kind === 'folderPrefix' ||
@@ -281,6 +300,8 @@ export function MakersScreen() {
       const seq = ++loadSeq.current;
       setLoading(true);
       setMsg('');
+      // 筛选切换时先清空，避免旧列表闪一下，也不要用黑底空屏
+      if (offset === 0) setItems([]);
       try {
         const page = await listScrapLibraryEmbedItems({
           region: hubTab,
@@ -373,7 +394,7 @@ export function MakersScreen() {
   const loadHubView = useCallback(
     async (pageNum: number) => {
       if (libraryView === 'recommended') return;
-      const cacheKey = `${hubTab}|${libraryView}|${itemSort}|${facetSort}|${sortOrder}|${pageNum}`;
+      const cacheKey = `${hubTab}|${libraryView}|${itemSort}|${activeFacetSort}|${sortOrder}|${pageNum}`;
       if (libraryView !== 'favorites') {
         const cached = hubCacheRef.current.get(cacheKey);
         if (cached) {
@@ -427,7 +448,7 @@ export function MakersScreen() {
           const page = await listScrapLibraryEmbedFacets({
             region: hubTab,
             kind,
-            sort: facetSort,
+            sort: activeFacetSort,
             order: sortOrder,
             offset,
             limit: PAGE_SIZE,
@@ -455,7 +476,7 @@ export function MakersScreen() {
         if (seq === loadSeq.current) setLoading(false);
       }
     },
-    [hubTab, libraryView, itemSort, facetSort, sortOrder, putHubCache],
+    [hubTab, libraryView, itemSort, activeFacetSort, sortOrder, putHubCache],
   );
 
   useEffect(() => {
@@ -470,11 +491,84 @@ export function MakersScreen() {
   // 筛选变化时回到第 1 页
   useEffect(() => {
     setHubPage(1);
-  }, [hubTab, libraryView, itemSort, facetSort, sortOrder]);
+  }, [hubTab, libraryView, itemSort, actressSort, facetSort, sortOrder]);
+
+  // 女优钻取：加载基本信息（头像 / 别名 / 作品数）
+  useEffect(() => {
+    if (stack.kind !== 'facet' || stack.facet !== 'actress') {
+      setActressProfile(null);
+      setActressProfileLoading(false);
+      return;
+    }
+    const name = String(stack.value || '').trim();
+    if (!name) return;
+    let cancelled = false;
+    setActressProfileLoading(true);
+    const seedPoster =
+      stack.posterApi &&
+      (stack.posterApi.includes('/_actress/') ||
+        stack.posterApi.includes('%2F_actress%2F') ||
+        stack.posterApi.includes('%2f_actress%2f'))
+        ? stack.posterApi
+        : undefined;
+    setActressProfile({
+      name,
+      count: stack.count,
+      posterApi: seedPoster,
+      aliases: [],
+    });
+    void (async () => {
+      try {
+        const data = await getScrapActressProfile({
+          name,
+          region: hubTab,
+        });
+        if (cancelled) return;
+        const apiPoster =
+          data.posterApi &&
+          (data.posterApi.includes('/_actress/') ||
+            data.posterApi.includes('%2F_actress%2F') ||
+            data.posterApi.includes('%2f_actress%2f'))
+            ? data.posterApi
+            : undefined;
+        setActressProfile({
+          ...data,
+          posterApi: apiPoster || seedPoster,
+          count:
+            typeof data.count === 'number'
+              ? data.count
+              : stack.count,
+        });
+      } catch {
+        if (!cancelled) {
+          setActressProfile((prev) =>
+            prev
+              ? prev
+              : {
+                  name,
+                  count: stack.count,
+                  posterApi: seedPoster,
+                },
+          );
+        }
+      } finally {
+        if (!cancelled) setActressProfileLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    stack.kind === 'facet' ? stack.facet : '',
+    stack.kind === 'facet' ? stack.value : '',
+    stack.kind === 'facet' ? stack.posterApi : '',
+    stack.kind === 'facet' ? stack.count : undefined,
+    hubTab,
+  ]);
 
   // Hub 数据：不要依赖 stack.kind，否则详情返回会整页重载（闪烁 + 丢滚动）
   // 推荐页与七区无关，切换区时不要重拉
-  const hubQueryKey = `${hubTab}|${libraryView}|${itemSort}|${facetSort}|${sortOrder}`;
+  const hubQueryKey = `${hubTab}|${libraryView}|${itemSort}|${activeFacetSort}|${sortOrder}`;
   const hubQueryKeyRef = useRef(hubQueryKey);
   useEffect(() => {
     if (libraryView === 'recommended') return;
@@ -669,7 +763,10 @@ export function MakersScreen() {
     ? MAKER_SORT_OPTS.find((o) => o.id === itemSort)?.label || '名称'
     : isPrefixSortView
       ? MAKER_PREFIX_SORT_OPTS.find((o) => o.id === prefixSort)?.label || '先后'
-      : MAKER_FACET_SORT_OPTS.find((o) => o.id === facetSort)?.label || '名称';
+      : (isActressHubView
+          ? MAKER_ACTRESS_SORT_OPTS
+          : MAKER_FACET_SORT_OPTS
+        ).find((o) => o.id === activeFacetSort)?.label || '名称';
 
   const OrderIcon = sortOrder === 'asc' ? ArrowUp : ArrowDown;
 
@@ -710,13 +807,22 @@ export function MakersScreen() {
       }
       setPrefixSort(next);
       setSortOrder(next === 'name' ? 'asc' : 'desc');
+    } else if (isActressHubView) {
+      const next = id as MakerFacetSortId;
+      if (actressSort === next) {
+        setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'));
+        return;
+      }
+      setActressSort(next);
+      // 年龄默认小→大；数量大→小；名称 A→Z
+      setSortOrder(next === 'count' ? 'desc' : 'asc');
     } else {
       const next = id as MakerFacetSortId;
       if (facetSort === next) {
         setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'));
         return;
       }
-      setFacetSort(next);
+      setFacetSort(next === 'age' ? 'count' : next);
       setSortOrder(next === 'count' ? 'desc' : 'asc');
     }
     setSortMenuOpen(false);
@@ -726,12 +832,14 @@ export function MakersScreen() {
     ? MAKER_SORT_OPTS
     : isPrefixSortView
       ? MAKER_PREFIX_SORT_OPTS
-      : MAKER_FACET_SORT_OPTS;
+      : isActressHubView
+        ? MAKER_ACTRESS_SORT_OPTS
+        : MAKER_FACET_SORT_OPTS;
   const activeSortId = isItemSortView
     ? itemSort
     : isPrefixSortView
       ? prefixSort
-      : facetSort;
+      : activeFacetSort;
 
   const sortDropdown = sortMenuOpen ? (
     <div className="makers-sort-dropdown" role="listbox" aria-label="排序">
@@ -890,6 +998,7 @@ export function MakersScreen() {
   function openFacetFromDetail(
     facet: 'genre' | 'tag' | 'actress',
     value: string,
+    opts?: { posterApi?: string; count?: number },
   ) {
     const name = String(value || '').trim();
     if (!name) return;
@@ -899,6 +1008,8 @@ export function MakersScreen() {
       facet,
       value: name,
       fromDetail,
+      posterApi: opts?.posterApi,
+      count: opts?.count,
     });
   }
 
@@ -1102,12 +1213,20 @@ export function MakersScreen() {
       if (loading) {
         return (
           <div className="makers-hub__shelves" aria-hidden>
-            {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="media-shelf__rail media-shelf__rail--skel">
-                {Array.from({ length: 5 }).map((__, j) => (
-                  <span key={j} className="makers-poster-skel" />
-                ))}
-              </div>
+            {MAKER_KIND_TABS.map((tab) => (
+              <section key={tab.id} className="media-shelf makers-shelf">
+                <div className="media-shelf__head">
+                  <span className="media-shelf__title">
+                    {tab.label} · 最近刮削
+                  </span>
+                  <span className="media-shelf__more" />
+                </div>
+                <div className="media-shelf__rail makers-shelf__rail media-shelf__rail--skel">
+                  {Array.from({ length: 5 }).map((_, j) => (
+                    <span key={j} className="makers-poster-skel" />
+                  ))}
+                </div>
+              </section>
             ))}
           </div>
         );
@@ -1248,7 +1367,7 @@ export function MakersScreen() {
             className="makers-actress-grid makers-actress-grid--skel"
             aria-hidden
           >
-            {Array.from({ length: 9 }).map((_, i) => (
+            {Array.from({ length: 8 }).map((_, i) => (
               <span key={i} className="makers-actress-skel" />
             ))}
           </div>
@@ -1275,6 +1394,8 @@ export function MakersScreen() {
                     kind: 'facet',
                     facet: 'actress',
                     value: f.name,
+                    posterApi: f.posterApi,
+                    count: f.count,
                   })
                 }
               />
@@ -1299,7 +1420,13 @@ export function MakersScreen() {
   const hub = (
     <div {...hubCover}>
       <div className="makers-hub__wash" aria-hidden />
-      <div className="makers-hub__top media-hub__top">
+      <div
+        className={
+          sortMenuOpen && showSortBar
+            ? 'makers-hub__top media-hub__top is-sort-open'
+            : 'makers-hub__top media-hub__top'
+        }
+      >
         <div className="media-hub__top-row">
           <p className="makers-hub__meta allow-select">{viewMetaLabel()}</p>
           <h1 className="app-hub__title">片商</h1>
@@ -1390,6 +1517,12 @@ export function MakersScreen() {
                 }
                 onClick={() => {
                   setLibraryView(v.id);
+                  if (v.id === 'tags') {
+                    // 女优墙默认年龄升序（小→大）
+                    setSortOrder(
+                      actressSort === 'count' ? 'desc' : 'asc',
+                    );
+                  }
                   if (stack.kind !== 'hub') setStack({ kind: 'hub' });
                 }}
               >
@@ -1718,20 +1851,49 @@ export function MakersScreen() {
       }
       setStack({ kind: 'hub' });
     };
+    const isActress = stack.facet === 'actress';
+    const profileName = actressProfile?.name || stack.value;
+    const profileCount =
+      typeof actressProfile?.count === 'number'
+        ? actressProfile.count
+        : typeof stack.count === 'number'
+          ? stack.count
+          : total;
     push = (
       <AppPush
-        title={stack.value}
+        title={isActress ? '女优' : stack.value}
         scrollKey={`makers-drill-${hubTab}-facet-${stack.value}`}
         onBack={onDrillBack}
         skipEnterAnimation
       >
         <div className="makers-library-panel">
+          {isActress ? (
+            <ScrapActressProfileHeader
+              name={profileName}
+              count={profileCount}
+              posterApi={
+                actressProfile?.posterApi ||
+                (stack.posterApi &&
+                (stack.posterApi.includes('/_actress/') ||
+                  stack.posterApi.includes('%2F_actress%2F') ||
+                  stack.posterApi.includes('%2f_actress%2f'))
+                  ? stack.posterApi
+                  : undefined)
+              }
+              loading={actressProfileLoading}
+              profile={actressProfile}
+            />
+          ) : null}
           <div
             className="makers-drill-toolbar makers-sort-bar--push"
             ref={sortSlotRef}
           >
             <p className="makers-drill-toolbar__meta allow-select">
-              {loading && items.length === 0 ? '加载中…' : `共 ${total} 项`}
+              {loading && items.length === 0
+                ? '加载中…'
+                : isActress
+                  ? `番号 · ${total} 项`
+                  : `共 ${total} 项`}
             </p>
             {combinedSortBtn(true, 'makers-drill-sort')}
             {sortDropdown}
@@ -1757,7 +1919,9 @@ export function MakersScreen() {
           item={stack.item}
           region={hubTab}
           onFavoriteChange={() => setFavTick((n) => n + 1)}
-          onOpenActress={(name) => openFacetFromDetail('actress', name)}
+          onOpenActress={(name, posterApi) =>
+            openFacetFromDetail('actress', name, { posterApi })
+          }
           onOpenGenre={(name) => openFacetFromDetail('genre', name)}
           onOpenStudio={(name) => openStudioFromDetail(name)}
           onItemPatch={(patch) => {

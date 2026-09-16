@@ -1,11 +1,45 @@
 'use client';
 
-import { useState } from 'react';
-import { Folder } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { CircleUserRound, Folder } from 'lucide-react';
+import {
+  lookupScrapActressAvatarUrls,
+  peekActressAvatarPosterApi,
+  rememberActressAvatarPosterApis,
+} from '@/lib/api';
+import { SoftImg } from '@/components/SoftImg';
 import {
   SCRAP_COLLAGE_COVER_OPTS,
   useScrapLocalCover,
 } from './useScrapLocalCover';
+
+function isUnlabeledActress(name: string): boolean {
+  const t = String(name || '').trim();
+  return t === '未标注女优' || t === '未标注' || t === '(unknown)';
+}
+
+function isActressAvatarApi(api?: string): boolean {
+  const s = String(api || '');
+  return (
+    s.includes('/_actress/') ||
+    s.includes('%2F_actress%2F') ||
+    s.includes('%2f_actress%2f')
+  );
+}
+
+/** 女优墙只允许真人头像；作品 poster 一律丢弃。 */
+function resolveActressCardPosterApi(
+  name: string,
+  posterApi?: string,
+  posterApis?: string[],
+): string {
+  if (isUnlabeledActress(name)) return '';
+  if (isActressAvatarApi(posterApi)) return String(posterApi);
+  for (const p of posterApis || []) {
+    if (isActressAvatarApi(p)) return String(p);
+  }
+  return peekActressAvatarPosterApi(name);
+}
 
 /** Emby 式 2×2 拼贴封面（厂牌 / 标签） */
 export function ScrapCollageCard({
@@ -57,22 +91,19 @@ export function ScrapCollageCard({
     >
       <span className="makers-collage__frame">
         {!mosaic || posters.length <= 1 ? (
-          src ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              className="makers-collage__full"
-              src={src}
-              alt=""
-              loading="lazy"
-              decoding="async"
-              referrerPolicy="no-referrer"
-              onError={onError}
-            />
-          ) : (
+          <>
             <span className="makers-collage__ph" aria-hidden>
               {title.slice(0, 1)}
             </span>
-          )
+            {src ? (
+              <SoftImg
+                className="makers-collage__full"
+                src={src}
+                loading="eager"
+                onError={onError}
+              />
+            ) : null}
+          </>
         ) : (
           <span className="makers-collage__mosaic" aria-hidden>
             {Array.from({ length: 4 }).map((_, i) => {
@@ -86,15 +117,11 @@ export function ScrapCollageCard({
                 );
               }
               return (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
+                <SoftImg
                   key={i}
                   className="makers-collage__cell"
                   src={cell}
-                  alt=""
-                  loading="lazy"
-                  decoding="async"
-                  referrerPolicy="no-referrer"
+                  loading="eager"
                   onError={() => setGone((g) => ({ ...g, [i]: true }))}
                 />
               );
@@ -152,8 +179,6 @@ export function ScrapActressCard({
   count,
   posterApi,
   posterApis,
-  coverUrl,
-  itemId,
   onClick,
 }: {
   title: string;
@@ -164,35 +189,76 @@ export function ScrapActressCard({
   itemId?: string;
   onClick: () => void;
 }) {
+  const unlabeled = isUnlabeledActress(title);
+  const [avatarApi, setAvatarApi] = useState(() =>
+    resolveActressCardPosterApi(title, posterApi, posterApis),
+  );
+
+  useEffect(() => {
+    if (unlabeled) {
+      setAvatarApi('');
+      return;
+    }
+    // 分面已给头像路径则直接用
+    if (isActressAvatarApi(posterApi)) {
+      setAvatarApi(String(posterApi));
+      return;
+    }
+    const guess = resolveActressCardPosterApi(title, posterApi, posterApis);
+    setAvatarApi(guess);
+    let cancelled = false;
+    // 异写名（松本芽衣→芽依）必须问后端，前端乐观拼路径会 404
+    void lookupScrapActressAvatarUrls([title])
+      .then((m) => {
+        if (cancelled) return;
+        rememberActressAvatarPosterApis(m || {});
+        const hit = String((m || {})[title] || '').trim();
+        if (hit) setAvatarApi(hit);
+        else if (!guess) setAvatarApi('');
+      })
+      .catch(() => {
+        /* 保持乐观路径 */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [title, posterApi, posterApis, unlabeled]);
+
   const { src, onError } = useScrapLocalCover({
-    posterApi,
-    posterApis,
-    coverUrl,
-    itemId,
-    ...SCRAP_COLLAGE_COVER_OPTS,
+    posterApi: avatarApi || undefined,
+    // 女优墙禁止拼贴作品封面（否则会吃到 UMD-557/poster.jpg）
+    posterApis: undefined,
+    coverUrl: undefined,
+    itemId: undefined,
+    w: 320,
+    prefer: 'poster',
+    rp: false,
   });
 
   return (
     <button
       type="button"
       className="makers-actress"
-      data-avatar={posterApi?.includes('/_actress/') ? '1' : undefined}
+      data-avatar={avatarApi ? '1' : undefined}
+      data-unlabeled={unlabeled ? '1' : undefined}
       onClick={onClick}
     >
       <span className="makers-actress__frame">
-        {src ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+        <span className="makers-actress__ph" aria-hidden>
+          {unlabeled ? (
+            <CircleUserRound size={28} strokeWidth={1.55} />
+          ) : (
+            title.slice(0, 1)
+          )}
+        </span>
+        {!unlabeled && src ? (
+          <SoftImg
             src={src}
-            alt=""
-            loading="lazy"
-            decoding="async"
-            referrerPolicy="no-referrer"
+            loading="eager"
+            fetchPriority="high"
             onError={onError}
           />
-        ) : (
-          <span className="makers-actress__ph">{title.slice(0, 1)}</span>
-        )}
+        ) : null}
       </span>
       <span className="makers-actress__caption">
         <span className="makers-actress__name allow-select">{title}</span>
@@ -231,21 +297,17 @@ export function ScrapFolderCard({
   return (
     <button type="button" className="makers-folder" onClick={onClick}>
       <span className="makers-folder__frame">
+        <span className="makers-folder__ph" aria-hidden>
+          <Folder size={28} strokeWidth={1.6} />
+        </span>
         {src ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <SoftImg
             src={src}
-            alt=""
-            loading="lazy"
-            decoding="async"
-            referrerPolicy="no-referrer"
+            loading="eager"
+            fetchPriority="high"
             onError={onError}
           />
-        ) : (
-          <span className="makers-folder__ph">
-            <Folder size={28} strokeWidth={1.6} aria-hidden />
-          </span>
-        )}
+        ) : null}
         <span className="makers-folder__badge" aria-hidden>
           <Folder size={14} strokeWidth={2.2} />
         </span>

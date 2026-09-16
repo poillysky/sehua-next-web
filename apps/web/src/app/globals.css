@@ -1,6 +1,7 @@
 @import "tailwindcss" source(none);
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+/* CSS @import 走相对路径；next.config 的 resolveAlias 对 CSS 不生效 */
 @import "./app-ui.css";
 
 /* 只扫 src/，禁止 Tailwind 沿仓库根扫 data/library */

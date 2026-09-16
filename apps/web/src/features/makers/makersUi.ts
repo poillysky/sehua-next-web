@@ -62,7 +62,7 @@ export const MAKER_SORT_OPTS: Array<{ id: MakerSortId; label: string }> = [
 ];
 
 /** 合集 / 流派 / 标签 / 文件夹列表排序 */
-export type MakerFacetSortId = 'name' | 'count';
+export type MakerFacetSortId = 'name' | 'count' | 'age';
 
 export const MAKER_FACET_SORT_OPTS: Array<{
   id: MakerFacetSortId;
@@ -70,6 +70,16 @@ export const MAKER_FACET_SORT_OPTS: Array<{
 }> = [
   { id: 'name', label: '名称' },
   { id: 'count', label: '数量' },
+];
+
+/** 女优墙：默认按年龄（小→大） */
+export const MAKER_ACTRESS_SORT_OPTS: Array<{
+  id: MakerFacetSortId;
+  label: string;
+}> = [
+  { id: 'age', label: '年龄' },
+  { id: 'count', label: '数量' },
+  { id: 'name', label: '名称' },
 ];
 
 /** 厂牌下前缀列表排序（文件夹下钻） */

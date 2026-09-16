@@ -16,6 +16,7 @@ import { copyText } from '@/lib/clipboard';
 import { linkKindOf } from '@/lib/resourceView';
 import { runP115Save } from '@/lib/p115SaveClient';
 import { useTabNavigation } from '@/shell';
+import { SoftImg } from '@/components/SoftImg';
 import { useOverlay } from '@/components/overlay/OverlayContext';
 import { AppCenterModal } from '@/components/ui/AppCenterModal';
 import { openHomeSearchFromItem, pickCloudSearchKeyword } from './mediaUi';
@@ -293,36 +294,28 @@ export function MediaDetailBody({
     <div className="media-detail">
       {poster && !imgGone ? (
         <div className="media-detail__wash" aria-hidden>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
+          <SoftImg
             src={poster}
-            alt=""
             loading="eager"
-            decoding="async"
             fetchPriority="high"
-            referrerPolicy="no-referrer"
+            onError={() => setImgGone(true)}
           />
         </div>
       ) : null}
 
       <div className="media-detail__hero">
         <div className="media-detail__poster" aria-hidden>
+          <span className="media-detail__poster-ph">
+            {item.title.slice(0, 1)}
+          </span>
           {poster && !imgGone ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
+            <SoftImg
               src={poster}
-              alt=""
               loading="eager"
-              decoding="async"
               fetchPriority="high"
-              referrerPolicy="no-referrer"
               onError={() => setImgGone(true)}
             />
-          ) : (
-            <span className="media-detail__poster-ph">
-              {item.title.slice(0, 1)}
-            </span>
-          )}
+          ) : null}
           {rating ? (
             <span className="media-detail__score">
               <Star size={11} strokeWidth={2.6} aria-hidden />
