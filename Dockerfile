@@ -42,6 +42,7 @@ RUN pip install -r /tmp/requirements.txt \
   && rm /tmp/requirements.txt
 
 COPY apps/api /app/apps/api
+COPY apps/maps /app/apps/maps
 COPY apps/web/src/config /app/apps/web/src/config
 COPY config /app/config
 RUN mkdir -p /app/data

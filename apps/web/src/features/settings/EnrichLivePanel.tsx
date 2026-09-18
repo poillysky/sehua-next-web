@@ -528,12 +528,16 @@ function detailFromRow(
   };
 }
 
-function localCoverSrc(api?: string, mtime?: number) {
+/** 详情竖框约 240px，2x 用 480 即可；过大 w 会逼后端现场压图变慢 */
+const ENRICH_POSTER_W = 480;
+const ENRICH_SHOT_W = 320;
+
+function localCoverSrc(api?: string, mtime?: number, w = ENRICH_POSTER_W) {
   const raw = String(api || '').trim();
   if (!raw) return '';
   const url = scrapLibraryCoverUrl(
     { posterApi: raw, thumbApi: '', coverUrl: '' },
-    { w: 720, prefer: 'poster', rp: false },
+    { w, prefer: 'poster', rp: false },
   );
   if (!url) return '';
   if (!mtime) return url;
@@ -617,7 +621,11 @@ function EnrichItemDetail({
         const posterFile =
           files.find((f) => f.kind === 'poster') ||
           (data.posterApi ? { posterApi: data.posterApi, mtime: 0 } : null);
-        const poster = localCoverSrc(posterFile?.posterApi, posterFile?.mtime);
+        const poster = localCoverSrc(
+          posterFile?.posterApi,
+          posterFile?.mtime,
+          ENRICH_POSTER_W,
+        );
         const extras: Array<{ key: string; label: string; url: string }> = [];
         const labels: Record<string, string> = {
           thumb: '横图',
@@ -625,7 +633,7 @@ function EnrichItemDetail({
         };
         for (const f of files) {
           if (f.kind === 'poster') continue;
-          const url = localCoverSrc(f.posterApi, f.mtime);
+          const url = localCoverSrc(f.posterApi, f.mtime, ENRICH_SHOT_W);
           if (!url || url === poster) continue;
           extras.push({
             key: String(f.kind || f.name || extras.length),
@@ -661,27 +669,6 @@ function EnrichItemDetail({
 
   useEffect(() => {
     setPosterLandscape(false);
-    const url = String(showPoster || '').trim();
-    if (!url) return;
-    let cancelled = false;
-    const img = new Image();
-    const apply = () => {
-      if (cancelled) return;
-      const w = img.naturalWidth || 0;
-      const h = img.naturalHeight || 0;
-      setPosterLandscape(w > 0 && h > 0 && w > h);
-    };
-    img.onload = apply;
-    img.onerror = () => {
-      if (!cancelled) setPosterLandscape(false);
-    };
-    img.src = url;
-    if (img.complete && img.naturalWidth > 0) apply();
-    return () => {
-      cancelled = true;
-      img.onload = null;
-      img.onerror = null;
-    };
   }, [showPoster]);
 
   return (
@@ -813,6 +800,12 @@ function EnrichItemDetail({
               src={showPoster}
               alt={detail.code || 'poster'}
               className="enrich-live__cover-img"
+              onLoad={(e) => {
+                const el = e.currentTarget;
+                const w = el.naturalWidth || 0;
+                const h = el.naturalHeight || 0;
+                setPosterLandscape(w > 0 && h > 0 && w > h);
+              }}
             />
           </div>
         ) : (

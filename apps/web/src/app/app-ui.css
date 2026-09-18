@@ -22834,6 +22834,27 @@ img.soft-img[data-ready='1'] {
   background: color-mix(in srgb, var(--app-fg, #1c1c1e) 6%, transparent);
 }
 
+/* SoftImg 未 ready 时给一点呼吸感，避免「坏图」错觉 */
+.settings-screen-root .enrich-live__cover:has(img.soft-img:not([data-ready='1'])) {
+  background: linear-gradient(
+    110deg,
+    color-mix(in srgb, var(--app-fg, #1c1c1e) 5%, transparent) 30%,
+    color-mix(in srgb, var(--app-fg, #1c1c1e) 10%, transparent) 45%,
+    color-mix(in srgb, var(--app-fg, #1c1c1e) 5%, transparent) 60%
+  );
+  background-size: 200% 100%;
+  animation: enrich-live-cover-shimmer 1.1s ease-in-out infinite;
+}
+
+@keyframes enrich-live-cover-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
 .settings-screen-root .enrich-live__cover--poster {
   aspect-ratio: 2 / 3;
   max-height: 360px;
