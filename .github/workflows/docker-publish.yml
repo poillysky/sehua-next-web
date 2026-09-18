@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "镜像标签（如 1.2.6，不要带 v）"
+        description: "镜像标签（如 1.2.7，不要带 v）"
         required: true
-        default: "1.2.6"
+        default: "1.2.7"
       dockerhub_username:
         description: "Docker Hub 用户名（默认 poillysky）"
         required: false
@@ -74,6 +74,8 @@ jobs:
         run: |
           set -o pipefail
           npm ci
+          # tsc 依赖 @maps/* → apps/web/maps（gitignore），需先从 apps/maps 同步
+          npm run sync-maps
           set +e
           npx tsc -p tsconfig.json --noEmit 2>&1 | tee /tmp/web-tsc.log
           code=${PIPESTATUS[0]}

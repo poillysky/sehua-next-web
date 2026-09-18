@@ -1957,6 +1957,8 @@ export async function enrichScrapLibraryItem(opts: {
     vectorMs?: number;
     totalMs?: number;
     vectorSkipped?: boolean;
+    partialOk?: boolean;
+    gapsAfter?: string[];
     fields?: ScrapLibraryEnrichFieldRow[];
     sourceTimings?: Array<{
       id?: string;
@@ -2001,6 +2003,8 @@ export async function enrichScrapLibraryItem(opts: {
         vectorMs?: number;
         totalMs?: number;
         vectorSkipped?: boolean;
+        partialOk?: boolean;
+        gapsAfter?: string[];
         fields?: ScrapLibraryEnrichFieldRow[];
         sourceTimings?: Array<{
           id?: string;
