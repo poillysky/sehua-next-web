@@ -1174,7 +1174,7 @@ export function AiModelsPanel({
           {embedProvider === 'local' ? (
             <AppFootnote>
               本地多语种向量。推理可选 CPU / N卡(CUDA) / A卡(DirectML)。灌库入口：片商管理 →
-              七区目录。
+              六区目录。
             </AppFootnote>
           ) : embedUseMainLlm ? (
             <AppFootnote>沿用聊天 tab 的端点与密钥。</AppFootnote>

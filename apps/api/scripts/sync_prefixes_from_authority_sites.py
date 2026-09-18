@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Step1b: 各区权威站点抽前缀，合并进七区 catalog / seed。
+"""Step1b: 各区权威站点抽前缀，合并进六区 catalog / seed。
 
 权威映射（优先用面板已启用且测通的源）:
-  japan_censored   → JavBus 有码列表（公开索引最全）
+  japan_censored   → JavBus 有码列表（含原写真前缀）
   japan_uncensored → JavBus 无码 + Caribbeancom 列表
   japan_amateur    → MGStage 检索列表
-  japan_gravure    → JavBus/写真向页面 + 既有种子
   fc2              → FC2 内容站（前缀形态固定）
   china            → MissAV 国产/中文区 + Madou
   western          → MissAV 欧美区（ThePornDB 需登录，作备注）
@@ -90,7 +89,7 @@ AUTHORITY: dict[str, dict[str, Any]] = {
     "japan_censored": {
         "label": "日本有码",
         "site": "javbus",
-        "why": "公开有码索引最全；番号校验可再用 DMM",
+        "why": "公开有码索引最全；番号校验可再用 DMM（含原写真前缀）",
         "urls": [
             "https://www.javbus.com/",
             "https://www.javbus.com/page/2",
@@ -99,6 +98,18 @@ AUTHORITY: dict[str, dict[str, Any]] = {
             "https://www.javbus.com/page/5",
             "https://www.javbus.com/genre",
         ],
+        "force_prefixes": {
+            "ENFD": {"maker": "イーネット・フロンティア"},
+            "OAE": {"maker": "Air control"},
+            "REBD": {"maker": "REbecca"},
+            "REBDB": {"maker": "REbecca"},
+            "MBRAA": {"maker": "スパイスビジュアル"},
+            "MBRBA": {"maker": "スパイスビジュアル"},
+            "MBDD": {"maker": "メディアブランド"},
+            "SYD": {"maker": "スパイスビジュアル"},
+            "GGSID": {"maker": "グレイズ"},
+            "BFAZ": {"maker": "ファインピクチャーズ"},
+        },
     },
     "japan_uncensored": {
         "label": "日本无码",
@@ -134,27 +145,6 @@ AUTHORITY: dict[str, dict[str, Any]] = {
             "https://www.mgstage.com/search/cSearch.php?search_word=&type=latest",
             "https://www.mgstage.com/ppv/makers.php",
         ],
-    },
-    "japan_gravure": {
-        "label": "日本写真",
-        "site": "javbus",
-        "why": "写真向公开列表较少，JavBus/种子交叉；DMM 作补充",
-        "urls": [
-            "https://www.javbus.com/",
-            "https://www.javbus.com/page/2",
-        ],
-        "force_prefixes": {
-            "ENFD": {"maker": "イーネット・フロンティア"},
-            "OAE": {"maker": "Air control"},
-            "REBD": {"maker": "REbecca"},
-            "REBDB": {"maker": "REbecca"},
-            "MBRAA": {"maker": "スパイスビジュアル"},
-            "MBRBA": {"maker": "スパイスビジュアル"},
-            "MBDD": {"maker": "メディアブランド"},
-            "SYD": {"maker": "スパイスビジュアル"},
-            "GGSID": {"maker": "グレイズ"},
-            "BFAZ": {"maker": "ファインピクチャーズ"},
-        },
     },
     "fc2": {
         "label": "FC2",
@@ -375,15 +365,11 @@ def main() -> None:
         force_meta = {
             clean_prefix(k): v for k, v in (conf.get("force_prefixes") or {}).items()
         }
-        # for gravure: only keep force + known gravure-like, avoid polluting with SSIS etc.
+        # for uncensored: keep extracted letter prefixes + forced studio shells
         prefs = harvested["prefixes"]
-        if rid == "japan_gravure":
-            prefs = sorted(set(force_meta) | set(conf.get("force_prefixes") or {}))
-            prefs = [clean_prefix(p) for p in prefs if clean_prefix(p)]
         if rid == "fc2":
             prefs = ["FC2", "FC2PPV"]
         if rid == "japan_uncensored":
-            # keep extracted letter prefixes + forced studio shells; drop pure date noise later
             prefs = sorted(set(prefs) | set(force_meta))
         merge = merge_into_catalog(
             rid, prefs, site=str(conf["site"]), force_meta=force_meta

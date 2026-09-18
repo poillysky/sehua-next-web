@@ -37,6 +37,8 @@ class SettingsBody(BaseModel):
 class StartBody(BaseModel):
     root: str = ""
     force: bool = False
+    # full=元数据+向量（兼容）；meta=仅同步数据库；embed=仅向量化
+    mode: str = "full"
 
 
 class SearchBody(BaseModel):
@@ -72,7 +74,7 @@ def get_stats(_user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
 
 @router.post("/embed/reset-skeletons")
 def reset_to_skeletons(_user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
-    """清空向量库并按七区目录重建仅番号骨架（本地 NFO 不删）。"""
+    """清空向量库并按六区目录重建仅番号骨架（本地 NFO 不删）。"""
     try:
         data = svc.reset_embed_to_catalog_skeletons()
     except Exception as e:  # noqa: BLE001
@@ -184,7 +186,7 @@ def get_quality_gate(
 
 class EnrichBody(BaseModel):
     region: str = ""
-    # 空 = 使用策略里已开启的七区
+    # 空 = 使用策略里已开启的六区
     regions: list[str] = Field(default_factory=list)
     # 空 = 服务端默认完整补齐（封面+女优/片商/剧情/标题）
     kinds: list[str] = Field(default_factory=list)
@@ -323,38 +325,46 @@ def enrich_one(
 
 @router.get("/embed/enrich/status")
 def get_enrich_status(
+    lite: bool = False,
     _user: dict[str, Any] = Depends(require_user),
 ) -> dict[str, Any]:
     import app.scrap_library.enrich as enrich_svc
 
-    return {"ok": True, "data": enrich_svc.get_enrich_status()}
+    return {"ok": True, "data": enrich_svc.get_enrich_status(lite=bool(lite))}
 
 
 @router.get("/embed/enrich/status/stream")
 async def enrich_status_stream(
     request: Request,
+    lite: bool = False,
     _user: dict[str, Any] = Depends(require_user),
 ):
-    """SSE：刮削状态变更时推送（替代 450ms 轮询）。"""
+    """SSE：刮削状态变更时推送（替代 450ms 轮询）。
+
+    lite=1：总览角标用，不含 queue 抽样（避免设置页卡死）。
+    """
     import asyncio
     import json
 
     import app.scrap_library.enrich as enrich_svc
     from fastapi.responses import StreamingResponse
 
+    want_lite = bool(lite)
+
     async def gen():
         sub = enrich_svc.subscribe_enrich_updates()
         last = ""
-        # 构建一帧状态要跑 DB 计数 + 内存纠偏扫描，属于「重活」；
-        # 通知风暴时（每条 item 有多次 force / 进度通知）必须限流，
-        # 否则多路 SSE 会把状态快照刷成每秒几十次，把 worker 的 CPU 抢光。
-        min_gap_sec = 0.25
+        # 构建一帧状态偏重；通知风暴必须限流。
+        # 详情帧含 monitor.elapsedMs，若不抬高间隔会几乎每拍都变、前端一直重绘卡顿。
+        min_gap_sec = 1.0 if want_lite else 0.75
         try:
             while True:
                 if await request.is_disconnected():
                     break
                 t_build0 = asyncio.get_running_loop().time()
-                snap = await asyncio.to_thread(enrich_svc.get_enrich_status)
+                snap = await asyncio.to_thread(
+                    lambda: enrich_svc.get_enrich_status(lite=want_lite)
+                )
                 payload = json.dumps(
                     {"event": "status", "data": snap},
                     ensure_ascii=False,
@@ -575,6 +585,24 @@ def retry_enrich_fails(
     return {"ok": True, "data": enrich_svc.retry_enrich_fails(region=rid)}
 
 
+class EnrichRetrySoftsBody(BaseModel):
+    region: str = ""
+
+
+@router.post("/embed/enrich/retry-softs")
+def retry_enrich_softs(
+    body: EnrichRetrySoftsBody,
+    _user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    """软成功批量重试：转入未处理队列，运行中则插到最前优先处理。"""
+    import app.scrap_library.enrich as enrich_svc
+
+    rid = str(body.region or "").strip()
+    if not rid:
+        raise HTTPException(status_code=400, detail="region required")
+    return {"ok": True, "data": enrich_svc.retry_enrich_softs(region=rid)}
+
+
 @router.get("/embed/status")
 def get_status(_user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
     return {"ok": True, "data": svc.get_job_status()}
@@ -604,6 +632,42 @@ def start_actress_optimize(
         lim = int(body.limit or 0)
         data = svc.start_actress_optimize_job(
             reembed=bool(body.reembed),
+            force=bool(body.force),
+            limit=lim if lim > 0 else None,
+        )
+    except RuntimeError as e:
+        raise HTTPException(409, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return {"ok": True, "data": data}
+
+
+class NfoOptimizeBody(BaseModel):
+    # True=全量（映射有则强制覆盖标题/女优）；False=增量（prefer 策略，仅有变才写）
+    force: bool = False
+    limit: int = Field(default=0, ge=0, le=500_000)
+
+
+@router.get("/embed/nfo-optimize/status")
+def get_nfo_optimize_status(
+    _user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    from app.scrap_library import nfo_optimize as nfo_opt
+
+    return {"ok": True, "data": nfo_opt.get_job_status()}
+
+
+@router.post("/embed/nfo-optimize/start")
+def start_nfo_optimize(
+    body: NfoOptimizeBody,
+    _user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    """本地映射优化磁盘 NFO：标题/女优/标签/片商写回。"""
+    from app.scrap_library import nfo_optimize as nfo_opt
+
+    try:
+        lim = int(body.limit or 0)
+        data = nfo_opt.start_nfo_optimize_job(
             force=bool(body.force),
             limit=lim if lim > 0 else None,
         )
@@ -701,7 +765,11 @@ def start_ingest(
     _user: dict[str, Any] = Depends(require_user),
 ) -> dict[str, Any]:
     try:
-        data = svc.start_ingest_job(root=body.root, force=bool(body.force))
+        data = svc.start_ingest_job(
+            root=body.root,
+            force=bool(body.force),
+            mode=str(body.mode or "full"),
+        )
     except RuntimeError as e:
         raise HTTPException(409, str(e)) from e
     except ValueError as e:
@@ -925,6 +993,7 @@ def get_items(
                 order=order,
                 offset=offset,
                 limit=limit,
+                display_only=True,
             ),
         }
     except Exception as e:  # noqa: BLE001
@@ -984,7 +1053,7 @@ def refresh_facets_snapshot(
     body: FacetsRefreshBody | None = None,
     _user: dict[str, Any] = Depends(require_user),
 ) -> dict[str, Any]:
-    """重建浏览快照：默认七区厂牌/标签/女优 + 推荐 + 影片首页预热。"""
+    """重建浏览快照：默认六区厂牌/标签/女优 + 推荐 + 影片首页预热。"""
     payload = body or FacetsRefreshBody()
     try:
         data = svc.refresh_facets_snapshot(

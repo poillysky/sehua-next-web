@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import random
 import threading
 import time
@@ -100,19 +101,108 @@ def thread_slot_meter() -> SlotWaitMeter | None:
     return getattr(_meter_tls, "meter", None)
 
 
+# 单个番号同时要抓的源数（第十七轮实测：10 个启用源均 1 请求；按 9 计留余量）
+ITEM_SOURCES_PER_JOB = 9
+# 其中走直连 api 通道的占比（dmm / r18dev / libredmm / jav321 这四类）
+API_SOURCE_RATIO = 1.0 / 3.0
+# 上表 page/api 两行所对应的 itemWorkers —— 改这两个常量的前提是同步改公式输入
+CAPS_BASELINE_ITEM_WORKERS = 4
+
+# 封面全局槽相对「真实峰值并发」的余量。
+# 峰值 = itemWorkers × COVER_BATCH_WORKERS（封面是在番号工人里**同步** `.result()` 等结果的，
+# 见 `enrich._download_covers`，所以不是异步池，会乘起来）。
+#
+# 1.25（基线恒等 20）→ 1.5（基线 24）：第二十一轮调高，依据是**现场实测到的
+# `slot_blocked`**（报告 §二十一）。原 1.25 只算了「本进程 itemWorkers × 批并发」
+# 这一路来源，漏掉了同样取 `kind="cover"` 全局槽的旁路调用方（列表/详情封面代理），
+# 峰值一叠加就先于站点限流触顶 → 抢槽 TimeoutError → 记成 `slot_blocked`
+# （看起来像图床故障，实际是**自己人挤自己人**）。
+# 1.5 的余量正好覆盖那部分旁路流量；仍然只动**全局**槽，
+# `pics.dmm.co.jp per_host=4` 这类站点保护不变，所以不会多打上游。
+COVER_SLOT_HEADROOM = 1.5
+
+
+def _cover_batch_workers() -> int:
+    """封面每番号的并发候选数 —— **惰性读** `cover_download`，不复制数值。
+
+    为什么惰性读而不是复制常量：第十七轮 D5 的教训就是「同一个需求量在两处
+    各写各的常量」，两边一改就超订。这里让封面槽跟着 `COVER_BATCH_WORKERS`
+    自动走，改封面并发只需改一个地方。
+    兜底值 4 仅在极端情况（循环导入 / 模块缺失）下生效，有单测锁住真实读取。
+    """
+    try:
+        from app.scrap_library.cover_download import COVER_BATCH_WORKERS
+
+        return max(1, int(COVER_BATCH_WORKERS))
+    except Exception:  # noqa: BLE001
+        return 4
+
+
+def cover_cap_for_item_workers(item_workers: int) -> int:
+    """由 itemWorkers 推封面全局槽。
+
+    为什么封面**必须**进公式（第十九轮发现）：`_KIND_GLOBAL["cover"]` 原来固定 20，
+    而 `apply_item_workers()` 只重算 page/api。于是 itemWorkers 一抬就有：
+
+        itemWorkers=4  → 峰值 16  ≤ 20  ✅（当前，刚好不挤兑）
+        itemWorkers=8  → 峰值 32  > 20  ❌ 超订 1.6×
+        itemWorkers=16 → 峰值 64  > 20  ❌ 超订 3.2×
+
+    超订的直接后果不是「变慢」而是**误判**：抢不到封面槽抛 `TimeoutError`，
+    被上层写成 `slot_blocked`（见 `cover_download._fetch`），看起来像图床有问题。
+    **所以顺序必须是「先让 cover 进公式，再抬 itemWorkers」**，反过来先把封面挤死。
+
+    ⚠️ 与 page/api 同理：这里只动**全局**槽。站点保护仍由 `per_host` /
+    `min_interval`（如 `pics.dmm.co.jp` per_host=4）承担，所以抬高全局上限
+    并不会多打上游 —— 只是让全局槽不再先于站点限流触顶。
+    """
+    n = max(int(item_workers), int(CAPS_BASELINE_ITEM_WORKERS))
+    return int(math.ceil(n * _cover_batch_workers() * COVER_SLOT_HEADROOM))
+
+
+def caps_for_item_workers(item_workers: int) -> dict[str, int]:
+    """由「同时处理的番号数」推出 page / api 全局槽上限。
+
+    第十七轮 D5 发现：`page=24 + api=12 = 36` 与 `itemWorkers=4 × 9 源 = 36 路`
+    是**刻意凑出来的 1:1**，但两处常量各写各的 —— 只抬 itemWorkers 会变成
+    2× 超订（`waitMs` 上涨、可能触发 busy），只抬槽位则白占资源。
+    这里把那个巧合改成公式，让扩容只有一个入口：
+
+        demand = item_workers × ITEM_SOURCES_PER_JOB
+        api    = round(demand × API_SOURCE_RATIO)
+        page   = demand − api
+
+    自证：n=4 → demand 36 → api 12 / page 24，**与历史常量逐字相同**（有单测锁住）；
+    cover 侧 n=4 → 20，同样等于历史常量。
+    换句话说，itemWorkers=4 时本函数是恒等变换，行为不变；只有在调大
+    itemWorkers 时才真正生效。
+
+    ⚠️ 只动**全局**槽，绝不动 `_KIND_HOST` 的 per_host —— 保护单个站点的是
+    per_host 与 min_interval，全局槽只决定「同时在打多少个不同 host」。这是
+    扩容不会打爆上游的原因，改公式时别把这条丢了。
+    """
+    n = max(1, int(item_workers))
+    demand = n * int(ITEM_SOURCES_PER_JOB)
+    api = max(6, int(round(demand * API_SOURCE_RATIO)))
+    page = max(8, demand - api)
+    return {"page": page, "api": api, "cover": cover_cap_for_item_workers(n)}
+
+
 # 进程级：详情与封面分槽，避免 5 路刮详情把封面槽抢光（或反过来）
 _KIND_GLOBAL: dict[str, int] = {
-    # page 20→24（2026-09-16）：对齐 itemWorkers=4（4×10=40 路，其中 ~16 走 api 槽，
-    # page 侧 ≈24 路）—— 供需 1:1，消除排队反噬（并发 10 曾比 5 慢一倍）。
+    # page / api / cover 的默认值 = caps_for_item_workers(4)（2026-09-16 对齐 itemWorkers=4；
+    # 2026-09-17 第十八轮改为公式推导，默认值不变；第十九轮把 **cover 也纳入公式**）。
+    # 运行期由 `OutboundScheduler.apply_item_workers()` 按实际 itemWorkers 覆盖。
     # ⚠️ 上限逻辑见 §十五：再往上先看 sourceTimings[].waitMs 分布，别拍脑袋。
     "page": 24,
-    "cover": 20,
+    # 封面：4 番号 × 4 候选 × 1.5 余量 = 24。**别再写死** —— 它随 itemWorkers 缩放，
+    # 否则抬并发时封面会先于站点限流触顶，失败被记成 slot_blocked（第十九轮）。
+    # 余量 1.25→1.5 的理由见 `COVER_SLOT_HEADROOM` 上方注释（第二十一轮）。
+    "cover": 24,
     "ui": 8,
     # 直连 API（JSON / GraphQL / POST 表单）：第十一轮新增。
     # 原来 r18dev / libredmm / dmm / jav321 这些源**根本不走调度器** ——
     # 既不受并发上限约束，也不进 SlotWaitMeter（导致源真超时被误记成 busy）。
-    # 上限取 12：够 5 路番号各 2-3 个直连源并行；比 page 小是因为 API 站
-    # （r18.dev / api.video.dmm.co.jp）对突发并发比详情页更敏感。
     "api": 12,
 }
 
@@ -136,6 +226,13 @@ _HOST_OVERRIDES: dict[str, dict[str, float]] = {
     # 这条原来只在手动探针里遵守，生产路径（r18dev.py → fetch_json）没实现 ——
     # 第十一轮把它落到调度器上（覆盖对所有 kind 生效，而 r18.dev 只出现在 api 通道）。
     "r18.dev": {"per_host": 1, "min_interval": 0.45},
+    # iqqtv 镜像站：双页时代易把 page 槽打满；限 2 路 + 间距，防跑久后集体超时
+    "iqqk4.quest": {"per_host": 2, "min_interval": 0.12},
+    "www.iqqk4.quest": {"per_host": 2, "min_interval": 0.12},
+    "iqq5.xyz": {"per_host": 2, "min_interval": 0.12},
+    "www.iqq5.xyz": {"per_host": 2, "min_interval": 0.12},
+    "iqq6.xyz": {"per_host": 2, "min_interval": 0.12},
+    "www.iqq6.xyz": {"per_host": 2, "min_interval": 0.12},
 }
 
 
@@ -156,6 +253,52 @@ class OutboundScheduler:
         self._clients: dict[str, httpx.Client] = {}
         # 早停/暂停回收的在飞请求数（可观测：抢槽前被取消的次数）
         self._cancelled_n = 0
+        # 已应用的 itemWorkers（None = 还没按任务规模重算过槽位）
+        self._applied_item_workers: int | None = None
+
+    def apply_item_workers(self, item_workers: int) -> None:
+        """按 itemWorkers 重算 page / api / cover 全局槽（幂等；**不动** host 级限流）。
+
+        为什么要有这个入口：`page=24 + api=12 = 36` 与 `itemWorkers=4 × 9 源`
+        的 1:1 是手工凑的，只抬 itemWorkers 会 2× 超订（第十六/十七轮反复踩）。
+        改成公式后，扩容只需改策略里的 itemWorkers 一处。
+
+        ⚠️ 第十九轮补上 **cover**：它原来固定 20、不随 itemWorkers 走，
+        抬并发时这一格是全表最先触顶的（`itemWorkers × COVER_BATCH_WORKERS`）。
+        只重算 page/api 等于把风险从详情挪到了封面。
+
+        ⚠️ 只在**任务启动前**调用：此时没有在飞请求，换信号量是安全的。
+        任务飞行中改 itemWorkers 不会自动生效（需重开任务）—— 刻意如此，
+        否则已持有旧信号量对象的线程会把许可 release 到孤儿对象上，
+        计数永久漂移。这也和「改 app/*.py 会硬重启」的既有约束一致。
+        """
+        n = int(item_workers or 0)
+        if n <= 0:
+            n = int(CAPS_BASELINE_ITEM_WORKERS)
+        with self._mu:
+            if self._applied_item_workers == n:
+                return
+            caps = caps_for_item_workers(n)
+            for kind, cap in caps.items():
+                self._globals[kind] = threading.Semaphore(int(cap))
+            self._applied_item_workers = n
+        log.info(
+            "outbound caps applied · itemWorkers=%s page=%s api=%s cover=%s "
+            "(per_host 不变，站点保护仍由 per_host/min_interval 承担)",
+            n,
+            caps["page"],
+            caps["api"],
+            caps["cover"],
+        )
+
+    def applied_item_workers(self) -> int:
+        """当前槽位是按哪个 itemWorkers 算出来的（未应用过则返回基线值）。
+
+        调用方（换号主循环）用它给「热更新并发」封顶：飞行中换信号量不安全，
+        所以派发上限不得越过已经按规模算好的槽位，否则就是 2× 超订。
+        """
+        n = self._applied_item_workers
+        return int(n) if n else int(CAPS_BASELINE_ITEM_WORKERS)
 
     @staticmethod
     def host_key(url_or_host: str) -> str:

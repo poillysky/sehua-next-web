@@ -28,10 +28,24 @@ _LOW_QUALITY_SOURCES = frozenset(
         "avmoo",
     }
 )
+# 兜底源：优先池不够时，全局补充必须至少留 1 席（否则被 jav321 等慢 CDN 挤掉）
+_FALLBACK_COVER_SOURCES = frozenset(
+    {
+        "miss_av",
+        "freejavbt",
+        "javday",
+        "njav",
+        "avsox",
+    }
+)
+# 已知不稳图床：排序殿后 + 短超时（见 cover_focus_routes._is_slow_cover_host）
+_UNSTABLE_COVER_HOST_NEEDLES = (
+    "jav321.com",
+)
 
-# 落盘最小尺寸：宽≥600 或 高≥800（覆盖常见 DMM pl ~590×800）
-MIN_DISK_WIDTH = 600
-MIN_DISK_HEIGHT = 800
+# 仅挡图标/追踪像素级废图；有效封面有图即落盘（不再卡 600×800）
+MIN_DISK_WIDTH = 32
+MIN_DISK_HEIGHT = 32
 
 # 覆盖旧图：新分至少高这么多
 SCORE_OVERWRITE_DELTA = 5.0
@@ -39,10 +53,97 @@ SCORE_OVERWRITE_DELTA = 5.0
 # 优先池最高分达到此值且能落盘 → 不再补全局（与批量 early_score 对齐）
 # 旧值 85 导致 80 分早停后仍打全局，封面互相挤槽、越跑越慢
 PRIORITY_GOOD_ENOUGH = 78.0
-# 从全局池额外补试的 URL 数（优先池不够用时）
-GLOBAL_SUPPLEMENT_N = 2
+# 从全局池额外补试的 URL 数（优先池不够用时；含 1 席兜底源）
+GLOBAL_SUPPLEMENT_N = 3
 # 已有合格候选且尝试次数达到此值 → 强制收工（少打低质尾部）
 FORCE_STOP_AFTER_TRIES = 3
+
+
+def _host_unstable(url: str) -> bool:
+    u = (url or "").lower()
+    return any(n in u for n in _UNSTABLE_COVER_HOST_NEEDLES)
+
+
+def pick_global_supplement(
+    global_pool: list[dict[str, str]],
+    *,
+    used: set[str],
+    take_n: int,
+) -> list[dict[str, str]]:
+    """全局补充：沿用池内排序（调用方已把不稳 CDN 殿后），并强制留 1 席兜底源。
+
+    素人 e2e：jav321 CDN 超时后 miss_av 有 poster 却从未被试 —— 因其
+    `_LOW_QUALITY` 排到 900，而 GLOBAL_SUPPLEMENT 只取前 2 个高优 URL。
+
+    席位规则：非兜底源先占 n-1，最后一席优先 `miss_av`，再及其它
+    `_FALLBACK_COVER_SOURCES`（避免 freejavbt 占兜底席却仍把 miss_av 挤掉）。
+    """
+    n = max(0, int(take_n))
+    if n <= 0 or not global_pool:
+        return []
+    avail = [
+        e
+        for e in global_pool
+        if str(e.get("url") or "").strip()
+        and str(e.get("url") or "").strip() not in used
+    ]
+    if not avail:
+        return []
+
+    def _sid(e: dict[str, str]) -> str:
+        return str(e.get("source") or "").strip().lower()
+
+    reserved: dict[str, str] | None = None
+    if n >= 2:
+        # 优先 miss_av，再按 FALLBACK 集合出现顺序
+        prefer = ("miss_av",) + tuple(
+            s for s in sorted(_FALLBACK_COVER_SOURCES) if s != "miss_av"
+        )
+        for want in prefer:
+            for e in avail:
+                if _sid(e) == want:
+                    reserved = e
+                    break
+            if reserved is not None:
+                break
+
+    primary = [e for e in avail if e is not reserved]
+    room = n - (1 if reserved is not None else 0)
+    out = list(primary[: max(0, room)])
+    if reserved is not None:
+        out.append(reserved)
+    return out[:n]
+
+# 封面池并发（批量模式）。第十八轮实测（2026-09-17）：
+#   `coverMs` p50=4033 / p90=4037 / max=15053 —— 平台状分布 = **波次结构**，不是图慢。
+#   单独实测 DMM 封面 `pics.dmm.co.jp/.../{cid}pl.jpg` 成功 p50=752ms（10/10 命中），
+#   所以 4s 平台 = ceil(5 候选 / 2 路) = 3 波 × ~1.34s。
+# 取值 4 的依据（不是拍脑袋）：
+#   - `ceil(5 候选 / 4 路) = 2 波`，是压到 2 波的最小取值（取 3 是 2 波但更慢）。
+#   - 取 5 收益被主机信号量吃掉：DMM `pics.dmm.co.jp` `per_host=4`，第 5 路会排在
+#     主机信号量上，墙钟不变却多占一个全局槽 → 只增加 slot_blocked 风险。
+#   - 封面全局槽**不再是写死的 20**：第十九轮起由
+#     `outbound_scheduler.cover_cap_for_item_workers()` = ceil(itemWorkers × 本常量 × 余量)
+#     推导（余量见 `outbound_scheduler.COVER_SLOT_HEADROOM`；第二十一轮由 1.25 调到 1.5，
+#     基线 4×4×1.5 = 24）。**改本常量会自动同步槽位**，别再去手工改
+#     `_KIND_GLOBAL["cover"]` —— 那正是第十九轮修掉的坑。
+COVER_BATCH_WORKERS = 4
+# 单刷（非批量）保持 6：无并发同伴，多开只增加站点压力。
+COVER_SINGLE_WORKERS = 6
+
+# 抢槽超时（秒）= `outbound_scheduler.slot(..., kind="cover", timeout=…)` 的上限，
+# 即「抢不到 cover 全局槽时最多干等多久」。
+#
+# ⚠️ 第二十一轮修正：原为 batch 5.0 / single 6.0，与下层 `_fetch_bytes_for_enrich`
+# 的 docstring **直接冲突** —— 那里明写「timeout 为抢槽上限（批量应传 1～3s，
+# 勿再等 45s 把封面预算拖死）」。现场取证（报告 §二十一）：
+# 封面阶段 7~15s，而 5 候选 / 4 路 = **2 波**，2 × 5.0s = 10s 是**纯抢槽干等** ——
+# coverMs 的平台状分布就是这么来的，跟图床快慢无关。
+# 抢不到槽的正确反应是**尽快换下一条 URL**（`_fetch` 已把 slot_blocked 实现为换候选），
+# 不是原地等满：等得越久全局槽越回不来（正反馈恶化）。
+# 抽成模块常量是为了**可被测试锁定** —— 它当年悄悄涨到 5.0 正是因为藏在函数体里。
+COVER_SLOT_TIMEOUT_BATCH = 2.0
+COVER_SLOT_TIMEOUT_SINGLE = 4.0
 
 
 def upgrade_cover_urls(url: str) -> list[str]:
@@ -180,8 +281,13 @@ def score_cover_bytes(
 
 
 def meets_disk_min_size(width: int, height: int) -> bool:
-    """落盘最小尺寸：宽≥600 或 高≥800。"""
-    return int(width or 0) >= MIN_DISK_WIDTH or int(height or 0) >= MIN_DISK_HEIGHT
+    """落盘门槛：宽高均 ≥32（挡 1×1/图标）；有有效像素即允许落盘。"""
+    return int(width or 0) >= MIN_DISK_WIDTH and int(height or 0) >= MIN_DISK_HEIGHT
+
+
+def meets_processed_min_size(width: int, height: int) -> bool:
+    """处理后地板：与落盘门槛一致，有图即收。"""
+    return meets_disk_min_size(width, height)
 
 
 def score_local_poster(path: Path, *, want_portrait: bool = True) -> float:
@@ -265,9 +371,11 @@ def download_best_cover(
     want_portrait = crop_mode in ("right", "face")
     empty["mode"] = crop_mode
 
-    workers = 2 if batch_mode else 6
-    # 抢槽超时：批量略放宽，避免 5 路封面同时抢槽秒死
-    url_timeout = 5.0 if batch_mode else 6.0
+    workers = COVER_BATCH_WORKERS if batch_mode else COVER_SINGLE_WORKERS
+    # 抢槽超时：见 `COVER_SLOT_TIMEOUT_BATCH` / `_SINGLE` 上方说明。
+    url_timeout = (
+        COVER_SLOT_TIMEOUT_BATCH if batch_mode else COVER_SLOT_TIMEOUT_SINGLE
+    )
     # 批量 78 / 单刷 75：对常见 DMM 横 pl（抬分后约 80+）更友好
     early_score = 78.0 if batch_mode else 75.0
     max_urls = 5 if batch_mode else 6
@@ -337,12 +445,14 @@ def download_best_cover(
             return 900
         return 500
 
-    def _sort_key(e: dict[str, str]) -> tuple[int, int, str]:
+    def _sort_key(e: dict[str, str]) -> tuple[int, int, int, str]:
         from app.scrap_library.cover_scrape import cover_url_layer
 
-        layer = cover_url_layer(e.get("url") or "")
+        u = e.get("url") or ""
+        layer = cover_url_layer(u)
         layer_i = 0 if layer == "pl" else (1 if layer == "ps" else 2)
-        return (_src_rank(e.get("source") or ""), layer_i, e.get("url") or "")
+        unstable = 1 if _host_unstable(u) else 0
+        return (unstable, _src_rank(e.get("source") or ""), layer_i, u)
 
     # 优先池 / 全局池
     if fp:
@@ -369,18 +479,26 @@ def download_best_cover(
     def _fetch(url: str) -> tuple[bytes | None, dict[str, Any]]:
         host = _host_of(url)
         if int(host_fail_n.get(host) or 0) >= HOST_FAIL_BLOCK:
-            return None, {"reason": "host_blocked"}
+            return None, {"reason": "host_blocked", "elapsedMs": 0, "slotWait": False}
+        t0 = time.perf_counter()
         try:
             got = embed_svc._fetch_cover_bytes(url, slot_timeout=url_timeout)  # noqa: SLF001
         except TimeoutError:
             # 槽位忙：换下一条 URL，不要拉黑整个图床
-            return None, {"reason": "slot_blocked"}
+            ms = int((time.perf_counter() - t0) * 1000)
+            return None, {
+                "reason": "slot_blocked",
+                "elapsedMs": ms,
+                "slotWait": True,
+            }
         except Exception:  # noqa: BLE001
+            ms = int((time.perf_counter() - t0) * 1000)
             host_fail_n[host] = int(host_fail_n.get(host) or 0) + 1
-            return None, {"reason": "download"}
+            return None, {"reason": "download", "elapsedMs": ms, "slotWait": False}
+        ms = int((time.perf_counter() - t0) * 1000)
         if not got:
             host_fail_n[host] = int(host_fail_n.get(host) or 0) + 1
-            return None, {"reason": "download"}
+            return None, {"reason": "download", "elapsedMs": ms, "slotWait": False}
         raw, ctype = got
         if "png" in (ctype or "").lower() or "webp" in (ctype or "").lower():
             try:
@@ -399,13 +517,20 @@ def download_best_cover(
         try:
             # 占位空图（含较大 NOW PRINTING）一律丢弃，避免 80 分早停掐死其它源
             if embed_svc._is_blank_cover_bytes(raw):  # noqa: SLF001
-                return None, {"reason": "blank"}
+                return None, {
+                    "reason": "blank",
+                    "elapsedMs": ms,
+                    "slotWait": False,
+                }
         except Exception:  # noqa: BLE001
             pass
         # 成功则清零该 host 失败计数
         if host in host_fail_n:
             host_fail_n[host] = 0
-        return raw, probe_cover_bytes(raw)
+        meta = probe_cover_bytes(raw)
+        meta["elapsedMs"] = ms
+        meta["slotWait"] = False
+        return raw, meta
 
     def _commit(raw: bytes, *, src_url: str, score: float) -> str | None:
         # none 模式拒绝竖图
@@ -422,7 +547,7 @@ def download_best_cover(
                 score=score,
             )
             return None
-        # 最小尺寸看「裁切前」源图（横图右裁后宽会到 ~380，不能按裁后判）
+        # 最小尺寸看「裁切前」源图（仅挡图标级；有有效像素即落盘）
         if not meets_disk_min_size(w, h):
             _note(
                 url=src_url,
@@ -445,8 +570,8 @@ def download_best_cover(
         )
         after = probe_cover_bytes(poster_data)
         aw, ah = int(after.get("width") or 0), int(after.get("height") or 0)
-        # 裁后只挡极端废图（DMM 横图右裁约 380×538 属正常）
-        if aw < 200 or ah < 400 or len(poster_data or b"") < 1024:
+        # 裁后只挡空图/极小字节；不再卡分辨率
+        if not meets_processed_min_size(aw, ah) or len(poster_data or b"") < 256:
             _note(
                 url=src_url,
                 status="reject",
@@ -547,12 +672,16 @@ def download_best_cover(
             src = str(ent.get("source") or "")
             tried.append(url)
             raw, meta = _fetch(url)
+            elapsed = int(meta.get("elapsedMs") or 0)
             if raw is None:
+                reason = str(meta.get("reason") or "download")
                 return {
                     "url": url,
                     "source": src,
                     "ok": False,
-                    "reason": str(meta.get("reason") or "download"),
+                    "reason": reason,
+                    "elapsedMs": elapsed,
+                    "slotWait": bool(meta.get("slotWait")),
                 }
             sc = score_cover_bytes(
                 raw,
@@ -592,6 +721,7 @@ def download_best_cover(
                 "width": sc.get("width"),
                 "height": sc.get("height"),
                 "parts": sc.get("parts"),
+                "elapsedMs": elapsed,
             }
 
         n = max(1, min(workers, len(pool_entries)))
@@ -618,23 +748,28 @@ def download_best_cover(
                     if not row.get("ok"):
                         _note(
                             url=url,
+                            source=str(row.get("source") or ""),
                             status="fail",
                             reason=str(row.get("reason") or "fail"),
                             pool=pool_name,
                             score=row.get("score"),
                             width=row.get("width"),
                             height=row.get("height"),
+                            elapsedMs=row.get("elapsedMs"),
+                            slotWait=row.get("slotWait"),
                         )
                         continue
                     score = float(row.get("score") or 0)
                     _note(
                         url=url,
+                        source=str(row.get("source") or ""),
                         status="ok",
                         reason="",
                         pool=pool_name,
                         score=score,
                         width=row.get("width"),
                         height=row.get("height"),
+                        elapsedMs=row.get("elapsedMs"),
                     )
                     scored.append(row)
                     disk_ok = meets_disk_min_size(
@@ -693,6 +828,11 @@ def download_best_cover(
             )
             if not rel:
                 continue
+            src = str(best.get("source") or "").strip()
+            _log(
+                f"cover.commit · source={src or '?'} · score={best.get('score')} · "
+                f"url={str(best.get('url') or '')[:80]}"
+            )
             return {
                 "poster": rel,
                 "thumb": "",
@@ -703,6 +843,7 @@ def download_best_cover(
                 "keptOld": False,
                 "mode": crop_mode,
                 "score": float(best.get("score") or 0),
+                "coverSource": src,
             }
         return None
 
@@ -732,9 +873,13 @@ def download_best_cover(
                     )
                     return got_early
     elif global_pool:
-        all_scored.extend(
-            _run_pool("global", global_pool[: min(max_urls, len(global_pool))])
+        # 无字段优先：同样用稳定优先 + 兜底席，避免一上来全打 jav321
+        take = pick_global_supplement(
+            global_pool,
+            used=set(),
+            take_n=min(max_urls, len(global_pool)),
         )
+        all_scored.extend(_run_pool("global", take))
 
     best_pri = float(all_scored[0]["score"]) if all_scored else -1.0
     best_disk_ok = bool(
@@ -774,14 +919,17 @@ def download_best_cover(
         # 而走到 need_more 就说明优先池的结论**不够用**（全灭 / 最高分 <
         # early_score / 尺寸不达标 —— 上面每条 need_more=False 分支都要求
         # best_pri>=early_score 且 best_disk_ok），此时补全局是净收益：
-        # 本可拿 85 分的全局源会被白白跳过，出中分封面甚至直接失败。
-        # 所以只保留 GLOBAL_SUPPLEMENT_N 这个硬上限。
+        # 本可拿够分的全局源会被白白跳过，出中分封面甚至直接失败。
+        # 所以只保留 GLOBAL_SUPPLEMENT_N 这个硬上限；且强制留 1 席兜底源。
         take_n = min(GLOBAL_SUPPLEMENT_N, len(global_pool))
-        supp = [e for e in global_pool if str(e.get("url") or "") not in used][:take_n]
+        supp = pick_global_supplement(global_pool, used=used, take_n=take_n)
         if supp:
+            srcs = ",".join(
+                sorted({str(e.get("source") or "?") for e in supp})
+            )
             _log(
                 f"cover.pool · supplement global · n={len(supp)} · "
-                f"priBest={best_pri}"
+                f"srcs={srcs} · priBest={best_pri}"
             )
             all_scored.extend(_run_pool("global", supp))
             all_scored.sort(key=lambda r: float(r.get("score") or 0), reverse=True)
@@ -798,7 +946,11 @@ def download_best_cover(
     )
     if (not all_scored) and slot_heavy >= 2 and expanded:
         host_fail_n.clear()
-        url_timeout = max(float(url_timeout), 7.0)
+        # ⚠️ 第二十一轮修正（原为 `url_timeout = max(url_timeout, 7.0)`）：
+        # 这里的**抬高方向反了**。`slot_heavy >= 2` 恰恰说明 cover 槽已经不够用，
+        # 此时把抢槽超时从 2s 抬到 7s，只会让本番号更久地占着 itemWorker 干等、
+        # 并把全局槽继续榨干 —— 现场日志里的 `retry after slot pressure` 正是这条路径。
+        # 保持收敛后的短超时（快速失败 + 立刻补试），让出站槽回流给其它在飞番号。
         used = set(tried)
         retry_pool = [e for e in (priority or expanded) if str(e.get("url") or "") not in used]
         if not retry_pool:

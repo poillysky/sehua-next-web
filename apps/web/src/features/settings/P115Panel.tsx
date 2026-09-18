@@ -63,10 +63,10 @@ const SAVE_SOURCES: Array<{
   label: string;
   desc: string;
 }> = [
-  { key: 'warehouse', label: '仓库', desc: '先最近接受 → 再进本目录' },
-  { key: 'movie', label: '电影', desc: '影视·电影 · 先最近接受 → 再进本目录' },
-  { key: 'tv', label: '电视剧', desc: '影视·剧集 · 先最近接受 → 再进本目录' },
-  { key: 'makers', label: '片商', desc: '片商 · 先最近接受 → 再进分区目录' },
+  { key: 'warehouse', label: '仓库', desc: '先最近接收 → 再进本目录' },
+  { key: 'movie', label: '电影', desc: '影视·电影 · 先最近接收 → 再进本目录' },
+  { key: 'tv', label: '电视剧', desc: '影视·剧集 · 先最近接收 → 再进本目录' },
+  { key: 'makers', label: '片商', desc: '片商 · 先最近接收 → 再进分区目录' },
 ];
 
 function emptyTargets(): Record<P115SaveSource, P115TargetFolder> {
@@ -882,7 +882,7 @@ export function P115Panel({
                   <span className="settings-nav__main">
                     <span className="settings-nav__title">转存流程</span>
                     <span className="settings-nav__desc allow-select">
-                      影视 / 片商 / 仓库：先入根目录「最近接受」，完成后再移到各自指定目录
+                      影视 / 片商 / 仓库：先入根目录「最近接收」，完成后再移到各自指定目录
                     </span>
                   </span>
                 </div>

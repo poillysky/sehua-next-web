@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import re
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from urllib.parse import quote
 
@@ -242,23 +241,47 @@ def scrape_detail(
     ck = cookie or None
 
     def _fetch_pair(rel: str, referer: str) -> tuple[str, str, str, str]:
-        """抓 JP/CN 双页并校验番号；失败按原语义抛 RuntimeError。"""
+        """抓详情页。中文优先；日文仅在中文缺标题时补，避免双页串行把单源预算吃光。
+
+        跑久后卡顿主因：4 路番号 × iqqtv 双页 = 同站 page 槽打满，放弃后 curl
+        僵尸仍占槽 → 全员顶满 15s 超时。减半请求 + 取消令牌同线程生效。
+        """
+        from app.core.outbound_http import thread_is_cancelled
+
         jp_url = abs_url(f"/jp/{rel}", f"{jp_base}/") or f"{jp_base}/{rel}"
         cn_url = abs_url(f"/cn/{rel}", f"{cn_base}/") or f"{cn_base}/{rel}"
 
         def _fetch(url: str) -> str:
+            if thread_is_cancelled():
+                raise RuntimeError("已放弃(早停)")
             return fetch_html(url, referer=referer, cookie=ck, source_id=SOURCE)
 
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            jp_f = pool.submit(_fetch, jp_url)
-            cn_f = pool.submit(_fetch, cn_url)
-            jp_html = jp_f.result()
-            cn_html = cn_f.result()
+        cn_html = _fetch(cn_url)
+        if not cn_html or len(cn_html) < 800 or not page_mentions_code(cn_html, std):
+            # 中文页不可用再试日文
+            if thread_is_cancelled():
+                raise RuntimeError("中文详情不可用")
+            jp_html = _fetch(jp_url)
+            if not jp_html or len(jp_html) < 800 or not page_mentions_code(jp_html, std):
+                raise RuntimeError("日文详情不可用")
+            return jp_html, jp_html, jp_url, jp_url
 
+        # 中文已够用：默认不再拉日文（标题/剧情合并侧偏 CN）
+        cn_parsed_title = ""
+        try:
+            cn_parsed_title = str(
+                parse_iqqtv_detail_html(cn_html, std, cn_url).get("title") or ""
+            ).strip()
+        except Exception:
+            cn_parsed_title = ""
+        if cn_parsed_title:
+            return cn_html, cn_html, cn_url, cn_url
+
+        if thread_is_cancelled():
+            raise RuntimeError("中文无标题且已放弃")
+        jp_html = _fetch(jp_url)
         if not jp_html or len(jp_html) < 800 or not page_mentions_code(jp_html, std):
             raise RuntimeError("日文详情不可用")
-        if not cn_html or len(cn_html) < 800 or not page_mentions_code(cn_html, std):
-            raise RuntimeError("中文详情不可用")
         return jp_html, cn_html, jp_url, cn_url
 
     def _build_detail(

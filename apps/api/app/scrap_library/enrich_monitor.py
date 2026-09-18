@@ -134,7 +134,12 @@ def diagnose(
     timeout = max(5, min(180, timeout))
     sources = list(item.get("sources") or [])
 
+    # 只看「仍在跑」的源。已 fail 的 timeout:15s 不能永久钉死「卡顿」——
+    # 否则 iqqtv 早停后封面/其它源还在跑，UI 一直红标，看起来像整槽卡死。
+    slow_thr = timeout * 0.7
     for s in sources:
+        if str(s.get("status") or "") != "running":
+            continue
         err = str(s.get("error") or "")
         if "timeout" in err.lower():
             return {
@@ -143,11 +148,6 @@ def diagnose(
                 "detail": err[:120],
                 "sinceMs": int(s.get("ms") or phase_elapsed * 1000),
             }
-
-    slow_thr = timeout * 0.7
-    for s in sources:
-        if str(s.get("status") or "") != "running":
-            continue
         ms = float(s.get("ms") or 0)
         run_sec = (ms / 1000.0) if ms > 0 else phase_elapsed
         if run_sec >= slow_thr:
@@ -439,12 +439,15 @@ def snapshot() -> dict[str, Any]:
             if not isinstance(cur, dict):
                 continue
             nxt = dict(cur)
-            nxt["elapsedMs"] = int(
+            # 量化到 250ms：SSE 用 JSON 去重，毫秒级跳动会导致几乎每帧都推
+            raw_elapsed = int(
                 max(0.0, now - float(nxt.get("startedAt") or now)) * 1000
             )
-            nxt["phaseElapsedMs"] = int(
+            raw_phase = int(
                 max(0.0, now - float(nxt.get("phaseStartedAt") or now)) * 1000
             )
+            nxt["elapsedMs"] = (raw_elapsed // 250) * 250
+            nxt["phaseElapsedMs"] = (raw_phase // 250) * 250
             srcs = []
             for s in list(nxt.get("sources") or []):
                 if not isinstance(s, dict):

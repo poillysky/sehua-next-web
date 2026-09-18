@@ -7,20 +7,22 @@
     "europe": "western",
     "fc2": "fc2",
     "fc2ppv": "fc2",
-    "gravure": "japan",
+    "gravure": "japan_censored",
     "japan": "japan",
     "japan_amateur": "japan_amateur",
     "japan_censored": "japan_censored",
+    "japan_gravure": "japan_censored",
     "japan_uncensored": "japan_uncensored",
     "jp": "japan",
     "uncensored": "japan_uncensored",
     "western": "western",
     "yc": "japan_censored",
-    "素人": "japan_amateur"
+    "素人": "japan_amateur",
+    "写真": "japan_censored",
+    "日本写真": "japan_censored"
   },
   "order": [
     "japan_censored",
-    "japan_gravure",
     "japan_uncensored",
     "japan_amateur",
     "fc2",
@@ -52,12 +54,6 @@
       "label": "日本有码",
       "navPath": "片区/日本/有码"
     },
-    "japan_gravure": {
-      "db_region": "japan",
-      "id": "japan_gravure",
-      "label": "日本写真",
-      "navPath": "片区/日本/写真"
-    },
     "japan_uncensored": {
       "db_region": "japan_uncensored",
       "id": "japan_uncensored",
@@ -71,5 +67,5 @@
       "navPath": "片区/欧美/无码"
     }
   },
-  "version": 1
+  "version": 2
 }

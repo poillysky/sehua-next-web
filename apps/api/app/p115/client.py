@@ -551,11 +551,33 @@ def ensure_child_folder(
     }
 
 
-RECEIVE_INBOX_NAME = "最近接受"
+# 115 根目录系统习惯名是「最近接收」；旧版误写「最近接受」一并兼容
+RECEIVE_INBOX_NAME = "最近接收"
+RECEIVE_INBOX_ALIASES = (RECEIVE_INBOX_NAME, "最近接受")
 
 
 def ensure_receive_inbox(cookie: str) -> dict[str, Any]:
-    """115 根目录下的「最近接受」文件夹（转存落点）。"""
+    """115 根目录下的「最近接收」文件夹（转存落点）。
+
+    优先复用已有「最近接收」；若仅有历史错名「最近接受」则沿用，避免再建一个空目录。
+    """
+    listed = list_folders(cookie, "0")
+    if listed.get("ok"):
+        by_name: dict[str, dict[str, Any]] = {}
+        for f in listed.get("folders") or []:
+            if not isinstance(f, dict):
+                continue
+            n = str(f.get("name") or "").strip()
+            if n in RECEIVE_INBOX_ALIASES and f.get("cid"):
+                by_name[n] = f
+        preferred = by_name.get(RECEIVE_INBOX_NAME) or by_name.get("最近接受")
+        if preferred:
+            return {
+                "ok": True,
+                "cid": str(preferred.get("cid") or ""),
+                "name": str(preferred.get("name") or RECEIVE_INBOX_NAME),
+                "created": False,
+            }
     return ensure_child_folder(cookie, "0", RECEIVE_INBOX_NAME)
 
 

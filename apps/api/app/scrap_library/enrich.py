@@ -247,6 +247,133 @@ _JUNK_ACTOR_TAGS = frozenset(
         "儿媳的扭动之夜",
         "嫁の悶え",
         "妻・母・嫁",
+        # 题材/亲属关系词（airav 标签，易被升格成女优）
+        "乱伦",
+        "亂倫",
+        "近亲",
+        "近親",
+        "继母",
+        "繼母",
+        "义母",
+        "義母",
+        "岳母",
+        "丈母娘",
+        "高中生",
+        "女学生",
+        "女學生",
+        "连裤袜",
+        "連褲襪",
+        "眼镜娘",
+        "眼鏡娘",
+        "黑丝",
+        "黑絲",
+        "丝袜",
+        "絲襪",
+        # 常见题材词（曾被误写入 <actor>）
+        "业余",
+        "業餘",
+        "素人",
+        "乳交",
+        "乱交",
+        "亂交",
+        "亲吻",
+        "親吻",
+        "接吻",
+        "无毛",
+        "無毛",
+        "自慰",
+        "姐姐",
+        "企划",
+        "企劃",
+        "白人",
+        "深喉",
+        "母乳",
+        "舞蹈",
+        "水手服",
+        "体操服",
+        "體操服",
+        "萝莉",
+        "蘿莉",
+        "娇小",
+        "嬌小",
+        "小柄",
+        "迷你裙",
+        "辣妹",
+        "吞精",
+        "破解",
+        "无码破解",
+        "無碼破解",
+        "职业装",
+        "職業裝",
+        "恋物癖",
+        "戀物癖",
+        "其他癖好",
+        "多人数",
+        "多人數",
+        "丰满",
+        "豐滿",
+        "纪录片",
+        "紀錄片",
+        "猎艳",
+        "獵艷",
+        "猎豔",
+        "温泉",
+        "溫泉",
+        "搭讪",
+        "搭訕",
+        "车震",
+        "車震",
+        "美尻",
+        "饮尿",
+        "飲尿",
+        "女同",
+        "主观视角",
+        "主觀視角",
+        "各种职业",
+        "各種職業",
+        "立即插入",
+        "风俗",
+        "風俗",
+        "西洋片",
+        "我流",
+        "捆绑",
+        "捆綁",
+        "武术格斗",
+        "武術格鬥",
+        "巨根",
+        "运动",
+        "運動",
+        "精选合集",
+        "精選合集",
+        "傲娇",
+        "傲嬌",
+        "过激系",
+        "過激系",
+        "女大学生",
+        "女大學生",
+        "4小时",
+        "4小時",
+        "JK制服",
+        "睡虐魔",
+        "强奸",
+        "強姦",
+        "勉强",
+        "勉強",
+        "淫乱真实",
+        "淫亂真實",
+        "カノジョ",
+        "手交",
+        "受孕",
+        "秘书",
+        "秘書",
+        "白天出轨",
+        "白天出軌",
+        "汤烟频道",
+        "湯煙頻道",
+        "岁美容师",
+        "歲美容師",
+        "人间観察ドキュメント",
+        "人間観察ドキュメント",
     }
 )
 
@@ -269,6 +396,16 @@ _JUNK_ACTOR_SUBSTR = (
     "摄影",
     "扭动",
     "悶え",
+    "dmm独家",
+    "dmm獨家",
+    "fanza独占",
+    "fanza獨占",
+    "独家配信",
+    "独占配信",
+    "數位馬賽克",
+    "数位马赛克",
+    "数字马赛克",
+    "數字馬賽克",
 )
 
 
@@ -284,19 +421,164 @@ _NAME_PAIR_CENSOR_RESTORE = (
 
 
 def _looks_like_actor_sentence_frag(name: str) -> bool:
-    """标题句段/助词串误当女优名（STARS-902：好きだった男が強）。"""
+    """标题句段/助词串误当女优名（STARS-902：好きだった男が強）。
+
+    注意：假名艺名常含「を/が」（山本かをり）——短「姓+名读」不当句子。
+    """
     n = str(name or "").strip()
     if len(n) < 4:
         return False
-    # 日文助词几乎不可能出现在真实艺名里
-    if re.search(r"[がをにはへでも]", n) and len(n) >= 4:
+    # 常见日文姓名形：1～4 汉字姓 + 假名名（可含 を/が）
+    if re.fullmatch(r"[一-龥々〆ヵヶ]{1,4}[ぁ-んァ-ンー･・]{1,8}", n):
+        return False
+    if re.fullmatch(r"[ぁ-んァ-ンー･・]{2,12}", n):
+        return False
+    # 标题句段硬特征
+    if any(
+        m in n
+        for m in ("だった", "です", "ます", "好き", "とき", "から", "まで", "男が", "女が")
+    ):
         return True
-    if any(m in n for m in ("だった", "です", "ます", "好き", "とき", "から", "まで")):
+    # 助词夹在较长短语中间才当句子（避开短艺名）
+    if len(n) >= 6 and re.search(r"[一-龥ぁ-んァ-ン]{2,}[がをにはへでも][一-龥ァ-ンぁ-ん]", n):
         return True
     # 过长假名/汉字混杂短语
     if len(n) >= 8 and re.search(r"[ぁ-ん]", n) and re.search(r"[一-龥ァ-ン]", n):
+        if not re.fullmatch(r"[一-龥々]{1,4}[ぁ-んァ-ンー･・\s]{1,10}", n):
+            return True
+    return False
+
+
+def _is_platform_exclusivity_label(text: str) -> bool:
+    """DMM独家 / FANZA独占 / 独家配信 等发行渠道标签，不是女优名。"""
+    t = str(text or "").strip()
+    if not t:
+        return False
+    tl = t.casefold()
+    if tl in {
+        "dmm独家",
+        "dmm獨家",
+        "fanza独占",
+        "fanza獨占",
+        "独家配信",
+        "独家發送",
+        "独占配信",
+        "獨占配信",
+        "配信限定",
+        "独家",
+        "獨家",
+        "独占",
+        "獨占",
+    }:
+        return True
+    if re.search(r"(?i)(dmm|fanza|mgstage|prestige|sod)\s*(独家|獨家|独占|獨占|专卖|專賣|専売)", t):
+        return True
+    if re.search(r"(独家|獨家|独占|獨占).*(配信|发送|發送|限定)", t):
         return True
     return False
+
+
+# 行为/体位/体型/道具类标签碎片（曾被当成纯假名「艺名」写入 <actor>）
+_ACT_TAG_FRAG_RE = re.compile(
+    r"(舐め|フェラ|性交|挿入|插入|騎乗|骑乘|オナニー|オナホ|中出し|アナル|貫通|贯通|"
+    r"ハメ|プレイ|マッサージ|カメラ|視点|视角|視角|二穴|連発|连发|依存|"
+    r"无套|無套|后背位|後背位|顔騎|颜面|オリジナル|半外半中|ダブル|"
+    r"ご奉仕|個撮|卖挂|賣掛|ATM|贯通|ホス|ホスト|性感内衣|吸うやつ|"
+    r"主观视角|主觀視角|女大学生|女大學生|かわいい|"
+    r"デカ尻|巨尻|美尻|イチャイチャ|いちゃいちゃ|ちっぱい|微乳|貧乳|贫乳|"
+    r"毛あり|毛無し|毛なし|垂れ乳|颜出し|顔出し|ロングヘア|"
+    r"雪白肌肤|雪白肌膚|肉オナホ|马乗り|馬乗り|イラマ|ちんこ|ビンタ|"
+    r"日本人|年轻少妇|年輕少婦)"
+)
+
+
+def _looks_like_act_tag_token(name: str) -> bool:
+    """类型/玩法标签，不是女优名。"""
+    t = str(name or "").strip()
+    if not t:
+        return False
+    if t in _JUNK_ACTOR_TAGS or t.casefold() in _JUNK_ACTOR_TAGS:
+        return True
+    if _ACT_TAG_FRAG_RE.search(t):
+        return True
+    # 叠词玩法（イチャイチャ / モジモジ）
+    if re.fullmatch(r"([ぁ-んァ-ン]{2,4})\1", t):
+        return True
+    return False
+
+
+def _is_plausible_actress_name(name: str) -> bool:
+    """女优栏正向形态：宁可空着，也不收体型/玩法标签。"""
+    t = str(name or "").strip()
+    if not t or len(t) < 2 or len(t) > 40:
+        return False
+    if _looks_like_act_tag_token(t):
+        return False
+    if _looks_like_actor_sentence_frag(t):
+        return False
+    # 姓 + 假名读
+    if re.fullmatch(r"[一-龥々〆ヵヶ]{1,4}[ぁ-んァ-ンー･・]{1,10}", t):
+        return True
+    # 姓 名（官网空格分隔：横畠 杏菜 / 中村 あゆみ）
+    if re.fullmatch(
+        r"[一-龥々〆ヵヶ]{1,4}[\s　]+[一-龥々ぁ-んァ-ンー･・]{1,10}",
+        t,
+    ):
+        return True
+    # 纯汉字人名（题材 junk / act_tag 已滤）
+    # 2～6 字：覆盖「宮田加奈子」「小向美奈子」等 5 字姓名（旧上限 4 会误杀）
+    if re.fullmatch(r"[一-龥々]{2,6}", t):
+        if t.endswith(("娘", "母", "妻", "父", "妇", "婦", "女", "男", "生")):
+            return False
+        return True
+    # 西洋名 / 中间点名
+    if re.search(r"[A-Za-z]", t) or "・" in t or "·" in t:
+        return True
+    # 纯假名短艺名（ことね）；叠词与体型词已在 act_tag 拦
+    if re.fullmatch(r"[ぁ-んァ-ンー]{2,8}", t):
+        # 描述性接头：デカ/超/巨 + 体词
+        if re.match(r"^(デカ|超|巨|美|微|貧|贫)", t) and len(t) >= 3:
+            return False
+        return True
+    # 汉字 + 假名其它短混合
+    if (
+        re.search(r"[一-龥]", t)
+        and re.search(r"[ぁ-んァ-ン]", t)
+        and len(t) <= 16
+    ):
+        return True
+    return False
+
+
+def _looks_like_person_name_tag(tag: str) -> bool:
+    """标签里误塞的女优名（仅识别用；**禁止**再升格进 actor）。"""
+    t = str(tag or "").strip()
+    if not t or len(t) < 2 or len(t) > 16:
+        return False
+    if _is_platform_exclusivity_label(t):
+        return False
+    if _looks_like_act_tag_token(t):
+        return False
+    key = t.casefold()
+    if key in _JUNK_ACTORS or key in _JUNK_ACTOR_TAGS or t in _JUNK_TITLE_MARKERS:
+        return False
+    if any(s in t for s in _JUNK_ACTOR_SUBSTR):
+        return False
+    if t.startswith(("系列", "片商", "发行", "發行", "廠商", "厂商", "导演", "導演")):
+        return False
+    if "/" in t or "|" in t or "／" in t:
+        return False
+    # 片商/企划长假名（オーロラプロジェクト・アネックス）——勿误伤西洋名「キャンディ・雏・パークス」
+    if "プロジェクト" in t or "アネックス" in t or "スタジオ" in t:
+        return False
+    if "project" in key or "studio" in key:
+        return False
+    # 前缀/番号
+    if re.fullmatch(r"[A-Z]{2,10}-?\d{0,5}[A-Z0-9]*", t, re.I):
+        return False
+    if _looks_like_actor_sentence_frag(t):
+        return False
+    return _is_plausible_actress_name(t)
 
 
 def _names_from_title_pairs(title: str) -> list[str]:
@@ -649,7 +931,16 @@ def _clean_actors(names: list[str] | None) -> list[str]:
             continue
         if name in _JUNK_TITLE_MARKERS:
             continue
-        if any(s in name for s in _JUNK_ACTOR_SUBSTR):
+        if _looks_like_act_tag_token(name):
+            continue
+        if _is_platform_exclusivity_label(name):
+            continue
+        if any(s in name.casefold() for s in _JUNK_ACTOR_SUBSTR):
+            continue
+        # 片商/企划名误入女优栏（勿误伤西洋名中的「・」）
+        if any(s in name for s in ("プロジェクト", "アネックス", "スタジオ")):
+            continue
+        if "project" in key or (key.startswith("studio") and len(name) >= 6):
             continue
         # 类型复合词：出轨/NTR、痴女/OL 等
         if "/" in name or "|" in name or "／" in name:
@@ -665,9 +956,18 @@ def _clean_actors(names: list[str] | None) -> list[str]:
         # 纯数字 / URL / HTML
         if re.fullmatch(r"\d+", name) or re.search(r"https?://|<|>", name, re.I):
             continue
+        # 正名单：不像人名的（デカ尻/イチャイチャ）直接丢
+        if not _is_plausible_actress_name(name):
+            continue
         seen.add(key)
         out.append(name)
     return out
+
+
+def _actors_lifted_from_tags(tags: list[str] | None) -> list[str]:
+    """已废弃：禁止从标签升格女优（保留空实现，兼容旧调用/测试）。"""
+    del tags
+    return []
 
 _JUNK_TAGS = frozenset(
     {
@@ -719,6 +1019,14 @@ def _clean_tags(tags: list[str] | None, *, fold: bool = True) -> list[str]:
             continue
         key = tag.casefold()
         if raw_tag.casefold() in _JUNK_TAGS or key in _JUNK_TAGS or key in seen:
+            continue
+        if _is_platform_exclusivity_label(raw_tag) or _is_platform_exclusivity_label(tag):
+            continue
+        # 渠道/马赛克类噪声（大小写不敏感）
+        if any(s in key for s in ("数位马赛克", "數字馬賽克", "数字马赛克", "數位馬賽克")):
+            continue
+        # 前缀代号单独成标签（ALDN / ABP）无信息量
+        if re.fullmatch(r"[A-Z]{2,10}", tag, re.I):
             continue
         seen.add(key)
         out.append(tag)
@@ -793,10 +1101,10 @@ _enrich_job: dict[str, Any] = {
 _enrich_watchers_lock = threading.Lock()
 _enrich_watchers: list[threading.Event] = []
 _enrich_notify_last = 0.0
-_ENRICH_NOTIFY_MIN_GAP = 0.2
+_ENRICH_NOTIFY_MIN_GAP = 0.7
 # force（阶段切换）也必须留地板：10 番号并发时每条 item 有 2~3 次 force 通知，
-# 完全不节流会让 SSE 每帧重建一次状态快照（含磁盘校验，单次数百 ms），把 worker 的 CPU 吃光。
-_ENRICH_NOTIFY_FORCE_MIN_GAP = 0.12
+# 完全不节流会让 SSE 每帧重建一次状态快照，把 worker / 前端主线程吃光。
+_ENRICH_NOTIFY_FORCE_MIN_GAP = 0.35
 
 
 def subscribe_enrich_updates() -> threading.Event:
@@ -856,7 +1164,8 @@ def _checkpoint_summaries() -> dict[str, Any]:
 
 _ENRICH_LOG_KEEP = 2000
 # 状态接口回传本轮尾部；角标按内存实际条数（见 regionLogCounts）
-_ENRICH_LOG_RETURN = 200
+# 200 行 × SSE 高频会拖垮设置页；详情日志另有 /enrich/logs
+_ENRICH_LOG_RETURN = 40
 _ENRICH_LOG_MEMORY = 500
 
 
@@ -912,6 +1221,9 @@ def _canonical_enrich_log_region(region: str | None = None) -> str:
         return "_all"
     from app.core.region_meta import REGION_META
 
+    # 旧逻辑区 fc2_ppv 并回物理 FC2（设置页已合并为一类）
+    if raw in {"fc2_ppv", "FC2-PPV 番号", "FC2PPV"}:
+        return "fc2"
     if raw in REGION_META:
         return raw
     for rid, m in REGION_META.items():
@@ -1175,6 +1487,11 @@ def clear_enrich_logs(*, region: str = "") -> dict[str, Any]:
     _clear_enrich_logs(region=rid, wipe_all_tail=False)
     _clear_queue_log(region=rid)
     _clear_local_status_totals(rid)
+    _invalidate_classified_skip_cache(rid)
+    if rid:
+        _pending_backfill_done.discard(rid)
+    else:
+        _pending_backfill_done.clear()
     cleared_cp = False
     got_lock = _enrich_lock.acquire(timeout=2.0)
     try:
@@ -1290,8 +1607,9 @@ def _queue_log_region(region: str | None = None) -> str:
     return "" if rid == "_all" else rid
 
 
-# 角标计数短缓存：SSE/轮询每秒会问很多次同一个分区，
-# 而每次都要先跑一遍 `_ensure_actress_soft_promoted`（含磁盘校验）。
+# 角标计数短缓存：SSE/轮询每秒会问很多次同一个分区。
+# ⚠️ 禁止在计数前跑 `_ensure_actress_soft_promoted`：有码区 done/fail 可达 10 万+，
+# demote 会对每行做磁盘校验，卡住 GET /enrich/status，进而拖死整页设置接口。
 _counts_cache: dict[str, tuple[float, dict[str, int]]] = {}
 _COUNTS_CACHE_TTL_SEC = 1.2
 # 清空·扫描后的本地全量角标（队列表写全部分类行供翻页；角标与 DB 对齐，落盘防重启丢失）
@@ -1316,6 +1634,11 @@ def _persist_local_status_totals() -> None:
                     "done": int(v.get("done") or 0),
                     "soft": int(v.get("soft") or 0),
                     "fail": int(v.get("fail") or 0),
+                    **(
+                        {"total": int(v.get("total") or 0)}
+                        if int(v.get("total") or 0) > 0
+                        else {}
+                    ),
                 }
                 for rid, v in _LOCAL_STATUS_TOTALS.items()
                 if rid and isinstance(v, dict)
@@ -1353,23 +1676,38 @@ def _ensure_local_status_totals_loaded() -> None:
                     "done": max(0, int(tip.get("done") or 0)),
                     "soft": max(0, int(tip.get("soft") or 0)),
                     "fail": max(0, int(tip.get("fail") or 0)),
+                    **(
+                        {"total": max(0, int(tip.get("total") or 0))}
+                        if int(tip.get("total") or 0) > 0
+                        else {}
+                    ),
                 }
         except Exception as e:  # noqa: BLE001
             log.debug("load local status totals failed: %s", e)
 
 
 def _set_local_status_totals(
-    region: str, *, done: int = 0, soft: int = 0, fail: int = 0
+    region: str,
+    *,
+    done: int = 0,
+    soft: int = 0,
+    fail: int = 0,
+    total: int | None = None,
 ) -> None:
     rid = _queue_log_region(region)
     if not rid:
         return
     _ensure_local_status_totals_loaded()
-    _LOCAL_STATUS_TOTALS[rid] = {
+    prev = _LOCAL_STATUS_TOTALS.get(rid) or {}
+    row: dict[str, int] = {
         "done": max(0, int(done or 0)),
         "soft": max(0, int(soft or 0)),
         "fail": max(0, int(fail or 0)),
     }
+    tot = int(prev.get("total") or 0) if total is None else max(0, int(total or 0))
+    if tot > 0:
+        row["total"] = tot
+    _LOCAL_STATUS_TOTALS[rid] = row
     _counts_cache.pop(rid, None)
     _persist_local_status_totals()
 
@@ -1387,16 +1725,47 @@ def _clear_local_status_totals(region: str = "") -> None:
 
 
 def _apply_local_status_totals(counts: dict[str, int], region: str) -> dict[str, int]:
-    """扫描角标与库内进度取大，禁止用全 0 的扫描缓存盖掉已刮成功/失败。"""
+    """扫描 tip 与库内计数合并。
+
+    - 库分类全 0：用 tip（避免空库盖掉扫描角标）
+    - 库有分类：done/fail 取大；soft **以库为准**（软成功升完整成功后必须能下降，
+      禁止 tip.soft=1898 把 DB soft=57 永久钉死）
+    """
     _ensure_local_status_totals_loaded()
     rid = _queue_log_region(region)
     tip = _LOCAL_STATUS_TOTALS.get(rid) if rid else None
-    if not tip:
-        return counts
+    db_d = int(counts.get("done") or 0)
+    db_s = int(counts.get("soft") or 0)
+    db_f = int(counts.get("fail") or 0)
+    db_sum = db_d + db_s + db_f
     out = dict(counts)
-    out["done"] = max(int(tip.get("done") or 0), int(counts.get("done") or 0))
-    out["soft"] = max(int(tip.get("soft") or 0), int(counts.get("soft") or 0))
-    out["fail"] = max(int(tip.get("fail") or 0), int(counts.get("fail") or 0))
+    if not tip:
+        # 热重载后 tip 空但库有数 → 立刻回种，避免 pending 角标按「全未处理」算
+        if rid and db_sum > 0:
+            _set_local_status_totals(
+                rid, done=db_d, soft=db_s, fail=db_f, total=None
+            )
+        return out
+    tip_d = int(tip.get("done") or 0)
+    tip_s = int(tip.get("soft") or 0)
+    tip_f = int(tip.get("fail") or 0)
+    if db_sum <= 0:
+        out["done"] = tip_d
+        out["soft"] = tip_s
+        out["fail"] = tip_f
+        return out
+    out["done"] = max(tip_d, db_d)
+    out["fail"] = max(tip_f, db_f)
+    out["soft"] = db_s
+    # tip.soft 虚高时回写，避免 _region_library_progress 仍读旧 tip
+    if tip_s != db_s or tip_d < out["done"] or tip_f < out["fail"]:
+        _set_local_status_totals(
+            rid,
+            done=out["done"],
+            soft=db_s,
+            fail=out["fail"],
+            total=int(tip.get("total") or 0) or None,
+        )
     return out
 
 
@@ -1414,13 +1783,14 @@ def _lift_local_status_totals_from_counts(
     done = max(int(tip.get("done") or 0), int(counts.get("done") or 0))
     soft = max(int(tip.get("soft") or 0), int(counts.get("soft") or 0))
     fail = max(int(tip.get("fail") or 0), int(counts.get("fail") or 0))
+    tot = int(tip.get("total") or 0)
     if (
         done == int(tip.get("done") or 0)
         and soft == int(tip.get("soft") or 0)
         and fail == int(tip.get("fail") or 0)
     ):
         return
-    _set_local_status_totals(rid, done=done, soft=soft, fail=fail)
+    _set_local_status_totals(rid, done=done, soft=soft, fail=fail, total=tot or None)
 
 
 # 队列扫描进度（供 SSE/状态接口边扫边看；与刮削 progress 分开）
@@ -1471,10 +1841,12 @@ def _queue_scan_preview_item(
         item["partialOk"] = False
         item["error"] = ""
     elif kind == "soft":
-        labels = _gap_labels([g for g in gaps if g not in _SUCCESS_BLOCK_GAPS])
+        soft_gaps = [g for g in gaps if g in _SOFT_SUCCESS_GAPS]
+        labels = _gap_labels(soft_gaps)
         item["status"] = "done"
         item["partialOk"] = True
-        item["error"] = _format_soft_ok_error(labels)
+        item["error"] = _format_soft_ok_error(labels or ["女优"])
+        item["gapsAfter"] = soft_gaps
     else:
         block = [g for g in gaps if g in _SUCCESS_BLOCK_GAPS] or list(gaps or [])
         labels = _gap_labels(block)
@@ -1655,13 +2027,14 @@ def _queue_log_status_counts(region: str, *, fresh: bool = False) -> dict[str, i
     out = _empty_queue_counts()
     if not rid:
         return out
-    _ensure_actress_soft_promoted(rid)
+    # 纠偏（假成功回滚 / 软成功提升）只在扫描·开刮时跑，绝不挂在状态读路径。
     if not fresh:
         hit = _counts_cache.get(rid)
         if hit and (time.monotonic() - float(hit[0])) < _COUNTS_CACHE_TTL_SEC:
             return dict(hit[1])
     out = _queue_log_status_counts_db(rid)
     out = _apply_local_status_totals(out, rid)
+    out = _clamp_pending_badge(out, rid)
     _counts_cache[rid] = (time.monotonic(), dict(out))
     if len(_counts_cache) > 64:
         _counts_cache.clear()
@@ -2010,6 +2383,18 @@ def _queue_log_row_to_item(row: dict[str, Any]) -> dict[str, Any]:
     for k, v in payload.items():
         if k not in item:
             item[k] = v
+    # 完整成功但 gaps_json 未清（历史 bug）：展示层清空缺口，避免「成功还缺封面」
+    if st == "done" and not bool(item.get("partialOk")):
+        item["gaps"] = []
+        if not item.get("gapsAfter"):
+            item["gapsAfter"] = []
+        # 字段表封面：已落盘则强制 ok，避免陈旧 fields 误报
+        if item.get("posterDownloaded") and isinstance(item.get("fields"), list):
+            for f in item["fields"]:
+                if isinstance(f, dict) and str(f.get("id") or "") == "poster":
+                    f["ok"] = True
+                    if not str(f.get("value") or "").strip():
+                        f["value"] = "已落盘"
     # 伪命中源不展示
     if str(item.get("source") or "").strip() in {"log_recover", "recover"}:
         item["source"] = ""
@@ -2593,6 +2978,213 @@ def retry_enrich_fails(*, region: str = "") -> dict[str, Any]:
     }
 
 
+def _queue_log_reopen_softs(region: str) -> list[dict[str, Any]]:
+    """软成功批量重开为 pending（排除已有开放行）。"""
+    rid = _queue_log_region(region)
+    if not rid:
+        return []
+    soft_pred = _soft_done_sql_pred(error_col="r.error")
+    out: list[dict[str, Any]] = []
+    try:
+        from app.core.db import connect, init_db
+
+        init_db()
+        with connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT id, item_id, code, status, gaps_json, error, source,
+                       fetch_ms, detail_title, payload_json
+                FROM enrich_queue_log r
+                WHERE r.region=? AND r.status='done' AND {soft_pred}
+                  AND NOT EXISTS (
+                    SELECT 1 FROM enrich_queue_log o
+                    WHERE o.region=r.region
+                      AND o.status IN ('pending', 'running')
+                      AND (
+                        (NULLIF(r.code, '') <> '' AND o.code=r.code)
+                        OR (NULLIF(r.item_id, '') <> '' AND o.item_id=r.item_id)
+                      )
+                  )
+                ORDER BY id ASC
+                """,
+                (rid,),
+            ).fetchall()
+            ids: list[int] = []
+            for raw in rows or []:
+                if isinstance(raw, dict):
+                    it = _queue_log_row_to_item(raw)
+                    lid = int(raw.get("id") or 0)
+                else:
+                    it = _queue_log_row_to_item(
+                        {
+                            "id": raw[0],
+                            "item_id": raw[1],
+                            "code": raw[2],
+                            "status": raw[3],
+                            "gaps_json": raw[4],
+                            "error": raw[5],
+                            "source": raw[6],
+                            "fetch_ms": raw[7],
+                            "detail_title": raw[8],
+                            "payload_json": raw[9],
+                        }
+                    )
+                    lid = int(raw[0] or 0)
+                if lid <= 0:
+                    continue
+                ids.append(lid)
+                work = {
+                    "itemId": str(it.get("itemId") or ""),
+                    "code": str(it.get("code") or "").strip().upper(),
+                    "gaps": list(it.get("gaps") or it.get("gapsAfter") or []),
+                    "logId": lid,
+                    "region": rid,
+                    "status": "pending",
+                    "error": "",
+                }
+                rel = str(it.get("rel_path") or it.get("relPath") or "")
+                if rel:
+                    work["rel_path"] = rel
+                    work["relPath"] = rel
+                out.append(work)
+            if ids:
+                soft_upd = _soft_done_sql_pred(error_col="error")
+                for i in range(0, len(ids), 500):
+                    chunk = ids[i : i + 500]
+                    ph = ",".join(["?"] * len(chunk))
+                    conn.execute(
+                        f"""
+                        UPDATE enrich_queue_log
+                        SET status='pending', error='', updated_at=NOW()
+                        WHERE id IN ({ph}) AND status='done' AND {soft_upd}
+                        """,
+                        chunk,
+                    )
+                conn.commit()
+    except Exception as e:  # noqa: BLE001
+        log.warning("reopen soft enrich queue log failed region=%s: %s", rid, e)
+        return []
+    return out
+
+
+def retry_enrich_softs(*, region: str = "") -> dict[str, Any]:
+    """软成功批量重试：转入未处理，并尽量插到当前任务最前优先跑。"""
+    global _enrich_retry_front
+    rid = _queue_log_region(region)
+    if not rid:
+        return {"ok": False, "reopened": 0, "error": "region required"}
+    rows = _queue_log_reopen_softs(rid)
+    n = len(rows)
+    if n <= 0:
+        raw = _queue_log_status_counts_db(rid)
+        tip = _LOCAL_STATUS_TOTALS.get(rid) if rid else None
+        if tip:
+            _set_local_status_totals(
+                rid,
+                done=int(raw.get("done") or tip.get("done") or 0),
+                soft=int(raw.get("soft") or 0),
+                fail=int(raw.get("fail") or tip.get("fail") or 0),
+            )
+        _counts_cache.pop(rid, None)
+        counts = _queue_log_status_counts(rid, fresh=True)
+        return {
+            "ok": True,
+            "reopened": 0,
+            "region": rid,
+            "counts": counts,
+            "injected": False,
+        }
+
+    try:
+        codes = [
+            str(r.get("code") or "").strip().upper()
+            for r in rows
+            if str(r.get("code") or "").strip()
+        ]
+        _retry_hint_clear_codes(rid, codes)
+    except Exception:  # noqa: BLE001
+        pass
+
+    injected = False
+    with _enrich_lock:
+        cur_reg = _queue_log_region(str(_enrich_job.get("currentRegion") or ""))
+        running = bool(_enrich_job.get("running"))
+        cps = dict(_enrich_job.get("checkpoints") or {})
+        cp = cps.get(rid) if isinstance(cps.get(rid), dict) else None
+        if isinstance(cp, dict):
+            old_q = [dict(r) for r in list(cp.get("queue") or []) if isinstance(r, dict)]
+            seen_keys = {
+                str(r.get("itemId") or r.get("code") or "").strip()
+                for r in old_q
+            }
+            head = [
+                r
+                for r in rows
+                if str(r.get("itemId") or r.get("code") or "").strip() not in seen_keys
+            ]
+            cp = dict(cp)
+            cp["queue"] = head + old_q
+            cp["remainingCount"] = max(
+                int(cp.get("remainingCount") or 0) + len(head),
+                len(cp["queue"]),
+            )
+            # 软成功原先计入 ok
+            cp["ok"] = max(0, int(cp.get("ok") or 0) - n)
+            cps[rid] = cp
+            _enrich_job["checkpoints"] = cps
+        if running and cur_reg == rid:
+            existing = {
+                str(r.get("itemId") or r.get("code") or "").strip()
+                for r in _enrich_retry_front
+                if isinstance(r, dict)
+            }
+            add = [
+                dict(r)
+                for r in rows
+                if str(r.get("itemId") or r.get("code") or "").strip() not in existing
+            ]
+            _enrich_retry_front = add + list(_enrich_retry_front)
+            injected = True
+            prog = _enrich_job.get("progress")
+            if isinstance(prog, dict):
+                prog = dict(prog)
+                prog["ok"] = max(0, int(prog.get("ok") or 0) - n)
+                _enrich_job["progress"] = prog
+
+    try:
+        _persist_enrich_runtime()
+    except Exception:  # noqa: BLE001
+        pass
+
+    raw = _queue_log_status_counts_db(rid)
+    tip = _LOCAL_STATUS_TOTALS.get(rid) if rid else None
+    _set_local_status_totals(
+        rid,
+        done=int(raw.get("done") or (tip or {}).get("done") or 0),
+        soft=int(raw.get("soft") or 0),
+        fail=int(raw.get("fail") or (tip or {}).get("fail") or 0),
+    )
+    _counts_cache.pop(rid, None)
+
+    _push_log(f"软成功重试 · {n} 条 → 未处理优先", region=rid)
+    try:
+        notify_enrich_watchers(force=True)
+    except Exception:  # noqa: BLE001
+        pass
+    counts = _queue_log_status_counts(rid, fresh=True)
+    counts["pending"] = int(raw.get("pending") or counts.get("pending") or 0)
+    counts["soft"] = int(raw.get("soft") or 0)
+    counts["done"] = int(raw.get("done") or counts.get("done") or 0)
+    return {
+        "ok": True,
+        "reopened": n,
+        "region": rid,
+        "counts": counts,
+        "injected": injected,
+        "running": bool(_enrich_job.get("running")),
+    }
+
+
 def _queue_log_find_open(
     region: str, *, item_id: str = "", code: str = ""
 ) -> int:
@@ -2912,7 +3504,11 @@ def _queue_log_prune_pending_not_in(region: str, keep_item_ids: set[str]) -> int
 def _queue_log_prune_open_if_done(
     region: str, *, code: str = "", item_id: str = ""
 ) -> int:
-    """已有成功行时，删掉同番号/同条目的 pending·running，避免成功还出现在未处理。"""
+    """已有成功行时，删掉同番号/同条目的 pending·running，避免成功还出现在未处理。
+
+    热路径（刚写完 done）只按 code/item_id 定点删，禁止 EXISTS 全表相关子查询：
+    后者在 8 万+ done 行上会扫锁数分钟，卡住其它番号的 UPDATE → 监控假死在封面阶段。
+    """
     rid = _queue_log_region(region)
     if not rid:
         return 0
@@ -2923,55 +3519,85 @@ def _queue_log_prune_open_if_done(
 
         init_db()
         with connect() as conn:
+            # 短超时：prune 失败可下次再清，绝不能堵 worker
+            try:
+                conn.execute("SET LOCAL statement_timeout = '4s'")
+                conn.execute("SET LOCAL lock_timeout = '2s'")
+            except Exception:  # noqa: BLE001
+                pass
             if code_u or iid:
+                # 调用方刚写入 done：无需再 EXISTS 证明「已有成功」
                 clauses: list[str] = []
                 params: list[Any] = [rid]
                 if code_u:
-                    clauses.append("o.code=?")
+                    clauses.append("code=?")
                     params.append(code_u)
                 if iid:
-                    clauses.append("o.item_id=?")
+                    clauses.append("item_id=?")
                     params.append(iid)
-                where_open = " OR ".join(clauses)
                 cur = conn.execute(
                     f"""
-                    DELETE FROM enrich_queue_log AS o
-                    WHERE o.region=?
-                      AND o.status IN ('pending', 'running')
-                      AND ({where_open})
-                      AND EXISTS (
-                        SELECT 1 FROM enrich_queue_log d
-                        WHERE d.region=o.region
-                          AND d.status='done'
-                          AND (
-                            (NULLIF(o.code, '') <> '' AND d.code=o.code)
-                            OR (NULLIF(o.item_id, '') <> '' AND d.item_id=o.item_id)
-                          )
-                      )
+                    DELETE FROM enrich_queue_log
+                    WHERE region=?
+                      AND status IN ('pending', 'running')
+                      AND ({" OR ".join(clauses)})
                     """,
                     params,
                 )
-            else:
+                n = int(getattr(cur, "rowcount", 0) or 0)
+                conn.commit()
+                return max(0, n)
+
+            # 全分区后台清理：分批 + 用 code/item_id 半连接，避免相关 EXISTS 长锁
+            total = 0
+            for _ in range(40):
                 cur = conn.execute(
                     """
-                    DELETE FROM enrich_queue_log AS o
-                    WHERE o.region=?
-                      AND o.status IN ('pending', 'running')
-                      AND EXISTS (
-                        SELECT 1 FROM enrich_queue_log d
-                        WHERE d.region=o.region
-                          AND d.status='done'
-                          AND (
-                            (NULLIF(o.code, '') <> '' AND d.code=o.code)
-                            OR (NULLIF(o.item_id, '') <> '' AND d.item_id=o.item_id)
+                    WITH doomed AS (
+                      SELECT o.id
+                      FROM enrich_queue_log AS o
+                      WHERE o.region=?
+                        AND o.status IN ('pending', 'running')
+                        AND (
+                          (
+                            NULLIF(o.code, '') IS NOT NULL
+                            AND EXISTS (
+                              SELECT 1 FROM enrich_queue_log d
+                              WHERE d.region=o.region
+                                AND d.status='done'
+                                AND d.code=o.code
+                              LIMIT 1
+                            )
                           )
-                      )
+                          OR (
+                            NULLIF(o.item_id, '') IS NOT NULL
+                            AND EXISTS (
+                              SELECT 1 FROM enrich_queue_log d
+                              WHERE d.region=o.region
+                                AND d.status='done'
+                                AND d.item_id=o.item_id
+                              LIMIT 1
+                            )
+                          )
+                        )
+                      LIMIT 200
+                    )
+                    DELETE FROM enrich_queue_log
+                    WHERE id IN (SELECT id FROM doomed)
                     """,
                     (rid,),
                 )
-            n = int(getattr(cur, "rowcount", 0) or 0)
-            conn.commit()
-            return max(0, n)
+                n = int(getattr(cur, "rowcount", 0) or 0)
+                conn.commit()
+                total += max(0, n)
+                if n < 200:
+                    break
+                try:
+                    conn.execute("SET LOCAL statement_timeout = '4s'")
+                    conn.execute("SET LOCAL lock_timeout = '2s'")
+                except Exception:  # noqa: BLE001
+                    pass
+            return total
     except Exception as e:  # noqa: BLE001
         log.warning(
             "prune open enrich queue if done failed region=%s: %s", rid, e
@@ -3101,6 +3727,11 @@ def _queue_log_prune_pending_if_running(
 
         init_db()
         with connect() as conn:
+            try:
+                conn.execute("SET LOCAL statement_timeout = '4s'")
+                conn.execute("SET LOCAL lock_timeout = '2s'")
+            except Exception:  # noqa: BLE001
+                pass
             if kid > 0 and (code_u or iid):
                 clauses: list[str] = []
                 params: list[Any] = [rid]
@@ -3122,50 +3753,75 @@ def _queue_log_prune_pending_if_running(
                     params,
                 )
             elif code_u or iid:
+                # 定点删：有 running 时由调用方保证；勿用全表相关 EXISTS
                 clauses = []
                 params = [rid]
                 if code_u:
-                    clauses.append("o.code=?")
+                    clauses.append("code=?")
                     params.append(code_u)
                 if iid:
-                    clauses.append("o.item_id=?")
+                    clauses.append("item_id=?")
                     params.append(iid)
                 cur = conn.execute(
                     f"""
-                    DELETE FROM enrich_queue_log AS o
-                    WHERE o.region=?
-                      AND o.status='pending'
+                    DELETE FROM enrich_queue_log
+                    WHERE region=?
+                      AND status='pending'
                       AND ({" OR ".join(clauses)})
-                      AND EXISTS (
-                        SELECT 1 FROM enrich_queue_log r
-                        WHERE r.region=o.region
-                          AND r.status='running'
-                          AND (
-                            (NULLIF(o.code, '') <> '' AND r.code=o.code)
-                            OR (NULLIF(o.item_id, '') <> '' AND r.item_id=o.item_id)
-                          )
-                      )
                     """,
                     params,
                 )
             else:
-                cur = conn.execute(
-                    """
-                    DELETE FROM enrich_queue_log AS o
-                    WHERE o.region=?
-                      AND o.status='pending'
-                      AND EXISTS (
-                        SELECT 1 FROM enrich_queue_log r
-                        WHERE r.region=o.region
-                          AND r.status='running'
-                          AND (
-                            (NULLIF(o.code, '') <> '' AND r.code=o.code)
-                            OR (NULLIF(o.item_id, '') <> '' AND r.item_id=o.item_id)
-                          )
-                      )
-                    """,
-                    (rid,),
-                )
+                # 后台全分区：分批，避免长事务锁死 UPDATE
+                total = 0
+                for _ in range(40):
+                    cur = conn.execute(
+                        """
+                        WITH doomed AS (
+                          SELECT o.id
+                          FROM enrich_queue_log AS o
+                          WHERE o.region=?
+                            AND o.status='pending'
+                            AND (
+                              (
+                                NULLIF(o.code, '') IS NOT NULL
+                                AND EXISTS (
+                                  SELECT 1 FROM enrich_queue_log r
+                                  WHERE r.region=o.region
+                                    AND r.status='running'
+                                    AND r.code=o.code
+                                  LIMIT 1
+                                )
+                              )
+                              OR (
+                                NULLIF(o.item_id, '') IS NOT NULL
+                                AND EXISTS (
+                                  SELECT 1 FROM enrich_queue_log r
+                                  WHERE r.region=o.region
+                                    AND r.status='running'
+                                    AND r.item_id=o.item_id
+                                  LIMIT 1
+                                )
+                              )
+                            )
+                          LIMIT 200
+                        )
+                        DELETE FROM enrich_queue_log
+                        WHERE id IN (SELECT id FROM doomed)
+                        """,
+                        (rid,),
+                    )
+                    n = int(getattr(cur, "rowcount", 0) or 0)
+                    conn.commit()
+                    total += max(0, n)
+                    if n < 200:
+                        return total
+                    try:
+                        conn.execute("SET LOCAL statement_timeout = '4s'")
+                        conn.execute("SET LOCAL lock_timeout = '2s'")
+                    except Exception:  # noqa: BLE001
+                        pass
+                return total
             n = int(getattr(cur, "rowcount", 0) or 0)
             conn.commit()
             return max(0, n)
@@ -3179,6 +3835,294 @@ def _queue_log_prune_pending_if_running(
 def _queue_log_clear_pending(region: str) -> int:
     """清空该区 pending（保留成功/失败/处理中）。"""
     return _queue_log_prune_pending_not_in(region, set())
+
+
+def _pending_total_estimate(
+    region: str, *, classified: dict[str, int] | None = None
+) -> int:
+    """未处理角标：向量总数 − 成功/软成功/失败。
+
+    优先 tip.total（扫描落盘）；否则轻量 COUNT，不跑 quality_stats。
+    """
+    rid = _queue_log_region(region)
+    if not rid:
+        return 0
+    _ensure_local_status_totals_loaded()
+    tip = _LOCAL_STATUS_TOTALS.get(rid) if rid else None
+    vector_total = int((tip or {}).get("total") or 0)
+    if vector_total <= 0:
+        try:
+            vector_total = int(_region_library_progress(rid).get("total") or 0)
+        except Exception:  # noqa: BLE001
+            vector_total = 0
+    if classified is not None:
+        done_n = int(classified.get("done") or 0)
+        soft_n = int(classified.get("soft") or 0)
+        fail_n = int(classified.get("fail") or 0)
+    else:
+        raw = _queue_log_status_counts_db(rid)
+        done_n = max(int(raw.get("done") or 0), int((tip or {}).get("done") or 0))
+        soft_n = max(int(raw.get("soft") or 0), int((tip or {}).get("soft") or 0))
+        fail_n = max(int(raw.get("fail") or 0), int((tip or {}).get("fail") or 0))
+    return max(0, vector_total - done_n - soft_n - fail_n)
+
+
+def _clamp_pending_badge(counts: dict[str, int], region: str) -> dict[str, int]:
+    """未处理角标禁止被库内样例/虚高补写抬高：以向量−已分类为准。"""
+    rid = _queue_log_region(region)
+    out = dict(counts)
+    if not rid:
+        return out
+    est = _pending_total_estimate(rid, classified=out)
+    db_p = int(out.get("pending") or 0)
+    if est > 0:
+        out["pending"] = est
+    elif db_p > 0:
+        # 无向量总数时，仍限制明显虚高（大于已分类总和）
+        classified_n = (
+            int(out.get("done") or 0)
+            + int(out.get("soft") or 0)
+            + int(out.get("fail") or 0)
+        )
+        if classified_n > 0 and db_p > classified_n:
+            out["pending"] = 0
+    return out
+
+
+# 已分类 skip 缓存（翻页复用，避免每次读 10 万行）
+_classified_skip_cache: dict[str, tuple[float, set[str], set[str]]] = {}
+_CLASSIFIED_SKIP_TTL_SEC = 120.0
+_pending_backfill_done: set[str] = set()
+
+
+def _queue_log_classified_skip_keys(
+    region: str, *, fresh: bool = False
+) -> tuple[set[str], set[str]]:
+    """队列表已分类（done/fail，含软成功）+ running 的 itemId/code。"""
+    rid = _queue_log_region(region)
+    empty: tuple[set[str], set[str]] = (set(), set())
+    if not rid:
+        return empty
+    now = time.time()
+    if not fresh:
+        hit = _classified_skip_cache.get(rid)
+        if hit and now - float(hit[0]) < _CLASSIFIED_SKIP_TTL_SEC:
+            return hit[1], hit[2]
+    iids: set[str] = set()
+    codes: set[str] = set()
+    try:
+        from app.core.db import connect, init_db
+
+        init_db()
+        with connect() as conn:
+            for raw in (
+                conn.execute(
+                    """
+                    SELECT item_id, code FROM enrich_queue_log
+                    WHERE region=? AND status IN ('done', 'fail', 'running')
+                    """,
+                    (rid,),
+                ).fetchall()
+                or []
+            ):
+                if isinstance(raw, dict):
+                    iid = str(raw.get("item_id") or "").strip()
+                    code_u = str(raw.get("code") or "").strip().upper()
+                else:
+                    iid = str(raw[0] or "").strip()
+                    code_u = str(raw[1] or "").strip().upper()
+                if iid:
+                    iids.add(iid)
+                if code_u:
+                    codes.add(code_u)
+    except Exception as e:  # noqa: BLE001
+        log.warning("load classified skip keys failed region=%s: %s", rid, e)
+        return empty
+    _classified_skip_cache[rid] = (now, iids, codes)
+    return iids, codes
+
+
+def _invalidate_classified_skip_cache(region: str = "") -> None:
+    rid = _queue_log_region(region) if str(region or "").strip() else ""
+    if rid:
+        _classified_skip_cache.pop(rid, None)
+    else:
+        _classified_skip_cache.clear()
+
+
+def _pending_page_from_vector(
+    region: str, *, offset: int = 0, limit: int = 100
+) -> list[dict[str, Any]]:
+    """未处理翻页：读队列表 pending（updated_at 倒序）。
+
+    禁止对向量库做「updated_at + NOT EXISTS 已分类」全表扫描——会拖死 API。
+    队列表为空时回退向量 code ASC 分批排除（有索引）。
+    """
+    from app.core.db import connect, init_db
+    from app.scrap_library import embed as embed_svc
+
+    rid = _queue_log_region(region)
+    if not rid:
+        return []
+    off = max(0, int(offset or 0))
+    lim = max(1, min(int(limit or 100), 500))
+    out: list[dict[str, Any]] = []
+
+    try:
+        init_db()
+        with connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, item_id, code, status, gaps_json, error, source,
+                       fetch_ms, detail_title, payload_json
+                FROM enrich_queue_log
+                WHERE region=? AND status='pending'
+                ORDER BY updated_at DESC NULLS LAST, id DESC
+                LIMIT ? OFFSET ?
+                """,
+                (rid, lim, off),
+            ).fetchall()
+        for raw in rows or []:
+            if isinstance(raw, dict):
+                it = _queue_log_row_to_item(raw)
+            else:
+                it = _queue_log_row_to_item(
+                    {
+                        "id": raw[0],
+                        "item_id": raw[1],
+                        "code": raw[2],
+                        "status": raw[3],
+                        "gaps_json": raw[4],
+                        "error": raw[5],
+                        "source": raw[6],
+                        "fetch_ms": raw[7],
+                        "detail_title": raw[8],
+                        "payload_json": raw[9],
+                    }
+                )
+            it["status"] = "pending"
+            it["region"] = rid
+            if not it.get("gaps"):
+                it["gaps"] = list(_ENRICH_KINDS)
+            out.append(it)
+        if out or off > 0:
+            return out
+    except Exception as e:  # noqa: BLE001
+        log.warning("pending page from queue_log failed region=%s: %s", rid, e)
+
+    # 回退：向量 code ASC（有索引）+ 分批排除已分类
+    skipped = 0
+    batch_sz = 500
+    vec_off = 0
+    for _ in range(40):
+        if len(out) >= lim:
+            break
+        try:
+            batch = embed_svc.list_region_code_items(
+                region=rid, limit=batch_sz, offset=vec_off, order="code"
+            )
+        except Exception as e:  # noqa: BLE001
+            log.warning("pending page vector fallback failed: %s", e)
+            break
+        if not batch:
+            break
+        vec_off += len(batch)
+        codes = [
+            str(r.get("code") or "").strip().upper()
+            for r in batch
+            if isinstance(r, dict) and str(r.get("code") or "").strip()
+        ]
+        iids = [
+            str(r.get("itemId") or r.get("relPath") or "").strip()
+            for r in batch
+            if isinstance(r, dict)
+        ]
+        hit_c: set[str] = set()
+        hit_i: set[str] = set()
+        try:
+            with connect() as conn:
+                params: list[Any] = [rid]
+                clauses: list[str] = []
+                if iids:
+                    ph = ",".join(["?"] * len(iids))
+                    clauses.append(f"item_id IN ({ph})")
+                    params.extend(iids)
+                if codes:
+                    ph = ",".join(["?"] * len(codes))
+                    clauses.append(f"code IN ({ph})")
+                    params.extend(codes)
+                if clauses:
+                    for raw in conn.execute(
+                        f"""
+                        SELECT item_id, code FROM enrich_queue_log
+                        WHERE region=? AND status IN ('done','fail','running')
+                          AND ({' OR '.join(clauses)})
+                        """,
+                        params,
+                    ).fetchall() or []:
+                        if isinstance(raw, dict):
+                            if raw.get("item_id"):
+                                hit_i.add(str(raw["item_id"]))
+                            if raw.get("code"):
+                                hit_c.add(str(raw["code"]).upper())
+                        else:
+                            if raw[0]:
+                                hit_i.add(str(raw[0]))
+                            if raw[1]:
+                                hit_c.add(str(raw[1]).upper())
+        except Exception:  # noqa: BLE001
+            pass
+        for r in batch:
+            if not isinstance(r, dict):
+                continue
+            iid = str(r.get("itemId") or "").strip()
+            rel = str(r.get("relPath") or r.get("rel_path") or iid).strip()
+            code_u = str(r.get("code") or "").strip().upper()
+            iid2 = iid or rel
+            if iid2 in hit_i or (rel and rel in hit_i) or (code_u and code_u in hit_c):
+                continue
+            if skipped < off:
+                skipped += 1
+                continue
+            item = {
+                "itemId": iid2,
+                "code": code_u,
+                "gaps": list(r.get("gaps") or []) or list(_ENRICH_KINDS),
+                "status": "pending",
+                "region": rid,
+                "shell": bool(r.get("shell")),
+            }
+            if rel:
+                item["rel_path"] = rel
+                item["relPath"] = rel
+            out.append(item)
+            if len(out) >= lim:
+                break
+        if len(batch) < batch_sz:
+            break
+    return out
+
+
+def _queue_log_trim_inflated_pending(region: str) -> int:
+    """库内 pending 远高于估算时清掉（多半是旧全量补写），列表改走虚拟翻页。"""
+    rid = _queue_log_region(region)
+    if not rid:
+        return 0
+    raw = _queue_log_status_counts_db(rid)
+    db_n = int(raw.get("pending") or 0)
+    est = _pending_total_estimate(rid)
+    if est <= 0 or db_n <= max(int(est * 1.15), est + 200):
+        return 0
+    n = _queue_log_clear_pending(rid)
+    _counts_cache.pop(rid, None)
+    log.info(
+        "trim inflated pending region=%s db=%s est=%s cleared=%s",
+        rid,
+        db_n,
+        est,
+        n,
+    )
+    return n
 
 
 def _queue_log_clear_local_scan_status(region: str) -> int:
@@ -3408,7 +4352,10 @@ def _recover_done_from_enrich_logs(region: str) -> int:
 
 
 def _region_local_dirs(root: Path, region: str) -> list[Path]:
-    """刮削库根下该分区的本地目录（日本有码 / japan_censored …）。"""
+    """刮削库根下该分区的本地目录（日本有码 / japan_censored …）。
+
+    FC2 区一次扫整区：其下 FC2 / FC2-PPV 前缀夹均进队；落盘路径仍按骨架分夹。
+    """
     from app.scrap_library.embed import _region_match_values
 
     out: list[Path] = []
@@ -3592,6 +4539,8 @@ def _local_folder_gaps(folder: Path) -> tuple[str, list[str]]:
         gaps.append("no_plot")
     if (not title) or len(title) < 4 or title.casefold() == code_u.casefold():
         gaps.append("thin_title")
+    elif _title_lacks_zh(title, code_u):
+        gaps.append("no_zh_title")
     return _remember(code_u, gaps)
 
 
@@ -3651,13 +4600,18 @@ def iter_local_incomplete_items(
 
 
 def _classify_disk_gaps(gaps: list[str] | None) -> str:
-    """本地缺口 → done / soft / fail（仅封面/标题硬失败）。"""
+    """本地缺口 → done / soft / fail。
+
+    缺封面/空标题 → fail；缺女优/片商 → soft；其余（含缺剧情/外链/中文标题）→ done。
+    """
     gs = [str(g) for g in (gaps or []) if str(g).strip()]
     if not gs:
         return "done"
     if any(g in _SUCCESS_BLOCK_GAPS for g in gs):
         return "fail"
-    return "soft"
+    if any(g in _SOFT_SUCCESS_GAPS for g in gs):
+        return "soft"
+    return "done"
 
 
 def _local_status_item(
@@ -3688,10 +4642,12 @@ def _local_status_item(
         item["partialOk"] = False
         item["error"] = ""
     elif kind == "soft":
-        labels = _gap_labels([g for g in gaps if g not in _SUCCESS_BLOCK_GAPS])
+        soft_gaps = [g for g in gaps if g in _SOFT_SUCCESS_GAPS]
+        labels = _gap_labels(soft_gaps)
         item["status"] = "done"
         item["partialOk"] = True
-        item["error"] = _format_soft_ok_error(labels)
+        item["error"] = _format_soft_ok_error(labels or ["女优"])
+        item["gapsAfter"] = soft_gaps
     else:
         block = [g for g in gaps if g in _SUCCESS_BLOCK_GAPS] or list(gaps or [])
         labels = _gap_labels(block)
@@ -4339,10 +5295,12 @@ def iter_enrich_pending_items(
             samples.append(item)
 
     # 全库有番号行（空壳 + 已齐）；本地已分类排除 → 本地已删也会回未处理
+    # 最新变更优先，与未处理列表 / 开刮取号一致
     try:
         rows = embed_svc.list_region_code_items(
             region=rid or region,
             limit=lim if lim > 0 else 0,
+            order="updated",
         )
     except Exception as e:  # noqa: BLE001
         log.warning("list_region_code_items failed region=%s: %s", rid, e)
@@ -4450,21 +5408,35 @@ def iter_enrich_pending_batches(
     limit: int = 0,
     skip_item_ids: set[str] | None = None,
     skip_codes: set[str] | None = None,
+    defer_skip_until: threading.Event | None = None,
 ) -> Any:
     """分批产出未处理：向量库全部番号 − 本地成功/软成功/失败。
 
     含「向量已齐、本地已删」回填。不把 12 万行一次载入内存。limit<=0 表示一直扫到库空。
+    队列表已有 pending 先吐（不挡开刮）；骨架/向量切片可等 ``defer_skip_until``。
     """
     from app.scrap_library import embed as embed_svc
 
     rid = _queue_log_region(region)
     bs = max(50, min(1_000, int(batch_size or 200)))
     cap = int(limit or 0)
-    skip_iids = skip_item_ids or set()
-    skip_cs = {str(c).strip().upper() for c in (skip_codes or set()) if str(c).strip()}
-    local_maps = _local_nfo_gap_maps(region=rid or region)
-    local_classified = local_maps.skip_rels
-    local_codes = local_maps.classified_codes
+    skip_iids = skip_item_ids if skip_item_ids is not None else set()
+    skip_cs = skip_codes if skip_codes is not None else set()
+    # 延迟扫本地 NFO：否则开刮前全盘映射会卡数分钟，处理中一直 0。
+    # 队列表已有 pending（失败/软成功重试）必须立刻入队，不受本地「已分类」过滤。
+    local_maps: Any = None
+    local_classified: set[str] = set()
+    local_codes: set[str] = set()
+
+    def _ensure_local_maps() -> None:
+        nonlocal local_maps, local_classified, local_codes
+        if local_maps is not None:
+            return
+        maps = _local_nfo_gap_maps(region=rid or region)
+        local_maps = maps
+        local_classified = maps.skip_rels
+        local_codes = maps.classified_codes
+
     # 「封面已放弃」的番号不再自动入队（否则每轮重抓全部源，且永远清不掉）；
     # 只抑制**仅剩封面缺口**的行 —— 同时缺剧情/女优的仍要重试。
     cover_giveup = _cover_giveup_codes(rid or region)
@@ -4477,10 +5449,14 @@ def iter_enrich_pending_batches(
     seen: set[str] = set()
     emitted = 0
 
-    def _want(iid: str, code_u: str, gaps: Any = None) -> bool:
+    def _want(
+        iid: str, code_u: str, gaps: Any = None, *, honor_skip_done: bool = True
+    ) -> bool:
         if not iid or iid in seen:
             return False
-        if iid in skip_iids or (code_u and code_u in skip_cs):
+        if honor_skip_done and (
+            iid in skip_iids or (code_u and code_u in skip_cs)
+        ):
             return False
         if _should_skip_for_giveup(
             code_u=code_u, gaps=gaps, giveup_codes=cover_giveup
@@ -4514,7 +5490,7 @@ def iter_enrich_pending_batches(
         if head:
             yield head
 
-    def _pack(r: dict[str, Any]) -> dict[str, Any] | None:
+    def _pack(r: dict[str, Any], *, honor_local: bool = True) -> dict[str, Any] | None:
         iid = str(r.get("itemId") or "").strip()
         rel = str(r.get("relPath") or r.get("rel_path") or iid).strip().replace(
             "\\", "/"
@@ -4522,14 +5498,18 @@ def iter_enrich_pending_batches(
         if not iid and not rel:
             return None
         code_u = str(r.get("code") or "").strip().upper()
-        # 本地成功/软成功/失败 → 不进未处理
-        if (rel and rel in local_classified) or (iid and iid in local_classified):
-            return None
-        if code_u and code_u in local_codes:
-            return None
+        # 本地成功/软成功/失败 → 不进未处理（队列表显式 pending 重试除外）
+        if honor_local:
+            if (rel and rel in local_classified) or (iid and iid in local_classified):
+                return None
+            if code_u and code_u in local_codes:
+                return None
         iid2 = iid or rel
         gaps = list(r.get("gaps") or []) or list(_ENRICH_KINDS)
-        if not _want(iid2, code_u, gaps):
+        # 队列表 pending（失败/软成功重试）禁止再被 skip_done 挡掉
+        if not _want(
+            iid2, code_u, gaps, honor_skip_done=honor_local
+        ):
             return None
         seen.add(iid2)
         return {
@@ -4543,12 +5523,12 @@ def iter_enrich_pending_batches(
             "shell": bool(r.get("shell")),
         }
 
-    # 0b) 先吃队列表已有 pending（扫描/中断残留），避免边扫只吐新骨架就「假完成」
+    # 0b) 先吃队列表已有 pending（扫描/中断/失败·软成功重试），最新变更优先
     try:
         from app.core.db import connect, init_db
 
         init_db()
-        last_id = 0
+        log_off = 0
         with connect() as conn:
             while True:
                 if _halt_kind():
@@ -4558,20 +5538,20 @@ def iter_enrich_pending_batches(
                     SELECT id, item_id, code, status, gaps_json, error, source,
                            fetch_ms, detail_title, payload_json
                     FROM enrich_queue_log
-                    WHERE region=? AND status='pending' AND id>?
-                    ORDER BY id ASC
-                    LIMIT ?
+                    WHERE region=? AND status='pending'
+                    ORDER BY updated_at DESC NULLS LAST, id DESC
+                    LIMIT ? OFFSET ?
                     """,
-                    (rid or region, last_id, bs),
+                    (rid or region, bs, log_off),
                 ).fetchall()
                 batch_rows = list(rows or [])
                 if not batch_rows:
                     break
+                log_off += len(batch_rows)
                 log_batch: list[dict[str, Any]] = []
                 for r in batch_rows:
                     if isinstance(r, dict):
                         it = _queue_log_row_to_item(r)
-                        last_id = int(r.get("id") or last_id)
                     else:
                         it = _queue_log_row_to_item(
                             {
@@ -4587,14 +5567,14 @@ def iter_enrich_pending_batches(
                                 "payload_json": r[9],
                             }
                         )
-                        last_id = int(r[0] or last_id)
                     packed = _pack(
                         {
                             **it,
                             "itemId": it.get("itemId"),
                             "relPath": it.get("relPath") or it.get("rel_path"),
                             "rel_path": it.get("rel_path") or it.get("relPath"),
-                        }
+                        },
+                        honor_local=False,
                     )
                     if not packed:
                         iid0 = str(it.get("itemId") or "").strip()
@@ -4615,6 +5595,13 @@ def iter_enrich_pending_batches(
                     break
     except Exception as e:  # noqa: BLE001
         log.warning("iter pending from queue_log failed: %s", e)
+
+    # 骨架/向量切片需要 done-keys；开刮线程可能还在加载——最多等几秒，不永久堵死
+    if defer_skip_until is not None and not defer_skip_until.is_set():
+        defer_skip_until.wait(timeout=15.0)
+
+    # 后续骨架/向量切片才需要本地已分类映射
+    _ensure_local_maps()
 
     # 本地已分类路径占位，避免队列表残留 pending 与骨架重复吐出
     for rel in local_classified:
@@ -4659,14 +5646,17 @@ def iter_enrich_pending_batches(
         if len(rows) < bs:
             break
 
-    # 2) 向量库全部有番号行（含已齐但本地已删）— 按 code 分页回填未处理
+    # 2) 向量库全部有番号行（含已齐但本地已删）— 按更新时间倒序回填未处理
     off = 0
     while True:
         if _halt_kind():
             return
         try:
             extra = embed_svc.list_region_code_items(
-                region=rid or region, limit=bs, offset=off
+                region=rid or region,
+                limit=bs,
+                offset=off,
+                order="updated",
             )
         except Exception:  # noqa: BLE001
             extra = []
@@ -4735,7 +5725,7 @@ def scan_enrich_queue(
 
     from app.scrap_library.enrich_strategy import get_strategy
 
-    # 扫描只落盘队首样例；未处理角标 = 向量所有番号 − 成功 − 软成功 − 失败
+    # 扫描只落盘队首样例；未处理列表用虚拟翻页（向量 − 已分类），打开不卡
     _SCAN_WRITE = 500
     strat = get_strategy()
     mode = str(strat.get("fillMode") or "incremental").lower()
@@ -4762,6 +5752,9 @@ def scan_enrich_queue(
     skip_done_iids, skip_done_codes = (
         (set(), set()) if overwrite else _queue_log_done_keys(rid)
     )
+
+    _pending_backfill_done.discard(rid)
+    _invalidate_classified_skip_cache(rid)
 
     _set_queue_scan_progress(
         region=rid,
@@ -4851,7 +5844,7 @@ def scan_enrich_queue(
             _set_queue_scan_progress(
                 region=rid,
                 stage="pending",
-                label="对照向量骨架生成未处理…",
+                label="对照向量骨架生成未处理样例…",
                 done=int(local_maps.done_n or 0),
                 soft=int(local_maps.soft_n or 0),
                 fail=int(local_maps.fail_n or 0),
@@ -4917,6 +5910,12 @@ def scan_enrich_queue(
             + int(existing.get("fail") or 0)
         )
         local_counts = {"done": 0, "soft": 0, "fail": 0}
+        try:
+            vector_total = int(
+                (_region_library_progress(rid) or {}).get("total") or 0
+            )
+        except Exception:  # noqa: BLE001
+            vector_total = 0
         if not overwrite and local_maps is not None and (
             local_maps.done_n or local_maps.soft_n or local_maps.fail_n
         ):
@@ -4942,6 +5941,7 @@ def scan_enrich_queue(
                 done=local_counts["done"],
                 soft=local_counts["soft"],
                 fail=local_counts["fail"],
+                total=vector_total,
             )
         elif status_n <= 0 and not overwrite:
             if local_maps is None:
@@ -4966,6 +5966,7 @@ def scan_enrich_queue(
                 done=local_counts["done"],
                 soft=local_counts["soft"],
                 fail=local_counts["fail"],
+                total=vector_total,
             )
 
         out = load_queue_log(region=rid, status="pending", limit=200)
@@ -5227,9 +6228,24 @@ def load_queue_log(
             "limit": lim,
             "offset": off,
         }
-    # 历史软缺口失败迁入软成功
-    if st in {"", "done", "soft", "fail"} or code_q:
-        _ensure_actress_soft_promoted(rid)
+    # 纠偏只在「扫描 / 开刮」入口同步跑；列表读路径绝不触发（后台 demote
+    # 也会占满磁盘/连接池，把设置页其它接口拖死）。
+
+    # 未处理：虚高全量补写在后台清掉；列表立即虚拟翻页
+    if st == "pending" and not code_q and not bool(_QUEUE_SCAN_STATE.get("active")):
+        try:
+            raw_p = _queue_log_status_counts_db(rid)
+            db_p = int(raw_p.get("pending") or 0)
+            est_p = _pending_total_estimate(rid)
+            if est_p > 0 and db_p > max(int(est_p * 1.15), est_p + 200):
+                threading.Thread(
+                    target=_queue_log_trim_inflated_pending,
+                    args=(rid,),
+                    name=f"trim-pending-{rid}",
+                    daemon=True,
+                ).start()
+        except Exception as e:  # noqa: BLE001
+            log.debug("schedule trim inflated pending skipped: %s", e)
 
     def _rows_to_items(rows_l: list[Any]) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
@@ -5364,37 +6380,48 @@ def load_queue_log(
                     items[i] = _backfill_queue_item_detail(it, region=rid)
             elif st:
                 # 成功/软成功/失败：按最近更新时间（刚刮完的在最上）
-                # 未处理：按 id 升序稳定扫
-                if st in {"done", "soft", "fail"}:
-                    order = "updated_at DESC NULLS LAST, id DESC"
+                # 未处理：虚拟翻页（向量 − 已分类），total 用估算全量
+                if st == "pending":
+                    est = _pending_total_estimate(rid)
+                    # 翻页总数/角标都以估算为准，不被库内虚高 pending 抬高
+                    total = est if est > 0 else int(db_counts.get("pending") or 0)
+                    counts["pending"] = total
+                    items = _pending_page_from_vector(
+                        rid, offset=off, limit=lim
+                    )
                 else:
-                    order = "id ASC"
-                # 可翻页总数 = 库内样例行；角标用 overlay 全量
-                total = int(db_counts.get(st) or 0)
-                if st == "soft":
-                    where_extra = f"AND status='done' AND {soft_pred}"
-                    params: tuple[Any, ...] = (rid, lim, off)
-                elif st == "done":
-                    where_extra = f"AND status='done' AND NOT {soft_pred}"
-                    params = (rid, lim, off)
-                else:
-                    where_extra = "AND status=?"
-                    params = (rid, st, lim, off)
-                fetched = conn.execute(
-                    cols
-                    + f"""
-                    WHERE region=? {where_extra}
-                    ORDER BY {order}
-                    LIMIT ? OFFSET ?
-                    """,
-                    params,
-                ).fetchall()
-                items = _rows_to_items(list(fetched or []))
+                    if st in {"done", "soft", "fail"}:
+                        order = "updated_at DESC NULLS LAST, id DESC"
+                    else:
+                        order = "id ASC"
+                    total = int(db_counts.get(st) or 0)
+                    if st == "soft":
+                        where_extra = f"AND status='done' AND {soft_pred}"
+                        params: tuple[Any, ...] = (rid, lim, off)
+                    elif st == "done":
+                        where_extra = f"AND status='done' AND NOT {soft_pred}"
+                        params = (rid, lim, off)
+                    else:
+                        where_extra = "AND status=?"
+                        params = (rid, st, lim, off)
+                    fetched = conn.execute(
+                        cols
+                        + f"""
+                        WHERE region=? {where_extra}
+                        ORDER BY {order}
+                        LIMIT ? OFFSET ?
+                        """,
+                        params,
+                    ).fetchall()
+                    items = _rows_to_items(list(fetched or []))
             else:
                 total = sum(int(db_counts.get(k) or 0) for k in db_counts)
     except Exception as e:  # noqa: BLE001
         log.warning("load enrich queue log failed region=%s: %s", rid, e)
     counts = _apply_local_status_totals(counts, rid)
+    counts = _clamp_pending_badge(counts, rid)
+    if st == "pending" and int(counts.get("pending") or 0) > 0:
+        total = int(counts.get("pending") or total)
     return {
         "region": rid,
         "counts": counts,
@@ -5406,12 +6433,26 @@ def load_queue_log(
     }
 
 
+def _queue_row_status(row: Any) -> str:
+    """内存队列行的状态串（规范化后）。
+
+    **唯一真相源**：`_queue_counts_of` 与暂停态改写的展示层都走这里，
+    避免两处对 status 的读法漂移（曾出现大小写/空白不一致导致计数与展示打架）。
+
+    注意：这里的行是内存队列 dict，不是 DB 行——形态为
+    `{"status": "running"|"pending"|"done"|"fail", "code": ..., "itemId": ...}`。
+    """
+    if not isinstance(row, dict):
+        return ""
+    return str(row.get("status") or "").strip().lower()
+
+
 def _queue_counts_of(rows: list[dict[str, Any]]) -> dict[str, int]:
     counts = _empty_queue_counts()
     for row in rows:
         if not isinstance(row, dict):
             continue
-        st = str(row.get("status") or "pending").strip().lower()
+        st = _queue_row_status(row) or "pending"
         if st == "done":
             if bool(row.get("partialOk")) or _is_soft_ok_error(
                 str(row.get("error") or "")
@@ -5426,12 +6467,77 @@ def _queue_counts_of(rows: list[dict[str, Any]]) -> dict[str, int]:
     return counts
 
 
-_QUEUE_SAMPLE_LIMIT = 120
+_QUEUE_SAMPLE_LIMIT = 48
 # 最近一次采样缓存：(队列对象, 长度, limit, 结果)。
 # 用**对象身份**判定队列是否换过——`_patch_queue_item` 等每次改动都是
 # `list(q)` 整体替换，所以身份变化 ⟺ 内容变化。缓存持强引用，旧 list 不会被
 # GC，id 也就不会被复用，判定可靠。
 _queue_sample_cache: tuple[Any, int, int, list[dict[str, Any]]] | None = None
+
+# 状态/SSE 帧禁止带上的重字段（详情点开再从 queue-log 拉）
+_STATUS_QUEUE_HEAVY_KEYS = frozenset(
+    {
+        "sourceTimings",
+        "fields",
+        "wouldFill",
+        "actors",
+    }
+)
+
+
+def _slim_queue_row_for_status(row: dict[str, Any]) -> dict[str, Any]:
+    """SSE/status 热路径：只留列表行需要的摘要。
+
+    实测未瘦身时 120 行带 sourceTimings/fields ≈ 150KB+/帧，
+    设置页总览 SSE 每 0.2s 解析一次会把主线程卡死。
+    """
+    if not isinstance(row, dict):
+        return {}
+    out = {k: v for k, v in row.items() if k not in _STATUS_QUEUE_HEAVY_KEYS}
+    title = str(row.get("detailTitle") or "")
+    if title:
+        out["detailTitle"] = title[:120]
+    timings = row.get("sourceTimings")
+    if isinstance(timings, list) and timings:
+        out["sourceTimingCount"] = len(timings)
+    fields = row.get("fields")
+    if isinstance(fields, list) and fields:
+        out["fieldCount"] = len(fields)
+    return out
+
+
+def _slim_queue_for_status(rows: list[Any]) -> list[dict[str, Any]]:
+    return [
+        _slim_queue_row_for_status(r) for r in rows if isinstance(r, dict)
+    ]
+
+
+def _slim_current_for_status(current: Any) -> Any:
+    """current 里的 sourceTimings 保留精简版（监控条要用），去掉超大字段。"""
+    if not isinstance(current, dict):
+        return current
+    out = dict(current)
+    timings = out.get("sourceTimings")
+    if isinstance(timings, list) and timings:
+        slim_t: list[dict[str, Any]] = []
+        for t in timings[:16]:
+            if not isinstance(t, dict):
+                continue
+            slim_t.append(
+                {
+                    "id": t.get("id"),
+                    "status": t.get("status"),
+                    "ok": t.get("ok"),
+                    "ms": t.get("ms"),
+                    "waitMs": t.get("waitMs"),
+                    "kind": t.get("kind"),
+                    "error": str(t.get("error") or "")[:80],
+                    "actors": t.get("actors"),
+                    "poster": t.get("poster"),
+                }
+            )
+        out["sourceTimings"] = slim_t
+    return out
 
 
 def _sample_queue_uncached(
@@ -5598,25 +6704,51 @@ _INCOMPLETE_CACHE_TTL_SEC = 45.0
 
 
 def _region_library_progress(region: str) -> dict[str, int]:
-    """库内进度：用 quality incomplete，避免队列表只落了扫描样例把进度撑到 50%+。"""
+    """库内进度（状态热路径）：轻量 total + tip 已分类。
+
+    未处理 = total − done − soft − fail（与扫描角标同源）。
+    禁止调用 quality_stats（分项 COUNT 在有码区要数秒，会卡死设置页）。
+    """
     rid = _queue_log_region(region)
     if not rid:
         return {"total": 0, "incomplete": 0, "complete": 0, "percent": 0}
+    _ensure_local_status_totals_loaded()
+    tip = _LOCAL_STATUS_TOTALS.get(rid) or {}
     now = time.time()
     hit = _incomplete_cache.get(rid)
     if hit and now - hit[0] < _INCOMPLETE_CACHE_TTL_SEC:
-        total, incomplete = int(hit[1]), int(hit[2])
+        total = int(hit[1])
     else:
-        try:
-            from app.scrap_library.embed import quality_stats
+        total = int(tip.get("total") or 0)
+        if total <= 0:
+            try:
+                from app.scrap_library.embed import region_library_totals_fast
 
-            qs = quality_stats(region=rid)
-            total = int(qs.get("total") or 0)
-            incomplete = int(qs.get("incomplete") or 0)
-        except Exception:  # noqa: BLE001
-            total, incomplete = 0, 0
-        _incomplete_cache[rid] = (now, total, incomplete)
-    complete = max(0, total - incomplete)
+                total = int(
+                    region_library_totals_fast(region=rid).get("total") or 0
+                )
+            except Exception:  # noqa: BLE001
+                total = 0
+        if total > 0:
+            # 回写 tip.total，后续状态读 O(1)
+            if int(tip.get("total") or 0) != total:
+                _set_local_status_totals(
+                    rid,
+                    done=int(tip.get("done") or 0),
+                    soft=int(tip.get("soft") or 0),
+                    fail=int(tip.get("fail") or 0),
+                    total=total,
+                )
+                tip = _LOCAL_STATUS_TOTALS.get(rid) or tip
+        _incomplete_cache[rid] = (now, total, 0)
+    done_n = int(tip.get("done") or 0)
+    soft_n = int(tip.get("soft") or 0)
+    fail_n = int(tip.get("fail") or 0)
+    # 已刮完（含软成功）视为完成；未处理(+fail 仍算待办里的剩余用 pending 公式)
+    complete = done_n + soft_n
+    incomplete = max(0, total - done_n - soft_n - fail_n) if total > 0 else 0
+    # 缓存 incomplete 供同 TTL 复用
+    _incomplete_cache[rid] = (now, total, incomplete)
     pct = _enrich_percent(complete, total) if total > 0 else 0
     return {
         "total": total,
@@ -5626,12 +6758,18 @@ def _region_library_progress(region: str) -> dict[str, int]:
     }
 
 
-def get_enrich_status() -> dict[str, Any]:
+def get_enrich_status(*, lite: bool = False) -> dict[str, Any]:
+    """刮削状态快照。
+
+    lite=True：总览页 / 角标用，不含 queue 抽样与大段日志（SSE 高频友好）。
+    lite=False：详情直播页用，带瘦身后的 queue 抽样。
+    """
     _hydrate_enrich_runtime()
     with _enrich_lock:
         region_logs_raw = _enrich_job.get("regionLogs") or {}
         region_logs: dict[str, list[str]] = {}
         region_log_counts: dict[str, int] = {}
+        log_tail = 8 if lite else _ENRICH_LOG_RETURN
         if isinstance(region_logs_raw, dict):
             for rid, lines in region_logs_raw.items():
                 key = str(rid or "").strip()
@@ -5639,7 +6777,8 @@ def get_enrich_status() -> dict[str, Any]:
                     continue
                 full = list(lines or [])
                 region_log_counts[key] = len(full)
-                region_logs[key] = full[-_ENRICH_LOG_RETURN:]
+                if not lite:
+                    region_logs[key] = full[-log_tail:]
         checkpoints = _checkpoint_summaries()
         halt = _enrich_job.get("halt")
         current_region = str(_enrich_job.get("currentRegion") or "")
@@ -5656,15 +6795,18 @@ def get_enrich_status() -> dict[str, Any]:
         # 队列每次改动都是整体替换新 list 对象，直接持有引用即可得到一致快照，
         # 而拷贝会破坏 `_sample_queue_for_status` 的按身份缓存（导致每帧重扫）。
         raw_queue = _enrich_job.get("queue") or []
-        queue = _sample_queue_for_status(raw_queue)
+        if lite:
+            queue: list[dict[str, Any]] = []
+        else:
+            queue = _slim_queue_for_status(_sample_queue_for_status(raw_queue))
         stored_counts = _enrich_job.get("queueCounts")
         if isinstance(stored_counts, dict) and any(
             int(stored_counts.get(k) or 0) > 0
-            for k in ("pending", "running", "done", "fail")
+            for k in ("pending", "running", "done", "soft", "fail")
         ):
             queue_counts = {
                 k: int(stored_counts.get(k) or 0)
-                for k in ("pending", "running", "done", "fail")
+                for k in ("pending", "running", "done", "soft", "fail")
             }
         else:
             queue_counts = _queue_counts_of(raw_queue)
@@ -5686,7 +6828,11 @@ def get_enrich_status() -> dict[str, Any]:
                 ok_n = int(cp.get("ok") or 0)
                 fail_n = int(cp.get("failed") or 0)
                 sample = (
-                    [r for r in remaining[:48] if isinstance(r, dict)]
+                    [
+                        _slim_queue_row_for_status(r)
+                        for r in remaining[:48]
+                        if isinstance(r, dict)
+                    ]
                     if isinstance(remaining, list)
                     else []
                 )
@@ -5731,12 +6877,14 @@ def get_enrich_status() -> dict[str, Any]:
                     "pending": int(queue_counts.get("pending") or 0) + stray,
                     "running": 0,
                 }
-                queue = [
+            queue = [
+                (
                     {**r, "status": "pending"}
                     if _queue_row_status(r) == "running"
                     else r
-                    for r in queue
-                ]
+                )
+                for r in queue
+            ]
         pending_total = int(queue_counts.get("pending") or 0)
         monitor = enrich_mon.snapshot()
         stall_by_code: dict[str, str] = {}
@@ -5769,7 +6917,7 @@ def get_enrich_status() -> dict[str, Any]:
             "running": running,
             "phase": _enrich_job.get("phase") or "",
             "progress": progress,
-            "log": list(_enrich_job.get("log") or [])[-40:],
+            "log": list(_enrich_job.get("log") or [])[-(8 if lite else 40) :],
             "regionLogs": region_logs,
             "regionLogCounts": region_log_counts,
             "currentRegion": current_region,
@@ -5782,11 +6930,12 @@ def get_enrich_status() -> dict[str, Any]:
             "queueCounts": dict(queue_counts),
             # queueTotal 由计数求和得出，等价于旧 `len(queue_full)`（每行必归一类）
             "queueTruncated": pending_total > len(queue) or queue_total_n > len(queue),
-            "current": _enrich_job.get("current"),
+            "current": None if lite else _slim_current_for_status(_enrich_job.get("current")),
             "result": _slim_result_for_status(_enrich_job.get("result")),
             "error": _enrich_job.get("error"),
             "monitor": monitor,
-            "queueScan": _queue_scan_snapshot(),
+            "queueScan": None if lite else _queue_scan_snapshot(),
+            "lite": bool(lite),
         }
 
     # 角标成功/失败并入库计数（勿在 _enrich_lock 内打 DB）
@@ -5812,267 +6961,262 @@ def get_enrich_status() -> dict[str, Any]:
             key = _queue_log_region(str(part.get("region") or ""))
             if key and key not in count_regions:
                 count_regions.append(key)
+        # 空闲时把 tip 里已有分区也算上，避免详情页角标停在旧扫描数
+        _ensure_local_status_totals_loaded()
+        for rid in list(_LOCAL_STATUS_TOTALS.keys()):
+            key = _queue_log_region(str(rid or ""))
+            if key and key not in count_regions:
+                count_regions.append(key)
     if count_regions:
-        ui_counts = dict(status.get("queueCounts") or {})
-        cps_ui = dict(status.get("checkpoints") or {})
-        for rid_counts in count_regions:
-            dbc = _queue_log_status_counts(rid_counts)
-            # 空闲时清掉库残留 running，避免「处理中」假数据
-            if not status.get("running") and int(dbc.get("running") or 0) > 0:
-                _queue_log_reopen_running(region=rid_counts)
+        # 运行中（含详情 SSE）：只用内存 queueCounts / monitor，禁止每帧打库
+        if status.get("running"):
+            ui_counts = dict(status.get("queueCounts") or {})
+            mon = (
+                status.get("monitor")
+                if isinstance(status.get("monitor"), dict)
+                else {}
+            )
+            inflight_n = len(list(mon.get("inflight") or []))
+            if inflight_n > 0:
+                ui_counts["running"] = inflight_n
+            status["queueCounts"] = ui_counts
+            status["queueTotal"] = sum(
+                int(ui_counts.get(k) or 0)
+                for k in ("pending", "running", "done", "soft", "fail")
+            )
+            base_prog = dict(status.get("progress") or {})
+            status["progress"] = _progress_from_queue_counts(
+                ui_counts, base=base_prog
+            )
+            # 仅用 tip 内存，禁止 region_library_progress / DB
+            _ensure_local_status_totals_loaded()
+            library: dict[str, Any] = {}
+            region_queue_counts: dict[str, dict[str, int]] = {}
+            cur_rid_mem = _queue_log_region(str(status.get("currentRegion") or ""))
+            for rid_counts in count_regions:
+                tip = _LOCAL_STATUS_TOTALS.get(rid_counts) or {}
+                total = int(tip.get("total") or 0)
+                done_n = int(tip.get("done") or 0)
+                soft_n = int(tip.get("soft") or 0)
+                fail_n = int(tip.get("fail") or 0)
+                complete = done_n + soft_n
+                incomplete = (
+                    max(0, total - done_n - soft_n - fail_n) if total else 0
+                )
+                library[rid_counts] = {
+                    "total": total,
+                    "incomplete": incomplete,
+                    "complete": complete,
+                    "percent": int(round(100.0 * complete / max(total, 1)))
+                    if total > 0
+                    else 0,
+                }
+                if rid_counts == cur_rid_mem:
+                    region_queue_counts[rid_counts] = {
+                        "pending": int(ui_counts.get("pending") or 0),
+                        "running": inflight_n,
+                        "done": int(ui_counts.get("done") or 0),
+                        "soft": int(ui_counts.get("soft") or 0),
+                        "fail": int(ui_counts.get("fail") or 0),
+                    }
+                else:
+                    region_queue_counts[rid_counts] = {
+                        "pending": incomplete,
+                        "running": 0,
+                        "done": done_n,
+                        "soft": soft_n,
+                        "fail": fail_n,
+                    }
+            if library:
+                status["library"] = library
+            status["regionQueueCounts"] = region_queue_counts
+            if cur_rid_mem and cur_rid_mem in region_queue_counts:
+                status["queueCounts"] = dict(region_queue_counts[cur_rid_mem])
+                status["queueCountsRegion"] = cur_rid_mem
+            elif count_regions:
+                status["queueCountsRegion"] = count_regions[0]
+        else:
+            ui_counts = dict(status.get("queueCounts") or {})
+            cps_ui = dict(status.get("checkpoints") or {})
+            for rid_counts in count_regions:
                 dbc = _queue_log_status_counts(rid_counts)
-            if status.get("running"):
-                # 运行中：本轮内存与库取大（避免轮询漏计）
-                ui_counts["done"] = max(
-                    int(ui_counts.get("done") or 0), int(dbc.get("done") or 0)
-                )
-                ui_counts["soft"] = max(
-                    int(ui_counts.get("soft") or 0), int(dbc.get("soft") or 0)
-                )
-                ui_counts["fail"] = max(
-                    int(ui_counts.get("fail") or 0), int(dbc.get("fail") or 0)
-                )
-                ui_counts["pending"] = max(
-                    int(ui_counts.get("pending") or 0),
-                    int(dbc.get("pending") or 0),
-                )
-            else:
-                # 暂停/空闲：队列表是唯一真相，禁止用检查点历史 622 顶掉真实 fail=2
-                ui_counts["done"] = int(dbc.get("done") or 0)
-                ui_counts["soft"] = int(dbc.get("soft") or 0)
-                ui_counts["fail"] = int(dbc.get("fail") or 0)
-                ui_counts["pending"] = int(dbc.get("pending") or 0)
-                ui_counts["running"] = 0
-                stray_run = int(dbc.get("running") or 0)
-                if stray_run > 0:
-                    ui_counts["pending"] = int(ui_counts["pending"]) + stray_run
-            cp = cps_ui.get(rid_counts)
-            if isinstance(cp, dict):
-                cp = dict(cp)
-                ok_bucket = int(dbc.get("done") or 0) + int(dbc.get("soft") or 0)
+                # 空闲时清掉库残留 running，避免「处理中」假数据
+                if not status.get("running") and int(dbc.get("running") or 0) > 0:
+                    _queue_log_reopen_running(region=rid_counts)
+                    dbc = _queue_log_status_counts(rid_counts)
                 if status.get("running"):
-                    cp["ok"] = max(int(cp.get("ok") or 0), ok_bucket)
-                    cp["failed"] = max(
-                        int(cp.get("failed") or 0), int(dbc.get("fail") or 0)
+                    # 运行中：本轮内存与库取大（避免轮询漏计）
+                    ui_counts["done"] = max(
+                        int(ui_counts.get("done") or 0), int(dbc.get("done") or 0)
+                    )
+                    ui_counts["soft"] = max(
+                        int(ui_counts.get("soft") or 0), int(dbc.get("soft") or 0)
+                    )
+                    ui_counts["fail"] = max(
+                        int(ui_counts.get("fail") or 0), int(dbc.get("fail") or 0)
+                    )
+                    ui_counts["pending"] = max(
+                        int(ui_counts.get("pending") or 0),
+                        int(dbc.get("pending") or 0),
                     )
                 else:
-                    cp["ok"] = ok_bucket
-                    cp["failed"] = int(dbc.get("fail") or 0)
-                    cp["remaining"] = int(ui_counts.get("pending") or 0)
-                    done_n = int(cp["ok"]) + int(cp["failed"])
-                    rem_n = int(cp["remaining"])
-                    cp["total"] = max(int(cp.get("total") or 0), done_n + rem_n)
-                    cp["done"] = done_n
-                cps_ui[rid_counts] = cp
-        # 「处理中」= 真实 inflight；暂停/停止归零
-        # 旧逻辑用内存 queueCounts.running，队列截断后会虚高（例如显示 13）
-        halt_now = str(status.get("halt") or "")
-        phase_now = str(status.get("phase") or "")
-        if (
-            not status.get("running")
-            or halt_now in {"pause", "stop"}
-            or phase_now in {"paused", "stopping", "stopped"}
-        ):
-            stray = int(ui_counts.get("running") or 0)
-            if stray > 0:
-                ui_counts["pending"] = int(ui_counts.get("pending") or 0) + stray
-            ui_counts["running"] = 0
-        elif status.get("running"):
-            mon = status.get("monitor") if isinstance(status.get("monitor"), dict) else {}
-            inflight = list(mon.get("inflight") or [])
-            inflight_n = len(inflight)
-            ui_counts["running"] = inflight_n
-            keep_ids = {
-                str(it.get("itemId") or "").strip()
-                for it in inflight
-                if isinstance(it, dict) and str(it.get("itemId") or "").strip()
-            }
-            for rid_counts in count_regions:
-                stale = _queue_log_reopen_stale_running(
-                    rid_counts, keep_item_ids=keep_ids
-                )
-                if stale:
-                    # 角标 pending 补上退回的卡住 running
-                    ui_counts["pending"] = int(ui_counts.get("pending") or 0) + stale
-            with _enrich_lock:
-                qc_fix = dict(_enrich_job.get("queueCounts") or {})
-                qc_fix["running"] = inflight_n
-                _enrich_job["queueCounts"] = qc_fix
-        status["checkpoints"] = cps_ui
-        status["queueCounts"] = ui_counts
-        status["queueTotal"] = sum(
-            int(ui_counts.get(k) or 0) for k in ("pending", "running", "done", "fail")
-        )
-        # 进度条与文案同一套 done/fail
-        base_prog = dict(status.get("progress") or {})
-        status["progress"] = _progress_from_queue_counts(ui_counts, base=base_prog)
-
-        # 未处理 = 向量库所有番号 − 成功 − 软成功 − 失败（始终套用）
-        library: dict[str, Any] = {}
-        for rid_counts in count_regions:
-            lib = _region_library_progress(rid_counts)
-            tip = _LOCAL_STATUS_TOTALS.get(rid_counts)
-            db_done = int(ui_counts.get("done") or 0)
-            db_soft = int(ui_counts.get("soft") or 0)
-            db_fail = int(ui_counts.get("fail") or 0)
-            # 扫描缓存与库内取大：避免 tip=0 把真实成功钉死
-            done_n = max(int((tip or {}).get("done") or 0), db_done)
-            soft_n = max(int((tip or {}).get("soft") or 0), db_soft)
-            fail_n = max(int((tip or {}).get("fail") or 0), db_fail)
-            if tip and (
-                done_n > int(tip.get("done") or 0)
-                or soft_n > int(tip.get("soft") or 0)
-                or fail_n > int(tip.get("fail") or 0)
-            ):
-                _lift_local_status_totals_from_counts(
-                    rid_counts,
-                    {"done": done_n, "soft": soft_n, "fail": fail_n},
-                )
-            ui_counts["done"] = done_n
-            ui_counts["soft"] = soft_n
-            ui_counts["fail"] = fail_n
-            vector_total = int(lib.get("total") or 0)
-            # 成功含软成功：所有番号 − 成功 − 失败 ≡ total − done − soft − fail
-            ui_counts["pending"] = max(0, vector_total - done_n - soft_n - fail_n)
-            cps = dict(status.get("checkpoints") or {})
-            cp = cps.get(rid_counts)
-            if isinstance(cp, dict):
-                cp = dict(cp)
-                rem = int(ui_counts.get("pending") or 0)
-                cp["remaining"] = rem
-                cp["total"] = max(int(cp.get("total") or 0), vector_total)
-                cp["done"] = max(int(cp.get("done") or 0), done_n + soft_n)
-                cps[rid_counts] = cp
-                status["checkpoints"] = cps
-            lib = dict(lib)
-            lib["vectorTotal"] = vector_total
-            lib["vectorIncomplete"] = int(lib.get("incomplete") or 0)
-            library[rid_counts] = lib
-        if library:
-            status["library"] = library
-            # 进度条再跟校准后的 pending 对齐
-            status["queueCounts"] = dict(ui_counts)
-            status["progress"] = _progress_from_queue_counts(
-                ui_counts, base=dict(status.get("progress") or {})
-            )
-            # 假完成修复：phase=done 但库仍有未处理 → 自动挂可继续检查点
-            # ⚠️ 这是**状态读路径**，却会写库（合成检查点 + 落盘 + 置 phase=paused）。
-            # 预览（dryRun）必须排除：否则「看一眼预览」就会留下 dryRun=false、
-            # queueInLog=true、remainingCount=库内缺口(12万+) 的续跑检查点，
-            # 下次运行走该检查点会用 _rebuild_checkpoint_queue_from_log 重建
-            # **整个分区**的 pending（实测 2 万+）且无视 limit，且 UI 会显示「已暂停」。
+                    # 暂停/空闲：队列表是唯一真相
+                    ui_counts["done"] = int(dbc.get("done") or 0)
+                    ui_counts["soft"] = int(dbc.get("soft") or 0)
+                    ui_counts["fail"] = int(dbc.get("fail") or 0)
+                    ui_counts["pending"] = int(dbc.get("pending") or 0)
+                    ui_counts["running"] = 0
+                    stray_run = int(dbc.get("running") or 0)
+                    if stray_run > 0:
+                        ui_counts["pending"] = int(ui_counts["pending"]) + stray_run
+                cp = cps_ui.get(rid_counts)
+                if isinstance(cp, dict):
+                    cp = dict(cp)
+                    ok_bucket = int(dbc.get("done") or 0) + int(dbc.get("soft") or 0)
+                    if status.get("running"):
+                        cp["ok"] = max(int(cp.get("ok") or 0), ok_bucket)
+                        cp["failed"] = max(
+                            int(cp.get("failed") or 0), int(dbc.get("fail") or 0)
+                        )
+                    else:
+                        cp["ok"] = ok_bucket
+                        cp["failed"] = int(dbc.get("fail") or 0)
+                        cp["remaining"] = int(ui_counts.get("pending") or 0)
+                        done_n = int(cp["ok"]) + int(cp["failed"])
+                        rem_n = int(cp["remaining"])
+                        cp["total"] = max(int(cp.get("total") or 0), done_n + rem_n)
+                        cp["done"] = done_n
+                    cps_ui[rid_counts] = cp
+            # 「处理中」= 真实 inflight；暂停/停止归零
+            halt_now = str(status.get("halt") or "")
+            phase_now = str(status.get("phase") or "")
             if (
                 not status.get("running")
-                and str(status.get("phase") or "") == "done"
-                and not (status.get("checkpoints") or {})
-                and not bool(_enrich_job.get("jobDryRun"))
+                or halt_now in {"pause", "stop"}
+                or phase_now in {"paused", "stopping", "stopped"}
             ):
-                for rid_fix in count_regions:
-                    rem = int(ui_counts.get("pending") or 0)
-                    if rem <= 0:
-                        continue
-                    ok_n = int(ui_counts.get("done") or 0)
-                    fail_n = int(ui_counts.get("fail") or 0)
-                    result_obj = (
-                        status.get("result")
-                        if isinstance(status.get("result"), dict)
-                        else {}
-                    )
-                    kinds_fix: list[str] = []
-                    for part in list(result_obj.get("parts") or []):
-                        if isinstance(part, dict) and isinstance(part.get("kinds"), list):
-                            kinds_fix = [str(x) for x in part.get("kinds") or []]
-                            break
-                    lib_row = library.get(rid_fix) or {}
-                    tot = max(
-                        ok_n + fail_n + rem,
-                        int(lib_row.get("total") or 0),
-                    )
-                    cp_fix = {
-                        "region": rid_fix,
-                        "mode": str(result_obj.get("mode") or "incremental"),
-                        "kinds": kinds_fix,
-                        # 如实标注：不要硬编 False（预览产生的检查点会伪造成真实任务）
-                        "dryRun": bool(_enrich_job.get("jobDryRun")),
-                        "queue": [],
-                        "ok": ok_n,
-                        "failed": fail_n,
-                        "done": ok_n + fail_n,
-                        "originalTotal": tot,
-                        "remainingCount": rem,
-                        "queueInLog": True,
-                        "remaining": rem,
-                        "total": tot,
-                    }
-                    with _enrich_lock:
-                        _enrich_job["phase"] = "paused"
-                        _enrich_job["checkpoints"] = {rid_fix: dict(cp_fix)}
-                        _enrich_job["queueCounts"] = dict(ui_counts)
-                        prog = dict(_enrich_job.get("progress") or {})
-                        prog.update(
-                            {
-                                "stage": "done",
-                                "label": "未处理仍有剩余 · 可继续",
-                                "ok": ok_n,
-                                "failed": fail_n,
-                            }
-                        )
-                        _enrich_job["progress"] = prog
-                    status["phase"] = "paused"
-                    status["paused"] = True
-                    status["checkpoints"] = {rid_fix: cp_fix}
-                    status["progress"] = {
-                        **dict(status.get("progress") or {}),
-                        "stage": "done",
-                        "label": "未处理仍有剩余 · 可继续",
-                        "ok": ok_n,
-                        "failed": fail_n,
-                    }
-                    try:
-                        _persist_enrich_runtime()
-                    except Exception:  # noqa: BLE001
-                        pass
-                    break
-            # 进度条：优先本地全量角标；无本地态时才回退库 incomplete 比例
-            tip0 = _LOCAL_STATUS_TOTALS.get(count_regions[0]) if count_regions else None
-            if tip0:
-                local_done = int(tip0.get("done") or 0)
-                local_soft = int(tip0.get("soft") or 0)
-                local_fail = int(tip0.get("fail") or 0)
-                local_tot = local_done + local_soft + local_fail
-                base_prog = dict(status.get("progress") or {})
-                status["progress"] = {
-                    **base_prog,
-                    "done": local_done + local_soft,
-                    "total": max(local_tot, 1),
-                    "ok": local_done,
-                    "failed": local_fail,
-                    "percent": int(
-                        round(100.0 * (local_done + local_soft) / max(local_tot, 1))
-                    ),
-                }
-                status["queueCounts"] = ui_counts
-                status["queueTotal"] = sum(
-                    int(ui_counts.get(k) or 0)
-                    for k in ("pending", "running", "done", "soft", "fail")
+                stray = int(ui_counts.get("running") or 0)
+                if stray > 0:
+                    ui_counts["pending"] = int(ui_counts.get("pending") or 0) + stray
+                ui_counts["running"] = 0
+            elif status.get("running"):
+                mon = (
+                    status.get("monitor")
+                    if isinstance(status.get("monitor"), dict)
+                    else {}
                 )
-            else:
-                primary = library.get(count_regions[0]) or {}
-                if int(primary.get("total") or 0) > 0:
-                    base_prog = dict(status.get("progress") or {})
-                    status["progress"] = {
-                        **base_prog,
-                        "done": int(primary.get("complete") or 0),
-                        "total": int(primary.get("total") or 0),
-                        "ok": int(ui_counts.get("done") or 0),
-                        "failed": int(ui_counts.get("fail") or 0),
-                        "percent": int(primary.get("percent") or 0),
-                    }
-                    status["queueCounts"] = ui_counts
-                    status["queueTotal"] = sum(
-                        int(ui_counts.get(k) or 0)
-                        for k in ("pending", "running", "done", "fail")
+                inflight = list(mon.get("inflight") or [])
+                inflight_n = len(inflight)
+                ui_counts["running"] = inflight_n
+                keep_ids = {
+                    str(it.get("itemId") or "").strip()
+                    for it in inflight
+                    if isinstance(it, dict) and str(it.get("itemId") or "").strip()
+                }
+                for rid_counts in count_regions:
+                    stale = _queue_log_reopen_stale_running(
+                        rid_counts, keep_item_ids=keep_ids
                     )
+                    if stale:
+                        ui_counts["pending"] = int(ui_counts.get("pending") or 0) + stale
+                with _enrich_lock:
+                    qc_mem = dict(_enrich_job.get("queueCounts") or {})
+                    qc_mem["running"] = inflight_n
+                    _enrich_job["queueCounts"] = qc_mem
+            status["checkpoints"] = cps_ui
+            status["queueCounts"] = ui_counts
+            status["queueTotal"] = sum(
+                int(ui_counts.get(k) or 0)
+                for k in ("pending", "running", "done", "fail")
+            )
+            base_prog = dict(status.get("progress") or {})
+            status["progress"] = _progress_from_queue_counts(ui_counts, base=base_prog)
+
+            # 未处理 = 向量库所有番号 − 成功 − 软成功 − 失败（按分区独立，禁止串区）
+            library: dict[str, Any] = {}
+            region_queue_counts: dict[str, dict[str, int]] = {}
+            run_n_global = int(ui_counts.get("running") or 0)
+            for rid_counts in count_regions:
+                dbc = _queue_log_status_counts(rid_counts)
+                tip = _LOCAL_STATUS_TOTALS.get(rid_counts)
+                lib = _region_library_progress(rid_counts)
+                total = int(lib.get("total") or 0)
+                if tip:
+                    done_n = int(tip.get("done") or 0)
+                    soft_n = int(tip.get("soft") or 0)
+                    fail_n = int(tip.get("fail") or 0)
+                    tip_total = int(tip.get("total") or 0)
+                    if tip_total > total:
+                        total = tip_total
+                    classified = done_n + soft_n + fail_n
+                    pending_n = max(0, total - classified) if total > 0 else 0
+                    run_n = (
+                        run_n_global
+                        if rid_counts
+                        == _queue_log_region(str(status.get("currentRegion") or ""))
+                        else 0
+                    )
+                    region_queue_counts[rid_counts] = {
+                        "pending": pending_n,
+                        "running": run_n,
+                        "done": done_n,
+                        "soft": soft_n,
+                        "fail": fail_n,
+                    }
+                    complete = done_n + soft_n
+                    incomplete = pending_n + run_n
+                    library[rid_counts] = {
+                        "total": total,
+                        "incomplete": incomplete,
+                        "complete": complete,
+                        "percent": int(round(100.0 * complete / max(total, 1)))
+                        if total > 0
+                        else 0,
+                    }
+                else:
+                    pending_n = int(dbc.get("pending") or 0)
+                    run_n = int(dbc.get("running") or 0)
+                    done_n = int(dbc.get("done") or 0)
+                    soft_n = int(dbc.get("soft") or 0)
+                    fail_n = int(dbc.get("fail") or 0)
+                    if (
+                        rid_counts
+                        == _queue_log_region(str(status.get("currentRegion") or ""))
+                        and status.get("running")
+                    ):
+                        run_n = run_n_global
+                    region_queue_counts[rid_counts] = {
+                        "pending": pending_n,
+                        "running": run_n,
+                        "done": done_n,
+                        "soft": soft_n,
+                        "fail": fail_n,
+                    }
+                    library[rid_counts] = {
+                        "total": int(lib.get("total") or 0),
+                        "incomplete": int(lib.get("incomplete") or 0),
+                        "complete": int(lib.get("complete") or 0),
+                        "percent": int(lib.get("percent") or 0),
+                    }
+            if library:
+                status["library"] = library
+            status["regionQueueCounts"] = region_queue_counts
+            cur_rid2 = _queue_log_region(str(status.get("currentRegion") or ""))
+            if cur_rid2 and cur_rid2 in region_queue_counts:
+                status["queueCounts"] = dict(region_queue_counts[cur_rid2])
+                status["queueCountsRegion"] = cur_rid2
+            elif len(region_queue_counts) == 1:
+                only_rid = next(iter(region_queue_counts))
+                status["queueCounts"] = dict(region_queue_counts[only_rid])
+                status["queueCountsRegion"] = only_rid
+            status["queueTotal"] = sum(
+                int(status.get("queueCounts", {}).get(k) or 0)
+                for k in ("pending", "running", "done", "soft", "fail")
+            )
+            status["progress"] = _progress_from_queue_counts(
+                dict(status.get("queueCounts") or {}),
+                base=dict(status.get("progress") or {}),
+            )
 
     # 元库回填：仅空闲时合并历史；运行中只用本轮内存，避免角标被历史顶满
     try:
@@ -6117,6 +7261,33 @@ def get_enrich_status() -> dict[str, Any]:
         status["regionLogCounts"] = region_log_counts
     except Exception:  # noqa: BLE001
         pass
+    if lite:
+        mon = status.get("monitor")
+        if isinstance(mon, dict):
+            status["monitor"] = {
+                "enabled": mon.get("enabled"),
+                "itemWorkers": mon.get("itemWorkers"),
+                "perSourceTimeoutSec": mon.get("perSourceTimeoutSec"),
+                "region": mon.get("region"),
+                "summary": mon.get("summary"),
+                "inflight": [
+                    {
+                        "code": x.get("code"),
+                        "phase": x.get("phase"),
+                        "elapsedMs": x.get("elapsedMs"),
+                        "phaseElapsedMs": x.get("phaseElapsedMs"),
+                        "stall": x.get("stall"),
+                    }
+                    for x in list(mon.get("inflight") or [])
+                    if isinstance(x, dict)
+                ],
+                "recentStalls": [],
+            }
+        status["queue"] = []
+        status["current"] = None
+        status["queueScan"] = None
+        status["regionLogs"] = {}
+        status["lite"] = True
     return status
 
 
@@ -6225,6 +7396,30 @@ def _patch_queue_item(
                 region = str(
                     base.get("region") or _enrich_job.get("currentRegion") or ""
                 )
+                # 展示队列只有 ~120 行；丢行后若不改角标，成功数/部/分会假死在早期值
+                counts = dict(_enrich_job.get("queueCounts") or {})
+                old_st = str(match.get("status") or "").strip().lower()
+                if old_st not in {"pending", "running", "done", "fail"}:
+                    old_st = "running" if st_in in {"done", "fail"} else "pending"
+                if old_st != st_in:
+                    counts[old_st] = max(0, int(counts.get(old_st) or 0) - 1)
+                    counts[st_in] = int(counts.get(st_in) or 0) + 1
+                for k in ("pending", "running", "done", "fail", "soft"):
+                    counts[k] = int(counts.get(k) or 0)
+                _enrich_job["queueCounts"] = counts
+                base_prog = dict(_enrich_job.get("progress") or {})
+                _enrich_job["progress"] = _progress_from_queue_counts(
+                    counts, base=base_prog
+                )
+                if old_st != st_in and st_in in {"done", "fail"}:
+                    _lift_local_status_totals_from_counts(
+                        region,
+                        {
+                            "done": int(counts.get("done") or 0),
+                            "soft": int(counts.get("soft") or 0),
+                            "fail": int(counts.get("fail") or 0),
+                        },
+                    )
             else:
                 return
         else:
@@ -6474,6 +7669,7 @@ _GAP_FAIL_LABEL = {
     "no_studio": "片商",
     "no_plot": "剧情",
     "thin_title": "标题",
+    "no_zh_title": "中文标题",
 }
 
 _COVER_FAIL_LABEL = {
@@ -6496,29 +7692,24 @@ def _cover_fail_message(cover_fail: str) -> str:
         return "封面空图或下载失败"
     return f"封面失败:{_COVER_FAIL_LABEL.get(cf, cf)}"
 
-# 硬失败：只缺封面 / 标题（以本地 NFO+poster 为准）
+# 硬失败：只缺封面 / 标题空壳（以本地 NFO+poster 为准）
 _SUCCESS_BLOCK_GAPS = frozenset({"no_local", "thin_title"})
-# 其余缺口 → 软成功（封面+标题已齐）
-_SOFT_SUCCESS_GAPS = frozenset(
-    g for g in _ENRICH_KINDS if g not in _SUCCESS_BLOCK_GAPS
-)
+# 软成功：缺女优 / 片商（封面+非空标题已齐；中文标题不再挡成功）
+_SOFT_SUCCESS_GAPS = frozenset({"no_actress", "no_studio"})
 _SOFT_GAP_LABELS = frozenset(
     {_GAP_FAIL_LABEL[g] for g in _SOFT_SUCCESS_GAPS if g in _GAP_FAIL_LABEL}
 )
 # 文案前缀：新写「软成功」；读侧兼容旧「次成功」
 _SOFT_OK_PREFIX = "软成功"
 _SOFT_OK_PREFIXES = ("软成功", "次成功")
-# 软规则版本：放宽缺口后强制再跑一轮 fail→软成功 纠偏
-_SOFT_PROMOTE_RULE_VER = 2
+# 软规则版本：去掉「中文标题」软成功后强制再跑一轮纠偏
+_SOFT_PROMOTE_RULE_VER = 5
 
 _promoted_actress_soft: dict[str, int] = {}
 _demoted_false_dones: set[str] = set()
 
-# ⚠️ 性能：`_ensure_actress_soft_promoted` 会对内存队列里每条 done/fail 行做
-# `_resolve_enrich_folder` + `_local_poster_ok`（真实磁盘 I/O，单行 ~11ms）。
-# 它原先挂在 `_queue_log_status_counts` 上 → 每次状态快照都跑一遍：
-# 「40 条 done × 11ms ≈ 450ms/帧」，而 SSE 每有通知就重建一帧（每秒几十次），
-# 越刮越慢（done 行越多越慢）就是这么来的。纠偏是安全网，按分区限频即可。
+# ⚠️ 性能：`_ensure_actress_soft_promoted` / demote 会对 done/fail 行做磁盘校验
+# （有码区 10 万+ × ~11ms）。只允许挂在「扫描 / 开刮」入口，禁止状态读/日志列表。
 _soft_correction_last: dict[str, float] = {}
 _SOFT_CORRECTION_MIN_INTERVAL_SEC = 6.0
 
@@ -6634,6 +7825,48 @@ def _is_cover_only_gaps(gaps: Any) -> bool:
 # 而不是 `th.join(单源超时)` —— 后者把排队算进源超时（mgstage 433 次假 down）。
 _SRC_GIVEUP_POLL_SEC = 0.25
 
+# 源连续 down 冷却：跑久后某站集体超时会占满 page 槽，拖垮其它番号。
+# 连续失败达阈值 → 跳过该源一段时间，让活源先跑。
+_SOURCE_DOWN_STREAK: dict[str, int] = {}
+_SOURCE_COOLDOWN_UNTIL: dict[str, float] = {}
+_SOURCE_COOLDOWN_STREAK = 3
+_SOURCE_COOLDOWN_SEC = 50.0
+_SOURCE_COOLDOWN_LOCK = threading.Lock()
+
+
+def _source_in_cooldown(sid: str) -> bool:
+    key = str(sid or "").strip().lower()
+    if not key:
+        return False
+    with _SOURCE_COOLDOWN_LOCK:
+        until = float(_SOURCE_COOLDOWN_UNTIL.get(key) or 0.0)
+    return time.monotonic() < until
+
+
+def _note_source_fetch_outcome(sid: str, *, kind: str) -> None:
+    key = str(sid or "").strip().lower()
+    if not key:
+        return
+    with _SOURCE_COOLDOWN_LOCK:
+        if kind == "hit":
+            _SOURCE_DOWN_STREAK[key] = 0
+            _SOURCE_COOLDOWN_UNTIL.pop(key, None)
+            return
+        if kind != "down":
+            return
+        n = int(_SOURCE_DOWN_STREAK.get(key) or 0) + 1
+        _SOURCE_DOWN_STREAK[key] = n
+        if n >= int(_SOURCE_COOLDOWN_STREAK):
+            _SOURCE_COOLDOWN_UNTIL[key] = time.monotonic() + float(
+                _SOURCE_COOLDOWN_SEC
+            )
+            _SOURCE_DOWN_STREAK[key] = 0
+            log.info(
+                "enrich source cooldown sid=%s for %.0fs (down streak)",
+                key,
+                _SOURCE_COOLDOWN_SEC,
+            )
+
 
 def _src_give_up_reason(
     *,
@@ -6715,6 +7948,10 @@ def _classify_source_failure(err: Any) -> str:
     ⚠️ busy 的语义是「**我们这边**没轮到发请求」（出站槽/限速/退避/过盾通道排满），
     源本身是好的 —— 所以它**不得**计入任何源健康度/退避逻辑，
     但仍要进 `degradedByDown`（高优先源没拿到 = 本轮降级取值，该回头补）。
+
+    另有第五类 **cooldown**（源不健康被主动暂避），**不经过本函数**：
+    它在 `_one` 的冷却早退分支上直接产出，由 `_run_pool` 单独归集。
+    别把 cooldown 折进 busy —— 那是源健康度结论，busy 不是（见 `_one` 注释）。
     """
     name = err.__class__.__name__ if isinstance(err, BaseException) else ""
     # 类名优先，其次消息标记：中间层可能把异常包成 RuntimeError(str(e)) 丢掉类名
@@ -7164,7 +8401,7 @@ def _apply_local_gap_success(
     remain: list[str] | None = None,
     only_if_ok: bool = False,
 ) -> None:
-    """本地 NFO 缺口收口：缺封面/标题→失败；其余缺口→软成功；无缺口→成功。"""
+    """本地 NFO 缺口收口：缺封面/空标题→失败；缺女优/片商→软成功；其余→成功。"""
     # 无目录/无封面/无 NFO 绝不能算成功（防并发串写把别人的软成功盖到空壳番号）
     if not _local_success_disk_ok(folder):
         if only_if_ok and not out.get("ok"):
@@ -7199,16 +8436,15 @@ def _apply_local_gap_success(
         except Exception:  # noqa: BLE001
             remain = []
     remain = list(remain or [])
-    if remain:
-        out["gapsAfter"] = remain
     block = [g for g in remain if g in _SUCCESS_BLOCK_GAPS]
-    soft = [g for g in remain if g not in _SUCCESS_BLOCK_GAPS]
+    soft = [g for g in remain if g in _SOFT_SUCCESS_GAPS]
     if block:
         if only_if_ok and not out.get("ok"):
             return
         labels = _gap_labels(block)
         out["ok"] = False
         out["partialOk"] = False
+        out["gapsAfter"] = remain
         out["error"] = f"仍缺:{' · '.join(labels)}"
         _push_log(
             f"{code or folder.name} · 未算成功 · {out['error']}",
@@ -7221,6 +8457,7 @@ def _apply_local_gap_success(
         labels = _gap_labels(soft)
         out["ok"] = True
         out["partialOk"] = True
+        out["gapsAfter"] = soft
         out["error"] = _format_soft_ok_error(labels)
         _push_log(
             f"{code or folder.name} · {out['error']}",
@@ -7228,15 +8465,14 @@ def _apply_local_gap_success(
         )
         return
     # 硬缺口已清：必须显式 ok=True（调用方初始 ok=False，否则会被当成失败提前 return）
+    # 缺剧情/外链等不算软成功 → 完整成功
     if only_if_ok and not out.get("ok"):
         return
     out["ok"] = True
     out["partialOk"] = False
     out["error"] = ""
-    if remain:
-        out["gapsAfter"] = remain
-    else:
-        out["gapsAfter"] = []
+    out["gapsAfter"] = []
+    out["localCoverOk"] = True
 
 
 def _payload_field_code(payload: dict[str, Any] | None) -> str:
@@ -7255,7 +8491,10 @@ def _payload_field_code(payload: dict[str, Any] | None) -> str:
 
 
 def _queue_log_demote_false_dones(region: str) -> int:
-    """成功/软成功/失败但无本地目录或字段番号串号 → 退回 pending 重刮。"""
+    """成功/软成功/失败但无本地目录或字段番号串号 → 退回 pending 重刮。
+
+    磁盘校验在连接外做：持连接扫 10 万行会锁死其它状态接口。
+    """
     rid = _queue_log_region(region)
     if not rid:
         return 0
@@ -7264,87 +8503,232 @@ def _queue_log_demote_false_dones(region: str) -> int:
 
         init_db()
         with connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT id, code, item_id, error, gaps_json, payload_json, status
-                FROM enrich_queue_log
-                WHERE region=? AND status IN ('done', 'fail')
-                """,
-                (rid,),
-            ).fetchall()
-            n = 0
-            for raw in rows or []:
-                if isinstance(raw, dict):
-                    lid = int(raw.get("id") or 0)
-                    code = str(raw.get("code") or "").strip().upper()
-                    iid = str(raw.get("item_id") or "").strip()
-                    payload_raw = raw.get("payload_json")
-                    st = str(raw.get("status") or "").strip().lower()
-                else:
-                    lid = int(raw[0] or 0)
-                    code = str(raw[1] or "").strip().upper()
-                    iid = str(raw[2] or "").strip()
-                    payload_raw = raw[5]
-                    st = str(raw[6] if len(raw) > 6 else "").strip().lower()
-                if lid <= 0:
-                    continue
-                try:
-                    payload = (
-                        json.loads(payload_raw)
-                        if isinstance(payload_raw, str)
-                        else (payload_raw if isinstance(payload_raw, dict) else {})
-                    )
-                except Exception:  # noqa: BLE001
-                    payload = {}
-                if not isinstance(payload, dict):
-                    payload = {}
-                field_code = _payload_field_code(payload)
-                code_mismatch = bool(
-                    field_code and code and field_code != code
-                )
-                folder = _resolve_enrich_folder(
-                    region=rid, code=code, item_id=iid
-                )
-                missing_disk = folder is None or not _local_poster_ok(folder)
-                # fail：仅本地已删才回 pending（仍缺封面的 fail 保持失败）
-                if st == "fail" and not missing_disk and not code_mismatch:
-                    continue
-                if not code_mismatch and not missing_disk:
-                    continue
-                reason = (
-                    f"串号回滚:{field_code}"
-                    if code_mismatch
-                    else "仍缺:封面 · 无本地目录"
-                )
-                gaps = ["no_local", "no_media", "no_actress", "no_studio", "no_plot", "thin_title"]
-                if folder is not None and folder.is_dir():
-                    try:
-                        _, gaps = _local_folder_gaps(folder)
-                    except Exception:  # noqa: BLE001
-                        gaps = ["no_local"]
-                payload["partialOk"] = False
-                payload["gapsAfter"] = gaps
-                payload.pop("ok", None)
+            rows = list(
                 conn.execute(
                     """
-                    UPDATE enrich_queue_log
-                    SET status='pending', error=?, gaps_json=?, payload_json=?,
-                        updated_at=NOW()
-                    WHERE id=? AND status IN ('done', 'fail')
+                    SELECT id, code, item_id, error, gaps_json, payload_json, status
+                    FROM enrich_queue_log
+                    WHERE region=? AND status IN ('done', 'fail')
                     """,
-                    (
-                        reason[:500],
-                        json.dumps(gaps, ensure_ascii=False),
-                        json.dumps(payload, ensure_ascii=False, default=str),
-                        lid,
-                    ),
+                    (rid,),
+                ).fetchall()
+                or []
+            )
+        # 连接已释放；下面只做磁盘判定
+        updates: list[tuple[str, str, str, int]] = []
+        for raw in rows:
+            if isinstance(raw, dict):
+                lid = int(raw.get("id") or 0)
+                code = str(raw.get("code") or "").strip().upper()
+                iid = str(raw.get("item_id") or "").strip()
+                payload_raw = raw.get("payload_json")
+                st = str(raw.get("status") or "").strip().lower()
+            else:
+                lid = int(raw[0] or 0)
+                code = str(raw[1] or "").strip().upper()
+                iid = str(raw[2] or "").strip()
+                payload_raw = raw[5]
+                st = str(raw[6] if len(raw) > 6 else "").strip().lower()
+            if lid <= 0:
+                continue
+            try:
+                payload = (
+                    json.loads(payload_raw)
+                    if isinstance(payload_raw, str)
+                    else (payload_raw if isinstance(payload_raw, dict) else {})
                 )
-                n += 1
-            if n:
+            except Exception:  # noqa: BLE001
+                payload = {}
+            if not isinstance(payload, dict):
+                payload = {}
+            field_code = _payload_field_code(payload)
+            code_mismatch = bool(field_code and code and field_code != code)
+            folder = _resolve_enrich_folder(
+                region=rid, code=code, item_id=iid
+            )
+            missing_disk = folder is None or not _local_poster_ok(folder)
+            # fail：仅本地已删才回 pending（仍缺封面的 fail 保持失败）
+            if st == "fail" and not missing_disk and not code_mismatch:
+                continue
+            if not code_mismatch and not missing_disk:
+                continue
+            reason = (
+                f"串号回滚:{field_code}"
+                if code_mismatch
+                else "仍缺:封面 · 无本地目录"
+            )
+            gaps = [
+                "no_local",
+                "no_media",
+                "no_actress",
+                "no_studio",
+                "no_plot",
+                "thin_title",
+            ]
+            if folder is not None and folder.is_dir():
+                try:
+                    _, gaps = _local_folder_gaps(folder)
+                except Exception:  # noqa: BLE001
+                    gaps = ["no_local"]
+            payload["partialOk"] = False
+            payload["gapsAfter"] = gaps
+            payload.pop("ok", None)
+            updates.append(
+                (
+                    reason[:500],
+                    json.dumps(gaps, ensure_ascii=False),
+                    json.dumps(payload, ensure_ascii=False, default=str),
+                    lid,
+                )
+            )
+        if not updates:
+            return 0
+        n = 0
+        with connect() as conn:
+            for i in range(0, len(updates), 200):
+                chunk = updates[i : i + 200]
+                for params in chunk:
+                    conn.execute(
+                        """
+                        UPDATE enrich_queue_log
+                        SET status='pending', error=?, gaps_json=?, payload_json=?,
+                            updated_at=NOW()
+                        WHERE id=? AND status IN ('done', 'fail')
+                        """,
+                        params,
+                    )
+                    n += 1
                 conn.commit()
-            return n
+        return n
     except Exception as e:  # noqa: BLE001
         log.warning("demote false enrich dones failed region=%s: %s", rid, e)
+        return 0
+
+
+def _queue_log_demote_false_dones_budgeted(
+    region: str, *, time_budget_sec: float = 8.0
+) -> int:
+    """后台有限预算 demote：不挡开刮；扫完或超时即停。"""
+    rid = _queue_log_region(region)
+    if not rid:
+        return 0
+    # 标记已调度，避免同一进程反复开线程；未扫完也不再强制全量挡启动
+    if rid in _demoted_false_dones:
+        return 0
+    _demoted_false_dones.add(rid)
+    t0 = time.monotonic()
+    budget = max(1.0, float(time_budget_sec or 8.0))
+    try:
+        from app.core.db import connect, init_db
+
+        init_db()
+        with connect() as conn:
+            rows = list(
+                conn.execute(
+                    """
+                    SELECT id, code, item_id, error, gaps_json, payload_json, status
+                    FROM enrich_queue_log
+                    WHERE region=? AND status IN ('done', 'fail')
+                    ORDER BY updated_at ASC NULLS FIRST, id ASC
+                    LIMIT 4000
+                    """,
+                    (rid,),
+                ).fetchall()
+                or []
+            )
+        updates: list[tuple[str, str, str, int]] = []
+        for raw in rows:
+            if (time.monotonic() - t0) >= budget:
+                break
+            if isinstance(raw, dict):
+                lid = int(raw.get("id") or 0)
+                code = str(raw.get("code") or "").strip().upper()
+                iid = str(raw.get("item_id") or "").strip()
+                payload_raw = raw.get("payload_json")
+                st = str(raw.get("status") or "").strip().lower()
+            else:
+                lid = int(raw[0] or 0)
+                code = str(raw[1] or "").strip().upper()
+                iid = str(raw[2] or "").strip()
+                payload_raw = raw[5]
+                st = str(raw[6] if len(raw) > 6 else "").strip().lower()
+            if lid <= 0:
+                continue
+            try:
+                payload = (
+                    json.loads(payload_raw)
+                    if isinstance(payload_raw, str)
+                    else (payload_raw if isinstance(payload_raw, dict) else {})
+                )
+            except Exception:  # noqa: BLE001
+                payload = {}
+            if not isinstance(payload, dict):
+                payload = {}
+            field_code = _payload_field_code(payload)
+            code_mismatch = bool(field_code and code and field_code != code)
+            folder = _resolve_enrich_folder(region=rid, code=code, item_id=iid)
+            missing_disk = folder is None or not _local_poster_ok(folder)
+            if st == "fail" and not missing_disk and not code_mismatch:
+                continue
+            if not code_mismatch and not missing_disk:
+                continue
+            reason = (
+                f"串号回滚:{field_code}"
+                if code_mismatch
+                else "仍缺:封面 · 无本地目录"
+            )
+            gaps = [
+                "no_local",
+                "no_media",
+                "no_actress",
+                "no_studio",
+                "no_plot",
+                "thin_title",
+            ]
+            if folder is not None and folder.is_dir():
+                try:
+                    _, gaps = _local_folder_gaps(folder)
+                except Exception:  # noqa: BLE001
+                    gaps = ["no_local"]
+            payload["partialOk"] = False
+            payload["gapsAfter"] = gaps
+            payload.pop("ok", None)
+            updates.append(
+                (
+                    reason[:500],
+                    json.dumps(gaps, ensure_ascii=False),
+                    json.dumps(payload, ensure_ascii=False, default=str),
+                    lid,
+                )
+            )
+        if not updates:
+            return 0
+        n = 0
+        with connect() as conn:
+            for i in range(0, len(updates), 200):
+                chunk = updates[i : i + 200]
+                for params in chunk:
+                    conn.execute(
+                        """
+                        UPDATE enrich_queue_log
+                        SET status='pending', error=?, gaps_json=?, payload_json=?,
+                            updated_at=NOW()
+                        WHERE id=? AND status IN ('done', 'fail')
+                        """,
+                        params,
+                    )
+                    n += 1
+                conn.commit()
+        if n:
+            log.info(
+                "budget demote region=%s n=%s spent=%.1fs",
+                rid,
+                n,
+                time.monotonic() - t0,
+            )
+        return n
+    except Exception as e:  # noqa: BLE001
+        log.warning("budget demote failed region=%s: %s", rid, e)
         return 0
 
 
@@ -7397,8 +8781,11 @@ def _queue_log_promote_actress_soft_fails(region: str) -> int:
                 except Exception:  # noqa: BLE001
                     gaps_hint = []
                 soft_by_err = _is_soft_remain_error(err)
-                soft_by_gaps = bool(gaps_hint) and not any(
-                    g in _SUCCESS_BLOCK_GAPS for g in gaps_hint
+                soft_hint = [g for g in gaps_hint if g in _SOFT_SUCCESS_GAPS]
+                # 仅女优/片商软缺口，或「无硬缺口」的历史 fail（可能升完整成功）
+                soft_by_gaps = bool(soft_hint) or (
+                    bool(gaps_hint)
+                    and not any(g in _SUCCESS_BLOCK_GAPS for g in gaps_hint)
                 )
                 if not soft_by_err and not soft_by_gaps:
                     continue
@@ -7415,10 +8802,15 @@ def _queue_log_promote_actress_soft_fails(region: str) -> int:
                 if any(g in _SUCCESS_BLOCK_GAPS for g in disk_gaps):
                     continue
                 soft_only = [
-                    g for g in disk_gaps if g not in _SUCCESS_BLOCK_GAPS
+                    g for g in disk_gaps if g in _SOFT_SUCCESS_GAPS
                 ]
                 ids.append(lid)
-                soft_gaps = soft_only or _soft_gaps_from_remain_error(err) or gaps_hint
+                # 磁盘无女优/片商缺口 → 完整成功（剧情/外链不算软成功）
+                soft_gaps = (
+                    soft_only
+                    or _soft_gaps_from_remain_error(err)
+                    or soft_hint
+                )
                 try:
                     payload = (
                         json.loads(payload_raw)
@@ -7464,6 +8856,124 @@ def _queue_log_promote_actress_soft_fails(region: str) -> int:
         return 0
 
 
+def _queue_log_normalize_soft_to_full_success(region: str) -> int:
+    """旧规则把「缺剧情/外链」也标成软成功 → 升为完整成功。
+
+    仅保留缺女优/片商为 soft；其余 done+partialOk 清掉 soft 标记。
+    """
+    rid = _queue_log_region(region)
+    if not rid:
+        return 0
+    try:
+        from app.core.db import connect, init_db
+
+        init_db()
+        with connect() as conn:
+            soft_pred = _soft_done_sql_pred(error_col="error")
+            rows = conn.execute(
+                f"""
+                SELECT id, error, gaps_json, payload_json
+                FROM enrich_queue_log
+                WHERE region=? AND status='done' AND {soft_pred}
+                """,
+                (rid,),
+            ).fetchall()
+            n = 0
+            for raw in rows or []:
+                if isinstance(raw, dict):
+                    lid = int(raw.get("id") or 0)
+                    err = str(raw.get("error") or "")
+                    gaps_raw = raw.get("gaps_json")
+                    payload_raw = raw.get("payload_json")
+                else:
+                    lid = int(raw[0] or 0)
+                    err = str(raw[1] or "")
+                    gaps_raw = raw[2]
+                    payload_raw = raw[3]
+                if lid <= 0:
+                    continue
+                try:
+                    gaps = (
+                        json.loads(gaps_raw)
+                        if isinstance(gaps_raw, str)
+                        else (gaps_raw if isinstance(gaps_raw, list) else [])
+                    )
+                except Exception:  # noqa: BLE001
+                    gaps = []
+                try:
+                    payload = (
+                        json.loads(payload_raw)
+                        if isinstance(payload_raw, str)
+                        else (payload_raw if isinstance(payload_raw, dict) else {})
+                    )
+                except Exception:  # noqa: BLE001
+                    payload = {}
+                if not isinstance(payload, dict):
+                    payload = {}
+                after = list(payload.get("gapsAfter") or gaps or [])
+                soft_gaps = [g for g in after if str(g) in _SOFT_SUCCESS_GAPS]
+                # 仍缺女优/片商 → 保留软成功，只规范化文案/gaps
+                if soft_gaps or _is_soft_remain_error(err):
+                    if soft_gaps and (
+                        list(payload.get("gapsAfter") or []) != soft_gaps
+                        or not _is_soft_remain_error(err)
+                    ):
+                        payload["partialOk"] = True
+                        payload["gapsAfter"] = soft_gaps
+                        conn.execute(
+                            """
+                            UPDATE enrich_queue_log
+                            SET error=?, gaps_json=?, payload_json=?, updated_at=NOW()
+                            WHERE id=?
+                            """,
+                            (
+                                _format_soft_ok_error(_gap_labels(soft_gaps)),
+                                json.dumps(soft_gaps, ensure_ascii=False),
+                                json.dumps(payload, ensure_ascii=False, default=str),
+                                lid,
+                            ),
+                        )
+                        n += 1
+                    continue
+                # 仅缺剧情/外链等 → 升完整成功
+                payload["partialOk"] = False
+                payload["gapsAfter"] = []
+                conn.execute(
+                    """
+                    UPDATE enrich_queue_log
+                    SET error='', gaps_json='[]', payload_json=?, updated_at=NOW()
+                    WHERE id=?
+                    """,
+                    (
+                        json.dumps(payload, ensure_ascii=False, default=str),
+                        lid,
+                    ),
+                )
+                n += 1
+            if n:
+                conn.commit()
+            # 角标 tip 与库对齐（软成功降档必须立刻反映到 UI）
+            try:
+                dbc = _queue_log_status_counts_db(rid)
+                tip_prev = (_LOCAL_STATUS_TOTALS.get(rid) or {}) if rid else {}
+                _ensure_local_status_totals_loaded()
+                _set_local_status_totals(
+                    rid,
+                    done=int(dbc.get("done") or 0),
+                    soft=int(dbc.get("soft") or 0),
+                    fail=int(dbc.get("fail") or 0),
+                    total=int(tip_prev.get("total") or 0) or None,
+                )
+            except Exception:  # noqa: BLE001
+                pass
+            return n
+    except Exception as e:  # noqa: BLE001
+        log.warning(
+            "normalize soft→full success failed region=%s: %s", rid, e
+        )
+        return 0
+
+
 def _ensure_actress_soft_promoted(region: str, *, force: bool = False) -> int:
     """纠偏队列表：假成功回滚；软缺口失败升软成功；同步内存队列。
 
@@ -7489,6 +8999,7 @@ def _ensure_actress_soft_promoted(region: str, *, force: bool = False) -> int:
     n = 0
     if _promoted_actress_soft.get(rid) != _SOFT_PROMOTE_RULE_VER:
         n = _queue_log_promote_actress_soft_fails(rid)
+        n += _queue_log_normalize_soft_to_full_success(rid)
         _promoted_actress_soft[rid] = _SOFT_PROMOTE_RULE_VER
     # 内存队列同步：假成功→pending；软缺口 fail→软成功（须本地封面）
     mem_n = 0
@@ -7561,7 +9072,7 @@ def _ensure_actress_soft_promoted(region: str, *, force: bool = False) -> int:
                             soft_only = [
                                 g
                                 for g in disk_gaps
-                                if g not in _SUCCESS_BLOCK_GAPS
+                                if g in _SOFT_SUCCESS_GAPS
                             ]
                             nr = dict(r)
                             nr["status"] = "done"
@@ -7580,6 +9091,48 @@ def _ensure_actress_soft_promoted(region: str, *, force: bool = False) -> int:
                             new_q.append(nr)
                             mem_n += 1
                             fail_delta -= 1
+                            continue
+                if (
+                    st == "done"
+                    and folder is not None
+                    and _local_poster_ok(folder)
+                ):
+                    try:
+                        _, disk_gaps = _local_folder_gaps(folder)
+                    except Exception:  # noqa: BLE001
+                        disk_gaps = []
+                    if not any(g in _SUCCESS_BLOCK_GAPS for g in disk_gaps):
+                        soft_only = [
+                            g for g in disk_gaps if g in _SOFT_SUCCESS_GAPS
+                        ]
+                        was_soft = bool(r.get("partialOk")) or _is_soft_ok_error(
+                            err
+                        )
+                        if soft_only and (
+                            not was_soft
+                            or list(r.get("gapsAfter") or []) != soft_only
+                        ):
+                            nr = dict(r)
+                            nr["partialOk"] = True
+                            nr["gapsAfter"] = soft_only
+                            nr["error"] = _format_soft_ok_error(
+                                _gap_labels(soft_only)
+                            )
+                            new_q.append(nr)
+                            mem_n += 1
+                            if not was_soft:
+                                done_delta -= 1
+                                soft_delta += 1
+                            continue
+                        if was_soft and not soft_only:
+                            nr = dict(r)
+                            nr["partialOk"] = False
+                            nr["gapsAfter"] = []
+                            nr["error"] = ""
+                            new_q.append(nr)
+                            mem_n += 1
+                            soft_delta -= 1
+                            done_delta += 1
                             continue
                 new_q.append(r)
             if mem_n:
@@ -7882,6 +9435,7 @@ def _rebuild_checkpoint_queue_from_log(region: str) -> list[dict[str, Any]]:
 
         init_db()
         last_id = 0
+        log_off = 0
         with connect() as conn:
             while True:
                 rows = conn.execute(
@@ -7889,15 +9443,16 @@ def _rebuild_checkpoint_queue_from_log(region: str) -> list[dict[str, Any]]:
                     SELECT id, item_id, code, status, gaps_json, error, source,
                            fetch_ms, detail_title, payload_json
                     FROM enrich_queue_log
-                    WHERE region=? AND status='pending' AND id>?
-                    ORDER BY id ASC
-                    LIMIT 2000
+                    WHERE region=? AND status='pending'
+                    ORDER BY updated_at DESC NULLS LAST, id DESC
+                    LIMIT 2000 OFFSET ?
                     """,
-                    (rid, last_id),
+                    (rid, log_off),
                 ).fetchall()
                 batch = list(rows or [])
                 if not batch:
                     break
+                log_off += len(batch)
                 for r in batch:
                     if isinstance(r, dict):
                         it = _queue_log_row_to_item(r)
@@ -8431,11 +9986,11 @@ def _next_budget(budget: int | None, part: dict[str, Any]) -> int | None:
     return max(0, budget - int(part.get("processed") or 0))
 
 
-def _detail_sources(*, region: str = "") -> list[dict[str, Any]]:
-    """数据源页：七区对应分组 ∩ 已启用 ∩ 有详情实现，按目录顺序。"""
+def _detail_sources(*, region: str = "", code: str = "") -> list[dict[str, Any]]:
+    """数据源页：六区对应分组 ∩ 已启用 ∩ 有详情实现，按目录顺序。"""
     import app.scrape.sources_settings as scrape_src
 
-    return list(scrape_src.enabled_enrich_sources(region=region) or [])
+    return list(scrape_src.enabled_enrich_sources(region=region, code=code) or [])
 
 
 def _poster_rank(url: str) -> int:
@@ -8519,6 +10074,27 @@ def _zh_prefer_bonus(text: str) -> int:
     if _has_han(t):
         return 40
     return 0
+
+
+def _title_lacks_zh(title: str, code: str = "") -> bool:
+    """标题非空但仍非中文（日文假名 / 纯英文等）→ 软成功缺口。"""
+    t = str(title or "").strip()
+    if not t:
+        return False
+    code_u = str(code or "").strip().upper()
+    if code_u and t.casefold() == code_u.casefold():
+        return False
+    # 剥番号前缀后再判中文，避免「YSN-661 …」干扰
+    try:
+        from app.scrap_library.enrich_extras import strip_title_code_prefix
+
+        bare = strip_title_code_prefix(t, code_u) if code_u else t
+    except Exception:  # noqa: BLE001
+        bare = t
+    body = str(bare or t).strip()
+    if len(body) < 2:
+        return False
+    return _zh_prefer_bonus(body) <= 0
 
 
 def _normalize_merged_title(value: str) -> str:
@@ -8668,6 +10244,14 @@ _TITLE_TAIL_NOISE = frozenset(
         "無碼流出",
         "独家配信",
         "独占配信",
+        "文芸部",
+        "游泳部",
+        "水泳部",
+        "网球部",
+        "テニス部",
+        "篮球部",
+        "バスケ部",
+        "部活",
     }
 )
 
@@ -8679,13 +10263,20 @@ def _title_trailing_person_name(title: str) -> str:
         return ""
     t2 = re.sub(r"[\[【(（].*$", "", t).strip()
     m = re.search(
-        r"(?:[\s　！!。．.]+|[—–―－\-]+)([\u4e00-\u9fffぁ-んァ-ン]{2,8})\s*$",
+        r"(?:[\s　！!。．.…⋯]+|[—–―－\-]+)([\u4e00-\u9fffぁ-んァ-ン]{2,8})\s*$",
         t2,
     )
     if not m:
         return ""
     nm = m.group(1).strip()
     if len(nm) < 2 or nm in _TITLE_TAIL_NOISE:
+        return ""
+    if nm.casefold() in _JUNK_ACTOR_TAGS or nm in _JUNK_ACTOR_TAGS:
+        return ""
+    if _is_platform_exclusivity_label(nm):
+        return ""
+    # 社团/部活尾巴不当人名
+    if nm.endswith(("部", "部活")) and len(nm) <= 4:
         return ""
     return nm
 
@@ -9325,7 +10916,19 @@ def _pick_best_str(
     return best[1], best[0]
 
 
-def _strategy_field_priority(field: str) -> list[str] | None:
+def _field_priority_applies(region: str = "") -> bool:
+    """字段优先级仅对有码区生效；其它区只看「优先级设置(全局)」分区源。"""
+    try:
+        from app.scrape.sources_settings import resolve_enrich_region_id
+
+        return resolve_enrich_region_id(region) == "japan_censored"
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _strategy_field_priority(field: str, *, region: str = "") -> list[str] | None:
+    if region and not _field_priority_applies(region):
+        return None
     try:
         from app.scrap_library.enrich_strategy import get_strategy
         from app.scrape.sources_settings import is_provider_enabled
@@ -9340,16 +10943,39 @@ def _strategy_field_priority(field: str) -> list[str] | None:
     return None
 
 
-def _strategy_region_sources(region: str) -> list[str]:
+def _strategy_region_sources(region: str, *, code: str = "") -> list[str]:
     try:
-        from app.scrap_library.enrich_strategy import region_sources_for
-        from app.scrape.sources_settings import is_provider_enabled
+        from app.scrap_library.enrich_strategy import (
+            region_sources_for,
+            uncensored_official_for_code,
+        )
+        from app.scrape.sources_settings import (
+            is_provider_enabled,
+            resolve_enrich_region_id,
+        )
 
-        return [
+        base = [
             s
             for s in (region_sources_for(region) or [])
             if is_provider_enabled(s)
         ]
+        rid = resolve_enrich_region_id(region)
+        if rid == "japan_uncensored" and code:
+            official = [
+                s
+                for s in (uncensored_official_for_code(code) or [])
+                if is_provider_enabled(s)
+            ]
+            if official:
+                seen: set[str] = set()
+                out: list[str] = []
+                for sid in list(official) + base:
+                    if not sid or sid in seen:
+                        continue
+                    seen.add(sid)
+                    out.append(sid)
+                return out
+        return base
     except Exception:  # noqa: BLE001
         return []
 
@@ -9383,9 +11009,12 @@ def _pick_by_field_priority(
 ) -> tuple[str, str] | None:
     """字段优先级选值。
 
+    有码区：
     1) 字段配置源（设置「字段优先级」）按顺序 —— 已关总开关的跳过
     2) 番号类型全局源（设置「全局优先级」）按顺序 —— 同上
     3) 其余站按可信度链；配置/全局阶段有数据即用
+
+    其它区：跳过字段优先级，只走全局分区源 + 可信度链。
     """
     import app.scrape.source_catalog as catalog
 
@@ -9403,7 +11032,7 @@ def _pick_by_field_priority(
 
     preferred = [
         catalog.canonicalize_id(s)
-        for s in (_strategy_field_priority(field) or [])
+        for s in (_strategy_field_priority(field, region=region) or [])
         if catalog.canonicalize_id(s)
     ]
     pref_seen: set[str] = set()
@@ -10018,7 +11647,7 @@ def _merge_got(
         detailed.append(ent)
     poster_fp = [
         catalog.canonicalize_id(s)
-        for s in (_strategy_field_priority("poster") or [])
+        for s in (_strategy_field_priority("poster", region=region) or [])
         if catalog.canonicalize_id(s)
     ]
     poster_fp_rank = {sid: i for i, sid in enumerate(poster_fp)}
@@ -10338,7 +11967,7 @@ def _merge_got(
         ]
         pref_tags = [
             catalog.canonicalize_id(s)
-            for s in (_strategy_field_priority("tags") or [])
+            for s in (_strategy_field_priority("tags", region=region) or [])
             if catalog.canonicalize_id(s)
         ]
         # 字段未配标签源时：用番号类型全局顺序打底
@@ -10414,6 +12043,8 @@ def _merge_got(
             except Exception:  # noqa: BLE001
                 pass
     merged["tags"] = tags_out
+
+    # 禁止从标签/标题硬套女优：无 <actor>/actors 字段则保持空
 
     contrib = list(dict.fromkeys(order_hit))
     merged["sources"] = contrib
@@ -10739,6 +12370,15 @@ def _detail_satisfies_gaps(
         str(detail.get("title") or ""), code or str(detail.get("code") or "")
     ):
         return False
+    # ⚠️ `no_zh_title` **刻意不在这里判**（第二十一轮修正）。
+    # 它曾是硬闸门：标题非中文就一律不许早停。但 dmm / avbase 这类源给出的是
+    # 日文标题（含假名 → `_zh_prefer_bonus` 恒为 0），**永远不可能**满足这条，
+    # 于是这些番号必然等到全部源回或超时 —— 早停对它们完全失效（现场 12% 的号）。
+    # 正确归属是 `_may_early_stop` 的「中文源等待」逻辑：等中文源跑完即放行，
+    # 而不是无限等所有源（含注定给不出中文的那几个）。
+    # 反证：把它加回来 → `test_no_zh_title_is_not_a_hard_gate` 与
+    # `test_no_zh_title_releases_after_cn_sources_done` 双双 FAILED（后者直接
+    # 复现了「中文源已全跑完仍不许放行」的死锁）。
     return True
 
 
@@ -10772,6 +12412,10 @@ def _cn_text_ids_in_batch(batch: list[dict[str, Any]]) -> set[str]:
 # 缺口 → 策略 fieldPriority 字段（发车提权只读配置，不写死站点快慢）
 _GAP_FIELD_PRIORITY_KEYS: dict[str, tuple[str, ...]] = {
     "thin_title": ("title",),
+    # 缺中文标题与「标题太薄」是同一诉求（都要 title 字段）→ 同样提权 title 源。
+    # 不加这条时，只缺 `no_zh_title` 的号不会优先发车中文源，只能靠默认顺序兜底
+    # （第二十一轮对齐；与 `_may_early_stop` 的 need_zh 集合同源）
+    "no_zh_title": ("title",),
     "no_plot": ("overview",),
     "no_actress": ("actors",),
     "no_studio": ("studio", "maker"),
@@ -10794,13 +12438,18 @@ _FIELD_LAUNCH_ORDER: tuple[str, ...] = (
 def _prioritize_batch_for_gaps(
     batch: list[dict[str, Any]],
     gaps: list[str] | None,
+    *,
+    region: str = "",
 ) -> list[dict[str, Any]]:
     """按缺口对应的 fieldPriority 配置提权，其余保持 regionSources 原序。
 
+    仅有码区生效；其它区保持 batch 原序（只看全局分区源）。
     例：缺标题/剧情时先发 fieldPriority.title/overview 里的站，
     避免 regionSources 开头的站占满波次槽、字段优先站迟迟发不出。
     """
     if len(batch) <= 1:
+        return list(batch)
+    if not _field_priority_applies(region):
         return list(batch)
     gap_set = {str(g).strip() for g in (gaps or []) if str(g).strip()}
     if not gap_set:
@@ -10911,6 +12560,34 @@ def _detail_meta_incomplete(detail: dict[str, Any] | None) -> bool:
     return not (series and publisher and website.startswith(("http://", "https://")))
 
 
+# 元数据（系列/发行/官网）的**有界等待**预算（秒）。
+#
+# 为什么需要：`_detail_meta_incomplete` 要求 `series + publisher + website` 三者齐，
+# 但大量番号**本来就没有系列**（实测 MUKD-252、AARM-010/018/037/061 合并后
+# `series` 均为空串）。于是「主缺口已齐」也无法早停 —— 只要本批还有
+# `_META_FILL_SOURCE_IDS`（dmm/jav321/libredmm/avbase…）在飞就一路等到它们
+# **全部回或超时**，而 avbase 单独就是 p50≈3.0s（第十七轮 D2）。
+#
+# 取值依据（`_diag_round17_gate_ab.py`，逐号交替 ON/OFF + 每次单跑前清 cooldown，
+# 用真实队列行的 gaps 复测）：
+#   现状             Σfetch(6 号) = 23,311ms   字段保有量 series4/pub4/web5/ovLen727
+#   关闸门           Σfetch(6 号) =  6,897ms   同上，但 gaps=[] 时会丢 overview/publisher
+#   有界等待 1.2s    Σfetch(6 号) = 14,701ms   同上，**一字不差**
+# → 比现状快 32%、字段零损失；快源（dmm 488ms / libredmm 664ms）仍来得及补字段，
+#   被砍掉的是 avbase 那条 ~3.0s 的尾巴。
+# ⚠️ 该 A/B n=5，噪声大。它只是**上限**：预算内源回来了照样补字段，
+#   预算用尽才放行早停，所以「字段保有量下降」只可能发生在慢源上。
+_META_WAIT_BUDGET_SEC = 1.2
+
+# 中文源（airav/iqqtv…）的**有界等待**预算（秒）。
+#
+# 缺 thin_title / no_plot / no_zh_title 时本会等 `_CN_TEXT_SOURCE_IDS` 全部结束。
+# 现场（SDMUA-042 / SDMS-622）：airav ~2s 已回，iqqtv 却搜无结果/超时拖到 12~20s，
+# 墙钟被最慢中文源钉死 → 「时快时慢 + 卡顿源」。预算覆盖 airav 常态回包，
+# 超时后放行早停并取消在飞慢源（取消令牌），不再干等 iqqtv/avbase 顶满单源超时。
+_CN_WAIT_BUDGET_SEC = 2.8
+
+
 def _may_early_stop(
     detail: dict[str, Any] | None,
     gaps: list[str] | None,
@@ -10918,26 +12595,58 @@ def _may_early_stop(
     code: str,
     batch: list[dict[str, Any]],
     finished: set[str],
+    meta_wait: dict[str, float] | None = None,
 ) -> bool:
-    """缺口齐了才可早停；缺标题/剧情时优先等中文源；元数据未齐时再等 DMM/MGS 等。"""
+    """缺口齐了才可早停；缺标题/剧情时**有界**等中文源；元数据未齐时**有界**等 DMM/MGS 等。
+
+    meta_wait：本番号的等待状态（调用方持有，跨多次调用累计）。
+    键：`since`/`logged`（元数据）、`cn_since`/`cn_logged`（中文源）。
+    传 `None` = 旧行为（无限等），便于 A/B 与反证；生产路径必须传。
+    """
     import app.scrape.source_catalog as catalog
 
     if not _detail_satisfies_gaps(detail, gaps, code=code):
         return False
     gap_set = {str(g).strip() for g in (gaps or []) if str(g).strip()}
-    need_zh = bool(gap_set & {"thin_title", "no_plot"})
+    # 中文源等待集合。`no_zh_title` 与 `thin_title` 是**同一诉求的两种表述**
+    # （标题还没有中文），必须一起处理 —— 第二十一轮修正前它缺席此集合，
+    # 却又被 `_detail_satisfies_gaps` 当硬闸门，于是这些番号既不享受
+    # 「中文源跑完就放行」，也不被允许早停，只能活活等到全部源超时。
+    need_zh = bool(gap_set & {"thin_title", "no_plot", "no_zh_title"})
     if need_zh and detail:
         title_ok = True
         plot_ok = True
         if "thin_title" in gap_set:
             title_ok = _zh_prefer_bonus(str(detail.get("title") or "")) > 0
+        if "no_zh_title" in gap_set:
+            title_ok = title_ok and not _title_lacks_zh(
+                str(detail.get("title") or ""), code
+            )
         if "no_plot" in gap_set:
             plot_ok = _zh_prefer_bonus(str(detail.get("overview") or "")) > 0
         if not (title_ok and plot_ok):
             pending = _cn_text_ids_in_batch(batch) - finished
             if pending:
-                return False
-    # 主缺口已齐，但系列/发行/官网仍缺：若本批还有元数据源未回，继续等
+                if meta_wait is None:
+                    return False
+                now = time.monotonic()
+                since = meta_wait.get("cn_since")
+                if since is None:
+                    meta_wait["cn_since"] = now
+                    return False
+                if (now - float(since)) < _CN_WAIT_BUDGET_SEC:
+                    return False
+                if not meta_wait.get("cn_logged"):
+                    meta_wait["cn_logged"] = 1.0
+                    log.info(
+                        "enrich %s cn-wait budget %.1fs expired, early-stop "
+                        "pending_cn=%s (中文标题/剧情可能本就缺失)",
+                        code,
+                        _CN_WAIT_BUDGET_SEC,
+                        ",".join(sorted(pending)),
+                    )
+    # 主缺口已齐，但系列/发行/官网仍缺：若本批还有元数据源未回，**在预算内**继续等。
+    # 预算用尽即放行早停 —— 否则「本来就没有系列」的番号会永远等不到早停。
     if _detail_meta_incomplete(detail):
         pending_meta: set[str] = set()
         for src in batch:
@@ -10947,7 +12656,25 @@ def _may_early_stop(
             if sid in _META_FILL_SOURCE_IDS:
                 pending_meta.add(sid)
         if pending_meta:
-            return False
+            if meta_wait is None:
+                return False
+            now = time.monotonic()
+            since = meta_wait.get("since")
+            if since is None:
+                # 第一次需要等：起表，先让快源（dmm/libredmm）把窗口用起来
+                meta_wait["since"] = now
+                return False
+            if (now - float(since)) < _META_WAIT_BUDGET_SEC:
+                return False
+            if not meta_wait.get("logged"):
+                meta_wait["logged"] = 1.0
+                log.info(
+                    "enrich %s meta-wait budget %.1fs expired, early-stop "
+                    "pending_meta=%s (series/publisher/website 可能本就缺失)",
+                    code,
+                    _META_WAIT_BUDGET_SEC,
+                    ",".join(sorted(pending_meta)),
+                )
     return True
 
 
@@ -11016,7 +12743,7 @@ def _fetch_detail(
     code_u = str(code or "").strip().upper()
     if not code_u:
         return None
-    sources = _detail_sources(region=region)
+    sources = _detail_sources(region=region, code=code_u)
     if not sources:
         log.info(
             "enrich: no enabled sources for region=%r groups=%s",
@@ -11227,6 +12954,9 @@ def _fetch_detail(
     # 本番号本轮 fetch 的取消令牌：早停/暂停后置位，让被放弃的在飞源
     # 立刻从出站等槽队列里退出（详见 _run_pool）。
     _fetch_ctx: dict[str, Any] = {"cancel": None}
+    # 本番号的「元数据有界等待」状态（详见 _META_WAIT_BUDGET_SEC）。
+    # 必须跨多次 `_may_early_stop` 调用累计，所以放在本函数作用域而非函数内部。
+    _meta_wait: dict[str, float] = {}
 
     def _one(src: dict[str, Any]) -> tuple[str, dict[str, Any] | None, str, str]:
         import app.core.outbound_http as outbound_http
@@ -11237,7 +12967,29 @@ def _fetch_detail(
         src_timeout = float(timeout_sec)
         if access == "proxy_flare":
             src_timeout = float(min(flare_timeout_cap, timeout_sec))
+        # iqqtv 曾双页串行易顶满预算；即便已改中文优先，仍略收紧工作超时，
+        # 让放弃后的 curl 僵尸更快释放 page 槽。
+        if sid == "iqqtv":
+            src_timeout = float(min(src_timeout, 12.0))
         t0 = time.perf_counter()
+        if _source_in_cooldown(sid):
+            # ⚠️ 用**独立 kind**，不能记成 busy。
+            # `busy` 的既定语义是「**我们这边**没轮到发请求（出站槽/限速/退避/过盾通道排满）」，
+            # 因此**不计入源健康度**；而 cooldown 恰恰是 `_note_source_fetch_outcome`
+            # 依据 down 连击算出来的**源健康度**结论（见其 docstring）。
+            # 混用会让 `sourcesBusy` 把「源不健康被主动跳过」报成「排队未及」，
+            # 前端/诊断读到的原因与事实相反（第十七轮 D3）。
+            # 待遇与 down 一致：仍要补抓（进 degradedByDown），但不重复计 streak。
+            err_c = "cooldown:源暂避"
+            _record_timing(
+                sid=sid,
+                access=access,
+                ms=0,
+                ok=False,
+                err=err_c,
+                kind="cooldown",
+            )
+            return sid, None, err_c, "cooldown"
         try:
             applied = scrape_src.apply_provider_link_for_fetch(sid)
         except Exception as e:  # noqa: BLE001
@@ -11245,6 +12997,7 @@ def _fetch_detail(
             _record_timing(
                 sid=sid, access=access, ms=ms, ok=False, err=f"link:{e}", kind="down"
             )
+            _note_source_fetch_outcome(sid, kind="down")
             return sid, None, f"link:{e}", "down"
 
         # 本源等槽记账：由 fetch 线程写、本线程（池线程）读 —— 用「墙钟 − 等槽」
@@ -11351,6 +13104,7 @@ def _fetch_detail(
                 kind=t_kind,
                 wait_ms=float(meter.wait_now()) * 1000,
             )
+            _note_source_fetch_outcome(sid, kind=t_kind)
             return sid, None, err_t, t_kind
 
         err_obj = holder.get("error")
@@ -11372,12 +13126,16 @@ def _fetch_detail(
                 kind=err_kind,
                 wait_ms=float(meter.wait_now()) * 1000,
             )
+            _note_source_fetch_outcome(sid, kind=err_kind)
             return sid, None, err_s, err_kind
 
         detail = holder.get("detail")
         if not _detail_usable(detail, code=code_u):
             title = str((detail or {}).get("title") or "")[:40]
             err_r = f"rejected:{title}"
+            miss_kind = _refine_kind_with_meter(
+                "miss", slot_timeout=int(getattr(meter, "slot_timeout", 0))
+            )
             _record_timing(
                 sid=sid,
                 access=applied_access,
@@ -11386,11 +13144,10 @@ def _fetch_detail(
                 err=err_r,
                 # 源正常响应、只是没有这条番号（或返回了别的番号的页面）→ miss，不必补抓；
                 # 但若本次出站排到过超时（痕迹在记账里），「未找到」可能是被吞掉的 busy。
-                kind=_refine_kind_with_meter(
-                    "miss", slot_timeout=int(getattr(meter, "slot_timeout", 0))
-                ),
+                kind=miss_kind,
                 wait_ms=float(meter.wait_now()) * 1000,
             )
+            _note_source_fetch_outcome(sid, kind=miss_kind)
             return sid, None, err_r, "miss"
         detail = dict(detail)
         try:
@@ -11435,31 +13192,43 @@ def _fetch_detail(
             kind="hit",
             wait_ms=float(meter.wait_now()) * 1000,
         )
+        _note_source_fetch_outcome(sid, kind="hit")
         return sid, detail, "", "hit"
 
     def _run_pool(
         label: str, batch: list[dict[str, Any]], workers: int
     ) -> tuple[
-        dict[str, dict[str, Any]], list[str], set[str], set[str], set[str]
+        dict[str, dict[str, Any]],
+        list[str],
+        set[str],
+        set[str],
+        set[str],
+        set[str],
     ]:
-        """返回 (命中详情, 错误串, 不可用源 id, 无此番号源 id, 排队未及源 id)。
+        """返回 (命中详情, 错误串, down 源, miss 源, busy 源, cooldown 源)。
 
-        后三者是把「源挂了」「源没有这条番号」「我们没轮到发请求」分开的载体。
-        补抓口径：down + busy 需要，miss/cancelled 不需要。
+        后四者把「源挂了」「源没这条番号」「我们没轮到」「源不健康被主动暂避」
+        分开，别混：
+          - down / busy / **cooldown** → 补抓需要（cooldown 是源健康度结论，
+            下轮可能已恢复；且进 `degradedByDown` 才会被回头修）
+          - miss / cancelled → 不需要补抓（重抓只白占出站槽）
+        ⚠️ cooldown 单列的理由见 `_one` 里冷却分支的注释：busy 不算健康度，
+        cooldown 算，混用会把「源不健康」报成「排队未及」。
         """
         if not batch or workers <= 0:
-            return {}, [], set(), set(), set()
+            return {}, [], set(), set(), set(), set()
         got: dict[str, dict[str, Any]] = {}
         errors: list[str] = []
         down_ids: set[str] = set()
         miss_ids: set[str] = set()
         busy_ids: set[str] = set()
+        cooldown_ids: set[str] = set()
         finished: set[str] = set()
         # 每池独立令牌：adaptive 池收尾时置位，只回收本池被放弃的在飞源，
         # 不误伤随后的 flare 池（两池串行，见 _fetch_detail 的 pools）
         cancel_ev = threading.Event()
         _fetch_ctx["cancel"] = cancel_ev
-        ordered = _prioritize_batch_for_gaps(batch, gaps)
+        ordered = _prioritize_batch_for_gaps(batch, gaps, region=region)
         # 对齐 mdc-ng：匹配源一次全开并发；workers=配置上限（0→全开）
         n = max(1, min(workers, len(ordered)))
         pool = ThreadPoolExecutor(
@@ -11470,7 +13239,7 @@ def _fetch_detail(
         probe_keys: frozenset[str] | None = None
         probe_merged: dict[str, Any] | None = None
         gap_set = {str(g).strip() for g in (gaps or []) if str(g).strip()}
-        need_zh = bool(gap_set & {"thin_title", "no_plot"})
+        need_zh = bool(gap_set & {"thin_title", "no_plot", "no_zh_title"})
         _push_log(
             f"开跑 · {label} ×{len(ordered)} · workers={n} · 全开并发"
         )
@@ -11507,7 +13276,11 @@ def _fetch_detail(
                             got, gaps, code=code_u
                         ):
                             if need_zh:
-                                title_need = "thin_title" in gap_set
+                                # 与 `_may_early_stop` 的 need_zh 集合同源：
+                                # `no_zh_title` 同样表示「标题还没有中文」，也要等中文源
+                                title_need = bool(
+                                    gap_set & {"thin_title", "no_zh_title"}
+                                )
                                 plot_need = "no_plot" in gap_set
                                 zh_ready = (
                                     not title_need or _got_has_zh_title(got)
@@ -11515,8 +13288,16 @@ def _fetch_detail(
                                 cn_pending = (
                                     _cn_text_ids_in_batch(ordered) - finished
                                 )
+                                # 有界等中文源：预算内才跳过早停探测。
+                                # 否则 iqqtv「搜索无结果」12~20s 会钉死墙钟。
                                 if not zh_ready and cn_pending:
-                                    continue
+                                    now_cn = time.monotonic()
+                                    if _meta_wait.get("cn_since") is None:
+                                        _meta_wait["cn_since"] = now_cn
+                                    if (
+                                        now_cn - float(_meta_wait["cn_since"])
+                                    ) < _CN_WAIT_BUDGET_SEC:
+                                        continue
                             keys_now = frozenset(got.keys())
                             if keys_now != probe_keys:
                                 probe_merged = _merge_got(
@@ -11529,6 +13310,7 @@ def _fetch_detail(
                                 code=code_u,
                                 batch=ordered,
                                 finished=finished,
+                                meta_wait=_meta_wait,
                             ):
                                 early = True
                                 log.info(
@@ -11563,6 +13345,8 @@ def _fetch_detail(
                             miss_ids.add(str(sid))
                         elif kind == "busy" and sid:
                             busy_ids.add(str(sid))
+                        elif kind == "cooldown" and sid:
+                            cooldown_ids.add(str(sid))
                 if early:
                     break
         finally:
@@ -11582,13 +13366,14 @@ def _fetch_detail(
                 _mark_pending_skipped("早停跳过")
         if early:
             errors = [e for e in errors if "cancelled" not in e.lower()]
-        return got, errors, down_ids, miss_ids, busy_ids
+        return got, errors, down_ids, miss_ids, busy_ids, cooldown_ids
 
     got_all: dict[str, dict[str, Any]] = {}
     errors: list[str] = []
     down_all: set[str] = set()
     busy_all: set[str] = set()
     miss_all: set[str] = set()
+    cooldown_all: set[str] = set()
     for label, batch, workers in pools:
         if not batch:
             continue
@@ -11602,6 +13387,7 @@ def _fetch_detail(
                 code=code_u,
                 batch=batch,
                 finished=set(got_all.keys()),
+                meta_wait=_meta_wait,
             )
         ):
             log.info(
@@ -11625,7 +13411,7 @@ def _fetch_detail(
                         }
             _publish_timings()
             break
-        part, errs, part_down, part_miss, part_busy = _run_pool(
+        part, errs, part_down, part_miss, part_busy, part_cooldown = _run_pool(
             label, batch, workers
         )
         got_all.update(part)
@@ -11633,6 +13419,7 @@ def _fetch_detail(
         down_all |= part_down
         miss_all |= part_miss
         busy_all |= part_busy
+        cooldown_all |= part_cooldown
 
     _mark_pending_skipped("未完成")
     fetch_ms = int(round((time.perf_counter() - t_fetch0) * 1000))
@@ -11710,10 +13497,11 @@ def _fetch_detail(
     merged["fetchMs"] = fetch_ms
     merged["mergeMs"] = merge_ms
     # ⚠️ 「源挂了 / 我们没轮到」≠「源没有这条番号」：只有前者才值得补抓。
-    # 判据：某个**没拿到**的源（down 故障 或 busy 排队未及）在优先级上高于所有命中源
-    # → 本轮属于「降级取值」（高优先源抖动/被排队挤掉，结果来自更低优先的源），
-    # 该番号进补抓提示；若只是尾部低优先源抖动而头部源已命中，则不打扰
-    #（否则会大面积误入重试队列）。
+    # 判据：某个**没拿到**的源（down 故障 / busy 排队未及 / cooldown 源不健康被暂避）
+    # 在优先级上高于所有命中源 → 本轮属于「降级取值」（高优先源抖动/被排队挤掉/
+    # 被冷却跳过，结果来自更低优先的源），该番号进补抓提示；若只是尾部低优先源
+    # 抖动而头部源已命中，则不打扰（否则会大面积误入重试队列）。
+    # cooldown 必须并进来：它和 down 同源（由 down 连击触发），漏掉就没人回头补。
     _prio = {str(s.get("id") or ""): i for i, s in enumerate(sources)}
     _hit_ids = {str(k) for k in got_all.keys()}
     _best_hit = min((_prio.get(i, len(sources)) for i in _hit_ids), default=None)
@@ -11721,20 +13509,22 @@ def _fetch_detail(
     if _best_hit is not None:
         degraded_by_down = sorted(
             sid
-            for sid in (down_all | busy_all)
+            for sid in (down_all | busy_all | cooldown_all)
             if _prio.get(sid, len(sources)) < _best_hit
         )
     merged["sourcesDown"] = sorted(str(x) for x in down_all)
     merged["sourcesBusy"] = sorted(str(x) for x in busy_all)
+    merged["sourcesCooldown"] = sorted(str(x) for x in cooldown_all)
     merged["sourcesMiss"] = sorted(str(x) for x in miss_all)
     merged["degradedByDown"] = degraded_by_down
     if degraded_by_down:
         log.info(
-            "enrich %s degraded hit=%s down=%s busy=%s",
+            "enrich %s degraded hit=%s down=%s busy=%s cooldown=%s",
             code_u,
             ",".join(sorted(_hit_ids)),
             ",".join(sorted(down_all)),
             ",".join(sorted(busy_all)),
+            ",".join(sorted(cooldown_all)),
         )
         _push_log(
             f"降级取值 · 高优先源未拿到 {','.join(degraded_by_down)} · "
@@ -11971,9 +13761,12 @@ def _title_is_thin(title: str, code: str) -> bool:
     # 素人/无垢等官名常为 2～3 假名（案例 MUKD-244「えれな」）；勿当空题拒写
     if len(t) < 2:
         return True
-    # 过短中文残片机翻（DV-673「高中部」、FLAV-072「双倍的」）
+    # 过短中文残片机译（DV-673「高中部」、FLAV-072「双倍的」）
     if _has_han(t) and not _has_kana(t) and len(t) <= 6:
         return True
+    # 纯片假名作品名（女体のしんぴ「オナサポ」）保留，不当空题
+    if re.fullmatch(r"[ァ-ヴー]{3,8}", t):
+        return False
     # 纯人名感短题（ONS-029「あいら」、STZY「百仁花」）：有更长候选时应让位
     if len(t) <= 4 and not re.search(r"[\s　、，。！!？?【】\[\]「」『』（）()]", t):
         return True
@@ -12100,25 +13893,38 @@ def merge_nfo_with_detail(
     *,
     overwrite: bool = False,
     force_fields: set[str] | None = None,
+    existing_root: ET.Element | None = None,
+    existing_fields: dict[str, Any] | None = None,
+    old_bytes: bytes | None = None,
 ) -> bool:
     """增量仅补空；覆盖模式写入新值。最终按 MDCx 参考布局整文件重排写出。
 
     force_fields：增量下仍强制写回的字段名集合（title/overview/actors/…）。
+    existing_root / existing_fields / old_bytes：调用方已读过文件时跳过二次解析。
     """
-    old_bytes = b""
-    if nfo_path.is_file():
-        try:
-            old_bytes = nfo_path.read_bytes()
-            root = ET.fromstring(
-                old_bytes.decode("utf-8", errors="replace")
-            )
-        except Exception:
-            root = ET.Element("movie")
+    if existing_fields is not None:
+        fields = existing_fields
+        if old_bytes is None:
+            old_bytes = b""
     else:
-        root = ET.Element("movie")
-    if root.tag.lower() != "movie":
-        movie = root.find("movie")
-        root = movie if movie is not None else ET.Element("movie")
+        old_bytes = b"" if old_bytes is None else old_bytes
+        root = existing_root
+        if root is None:
+            if nfo_path.is_file():
+                try:
+                    old_bytes = nfo_path.read_bytes()
+                    root = ET.fromstring(
+                        old_bytes.decode("utf-8", errors="replace")
+                    )
+                except Exception:
+                    root = ET.Element("movie")
+            else:
+                root = ET.Element("movie")
+        if root.tag.lower() != "movie":
+            movie = root.find("movie")
+            root = movie if movie is not None else ET.Element("movie")
+        code_pre = str(detail.get("code") or detail.get("id") or "").strip().upper()
+        fields = fields_from_movie_root(root, code_fallback=code_pre)
 
     force = bool(overwrite)
     ff = {str(x).strip().lower() for x in (force_fields or set()) if str(x).strip()}
@@ -12136,7 +13942,6 @@ def merge_nfo_with_detail(
         fields[key] = v
 
     code = str(detail.get("code") or detail.get("id") or "").strip().upper()
-    fields = fields_from_movie_root(root, code_fallback=code)
     if code:
         _put("num", code, do_force=force)
 
@@ -12239,6 +14044,7 @@ def merge_nfo_with_detail(
     actors_all = _clean_actors(detail.get("actorsAll"))
     if actors_all and not actors:
         actors = list(actors_all)
+    # 禁止从 tags/标题硬套女优
     try:
         from app.scrape.metadata_optimize import polish_actress_names
 
@@ -12250,14 +14056,30 @@ def merge_nfo_with_detail(
         fields["actors"] = list(actors)
     elif actors:
         existing = [str(a).strip() for a in (fields.get("actors") or []) if str(a).strip()]
+        # 已有 actor 也滤一遍垃圾标签
+        existing = _clean_actors(existing)
         seen = {a.casefold() for a in existing}
         for a in actors:
             if a.casefold() not in seen:
                 existing.append(a)
                 seen.add(a.casefold())
         fields["actors"] = existing
+    else:
+        # 无真实女优：清掉历史上从标签写入的垃圾 <actor>
+        existing = _clean_actors(
+            [str(a).strip() for a in (fields.get("actors") or []) if str(a).strip()]
+        )
+        fields["actors"] = existing
 
     tags = _clean_tags(detail.get("tags"))
+    # 已是女优的人名不再留在 genre
+    act_fold = {
+        str(a).casefold()
+        for a in (fields.get("actors") or actors or [])
+        if str(a).strip()
+    }
+    if act_fold:
+        tags = [t for t in tags if t.casefold() not in act_fold]
     if _force("tags"):
         fields["genres"] = list(tags)
     elif tags:
@@ -12266,7 +14088,7 @@ def merge_nfo_with_detail(
         ]
         seen_g = {g.casefold() for g in existing_g}
         for t in tags:
-            if t.casefold() not in seen_g:
+            if t.casefold() not in seen_g and t.casefold() not in act_fold:
                 existing_g.append(t)
                 seen_g.add(t.casefold())
         fields["genres"] = existing_g
@@ -12550,8 +14372,8 @@ def _download_covers(
         else (get_strategy().get("cover") or {})
     )
     entries = _normalize_cover_entries(cover_url)
-    field_priority = list(_strategy_field_priority("poster") or [])
-    region_sources = list(_strategy_region_sources(region) or [])
+    field_priority = list(_strategy_field_priority("poster", region=region) or [])
+    region_sources = list(_strategy_region_sources(region, code=code_u) or [])
 
     def _log(msg: str) -> None:
         _push_log(msg, region=region)
@@ -12648,8 +14470,10 @@ def _local_poster_ok_uncached(poster_file: Path, size: int) -> bool:
 
         with Image.open(poster_file) as im:
             w, h = int(im.size[0] or 0), int(im.size[1] or 0)
-        # 与封面裁后地板一致：DMM 横图右裁约 380×538
-        if w < 200 or h < 400:
+        # 与 cover_download.meets_processed_min_size 对齐：有有效像素即合格
+        from app.scrap_library.cover_download import meets_processed_min_size
+
+        if not meets_processed_min_size(w, h):
             return False
     except Exception:  # noqa: BLE001
         return False
@@ -12723,6 +14547,26 @@ def _resolve_enrich_folder(
             pass
 
     if not code_u:
+        return None
+    # FC2：前缀夹是 FC2 / FC2-PPV，不能用 split('-',1)（会把 FC2-PPV-x 拆成 FC2）
+    rid_n = str(rid or region or "").strip().casefold()
+    if rid_n in {"fc2", "fc2ppv"} or code_u.startswith("FC2"):
+        from app.core.region_meta import fc2_fs_prefix, normalize_fc2_code
+
+        code_n = normalize_fc2_code(code_u)
+        pref = fc2_fs_prefix(code=code_n)
+        for base in _region_local_dirs(root, rid or region):
+            for cand in (
+                base / pref / code_n,
+                base / "FC2-PPV" / code_n,
+                base / "FC2PPV" / code_n,
+                base / "FC2" / code_n,
+                base / code_n,
+                base / code_u,
+            ):
+                hit = _ok_dir(cand)
+                if hit:
+                    return hit
         return None
     prefix = code_u.split("-", 1)[0] if "-" in code_u else code_u
     for base in _region_local_dirs(root, rid or region):
@@ -13080,11 +14924,23 @@ def _persist_enrich_result_to_queue_log(
     try:
         lid = _queue_log_update_row(persist, region=rid or region)
         if st == "done":
-            _queue_log_prune_open_if_done(
-                rid or region,
-                code=code_u,
-                item_id=str(persist.get("itemId") or ""),
-            )
+            # prune 异步：绝不能挡 _done→item_end，否则监控假死在封面阶段
+            _rid = rid or region
+            _iid = str(persist.get("itemId") or "")
+
+            def _prune_open_bg() -> None:
+                try:
+                    _queue_log_prune_open_if_done(
+                        _rid, code=code_u, item_id=_iid
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+
+            threading.Thread(
+                target=_prune_open_bg,
+                name=f"prune-open-{code_u or 'x'}",
+                daemon=True,
+            ).start()
         # 番号目录落盘：清空队列表后仍可回读源耗时
         try:
             fol = _resolve_enrich_folder(
@@ -13222,9 +15078,10 @@ def enrich_one_row(
     out["fetchMs"] = detail.get("fetchMs")
     out["mergeMs"] = detail.get("mergeMs")
     # 源级诊断（区分「源挂了」「源没这条番号」「我们没轮到」）：
-    # 交给 _finish_one 做有界重试记账（busy 也进 degradedByDown → 同样要补抓）
+    # 交给 _finish_one 做有界重试记账（busy / cooldown 也进 degradedByDown → 同样要补抓）
     out["sourcesDown"] = list(detail.get("sourcesDown") or [])
     out["sourcesBusy"] = list(detail.get("sourcesBusy") or [])
+    out["sourcesCooldown"] = list(detail.get("sourcesCooldown") or [])
     out["sourcesMiss"] = list(detail.get("sourcesMiss") or [])
     out["degradedByDown"] = list(detail.get("degradedByDown") or [])
     out["actors"] = len(detail.get("actors") or [])
@@ -13316,6 +15173,7 @@ def enrich_one_row(
             out["coverTried"] = tried[:6]
             out["coverAttempts"] = list(cover_res.get("attempts") or [])[:8]
             out["coverMode"] = str(cover_res.get("mode") or "")
+            out["coverSource"] = str(cover_res.get("coverSource") or "")
             fail_reason = str(cover_res.get("failReason") or "").strip()
             if got_p and not cover_res.get("keptOld"):
                 changed = True
@@ -13331,6 +15189,11 @@ def enrich_one_row(
             _push_log(
                 f"{code or folder.name} · 封面 "
                 f"{out.get('coverMs')}ms"
+                + (
+                    f" · src={out.get('coverSource')}"
+                    if out.get("coverSource")
+                    else ""
+                )
                 + (
                     f" · fail={out.get('coverFail')}"
                     if out.get("coverFail")
@@ -13366,7 +15229,7 @@ def enrich_one_row(
     out["fields"] = fields
     out["localCoverOk"] = local_cover_ok
 
-    # 批量分区刮削：只写本地 NFO/封面，向量交给「同步向量数据库」单独跑（提速）
+    # 批量分区刮削：只写本地 NFO/封面，元库/向量交给「同步数据库」「数据库向量化」单独跑（提速）
     if not sync_vector:
         out["vectorSynced"] = False
         out["vectorSkipped"] = True
@@ -13909,20 +15772,45 @@ def run_enrich(
             fail_n = 0
             _push_log(f"队列 {len(queue)} 条", region=region)
         else:
-            # 增量/弱项：边扫边刮——扫描线程分批入队，worker 立刻开刮
-            # 开刮前再 demote 一次：本地已删的 done/fail → pending
-            try:
-                _demoted_false_dones.discard(region)
-                demoted_run = _queue_log_demote_false_dones(region)
-                _demoted_false_dones.add(region)
-                if demoted_run:
-                    _push_log(
-                        f"本地已删回滚 · {demoted_run} 条 → 未处理",
-                        region=region,
+            # 增量/弱项：边扫边刮——扫描线程分批入队，worker 立刻开刮。
+            # ⚠️ 禁止在开刮前同步 demote / 全量 done-keys：会卡数分钟，
+            # UI 显示 running 但「处理中=0」。队列表已有 pending 优先入队；
+            # done-keys 在首批入队后再懒加载，只影响后续骨架/向量切片去重。
+            skip_done_iids: set[str] = set()
+            skip_done_codes: set[str] = set()
+            skip_ready = threading.Event()
+
+            def _load_skip_done() -> None:
+                try:
+                    iids, codes = _queue_log_done_keys(region)
+                    skip_done_iids.clear()
+                    skip_done_iids.update(iids)
+                    skip_done_codes.clear()
+                    skip_done_codes.update(
+                        str(c).strip().upper()
+                        for c in codes
+                        if str(c).strip()
                     )
+                except Exception as e:  # noqa: BLE001
+                    log.warning("enrich load done keys failed: %s", e)
+                finally:
+                    skip_ready.set()
+
+            threading.Thread(
+                target=_load_skip_done,
+                name=f"done-keys-{region}",
+                daemon=True,
+            ).start()
+            try:
+                if region not in _demoted_false_dones:
+                    threading.Thread(
+                        target=_queue_log_demote_false_dones_budgeted,
+                        kwargs={"region": region, "time_budget_sec": 5.0},
+                        name=f"demote-bg-{region}",
+                        daemon=True,
+                    ).start()
             except Exception as e:  # noqa: BLE001
-                log.warning("enrich start demote failed: %s", e)
-            skip_done_iids, skip_done_codes = _queue_log_done_keys(region)
+                log.warning("enrich start demote schedule failed: %s", e)
             try:
                 lib = _region_library_progress(region)
                 est_total = max(int(lib.get("incomplete") or 0), 1)
@@ -13952,12 +15840,14 @@ def run_enrich(
             def _feed_loop() -> None:
                 fed = 0
                 try:
+                    # 首批只用队列表 pending（不依赖 done-keys）；之后等 skip 就绪再扫骨架
                     for batch in iter_enrich_pending_batches(
                         region=region,
                         batch_size=200,
                         limit=fetch_lim if fetch_lim > 0 else 0,
                         skip_item_ids=skip_done_iids,
                         skip_codes=skip_done_codes,
+                        defer_skip_until=skip_ready,
                     ):
                         if _halt_kind():
                             break
@@ -14045,18 +15935,23 @@ def run_enrich(
                 region=region,
             )
 
-    # 历史脏数据：已成功/处理中却仍 pending 的同番号行清掉
-    # 预览（dryRun）跳过：预览必须对队列表零副作用，否则「看一眼」就会删行
+    # 历史脏数据清理改后台：同步跑会挡 worker 占槽（处理中一直 0）
     if not dry_run:
-        try:
-            cleaned = _queue_log_prune_open_if_done(region)
-            if cleaned:
-                _push_log(f"清理成功残留未处理 {cleaned}", region=region)
-            cleaned_run = _queue_log_prune_pending_if_running(region)
-            if cleaned_run:
-                _push_log(f"清理处理中残留未处理 {cleaned_run}", region=region)
-        except Exception:  # noqa: BLE001
-            pass
+
+        def _prune_bg() -> None:
+            try:
+                cleaned = _queue_log_prune_open_if_done(region)
+                if cleaned:
+                    _push_log(f"清理成功残留未处理 {cleaned}", region=region)
+                cleaned_run = _queue_log_prune_pending_if_running(region)
+                if cleaned_run:
+                    _push_log(f"清理处理中残留未处理 {cleaned_run}", region=region)
+            except Exception:  # noqa: BLE001
+                pass
+
+        threading.Thread(
+            target=_prune_bg, name=f"prune-open-{region}", daemon=True
+        ).start()
 
     if not live_feed:
         queue_view: list[dict[str, Any]] = []
@@ -14238,9 +16133,10 @@ def run_enrich(
             "wouldFill": one.get("wouldFill"),
             "partialOk": bool(one.get("partialOk")),
             "gapsAfter": gaps_after,
+            # 必须始终回写 gaps：成功且 gapsAfter=[] 时要清空刮前的 no_local，
+            # 否则内存队列/库 gaps_json 仍显示「缺封面」
+            "gaps": gaps_after,
         }
-        if gaps_after:
-            patch["gaps"] = gaps_after
         if not halted:
             _patch_queue_item(i, match=row, persist=persist_db, **patch)
         if persist_db:
@@ -14254,11 +16150,21 @@ def run_enrich(
             try:
                 new_lid = _queue_log_update_row(persist, region=region)
                 if st == "done":
-                    _queue_log_prune_open_if_done(
-                        region,
-                        code=code_u,
-                        item_id=str(persist.get("itemId") or ""),
-                    )
+                    _iid2 = str(persist.get("itemId") or "")
+
+                    def _prune_open_bg2() -> None:
+                        try:
+                            _queue_log_prune_open_if_done(
+                                region, code=code_u, item_id=_iid2
+                            )
+                        except Exception:  # noqa: BLE001
+                            pass
+
+                    threading.Thread(
+                        target=_prune_open_bg2,
+                        name=f"prune-open2-{code_u or 'x'}",
+                        daemon=True,
+                    ).start()
                 if new_lid and not halted and not _queue_log_int_id(persist):
                     with _enrich_lock:
                         q = list(_enrich_job.get("queue") or [])
@@ -14372,7 +16278,7 @@ def run_enrich(
                 # 空字段，否则「降级取值」写进 NFO 的差字段永远不会被高优先源的
                 # 好值替换 —— 那样补抓就白跑了。
                 overwrite=force_write or bool(row.get("overwrite")),
-                # 分区批量：只写 NFO/封面；向量用下方「同步向量数据库」
+                # 分区批量：只写 NFO/封面；元库/向量用「同步数据库」「数据库向量化」
                 sync_vector=False,
             )
             try:
@@ -14455,6 +16361,16 @@ def run_enrich(
         workers = max(1, min(int(_ITEM_WORKERS_MAX), cfg_w))
     except Exception:  # noqa: BLE001
         pass
+    # 出站槽必须与「同时处理的番号数」同步（第十七轮 D5）。
+    # 只在本处（任务启动前、无在飞请求）应用：把 page/api 全局槽从
+    # 「手工凑的 24+12」换成按 itemWorkers 推导，扩容从此只需改策略一处。
+    cfg_workers = int(workers)
+    try:
+        from app.core.outbound_scheduler import get_scheduler as _get_sched
+
+        _get_sched().apply_item_workers(cfg_workers)
+    except Exception as e:  # noqa: BLE001
+        log.warning("apply outbound caps failed: %s", e)
     # 非边扫：初始 worker 数不超过当前队列；边扫时队列会涨
     if not live_feed:
         workers = max(1, min(workers, len(queue) or 1))
@@ -14478,6 +16394,8 @@ def run_enrich(
     _push_log(f"并发番号 · {workers} · 封面池 {_cover_job_workers_target()}", region=region)
     next_i = 0
     inflight: dict[Any, int] = {}
+    # 「请求并发超出出站槽档位」只提示一次，避免每轮刷屏
+    _outbound_cap_warned = False
     # 池按上限开；循环内按最新 itemWorkers 节流，改策略后下一轮投递即生效
     pool_cap = max(workers, int(_ITEM_WORKERS_MAX))
     pool = ThreadPoolExecutor(
@@ -14485,7 +16403,10 @@ def run_enrich(
     )
     try:
         while True:
-            # 热读并发：保存策略后无需重启任务
+            # 热读并发：保存策略后无需重启任务。
+            # ⚠️ 但派发上限不得越过「已经按规模算好的出站槽」（`cfg_workers`）：
+            # 飞行中换信号量不安全（已持旧对象的线程会 release 到孤儿上），
+            # 所以抬 itemWorkers 需要重开任务；此处只做封顶，避免 2× 超订。
             try:
                 import app.scrap_library.enrich_strategy as strat_live
 
@@ -14494,6 +16415,15 @@ def run_enrich(
                     or _ITEM_WORKERS_DEFAULT
                 )
                 want_w = max(1, min(pool_cap, cfg_live))
+                if want_w > cfg_workers:
+                    if not _outbound_cap_warned:
+                        _outbound_cap_warned = True
+                        _push_log(
+                            f"并发番号请求 {want_w} 超出出站槽档位 {cfg_workers} · "
+                            f"已封顶（重开任务后生效）",
+                            region=region,
+                        )
+                    want_w = cfg_workers
                 if want_w != workers:
                     workers = want_w
                     _push_log(f"并发番号热更新 · {workers}", region=region)
@@ -14993,7 +16923,7 @@ def enrich_one_by_item_id(
         )
 
         # 覆盖且要同步向量：先清空该条向量，再刮削写回
-        # 仅本地刮削时保留向量行，交给「同步向量数据库」另跑
+        # 仅本地刮削时保留向量行，交给「同步数据库」「数据库向量化」另跑
         if force and do_vector and not dry_run:
             with pool.connection() as conn, conn.cursor() as cur:
                 cur.execute(
@@ -15121,7 +17051,7 @@ def start_enrich_job(
     if requested:
         # 显式指定分区：按请求跑（开关打开即开始，不二次过滤）
         want = set(requested)
-        region_list = [r for r in REGION_ORDER if r in want]
+        region_list = [r for r in strat.enrich_region_ids() if r in want]
         for r in requested:
             if r not in region_list:
                 region_list.append(r)

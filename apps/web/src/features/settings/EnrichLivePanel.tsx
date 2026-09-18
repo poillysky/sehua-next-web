@@ -11,6 +11,7 @@ import {
   getScrapLibraryEnrichLocalCovers,
   scanScrapLibraryEnrichQueue,
   retryScrapLibraryEnrichFails,
+  retryScrapLibraryEnrichSofts,
   enrichScrapLibraryItem,
   listScrapLibraryEmbedItems,
   scrapLibraryCoverUrl,
@@ -136,6 +137,7 @@ const GAP_LABEL: Record<string, string> = {
   no_studio: '片商',
   no_plot: '剧情',
   thin_title: '标题',
+  no_zh_title: '中文标题',
 };
 
 function isSoftRemainError(err?: string) {
@@ -148,11 +150,9 @@ function isSoftRemainError(err?: string) {
     .split(/[·,，]/)
     .map((s) => s.trim())
     .filter(Boolean);
-  // 硬失败只认封面/标题；其余缺口算软成功
-  const hardLabels = new Set(['封面', '标题']);
-  return (
-    parts.length > 0 && parts.every((p) => p && !hardLabels.has(p))
-  );
+  // 女优 / 片商算软成功（中文标题不再挡）
+  const softLabels = new Set(['女优', '片商']);
+  return parts.length > 0 && parts.every((p) => softLabels.has(p));
 }
 
 function normalizeSoftSuccessRow(
@@ -186,14 +186,18 @@ function isPartialOk(row?: {
       ? { ...row, status: 'done' as const, partialOk: true }
       : row;
   if (normalized.status !== 'done') return false;
-  if (normalized.partialOk) return true;
-  const err = String(normalized.error || '').trim();
-  if (err.startsWith('软成功') || err.startsWith('次成功')) return true;
-  if (isSoftRemainError(err)) return true;
+  const softGaps = new Set(['no_actress', 'no_studio']);
   const after = normalized.gapsAfter;
-  if (!Array.isArray(after) || !after.length) return false;
-  const hardGaps = new Set(['no_local', 'thin_title']);
-  return after.every((g) => !hardGaps.has(g));
+  if (Array.isArray(after) && after.length) {
+    // 有 gapsAfter 时只认软缺口
+    return after.some((g) => softGaps.has(String(g || '')));
+  }
+  const err = String(normalized.error || '').trim();
+  if (err.startsWith('软成功') || err.startsWith('次成功') || isSoftRemainError(err)) {
+    return isSoftRemainError(err);
+  }
+  // 旧数据只有 partialOk、无 gaps/文案：保持软成功徽标，避免整页跳动
+  return Boolean(normalized.partialOk);
 }
 
 function statusLabel(s?: string, row?: ScrapLibraryEnrichQueueItem) {
@@ -303,7 +307,25 @@ function topStallKinds(mon?: EnrichMonitorSnapshot | null): string {
 function fieldCompletenessText(row: ScrapLibraryEnrichQueueItem): string {
   const fields = Array.isArray(row.fields) ? row.fields : [];
   if (!fields.length) return '';
-  const missing = fields.filter((f) => f && f.ok === false);
+  const coverOk =
+    row.posterDownloaded === true ||
+    fields.some(
+      (f) =>
+        Boolean(f) &&
+        (f.id === 'poster' || String(f.label || '') === '封面') &&
+        f.ok === true,
+    );
+  const missing = fields.filter((f) => {
+    if (!f || f.ok !== false) return false;
+    // 已落盘/字段已齐时忽略陈旧「缺封面」
+    if (
+      coverOk &&
+      (f.id === 'poster' || String(f.label || '') === '封面')
+    ) {
+      return false;
+    }
+    return true;
+  });
   if (!missing.length) return '字段齐全';
   const labels = missing
     .map((f) => String(f.label || f.id || '').trim())
@@ -408,8 +430,28 @@ function mergeLogLines(base: string[], extra: string[]) {
 }
 
 function rowKey(row: ScrapLibraryEnrichQueueItem) {
+  // 稳定键：SSE 快照与库表翻页必须对上，勿用 logId 优先（否则同号两套身份来回闪）
+  const iid = String(row.itemId || '').trim();
+  if (iid) return `id:${iid}`;
+  const code = String(row.code || '').trim().toUpperCase();
+  if (code) return `code:${code}`;
   if (row.logId) return `log:${row.logId}`;
-  return `${row.index ?? ''}:${row.itemId || row.code || ''}`;
+  return `idx:${row.index ?? ''}`;
+}
+
+/** 合并队列行：保留已有字段，用新行覆盖有值字段 */
+function mergeQueueRow(
+  prev: ScrapLibraryEnrichQueueItem,
+  next: ScrapLibraryEnrichQueueItem,
+): ScrapLibraryEnrichQueueItem {
+  return {
+    ...prev,
+    ...next,
+    logId: next.logId || prev.logId,
+    gaps: next.gaps?.length ? next.gaps : prev.gaps,
+    gapsAfter: next.gapsAfter?.length ? next.gapsAfter : prev.gapsAfter,
+    fields: next.fields?.length ? next.fields : prev.fields,
+  };
 }
 
 function detailFromRow(
@@ -549,15 +591,19 @@ function EnrichItemDetail({
     poster: string;
     extras: Array<{ key: string; label: string; url: string }>;
   }>({ ready: false, folder: '', poster: '', extras: [] });
+  /** 原图横/竖：横图不进 2:3 竖框裁切 */
+  const [posterLandscape, setPosterLandscape] = useState(false);
 
   useEffect(() => {
     const code = String(detail.code || '').trim();
     const iid = String(detail.itemId || detail.relPath || '').trim();
     if (!code && !iid) {
       setLocalCovers({ ready: true, folder: '', poster: '', extras: [] });
+      setPosterLandscape(false);
       return;
     }
     let alive = true;
+    setPosterLandscape(false);
     setLocalCovers((prev) => ({ ...prev, ready: false }));
     void (async () => {
       try {
@@ -612,6 +658,31 @@ function EnrichItemDetail({
         : '未找到本地番号目录'
       : '读取本地封面…'
     : '';
+
+  useEffect(() => {
+    setPosterLandscape(false);
+    const url = String(showPoster || '').trim();
+    if (!url) return;
+    let cancelled = false;
+    const img = new Image();
+    const apply = () => {
+      if (cancelled) return;
+      const w = img.naturalWidth || 0;
+      const h = img.naturalHeight || 0;
+      setPosterLandscape(w > 0 && h > 0 && w > h);
+    };
+    img.onload = apply;
+    img.onerror = () => {
+      if (!cancelled) setPosterLandscape(false);
+    };
+    img.src = url;
+    if (img.complete && img.naturalWidth > 0) apply();
+    return () => {
+      cancelled = true;
+      img.onload = null;
+      img.onerror = null;
+    };
+  }, [showPoster]);
 
   return (
     <div className="enrich-live__detail">
@@ -732,7 +803,12 @@ function EnrichItemDetail({
       <p className="settings-group-label">刮削图片</p>
       <div className="enrich-live__covers">
         {showPoster ? (
-          <div className="enrich-live__cover enrich-live__cover--poster">
+          <div
+            className={cn(
+              'enrich-live__cover enrich-live__cover--poster',
+              posterLandscape && 'enrich-live__cover--landscape',
+            )}
+          >
             <SoftImg
               src={showPoster}
               alt={detail.code || 'poster'}
@@ -969,6 +1045,7 @@ export function EnrichLivePanel({
   const [logsCleared, setLogsCleared] = useState(false);
   const [queueScanning, setQueueScanning] = useState(false);
   const [retryingFails, setRetryingFails] = useState(false);
+  const [retryingSofts, setRetryingSofts] = useState(false);
   const [codeQuery, setCodeQuery] = useState('');
   const [searchCode, setSearchCode] = useState('');
   const [searchItems, setSearchItems] = useState<ScrapLibraryEnrichQueueItem[]>(
@@ -997,6 +1074,13 @@ export function EnrichLivePanel({
   const [queuePaging, setQueuePaging] = useState(false);
   const queuePageRef = useRef(1);
   queuePageRef.current = queuePage;
+  /** 切 tab / 翻页拉库期间，禁止 SSE 用工作队列重排列表 */
+  const queueHydratingRef = useRef(false);
+  /** 成功/软成功/失败：角标上涨时防抖回读库表（按 updated_at），勿用工作队列插旧号 */
+  const resultTabReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const resultTabCountRef = useRef({ soft: 0, done: 0, fail: 0 });
   const queuePaneRef = useRef<HTMLDivElement | null>(null);
   /** 缺口总数（可大于列表条数）；tab 切换读表时仍保留 */
   const pendingTotalRef = useRef(0);
@@ -1074,25 +1158,61 @@ export function EnrichLivePanel({
         soft: Number(data.localSoft ?? counts.soft ?? 0),
         fail: Number(data.localFail ?? counts.fail ?? 0),
       });
-      // 扫描全量分类写入后，列表可翻页总数与角标对齐
+      // 扫描全量分类写入后，列表可翻页总数与角标对齐（含未处理）
       const doneN = Number(data.localDone ?? counts.done ?? 0);
       const softN = Number(data.localSoft ?? counts.soft ?? 0);
       const failN = Number(data.localFail ?? counts.fail ?? 0);
-      if (doneN > 0 || softN > 0 || failN > 0) {
+      setListTotals((prev) => ({
+        ...prev,
+        ...(pending > 0 ? { pending } : {}),
+        ...(doneN > 0 ? { done: doneN } : {}),
+        soft: softN,
+        ...(failN > 0 ? { fail: failN } : {}),
+      }));
+    } else {
+      // 切 tab 读表：仍同步成功/软成功/失败角标（允许 soft 下降）
+      const doneN = Number(counts.done || 0);
+      const softN = Number(counts.soft || 0);
+      const failN = Number(counts.fail || 0);
+      if (doneN > 0 || softN >= 0 || failN > 0) {
+        setQueueCounts((prev) => ({
+          ...prev,
+          done: doneN > 0 ? doneN : Number(prev.done || 0),
+          soft: softN,
+          fail: failN > 0 ? failN : Number(prev.fail || 0),
+        }));
         setListTotals((prev) => ({
           ...prev,
           ...(doneN > 0 ? { done: doneN } : {}),
-          ...(softN > 0 ? { soft: softN } : {}),
+          soft: softN,
           ...(failN > 0 ? { fail: failN } : {}),
         }));
       }
     }
     const curTab = data.cacheTab || tabRef.current;
     if (typeof data.total === 'number' && Number.isFinite(data.total)) {
-      setListTotals((prev) => ({
-        ...prev,
-        [curTab]: Math.max(0, Math.floor(Number(data.total) || 0)),
-      }));
+      const listed = Math.max(0, Math.floor(Number(data.total) || 0));
+      setListTotals((prev) => {
+        if (curTab !== 'pending') {
+          return { ...prev, [curTab]: listed };
+        }
+        // 未处理 total 以本次接口为准；丢掉明显虚高的旧缓存
+        const cached = Number(pendingTotalRef.current || 0);
+        const prevN = Number(prev.pending || 0);
+        let floor = listed;
+        for (const n of [cached, prevN]) {
+          if (n <= 0 || listed <= 0) continue;
+          const ratio = n / listed;
+          if (ratio >= 0.85 && ratio <= 1.25) {
+            floor = Math.max(floor, n);
+          }
+        }
+        if (listed > 0 && (cached <= 0 || cached / listed > 1.25)) {
+          pendingTotalRef.current = listed;
+          writeCachedPendingTotal(regionId, listed);
+        }
+        return { ...prev, pending: floor };
+      });
     }
     const noMid =
       !st?.running ||
@@ -1143,9 +1263,24 @@ export function EnrichLivePanel({
     ) {
       const c = data.counts;
       const pendingFromServer = Number(c.pending || 0);
+      // 服务端估算为准；仅当本地缓存略大（扫描中）时保留，避免旧虚高卡死角标
+      const cached = pendingTotalRef.current || 0;
+      let pending = pendingFromServer;
+      if (cached > 0 && pendingFromServer > 0) {
+        const ratio = cached / pendingFromServer;
+        if (ratio >= 0.85 && ratio <= 1.25) {
+          pending = Math.max(pendingFromServer, cached);
+        } else {
+          pending = pendingFromServer;
+          pendingTotalRef.current = pendingFromServer;
+          writeCachedPendingTotal(regionId, pendingFromServer);
+        }
+      } else if (pendingFromServer > 0) {
+        pendingTotalRef.current = pendingFromServer;
+        writeCachedPendingTotal(regionId, pendingFromServer);
+      }
       setQueueCounts({
-        // 未处理全量优先用扫描缓存；读表样例数不能盖掉
-        pending: Math.max(pendingFromServer, pendingTotalRef.current || 0),
+        pending,
         running: Number(c.running || 0),
         done: Number(c.done || 0),
         soft: Number(c.soft || 0),
@@ -1158,20 +1293,27 @@ export function EnrichLivePanel({
     if (logsCleared) return;
     const seq = ++loadSeqRef.current;
     const pageSafe = Math.max(1, Math.floor(page || 1));
-    const data = await getScrapLibraryEnrichQueueLog({
-      region: regionId,
-      status,
-      limit: QUEUE_PAGE_SIZE,
-      offset: (pageSafe - 1) * QUEUE_PAGE_SIZE,
-    });
-    if (seq !== loadSeqRef.current) return;
-    applyQueuePayload({
-      ...data,
-      cacheTab: status,
-      updateCounts: false,
-      page: pageSafe,
-      pendingTotal: pendingTotalRef.current || readCachedPendingTotal(regionId),
-    });
+    queueHydratingRef.current = true;
+    try {
+      const data = await getScrapLibraryEnrichQueueLog({
+        region: regionId,
+        status,
+        limit: QUEUE_PAGE_SIZE,
+        offset: (pageSafe - 1) * QUEUE_PAGE_SIZE,
+      });
+      if (seq !== loadSeqRef.current) return;
+      applyQueuePayload({
+        ...data,
+        cacheTab: status,
+        updateCounts: false,
+        page: pageSafe,
+        pendingTotal: pendingTotalRef.current || readCachedPendingTotal(regionId),
+      });
+    } finally {
+      if (seq === loadSeqRef.current) {
+        queueHydratingRef.current = false;
+      }
+    }
   }
 
   function goQueuePage(next: number) {
@@ -1188,6 +1330,8 @@ export function EnrichLivePanel({
     setCodeQuery('');
     setSearchItems([]);
     setSearching(false);
+    setSelectedKey(null);
+    setDbDetail(null);
   }
 
   async function runCodeSearch(raw?: string) {
@@ -1203,6 +1347,7 @@ export function EnrichLivePanel({
     setSearchCode(q);
     setCodeQuery(q);
     setSelectedKey(null);
+    setDbDetail(null);
     // 先用各 tab 缓存做即时预览（仍无视当前 tab）
     const localHits: ScrapLibraryEnrichQueueItem[] = [];
     const seen = new Set<string>();
@@ -1263,7 +1408,7 @@ export function EnrichLivePanel({
       const soft = Number(scanned.counts?.soft || scanned.localSoft || 0);
       const fail = Number(scanned.counts?.fail || scanned.localFail || 0);
       setMsg(
-        `已扫描本地 · 未处理 ${n.toLocaleString()} · 成功 ${done.toLocaleString()} · 软成功 ${soft.toLocaleString()} · 失败 ${fail.toLocaleString()}（分类列表已全量写入，可翻页）`,
+        `已扫描本地 · 未处理 ${n.toLocaleString()} · 成功 ${done.toLocaleString()} · 软成功 ${soft.toLocaleString()} · 失败 ${fail.toLocaleString()}（分类全量可翻页；未处理按全量虚拟翻页）`,
       );
       return true;
     } catch (e) {
@@ -1321,10 +1466,35 @@ export function EnrichLivePanel({
         if (hasRows || enrichLiveBootstrapped.has(regionId)) {
           enrichLiveBootstrapped.add(regionId);
           queueScanDoneRef.current = true;
+          const serverPending = Number(c.pending || 0);
+          // 缓存只允许接近服务端的值；虚高（旧全量补写/双计）直接丢弃
+          let pendingTotal = serverPending;
+          if (serverPending > 0 && cachedPending > 0) {
+            const ratio = cachedPending / serverPending;
+            if (ratio >= 0.85 && ratio <= 1.25) {
+              pendingTotal = Math.max(serverPending, cachedPending);
+            } else {
+              try {
+                sessionStorage.removeItem(pendingTotalStorageKey(regionId));
+              } catch {
+                /* ignore */
+              }
+              pendingTotalRef.current = serverPending;
+              pendingTotal = serverPending;
+            }
+          } else if (serverPending === 0 && cachedPending > 0) {
+            try {
+              sessionStorage.removeItem(pendingTotalStorageKey(regionId));
+            } catch {
+              /* ignore */
+            }
+            pendingTotalRef.current = 0;
+            pendingTotal = 0;
+          }
           applyQueuePayload({
             ...existing,
             page: 1,
-            pendingTotal: cachedPending || Number(c.pending || 0),
+            pendingTotal,
           });
           setQueueScanning(false);
           return;
@@ -1333,16 +1503,22 @@ export function EnrichLivePanel({
         // 空队列：不自动全量扫描（会卡在「扫描未处理…」）
         enrichLiveBootstrapped.add(regionId);
         queueScanDoneRef.current = true;
+        if (cachedPending > 0) {
+          try {
+            sessionStorage.removeItem(pendingTotalStorageKey(regionId));
+          } catch {
+            /* ignore */
+          }
+          pendingTotalRef.current = 0;
+        }
         applyQueuePayload({
           ...existing,
           items: [],
-          pendingTotal: cachedPending || 0,
+          pendingTotal: 0,
         });
         setQueueScanning(false);
         setMsg(
-          cachedPending > 0
-            ? '打开分区开关即可边扫边刮；或点「清空·扫描」按向量骨架排除本地已分类重建队列'
-            : '打开分区开关即可边扫边刮；或点「清空·扫描」按向量骨架生成未处理队列',
+          '打开分区开关即可边扫边刮；或点「清空·扫描」按向量骨架生成未处理队列',
         );
       } catch (e) {
         if (cancelled) return;
@@ -1416,8 +1592,13 @@ export function EnrichLivePanel({
   useEffect(() => {
     let alive = true;
     const ac = new AbortController();
+    let lastUiAt = 0;
+    let pendingData: ScrapLibraryEnrichJobStatus | null = null;
+    let flushTimer: ReturnType<typeof setTimeout> | null = null;
+    const LIVE_UI_GAP_MS = 750;
+    let lastLogTail = '';
 
-    function applyStatus(data: ScrapLibraryEnrichJobStatus) {
+    function applyStatusCore(data: ScrapLibraryEnrichJobStatus) {
       if (!alive) return;
       setSt(data);
       setHydrated(true);
@@ -1461,25 +1642,52 @@ export function EnrichLivePanel({
         if (!sessionLiveRef.current) {
           // 本轮开始：只用内存日志，丢掉历史 200
           sessionLiveRef.current = true;
-          setPersistedLogs(Array.isArray(live) ? live.slice(-LOG_CAP) : []);
+          const boot = Array.isArray(live) ? live.slice(-LOG_CAP) : [];
+          lastLogTail = boot.length ? boot[boot.length - 1]! : '';
+          setPersistedLogs(boot);
         } else if (!logsCleared && Array.isArray(live) && live.length) {
-          setPersistedLogs((prev) => mergeLogLines(prev, live));
+          const tip = live[live.length - 1] || '';
+          if (tip !== lastLogTail) {
+            lastLogTail = tip;
+            setPersistedLogs((prev) => mergeLogLines(prev, live));
+          }
         }
       } else {
         sessionLiveRef.current = false;
         if (!logsCleared) {
           if (Array.isArray(live) && live.length) {
-            setPersistedLogs((prev) => mergeLogLines(prev, live));
+            const tip = live[live.length - 1] || '';
+            if (tip !== lastLogTail) {
+              lastLogTail = tip;
+              setPersistedLogs((prev) => mergeLogLines(prev, live));
+            }
           }
         } else if (!data.running) {
           if (!live.length) {
+            lastLogTail = '';
             setPersistedLogs([]);
           }
         }
       }
 
       // 运行中对齐本区计数；暂停/结束后「处理中」必须为 0（退回未处理）
-      const qc = data.queueCounts;
+      // 全局 queueCounts 只属于 currentRegion / queueCountsRegion，禁止 FC2 吃有码数字
+      const byRegion = data.regionQueueCounts;
+      const qcRegion = String(
+        data.queueCountsRegion || data.currentRegion || '',
+      ).trim();
+      const regionQc =
+        byRegion && typeof byRegion === 'object'
+          ? byRegion[regionId] ||
+            byRegion[
+              Object.keys(byRegion).find(
+                (k) => k === regionId || k.toLowerCase() === regionId.toLowerCase(),
+              ) || ''
+            ]
+          : null;
+      const qc =
+        regionQc ||
+        (qcRegion && qcRegion === regionId ? data.queueCounts : null);
       const halted =
         data.halt === 'pause' ||
         data.halt === 'stop' ||
@@ -1487,12 +1695,40 @@ export function EnrichLivePanel({
         data.phase === 'stopping' ||
         data.phase === 'stopped' ||
         !data.running;
-      if (qc && (liveHere || halted)) {
+      // 用本区 library.total 纠正串区缓存（曾把有码 12 万写进 FC2 sessionStorage）
+      const libRow =
+        data.library && typeof data.library === 'object'
+          ? data.library[regionId] ||
+            data.library[
+              Object.keys(data.library).find(
+                (k) => k === regionId || k.toLowerCase() === regionId.toLowerCase(),
+              ) || ''
+            ]
+          : null;
+      const libTotal = Number(
+        (libRow as { vectorTotal?: number; total?: number } | null)
+          ?.vectorTotal ??
+          (libRow as { total?: number } | null)?.total ??
+          0,
+      );
+      if (libTotal > 0) {
+        const cached = readCachedPendingTotal(regionId);
+        if (cached > libTotal) {
+          pendingTotalRef.current = 0;
+          try {
+            sessionStorage.removeItem(pendingTotalStorageKey(regionId));
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+      if (qc && (liveHere || (halted && (regionQc || qcRegion === regionId)))) {
         const runN = halted ? 0 : Number(qc.running || 0);
         const statusPending =
           Number(qc.pending || 0) + (halted ? Number(qc.running || 0) : 0);
         // 以服务端为准；勿 Math.max 旧缓存，否则会把历史 12 万钉死在角标上
-        const pendingN = statusPending;
+        const pendingN =
+          libTotal > 0 ? Math.min(statusPending, libTotal) : statusPending;
         if (halted) {
           pendingTotalRef.current = pendingN;
           writeCachedPendingTotal(regionId, pendingN);
@@ -1503,6 +1739,7 @@ export function EnrichLivePanel({
         setQueueCounts((prev) => ({
           pending: pendingN,
           running: runN,
+          // 空闲以服务端为准（软成功升档后 soft 必须能下降）；运行中仍取大防漏计
           done: halted
             ? preferBadge(Number(qc.done || 0), Number(prev.done || 0))
             : Math.max(Number(prev.done || 0), Number(qc.done || 0)),
@@ -1525,43 +1762,140 @@ export function EnrichLivePanel({
           (r) => rowStatus(r.status) === 'running',
         );
         tabCacheRef.current.running = liveRunning;
-        startTransition(() => setQueueItems(liveRunning));
+        // 有 monitor.inflight 时列表走监控行，勿每帧 setQueueItems 打断滚动
+        const monN = Array.isArray(data.monitor?.inflight)
+          ? data.monitor.inflight.length
+          : 0;
+        if (monN <= 0) {
+          startTransition(() => setQueueItems(liveRunning));
+        }
       } else if (
         liveHere &&
         !searchActiveRef.current &&
+        !queueHydratingRef.current &&
+        queuePageRef.current === 1 &&
         (tabRef.current === 'done' ||
           tabRef.current === 'soft' ||
           tabRef.current === 'fail')
       ) {
-        // 新完成的番号插到列表最上；软缺口归入软成功 tab
+        // 成功类 tab：只跟库表 updated_at（最新在上）。
+        // 勿用 data.queue 抽样插顶——工作队列里残留的旧 AARM 会被当成「新项」顶上来。
         const want = tabRef.current;
-        const normalized = (data.queue || []).map(normalizeSoftSuccessRow);
-        const matchWant = (r: ScrapLibraryEnrichQueueItem) => {
-          const st = rowStatus(r.status);
-          if (want === 'fail') return st === 'fail';
-          if (want === 'soft') return st === 'done' && isPartialOk(r);
-          if (want === 'done') return st === 'done' && !isPartialOk(r);
-          return st === want;
-        };
-        // 仅第 1 页做实时插入，避免翻页后列表被冲掉
-        if (queuePageRef.current === 1) {
-          const fresh = normalized.filter(matchWant);
-          if (fresh.length || want === 'fail') {
+        const curRaw = data.current;
+        let shouldReload = false;
+        if (curRaw && typeof curRaw === 'object') {
+          const cur = normalizeSoftSuccessRow(
+            curRaw as ScrapLibraryEnrichQueueItem,
+          );
+          const st = rowStatus(cur.status);
+          const match =
+            (want === 'fail' && st === 'fail') ||
+            (want === 'soft' && st === 'done' && isPartialOk(cur)) ||
+            (want === 'done' && st === 'done' && !isPartialOk(cur));
+          if (match && (cur.code || cur.itemId)) {
+            shouldReload = true;
             setQueueItems((prev) => {
-              const base =
-                want === 'fail'
-                  ? prev
-                      .map(normalizeSoftSuccessRow)
-                      .filter((r) => rowStatus(r.status) === 'fail')
-                  : prev.map(normalizeSoftSuccessRow).filter(matchWant);
-              const seen = new Set(fresh.map((r) => rowKey(r)));
-              const rest = base.filter((r) => !seen.has(rowKey(r)));
-              const next = [...fresh, ...rest].slice(0, QUEUE_PAGE_SIZE);
+              const base = prev.map(normalizeSoftSuccessRow);
+              const key = rowKey(cur);
+              const code = String(cur.code || '')
+                .trim()
+                .toUpperCase();
+              const without = base.filter((r) => {
+                if (rowKey(r) === key) return false;
+                if (
+                  code &&
+                  String(r.code || '')
+                    .trim()
+                    .toUpperCase() === code
+                ) {
+                  return false;
+                }
+                return true;
+              });
+              const next = [cur, ...without].slice(0, QUEUE_PAGE_SIZE);
               tabCacheRef.current[want] = next;
               return next;
             });
           }
         }
+        // 角标上涨也回读（current 有时已被下一号清掉）
+        const badgeDone = Number(qc?.done || 0);
+        const badgeFail = Number(qc?.fail || 0);
+        const badgeSoft = Number(
+          (qc as { soft?: number } | null)?.soft ||
+            resultTabCountRef.current.soft,
+        );
+        const prevBadge = resultTabCountRef.current;
+        if (want === 'soft' && badgeSoft > prevBadge.soft) shouldReload = true;
+        if (want === 'done' && badgeDone > prevBadge.done) shouldReload = true;
+        if (want === 'fail' && badgeFail > prevBadge.fail) shouldReload = true;
+        resultTabCountRef.current = {
+          soft: Math.max(prevBadge.soft, badgeSoft),
+          done: Math.max(prevBadge.done, badgeDone),
+          fail: Math.max(prevBadge.fail, badgeFail),
+        };
+        if (shouldReload) {
+          delete tabCacheRef.current[want];
+          if (resultTabReloadTimerRef.current) {
+            clearTimeout(resultTabReloadTimerRef.current);
+          }
+          const reloadWant = want;
+          resultTabReloadTimerRef.current = setTimeout(() => {
+            resultTabReloadTimerRef.current = null;
+            if (
+              tabRef.current !== reloadWant ||
+              queuePageRef.current !== 1 ||
+              searchActiveRef.current
+            ) {
+              return;
+            }
+            void loadQueueTab(reloadWant, 1);
+          }, 900);
+        }
+      }
+    }
+
+    function applyStatus(data: ScrapLibraryEnrichJobStatus) {
+      if (!alive) return;
+      // 暂停/结束立刻刷；运行中合并到 750ms，避免 monitor 时钟把主线程打满
+      const terminal =
+        !data.running ||
+        data.halt === 'pause' ||
+        data.halt === 'stop' ||
+        data.phase === 'paused' ||
+        data.phase === 'stopping' ||
+        data.phase === 'stopped';
+      if (terminal) {
+        if (flushTimer) {
+          clearTimeout(flushTimer);
+          flushTimer = null;
+        }
+        pendingData = null;
+        lastUiAt = Date.now();
+        applyStatusCore(data);
+        return;
+      }
+      const now = Date.now();
+      pendingData = data;
+      if (now - lastUiAt >= LIVE_UI_GAP_MS) {
+        if (flushTimer) {
+          clearTimeout(flushTimer);
+          flushTimer = null;
+        }
+        lastUiAt = now;
+        pendingData = null;
+        applyStatusCore(data);
+        return;
+      }
+      if (!flushTimer) {
+        flushTimer = setTimeout(() => {
+          flushTimer = null;
+          if (!alive || !pendingData) return;
+          lastUiAt = Date.now();
+          const next = pendingData;
+          pendingData = null;
+          applyStatusCore(next);
+        }, Math.max(80, LIVE_UI_GAP_MS - (now - lastUiAt)));
       }
     }
 
@@ -1587,6 +1921,7 @@ export function EnrichLivePanel({
     return () => {
       alive = false;
       ac.abort();
+      if (flushTimer) clearTimeout(flushTimer);
     };
   }, [regionId, logsCleared]);
 
@@ -1623,7 +1958,7 @@ export function EnrichLivePanel({
   }
 
   async function onRetryFails() {
-    if (retryingFails || clearing) return;
+    if (retryingFails || retryingSofts || clearing) return;
     const failN = Number(queueCounts.fail || 0);
     if (failN <= 0) {
       setMsg('没有失败任务');
@@ -1683,8 +2018,68 @@ export function EnrichLivePanel({
     }
   }
 
+  async function onRetrySofts() {
+    if (retryingSofts || retryingFails || clearing) return;
+    const softN = Number(queueCounts.soft || 0);
+    if (softN <= 0) {
+      setMsg('没有软成功任务');
+      return;
+    }
+    setRetryingSofts(true);
+    setMsg('');
+    try {
+      const data = await retryScrapLibraryEnrichSofts({ region: regionId });
+      const n = Number(data.reopened || 0);
+      const counts = data.counts || {};
+      const nextPending = Number(counts.pending || 0);
+      const nextFail = Number(counts.fail || 0);
+      const nextDone = Number(counts.done || 0);
+      const nextSoft = Number(counts.soft || 0);
+      setQueueCounts({
+        pending: nextPending,
+        running: Number(counts.running || 0),
+        done: nextDone,
+        soft: nextSoft,
+        fail: nextFail,
+      });
+      setListTotals((prev) => ({
+        ...prev,
+        pending: Math.max(nextPending, Number(prev.pending || 0)),
+        soft: nextSoft,
+        done: nextDone,
+        fail: nextFail || prev.fail,
+      }));
+      pendingTotalRef.current = Math.max(pendingTotalRef.current, nextPending);
+      if (nextPending > 0) {
+        writeCachedPendingTotal(regionId, nextPending);
+      }
+      delete tabCacheRef.current.soft;
+      delete tabCacheRef.current.pending;
+      setTabTouched(true);
+      setQueuePage(1);
+      setTab('pending');
+      await loadQueueTab('pending', 1);
+      if (n <= 0) {
+        setMsg('没有可重试的软成功（可能已在未处理中）');
+        onStatus('无软成功可重试', 'mute');
+      } else {
+        const tip = data.injected
+          ? `已重试 ${n.toLocaleString()} 条软成功 · 插入当前任务优先处理`
+          : `已重试 ${n.toLocaleString()} 条软成功 · 已转入未处理（优先）`;
+        setMsg(tip);
+        onStatus(tip, 'ok');
+      }
+    } catch (e) {
+      const text = e instanceof Error ? e.message : '软成功重试失败';
+      setMsg(text);
+      onStatus(text, 'warn');
+    } finally {
+      setRetryingSofts(false);
+    }
+  }
+
   async function onClearAndScan() {
-    if (clearing || queueScanning || retryingFails) return;
+    if (clearing || queueScanning || retryingFails || retryingSofts) return;
     setClearing(true);
     setLogsCleared(true);
     setPersistedLogs([]);
@@ -1799,7 +2194,7 @@ export function EnrichLivePanel({
       const data = await enrichScrapLibraryItem({
         itemId,
         overwrite: true,
-        // 与分区批量一致：只写本地；向量/女优交给「同步向量数据库」
+        // 与分区批量一致：只写本地；元库/向量交给「同步数据库」「数据库向量化」
         syncVector: false,
       });
       const result = data.result || {};
@@ -2099,19 +2494,22 @@ export function EnrichLivePanel({
     setDbDetail(null);
   }, [tab]);
   useEffect(() => {
-    if (!selectedKey) {
-      setDbDetail(null);
-      return;
-    }
-    const pool = [
-      ...queue,
-      ...((st?.queue || []).filter((r) => rowStatus(r.status) === 'running')),
-    ];
-    if (!pool.some((r) => rowKey(r) === selectedKey)) {
+    // selectedKey empty: do not setState — SSE st.queue identity churn
+    // caused Maximum update depth even with functional bailout.
+    // Clear dbDetail wherever selectedKey is cleared.
+    if (!selectedKey) return;
+    const runningFromStatus = (st?.queue || []).filter(
+      (r) => rowStatus(r.status) === 'running',
+    );
+    const inPool =
+      searchItems.some((r) => rowKey(r) === selectedKey) ||
+      queueItems.some((r) => rowKey(r) === selectedKey) ||
+      runningFromStatus.some((r) => rowKey(r) === selectedKey);
+    if (!inPool) {
       setSelectedKey(null);
       setDbDetail(null);
     }
-  }, [queue, selectedKey, st?.queue]);
+  }, [queueItems, searchItems, selectedKey, st?.queue]);
 
   // 成功/失败点进详情：优先用队列表已落库字段；空壳再从向量库补
   useEffect(() => {
@@ -2223,7 +2621,14 @@ export function EnrichLivePanel({
           ? `${selectedDetail.code} · 详情`
           : `${label} · 刮削`
       }
-      onBack={selectedKey ? () => setSelectedKey(null) : onBack}
+      onBack={
+        selectedKey
+          ? () => {
+              setSelectedKey(null);
+              setDbDetail(null);
+            }
+          : onBack
+      }
       scrollKey={
         selectedDetail?.code
           ? `enrich-live-detail-${selectedDetail.code}`
@@ -2258,7 +2663,7 @@ export function EnrichLivePanel({
           <button
             type="button"
             className="makers-manage__probe-btn makers-manage__probe-btn--danger"
-            disabled={clearing || queueScanning || retryingFails}
+            disabled={clearing || queueScanning || retryingFails || retryingSofts}
             onClick={() => void onClearAndScan()}
           >
             {clearing && !queueScanning
@@ -2370,6 +2775,19 @@ export function EnrichLivePanel({
                       return;
                     }
                   }
+                  // 成功类按库表时间排序：刮削中勿用旧缓存（否则 AARM 会钉在顶上）
+                  const live =
+                    Boolean(st?.running) &&
+                    (!st?.currentRegion || st.currentRegion === regionId);
+                  if (
+                    live &&
+                    (next === 'done' || next === 'soft' || next === 'fail')
+                  ) {
+                    delete tabCacheRef.current[next];
+                    setQueueItems([]);
+                    setTab(next);
+                    return;
+                  }
                   const cached = tabCacheRef.current[next];
                   if (cached) {
                     startTransition(() => setQueueItems(cached));
@@ -2408,6 +2826,7 @@ export function EnrichLivePanel({
                 className="makers-manage__probe-btn"
                 disabled={
                   retryingFails ||
+                  retryingSofts ||
                   clearing ||
                   queueScanning
                 }
@@ -2417,6 +2836,26 @@ export function EnrichLivePanel({
               </button>
               <span className="enrich-live__fail-actions-hint">
                 {`将 ${Number(tabCounts.fail || 0).toLocaleString()} 条失败转入未处理优先刮削`}
+              </span>
+            </div>
+          ) : null}
+          {!searchActive && tab === 'soft' && Number(tabCounts.soft || 0) > 0 ? (
+            <div className="enrich-live__fail-actions">
+              <button
+                type="button"
+                className="makers-manage__probe-btn"
+                disabled={
+                  retryingSofts ||
+                  retryingFails ||
+                  clearing ||
+                  queueScanning
+                }
+                onClick={() => void onRetrySofts()}
+              >
+                {retryingSofts ? '重试中…' : '软成功重试'}
+              </button>
+              <span className="enrich-live__fail-actions-hint">
+                {`将 ${Number(tabCounts.soft || 0).toLocaleString()} 条软成功转入未处理优先刮削`}
               </span>
             </div>
           ) : null}
@@ -2656,7 +3095,7 @@ export function EnrichLivePanel({
                 title={scanTip ? '扫描本地软成功…' : '暂无软成功项'}
                 desc={
                   scanTip ||
-                  '本地已有封面和标题、但仍缺剧情/女优等；点「清空·扫描」按磁盘重建'
+                  '本地封面和标题已齐，但仍缺女优或片商；点「清空·扫描」按磁盘重建'
                 }
                 icon={
                   scanTip ? (
@@ -2688,7 +3127,6 @@ export function EnrichLivePanel({
             <div className="enrich-live__body">
               <ul
                 className="settings-group enrich-live__queue"
-                key={`queue-${tab}-${pageShown}`}
               >
                 {filteredQueue.map((row) => (
                   <li key={rowKey(row)}>

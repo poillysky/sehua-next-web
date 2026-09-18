@@ -21,22 +21,43 @@ from .common import (
 )
 
 DEFAULT_BASE = "https://www.caribbeancom.com"
+DEFAULT_BASE_PREMIUM = "https://www.caribbeancompr.com"
 STUDIO = "カリビアンコム"
+STUDIO_PREMIUM = "カリビアンコムプレミアム"
 PLOT_BOILERPLATE = re.compile(
     r"動画詳細ページ|見放題|無修正動画|details?\s*page|sample\s*movie|お楽しみ", re.I
 )
 
 
+def is_carib_premium_code(code: str) -> bool:
+    return bool(re.match(r"^CARIBPR\b", str(code or "").strip(), re.I))
+
+
 def parse_carib_movie_key(code: str) -> str | None:
+    """解析为官网 movie key：`MMDDYY-NNN`（连字符形式）。
+
+    支持 `CARIB-011317-002` / `CARIBPR-011317-002` / `011317_002`。
+    Premium 详情 URL 路径要用下划线，见 `carib_path_key`。
+    """
     raw = str(code or "").strip()
-    m = re.match(r"^CARIB[-_]?(\d{6}-\d{3})$", raw, re.I) or re.match(
-        r"^(\d{6}-\d{3})$", raw
-    )
-    return m.group(1) if m else None
+    m = re.match(
+        r"^(?:CARIBPR|CARIB)[-_]?(\d{6})[-_](\d{3})$", raw, re.I
+    ) or re.match(r"^(\d{6})[-_](\d{3})$", raw)
+    if not m:
+        return None
+    return f"{m.group(1)}-{m.group(2)}"
+
+
+def carib_path_key(key: str, *, premium: bool = False) -> str:
+    """详情路径用 key：普通站连字符，Premium 站下划线。"""
+    k = str(key or "").strip()
+    if premium:
+        return k.replace("-", "_")
+    return k.replace("_", "-")
 
 
 def parse_carib_premiered_from_key(key: str) -> str | None:
-    m = re.match(r"^(\d{2})(\d{2})(\d{2})-\d{3}$", str(key or ""))
+    m = re.match(r"^(\d{2})(\d{2})(\d{2})[-_](\d{3})$", str(key or ""))
     if not m:
         return None
     mm, dd, yy = m.group(1), m.group(2), m.group(3)
@@ -52,9 +73,9 @@ def parse_carib_iso_duration(raw: str) -> int | None:
     return max(1, round(sec / 60)) if sec > 0 else None
 
 
-def carib_detail_url(base: str, key: str) -> str:
-    b = str(base or DEFAULT_BASE).rstrip("/")
-    return f"{b}/moviepages/{key}/index.html"
+def carib_detail_url(base: str, key: str, *, premium: bool = False) -> str:
+    b = str(base or (DEFAULT_BASE_PREMIUM if premium else DEFAULT_BASE)).rstrip("/")
+    return f"{b}/moviepages/{carib_path_key(key, premium=premium)}/index.html"
 
 
 def _carib_spec_map(html: str) -> dict[str, list[str]]:
@@ -98,6 +119,12 @@ def parse_carib_actors(html: str) -> list[str]:
             n = strip_tags(name_el.get_text())
             if n and 2 <= len(n) <= 40 and n not in out:
                 out.append(n)
+        # Premium 站常无 itemprop，女优在 .spec-content a
+        if not out:
+            for a in el.select(".spec-content a"):
+                n = strip_tags(a.get_text())
+                if n and 2 <= len(n) <= 40 and n not in out:
+                    out.append(n)
     return out[:20]
 
 
@@ -184,11 +211,22 @@ def is_carib_detail_html(html: str, key: str) -> bool:
         r"movie-spec", html
     ):
         return False
-    page_id_m = re.search(r'movie_id\\?"\s*:\s*\\?"(\d{6}-\d{3})', html, re.I) or re.search(
-        r"/moviepages/(\d{6}-\d{3})/", html, re.I
-    )
+    # 404 大页也会很长，标题里带 404 直接拒
+    if re.search(r"<title[^>]*>\s*404\b", html, re.I):
+        return False
+    want = carib_path_key(key, premium=False)
+    want_us = carib_path_key(key, premium=True)
+    page_id_m = re.search(
+        r'movie_id\\?"\s*:\s*\\?"(\d{6}[-_]\d{3})', html, re.I
+    ) or re.search(r"/moviepages/(\d{6}[-_]\d{3})/", html, re.I)
     page_id = page_id_m.group(1) if page_id_m else ""
-    return (not page_id) or page_id == key
+    if not page_id:
+        return True
+    pid_norm = page_id.replace("_", "-")
+    return pid_norm in {want, want.replace("_", "-")} or page_id in {
+        want,
+        want_us,
+    }
 
 
 def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: str = "") -> dict:
@@ -197,11 +235,17 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
     if not key:
         raise RuntimeError("番号格式无效")
 
-    base = (base_url or DEFAULT_BASE).rstrip("/")
+    premium = is_carib_premium_code(code)
+    bu = str(base_url or "").strip().rstrip("/")
+    if premium:
+        # 目录默认 caribbeancom.com；Premium 必须走 caribbeancompr + 下划线路径
+        base = bu if "caribbeancompr" in bu.lower() else DEFAULT_BASE_PREMIUM
+    else:
+        base = bu or DEFAULT_BASE
     if not base:
         raise RuntimeError("未配置网站地址")
 
-    detail_url = carib_detail_url(base, key)
+    detail_url = carib_detail_url(base, key, premium=premium)
     try:
         html = fetch_html(
             detail_url, referer=f"{base}/", cookie=cookie or None, source_id="carib"
@@ -213,7 +257,7 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
         raise RuntimeError("未找到")
 
     doc = soup(html)
-    h1 = doc.select_one('h1[itemprop="name"]')
+    h1 = doc.select_one('h1[itemprop="name"]') or doc.select_one("h1")
     title = clean_title(
         strip_tags(h1.get_text() if h1 else "") or pick_og_title(html), code
     )
@@ -223,6 +267,12 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
     actors = parse_carib_actors(html)
     tags = parse_carib_genres(html)
     rows = _carib_spec_map(html)
+    # Premium：标签常在「タグ」spec 链接里，itemprop=genre 可能为空
+    if not tags:
+        for label, vals in rows.items():
+            if re.search(r"タグ|ジャンル|类型|Genre", label, re.I):
+                tags = [v for v in vals if v and len(v) <= 40][:40]
+                break
     series = _first_spec(rows, "シリーズ", "系列") or (
         collect_by_re(html, r"gaDetailEvent\('Series Name',\s*'([^']+)'") or [""]
     )[0]
@@ -247,10 +297,15 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
     rating = parse_carib_rating(html)
     extras = parse_carib_extrafanart(html, detail_url)
 
+    path_key = carib_path_key(key, premium=premium)
     cover = pick_og_image(html) or None
     if not cover:
-        m = re.search(r"/moviepages/[\d-]+/images/l_l\.jpg", html, re.I)
-        cover = m.group(0) if m else f"/moviepages/{key}/images/l_l.jpg"
+        m = re.search(
+            rf"/moviepages/{re.escape(path_key)}/images/(?:l_l|l_hd|main)\.jpg",
+            html,
+            re.I,
+        ) or re.search(r"/moviepages/[\d_-]+/images/l_l\.jpg", html, re.I)
+        cover = m.group(0) if m else f"/moviepages/{path_key}/images/l_l.jpg"
     cover = abs_url(cover, detail_url) or cover
     if cover and is_junk_cover_url(cover):
         cover = None
@@ -270,12 +325,16 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
     if rating:
         extra.update(rating)
 
+    code_u = str(code or "").strip().upper()
+    if not code_u:
+        code_u = f"{'CARIBPR' if premium else 'CARIB'}-{key}"
+
     return make_detail(
         source="carib",
-        code=str(code or "").strip().upper() or f"CARIB-{key}",
+        code=code_u,
         title=title or None,
         poster=cover,
-        studio=STUDIO,
+        studio=STUDIO_PREMIUM if premium else STUDIO,
         actors=actors,
         tags=tags,
         overview=plot or None,

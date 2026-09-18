@@ -29,7 +29,7 @@ import { SoftImg } from '@/components/SoftImg';
 import { useTabNavigation } from '@/shell';
 import { useOverlay } from '@/components/overlay/OverlayContext';
 import { writeP115AttachSubs } from '@/lib/p115AttachSubs';
-import { openMakerHomeSearch } from './makersUi';
+import { openMakerHomeSearch, isCensoredRightCropRegion, stripTitleCodePrefix } from './makersUi';
 import { isScrapFavorite, toggleScrapFavorite, ensureScrapFavoritesLoaded } from './scrapFavorites';
 import { parseScrapSourceText } from './scrapSourceMeta';
 import { ScrapPosterCard } from './ScrapPosterCard';
@@ -227,16 +227,7 @@ export function ScrapDetailBody({
   const code = String(item.code || meta.code || '').trim();
   const title = String(item.title || meta.title || '').trim();
   const originalTitle = String(meta.originalTitle || '').trim();
-  const stripCodePrefix = (raw: string) => {
-    const s = raw.trim();
-    if (!s || !code) return s;
-    return s
-      .replace(
-        new RegExp(`^${code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*`, 'i'),
-        '',
-      )
-      .trim();
-  };
+  const stripCodePrefix = (raw: string) => stripTitleCodePrefix(raw, code);
   const titleZhOrJa = (() => {
     const a = stripCodePrefix(title);
     const b = stripCodePrefix(originalTitle);
@@ -292,6 +283,9 @@ export function ScrapDetailBody({
     coverUrl: item.coverUrl,
     itemId: item.itemId,
     ...SCRAP_DETAIL_COVER_OPTS,
+    rp: isCensoredRightCropRegion(
+      item.region || item.relPath || item.posterApi,
+    ),
   });
   const poster = posterRaw
     ? `${posterRaw}${posterRaw.includes('?') ? '&' : '?'}v=${coverRev || 0}`
@@ -506,8 +500,9 @@ export function ScrapDetailBody({
 
   function onSearch() {
     const region = String(regionProp || item.region || '').trim();
+    const prefix = String(item.prefix || meta.prefix || '').trim();
     const ok = openMakerHomeSearch(
-      { code, title, id: item.itemId, region },
+      { code, title, id: item.itemId, region, prefix },
       tabCtx?.scrollToTab,
     );
     if (!ok) toast('没有可用的番号用于搜索', 'error');
@@ -1015,6 +1010,12 @@ export function ScrapDetailBody({
                 <ScrapPosterCard
                   key={String(row.itemId || row.code)}
                   item={row}
+                  rightCrop={isCensoredRightCropRegion(
+                    row.region ||
+                      row.relPath ||
+                      item.region ||
+                      item.relPath,
+                  )}
                   onClick={() => onOpenRelated?.(row)}
                 />
               ))}

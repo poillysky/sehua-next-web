@@ -368,6 +368,17 @@ ENRICH_DETAIL_PROVIDERS: dict[str, str] = {
     "lulubar": "lulubar",
     "avsox": "avsox",
     "carib": "carib",
+    "10musume": "10musume",
+    "heyzo": "heyzo",
+    "1pondo": "1pondo",
+    "pacopacomama": "pacopacomama",
+    "kin8": "kin8",
+    "h0930": "h0930",
+    "h4610": "h4610",
+    "c0930": "c0930",
+    "tokyohot": "tokyohot",
+    "nyoshin": "nyoshin",
+    "heydouga": "heydouga",
     "fc2": "fc2",
     "fd2ppv": "fd2ppv",
     "madou": "madou",
@@ -378,12 +389,11 @@ ENRICH_DETAIL_PROVIDERS: dict[str, str] = {
     "avheat": "avheat",
 }
 
-# 七区 → 可用数据源分组（仅开关打开的源会参与级联）
-# 有码/写真/素人/无码 → 有码 AV + 无码 AV + 综合
+# 六区 → 可用数据源分组（仅开关打开的源会参与级联）
+# 有码/素人/无码 → 有码 AV + 无码 AV + 综合（原写真并入有码）
 # FC2 → FC2 + 综合；国产 → 国产 + 综合；欧美 → 欧美 + 综合
 REGION_ENRICH_GROUPS: dict[str, tuple[str, ...]] = {
     "japan_censored": ("av", "uncensored", "general"),
-    "japan_gravure": ("av", "uncensored", "general"),
     "japan_amateur": ("av", "uncensored", "general"),
     "japan_uncensored": ("av", "uncensored", "general"),
     "fc2": ("fc2", "general"),
@@ -393,7 +403,7 @@ REGION_ENRICH_GROUPS: dict[str, tuple[str, ...]] = {
 
 
 def resolve_enrich_region_id(region: str | None) -> str | None:
-    """刮削库 region / 七区 id / 中文标签 → 稳定七区 id。"""
+    """刮削库 region / 六区 id / 中文标签 → 稳定六区 id。"""
     from app.core.region_meta import REGION_META, resolve_fs_region
 
     raw = str(region or "").strip()
@@ -406,8 +416,10 @@ def resolve_enrich_region_id(region: str | None) -> str | None:
     aliases = {
         "有码": "japan_censored",
         "日本有码": "japan_censored",
-        "写真": "japan_gravure",
-        "日本写真": "japan_gravure",
+        "写真": "japan_censored",
+        "日本写真": "japan_censored",
+        "japan_gravure": "japan_censored",
+        "gravure": "japan_censored",
         "素人": "japan_amateur",
         "日本素人": "japan_amateur",
         "无码": "japan_uncensored",
@@ -417,6 +429,8 @@ def resolve_enrich_region_id(region: str | None) -> str | None:
         "欧美": "western",
         "欧美无码": "western",
         "fc2": "fc2",
+        "fc2_ppv": "fc2",
+        "FC2-PPV 番号": "fc2",
     }
     if raw in aliases:
         return aliases[raw]
@@ -482,11 +496,12 @@ def effective_display_url(
     return ""
 
 
-def enabled_enrich_sources(*, region: str = "") -> list[dict[str, Any]]:
-    """刮削池 =（番号类型全局有序源 ∪ 字段优先级源）∩ 已启用 ∩ 有详情。
+def enabled_enrich_sources(*, region: str = "", code: str = "") -> list[dict[str, Any]]:
+    """刮削池 = regionSources（∪ 有码区 fieldPriority 追加源）∩ 已启用 ∩ 有详情。
 
-    - regionSources：主列表，顺序即发车/合并全局序
-    - fieldPriority：字段偏好站若不在全局列表，仍追加进池（否则配置了也刮不到）
+    - regionSources：主列表，顺序即发车/合并全局序（各区「优先级设置(全局)」）
+    - fieldPriority：**仅 japan_censored** 把字段偏好站追加进池；其它区只看全局分区源
+    - 无码：番号命中前缀时，把官网专用站插到兜底链最前（专用站不进 UI 配置）
     - 数据源总开关关闭：不进池
     """
     rid = resolve_enrich_region_id(region)
@@ -510,24 +525,42 @@ def enabled_enrich_sources(*, region: str = "") -> list[dict[str, Any]]:
         except Exception:
             ordered_ids = []
 
-    # 字段优先级里多出来的站：接到全局列表后，保证能被刮到
-    extra_field_ids: list[str] = []
-    try:
-        fp = strategy_cfg.get("fieldPriority") or {}
-        if isinstance(fp, dict):
-            seen_ord = {catalog.canonicalize_id(s) for s in ordered_ids}
-            seen_extra: set[str] = set()
-            for sites in fp.values():
-                if not isinstance(sites, list):
+    # 无码：按番号前缀注入官网专用站（在通用兜底之前）
+    if rid == "japan_uncensored" and code and strat is not None:
+        try:
+            official = list(strat.uncensored_official_for_code(code) or [])
+        except Exception:  # noqa: BLE001
+            official = []
+        if official:
+            seen_pre: set[str] = set()
+            merged: list[str] = []
+            for raw_sid in list(official) + list(ordered_ids):
+                sid = catalog.canonicalize_id(str(raw_sid or ""))
+                if not sid or sid in seen_pre:
                     continue
-                for raw in sites:
-                    sid = catalog.canonicalize_id(str(raw or ""))
-                    if not sid or sid in seen_ord or sid in seen_extra:
+                seen_pre.add(sid)
+                merged.append(sid)
+            ordered_ids = merged
+
+    # 字段优先级追加源：只对有码区生效（无码/素人/FC2…只看全局分区源）
+    extra_field_ids: list[str] = []
+    if rid == "japan_censored":
+        try:
+            fp = strategy_cfg.get("fieldPriority") or {}
+            if isinstance(fp, dict):
+                seen_ord = {catalog.canonicalize_id(s) for s in ordered_ids}
+                seen_extra: set[str] = set()
+                for sites in fp.values():
+                    if not isinstance(sites, list):
                         continue
-                    seen_extra.add(sid)
-                    extra_field_ids.append(sid)
-    except Exception:
-        extra_field_ids = []
+                    for raw in sites:
+                        sid = catalog.canonicalize_id(str(raw or ""))
+                        if not sid or sid in seen_ord or sid in seen_extra:
+                            continue
+                        seen_extra.add(sid)
+                        extra_field_ids.append(sid)
+        except Exception:
+            extra_field_ids = []
 
     def _row(sid: str, meta: dict[str, Any]) -> dict[str, Any] | None:
         detail_key = ENRICH_DETAIL_PROVIDERS.get(sid)
@@ -692,6 +725,7 @@ _PROBE_MARKERS: dict[str, tuple[str, str]] = {
     "lulubar": ("lulubar", "lulu"),
     "avsox": ("avsox", "avsox"),
     "carib": ("caribbean", "caribbean"),
+    "10musume": ("10musume", "musume"),
     "fc2": ("fc2.com", "fc2"),
     "fd2ppv": ("fd2ppv", "fd2"),
     "madou": ("madou", "madou"),

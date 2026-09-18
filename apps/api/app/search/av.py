@@ -651,10 +651,41 @@ def _search_prefix_heads(keyword: str, head: str) -> list[str]:
     return out
 
 
+def _fc2_id_digits(parts: list[str], shape: str) -> str:
+    """FC2 / FC2-PPV parts → 数字 id。"""
+    if shape == "fc2ppv" and len(parts) >= 3 and str(parts[-1]).isdigit():
+        return str(parts[-1])
+    if shape == "fc2" and len(parts) >= 2 and str(parts[-1]).isdigit():
+        return str(parts[-1])
+    if parts and str(parts[-1]).isdigit():
+        return str(parts[-1])
+    return ""
+
+
 def _part_lists_for_search(keyword: str, parts: list[str], shape: str) -> list[list[str]]:
-    """同一番号的多套 parts（前缀别名 / TOKYOHOT 有无 N）。"""
+    """同一番号的多套 parts（前缀别名 / TOKYOHOT 有无 N / FC2↔PPV）。"""
     if not parts:
         return []
+
+    # 色花堂帖题常混写 FC2-123 与 FC2-PPV-123：搜任一都要能命中另一
+    if shape in {"fc2", "fc2ppv"}:
+        digits = _fc2_id_digits(parts, shape)
+        if digits:
+            variants = (
+                [["FC2", digits], ["FC2", "PPV", digits]]
+                if shape == "fc2"
+                else [["FC2", "PPV", digits], ["FC2", digits]]
+            )
+            out: list[list[str]] = []
+            seen: set[tuple[str, ...]] = set()
+            for row in variants:
+                key = tuple(row)
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(row)
+            return out
+
     head, *tail = parts
     heads = _search_prefix_heads(keyword, head)
     if not heads:
@@ -667,8 +698,8 @@ def _part_lists_for_search(keyword: str, parts: list[str], shape: str) -> list[l
         if dig.isdigit():
             bodies = [[f"N{dig}"], [dig]]
 
-    out: list[list[str]] = []
-    seen: set[tuple[str, ...]] = set()
+    out = []
+    seen = set()
     for h in heads:
         for body in bodies:
             row = [h, *body]

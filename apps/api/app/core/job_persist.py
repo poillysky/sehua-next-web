@@ -17,6 +17,7 @@ ENRICH_RUNTIME_KEY = "scrap.enrich.runtime"
 EMBED_JOB_KEY = "scrap.embed.job"
 ACTRESS_AVATAR_JOB_KEY = "scrap.actress_avatar.job"
 ACTRESS_OPTIMIZE_JOB_KEY = "scrap.actress_optimize.job"
+NFO_OPTIMIZE_JOB_KEY = "scrap.nfo_optimize.job"
 STRM_SYNC_JOB_KEY = "prefix.strm_sync.job"
 LOCAL_INDEX_JOB_KEY = "prefix.local_index.job"
 

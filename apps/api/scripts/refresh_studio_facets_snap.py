@@ -16,7 +16,6 @@ from app.scrap_library.studio_display_names import resolve_studio_for_prefix  # 
 def main() -> None:
     for rid in (
         "japan_censored",
-        "japan_gravure",
         "japan_uncensored",
         "japan_amateur",
         "fc2",

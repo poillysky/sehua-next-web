@@ -259,7 +259,7 @@ def load_kind_maps() -> dict[str, str]:
             ROOT / "apps/maps/makers/av-makers.japan.json",
             {
                 "有码": "japan_censored",
-                "写真": "japan_gravure",
+                "写真": "japan_censored",
                 "无码": "japan_uncensored",
                 "素人": "japan_amateur",
                 "FC2": "fc2",

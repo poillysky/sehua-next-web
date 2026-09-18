@@ -5,6 +5,7 @@
 1. 准度：拒年份伪流水 / FC2 过长 ID；写回前用 robust_serial_max 砍离群
 2. 补缺：素人数字头别名（406FCDSS←FCDSS）；长前缀走 extract；同前缀多区都写
 3. 未命中分类写入报告，不按前缀 SQL
+4. 写回：与旧 codes 取并集再去脏；本轮 0 命中不清空旧番号（减少误删）
 """
 
 from __future__ import annotations
@@ -179,7 +180,11 @@ JAPAN_CTX_RE = re.compile(
 # 明确归属：扫描时只写入该区（另一区需靠语境命中才写）
 PREFIX_HOME_REGION = {
     "MDS": "japan_censored",  # 宇宙企画；国产线是 MDSR
+    "MKY": "japan_censored",  # 有码 MOODYZ；国产麻豆撞前缀，语境不清默认有码
 }
+
+# 本轮扫描：MKY 语境不清却默认写入有码的番号（人工抽查）
+_mky_collision_suspects: set[str] = set()
 
 
 def guess_code_regions(
@@ -202,6 +207,10 @@ def guess_code_regions(
         out = [r for r in candidate_regions if r != "china"]
     elif home and home in candidate_regions:
         out = [home]
+        # MKY 撞名：语境不清走默认有码时打嫌疑标记
+        if key == "MKY" and home == "japan_censored" and not china_hit and not japan_hit:
+            # 调用方在 ingest 里按 code 登记；此处只返回区
+            pass
     else:
         # 写真/有码双挂（REBD 等）两侧都保留；有码+国产冲突默认只写非 china
         if "china" in candidate_regions and any(
@@ -266,7 +275,17 @@ def ingest_line(
         if shape in {"western_date", "western_ep"} and not accept_western_code(c):
             return
         key = clean_prefix(pref)
-        regs = guess_code_regions(text, key, prefix_regions.get(key) or ["*"])
+        cand = prefix_regions.get(key) or ["*"]
+        regs = guess_code_regions(text, key, cand)
+        # MKY 撞名：语境不清默认有码 → 嫌疑标记
+        if (
+            key == "MKY"
+            and "japan_censored" in regs
+            and "china" in cand
+            and not CHINA_CTX_RE.search(text or "")
+            and not JAPAN_CTX_RE.search(text or "")
+        ):
+            _mky_collision_suspects.add(c)
         slot = bucket[key]
         for rid in regs:
             slot[rid].add(c)
@@ -504,8 +523,25 @@ def _fetch_sehua_texts() -> list[str]:
 
 
 def _fetch_bitmagnet_texts(table: str, col: str, lim: int) -> list[str]:
+    # torrents 全表 310 万+，真正进过内容解析的在 torrent_contents（约 290 万）。
+    # content 表只有元数据几万行，不当主扫描源。
+    if table == "torrent_contents":
+        brows = bitmagnet_pg.query(
+            f"""
+            SELECT COALESCE(t.name, '') AS txt
+            FROM torrent_contents tc
+            JOIN torrents t ON t.info_hash = tc.info_hash
+            WHERE COALESCE(t.name, '') <> ''
+            LIMIT {int(lim)}
+            """,
+            statement_timeout_ms=600_000,
+        )
+        return [str(row.get("txt") or "") for row in brows if row.get("txt")]
+
+    timeout_ms = 600_000 if str(table) == "torrents" else 120_000
     brows = bitmagnet_pg.query(
-        f'SELECT COALESCE("{col}",\'\') AS txt FROM "{table}" LIMIT {int(lim)}'
+        f'SELECT COALESCE("{col}",\'\') AS txt FROM "{table}" LIMIT {int(lim)}',
+        statement_timeout_ms=timeout_ms,
     )
     return [str(row.get("txt") or "") for row in brows if row.get("txt")]
 
@@ -616,19 +652,14 @@ def scan_all(
 
     bucket: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
     bit_sources = (
-        ("torrents", "name", 2_000_000),
-        ("content", "title", 200_000),
-        ("content", "original_title", 200_000),
+        # 真正解析过的种子 ≈ torrent_contents（约 290 万），join torrents.name
+        ("torrent_contents", "name", 3_200_000),
     )
 
     emit("色花堂查询中…", stage="sehua", percent=2)
-    # 色花查询与 Bitmagnet 三路查询并行，缩短总等待
-    with ThreadPoolExecutor(max_workers=4) as io_pool:
+    # Bitmagnet 大表勿与色花同抢 IO（易超时被整路跳过）
+    with ThreadPoolExecutor(max_workers=2) as io_pool:
         sehua_fut = io_pool.submit(_fetch_sehua_texts)
-        bit_futs = {
-            io_pool.submit(_fetch_bitmagnet_texts, table, col, lim): (table, col, lim)
-            for table, col, lim in bit_sources
-        }
         try:
             sehua_texts = sehua_fut.result()
         except Exception as e:  # noqa: BLE001
@@ -663,6 +694,10 @@ def scan_all(
 
         emit("Bitmagnet 扫描中…", stage="bitmagnet", percent=72)
         bit_n = 0
+        bit_futs = {
+            io_pool.submit(_fetch_bitmagnet_texts, table, col, lim): (table, col, lim)
+            for table, col, lim in bit_sources
+        }
         # 按完成顺序处理，谁先查完谁先解析
         pending = dict(bit_futs)
         src_total = len(pending)
@@ -759,6 +794,8 @@ def run_local_db_index(on_progress: Callable[[Any], None] | None = None) -> dict
             print(phase, flush=True)
 
     emit("加载目录…", stage="prepare", percent=1)
+    global _mky_collision_suspects
+    _mky_collision_suspects = set()
     doc = store.load_catalog(force=True)
     # 回填每个前缀的 code_read（缺失则推断）
     for rid in REGION_ORDER:
@@ -819,6 +856,7 @@ def run_local_db_index(on_progress: Callable[[Any], None] | None = None) -> dict
 
     emit("写回目录…", stage="write", percent=95)
     updated = cleared = 0
+    kept_miss = 0
     by_region = {rid: {"hit": 0, "codes": 0, "miss": 0} for rid in REGION_ORDER}
     miss_notes = []
 
@@ -831,8 +869,23 @@ def run_local_db_index(on_progress: Callable[[Any], None] | None = None) -> dict
         else:
             for _rid, s in slots.items():
                 raw |= s
+        return sorted(raw, key=code_sort_key)
+
+    def merge_codes(key: str, old_codes: list[Any], scanned: list[str]) -> list[str]:
+        """旧号 ∪ 本轮扫到 → 准度过滤 → 离群裁剪。保留真号，丢掉明显脏号。"""
+        prof = profiles.get(key) or resolve_code_read(key)
+        merged: set[str] = set()
+        for raw in list(old_codes or []) + list(scanned or []):
+            c = str(raw or "").strip().upper()
+            if not c:
+                continue
+            if not accept_std_code(key, c, prof):
+                continue
+            merged.add(c)
+        if not merged:
+            return []
         return sorted(
-            filter_outlier_codes(key, sorted(raw), profiles.get(key)),
+            filter_outlier_codes(key, sorted(merged), prof),
             key=code_sort_key,
         )
 
@@ -840,11 +893,13 @@ def run_local_db_index(on_progress: Callable[[Any], None] | None = None) -> dict
         multi = len(locs) > 1
         prof = profiles.get(key) or resolve_code_read(key)
         for rid, ent in locs:
-            codes = codes_for_region(key, rid, multi)
+            scanned = codes_for_region(key, rid, multi)
             prefs = doc["regions"][rid]["prefixes"]
-            if codes:
+            old_codes = list(ent.get("codes") or [])
+            codes = merge_codes(key, old_codes, scanned)
+            if scanned:
                 serials = codes_to_serials(key, codes)
-                latest = max(codes, key=code_sort_key)
+                latest = max(codes, key=code_sort_key) if codes else ""
                 hint = serials[-1] if serials else 0
                 max_serial = prof.get("max_serial")
                 if max_serial is not None and hint:
@@ -876,36 +931,73 @@ def run_local_db_index(on_progress: Callable[[Any], None] | None = None) -> dict
                     ent["format"] = "FC2-PPV-{num}"
                 elif shape == "fc2":
                     ent["format"] = "FC2-{num}"
+                # MKY 撞名嫌疑：本轮语境不清默认写入有码的番号
+                if key == "MKY" and rid == "japan_censored" and _mky_collision_suspects:
+                    hit = sorted(c for c in codes if c in _mky_collision_suspects)
+                    if hit:
+                        note = str(ent.get("notes") or "")
+                        tag = f"mky_collision_suspect×{len(hit)}"
+                        if "mky_collision_suspect" not in note:
+                            ent["notes"] = (note + " · " + tag).strip(" ·")
+                        else:
+                            ent["notes"] = re.sub(
+                                r"mky_collision_suspect×\d+",
+                                tag,
+                                note,
+                            )
                 prefs[key] = store._normalize_prefix_entry(key, ent)
                 updated += 1
                 by_region[rid]["hit"] += 1
                 by_region[rid]["codes"] += len(codes)
             else:
+                # 本轮 0 命中：保留旧番号，只打 miss 标记（避免误清空真号）
                 ent = dict(ent)
-                ent.update(
-                    {
-                        "codes": [],
-                        "serials": [],
-                        "serial_max_hint": 0,
-                        "latest_code": "",
-                        "code_read": str(prof.get("id") or ent.get("code_read") or ""),
-                        "integrity": "local_db_miss",
-                        "verified_at": store._now(),
-                    }
-                )
+                if old_codes:
+                    kept = merge_codes(key, old_codes, [])
+                    serials = codes_to_serials(key, kept)
+                    ent.update(
+                        {
+                            "codes": kept,
+                            "serials": serials,
+                            "serial_max_hint": serials[-1] if serials else 0,
+                            "latest_code": max(kept, key=code_sort_key) if kept else "",
+                            "code_read": str(
+                                prof.get("id") or ent.get("code_read") or ""
+                            ),
+                            "integrity": "local_db_miss_keep",
+                            "verified_at": store._now(),
+                        }
+                    )
+                    kept_miss += 1
+                    by_region[rid]["codes"] += len(kept)
+                else:
+                    ent.update(
+                        {
+                            "codes": [],
+                            "serials": [],
+                            "serial_max_hint": 0,
+                            "latest_code": "",
+                            "code_read": str(
+                                prof.get("id") or ent.get("code_read") or ""
+                            ),
+                            "integrity": "local_db_miss",
+                            "verified_at": store._now(),
+                        }
+                    )
+                    cleared += 1
                 prefs[key] = store._normalize_prefix_entry(key, ent)
-                cleared += 1
                 by_region[rid]["miss"] += 1
                 miss_notes.append({"region": rid, "prefix": key})
 
     store.save_catalog(doc)
     summary = store.public_summary(doc)
     report = {
-        "mode": "one_pass_v3_parallel",
+        "mode": "one_pass_v3_parallel_merge_keep",
         "sehua_rows": sehua_n,
         "bitmagnet_rows": bit_n,
         "updated": updated,
         "cleared_miss": cleared,
+        "kept_miss": kept_miss,
         "by_region": by_region,
         "misses": miss_notes,
         "summary": summary,
@@ -915,7 +1007,8 @@ def run_local_db_index(on_progress: Callable[[Any], None] | None = None) -> dict
         json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
     emit(
-        f"完成 · 更新 {updated} · 未命中 {cleared} · 番号 {summary.get('code_total')}",
+        f"完成 · 更新 {updated} · 未命中保留 {kept_miss} · 空前缀 {cleared}"
+        f" · 番号 {summary.get('code_total')}",
         stage="done",
         done=updated,
         total=len(want),

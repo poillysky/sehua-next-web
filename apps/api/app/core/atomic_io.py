@@ -41,6 +41,13 @@ def atomic_write_bytes(path: Path, data: bytes) -> None:
             f.write(data)
             f.flush()
             os.fsync(f.fileno())
+        # Windows：杀软偶发在 replace 前删掉 tmp → WinError 2；写一次兜底
+        if not tmp.is_file():
+            with open(tmp, "wb") as f:
+                f.write(data)
+                f.flush()
+                os.fsync(f.fileno())
+        path.parent.mkdir(parents=True, exist_ok=True)
         _atomic_replace(tmp, path)
     finally:
         try:

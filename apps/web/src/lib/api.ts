@@ -1287,6 +1287,7 @@ export type ScrapLibraryEmbedJobStatus = {
     deleted?: number;
     total?: number;
     meta_db?: string;
+    mode?: string;
   } | null;
   error?: string | null;
 };
@@ -1323,13 +1324,19 @@ export async function getScrapLibraryEmbedStatus(): Promise<ScrapLibraryEmbedJob
 export async function startScrapLibraryEmbed(body?: {
   root?: string;
   force?: boolean;
-}): Promise<{ started: boolean }> {
+  /** full=元数据+向量；meta=仅同步数据库；embed=仅向量化 */
+  mode?: 'full' | 'meta' | 'embed';
+}): Promise<{ started: boolean; mode?: string; resumed?: boolean }> {
   const res = await apiFetch('/scrap-library/embed/start', {
     method: 'POST',
     body: JSON.stringify(body || {}),
   });
   if (!res.ok) throw new Error(await parseError(res));
-  return ((await res.json()) as Envelope<{ started: boolean }>).data;
+  return ((await res.json()) as Envelope<{
+    started: boolean;
+    mode?: string;
+    resumed?: boolean;
+  }>).data;
 }
 
 export type ScrapActressOptimizeJobStatus = {
@@ -1369,6 +1376,45 @@ export async function getScrapActressOptimizeStatus(): Promise<ScrapActressOptim
   const res = await apiFetch('/scrap-library/embed/actress-optimize/status');
   if (!res.ok) throw new Error(await parseError(res));
   return ((await res.json()) as Envelope<ScrapActressOptimizeJobStatus>).data;
+}
+
+export type ScrapNfoOptimizeJobStatus = {
+  running: boolean;
+  phase?: string;
+  progress?: PrefixCatalogLocalIndexProgress | null;
+  log?: string[];
+  result?: {
+    ok?: boolean;
+    total?: number;
+    updated?: number;
+    unchanged?: number;
+    errors?: number;
+    maps?: { count?: number; lang?: string };
+    samples?: string[];
+  } | null;
+  error?: string | null;
+};
+
+export async function startScrapNfoOptimize(body?: {
+  force?: boolean;
+  limit?: number;
+}): Promise<{ started: boolean; resumed?: boolean }> {
+  const res = await apiFetch('/scrap-library/embed/nfo-optimize/start', {
+    method: 'POST',
+    body: JSON.stringify({
+      force: Boolean(body?.force),
+      limit: body?.limit ?? 0,
+    }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<{ started: boolean; resumed?: boolean }>)
+    .data;
+}
+
+export async function getScrapNfoOptimizeStatus(): Promise<ScrapNfoOptimizeJobStatus> {
+  const res = await apiFetch('/scrap-library/embed/nfo-optimize/status');
+  if (!res.ok) throw new Error(await parseError(res));
+  return ((await res.json()) as Envelope<ScrapNfoOptimizeJobStatus>).data;
 }
 
 export type ScrapActressAvatarJobStatus = {
@@ -1719,6 +1765,19 @@ export type ScrapLibraryEnrichJobStatus = {
     soft?: number;
     fail?: number;
   };
+  /** 全局 queueCounts 对应的分区（防串区） */
+  queueCountsRegion?: string;
+  /** 各分区独立角标 */
+  regionQueueCounts?: Record<
+    string,
+    {
+      pending?: number;
+      running?: number;
+      done?: number;
+      soft?: number;
+      fail?: number;
+    }
+  >;
   current?: ScrapLibraryEnrichCurrent | null;
   /** 清空·扫描进行中的磁盘分类进度（SSE 边扫边看） */
   queueScan?: {
@@ -1958,8 +2017,13 @@ export async function enrichScrapLibraryItem(opts: {
   ).data;
 }
 
-export async function getScrapLibraryEnrichStatus(): Promise<ScrapLibraryEnrichJobStatus> {
-  const res = await apiFetch('/scrap-library/embed/enrich/status');
+export async function getScrapLibraryEnrichStatus(opts?: {
+  lite?: boolean;
+}): Promise<ScrapLibraryEnrichJobStatus> {
+  const q = new URLSearchParams();
+  if (opts?.lite) q.set('lite', '1');
+  const suffix = q.toString() ? `?${q}` : '';
+  const res = await apiFetch(`/scrap-library/embed/enrich/status${suffix}`);
   if (!res.ok) throw new Error(await parseError(res));
   return ((await res.json()) as Envelope<ScrapLibraryEnrichJobStatus>).data;
 }
@@ -1970,6 +2034,8 @@ export async function subscribeScrapLibraryEnrichStatus(
   opts?: {
     signal?: AbortSignal;
     onError?: (message: string) => void;
+    /** 总览角标：不含 queue，帧更小、更不易卡设置页 */
+    lite?: boolean;
   },
 ): Promise<void> {
   const signal = opts?.signal;
@@ -1979,7 +2045,10 @@ export async function subscribeScrapLibraryEnrichStatus(
   };
   if (signal?.aborted) abortError();
 
-  const res = await apiFetch('/scrap-library/embed/enrich/status/stream', {
+  const q = new URLSearchParams();
+  if (opts?.lite) q.set('lite', '1');
+  const suffix = q.toString() ? `?${q}` : '';
+  const res = await apiFetch(`/scrap-library/embed/enrich/status/stream${suffix}`, {
     signal,
   });
   if (signal?.aborted) abortError();
@@ -2344,6 +2413,47 @@ export async function retryScrapLibraryEnrichFails(opts: {
   ).data;
 }
 
+export async function retryScrapLibraryEnrichSofts(opts: {
+  region: string;
+}): Promise<{
+  ok?: boolean;
+  reopened?: number;
+  region?: string;
+  counts?: {
+    pending?: number;
+    running?: number;
+    done?: number;
+    soft?: number;
+    fail?: number;
+  };
+  injected?: boolean;
+  running?: boolean;
+  error?: string;
+}> {
+  const res = await apiFetch('/scrap-library/embed/enrich/retry-softs', {
+    method: 'POST',
+    body: JSON.stringify({ region: opts.region || '' }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return (
+    (await res.json()) as Envelope<{
+      ok?: boolean;
+      reopened?: number;
+      region?: string;
+      counts?: {
+        pending?: number;
+        running?: number;
+        done?: number;
+        soft?: number;
+        fail?: number;
+      };
+      injected?: boolean;
+      running?: boolean;
+      error?: string;
+    }>
+  ).data;
+}
+
 export type EnrichStrategyMode =
   | 'parallel_all'
   | 'adaptive_first'
@@ -2410,6 +2520,9 @@ export type ScrapEnrichStrategy = {
     coverHint?: string;
   }[];
   regionSourceDefaults?: Record<string, string[]>;
+  /** 无码官网专用站（按前缀自动注入，不进 UI 链） */
+  uncensoredOfficialSources?: string[];
+  uncensoredOfficialHint?: string;
   coverCropOptions?: { id: string; label: string }[];
   coverQualityOptions?: { id: string; label: string }[];
   coverRatioOptions?: { id: string; label: string }[];
@@ -2873,7 +2986,7 @@ export async function listScrapLibraryEmbedFacets(opts?: {
 export async function refreshScrapLibraryEmbedFacetsSnapshot(opts?: {
   region?: string;
   kinds?: Array<'genre' | 'tag' | 'studio' | 'actress' | string>;
-  /** 默认 true：七区全量；false 时仅刷 opts.region */
+  /** 默认 true：六区全量；false 时仅刷 opts.region */
   allRegions?: boolean;
 }): Promise<{
   region: string;
@@ -2906,7 +3019,7 @@ export async function refreshScrapLibraryEmbedFacetsSnapshot(opts?: {
 export async function listScrapLibraryEmbedRecommend(
   _region = '',
 ): Promise<ScrapLibraryEmbedRecommend> {
-  // 推荐页为七区货架，不再按单区过滤
+  // 推荐页为各区货架，不再按单区过滤
   const res = await apiFetch('/scrap-library/embed/recommend');
   if (!res.ok) throw new Error(await parseError(res));
   return ((await res.json()) as Envelope<ScrapLibraryEmbedRecommend>).data;
@@ -3992,12 +4105,13 @@ export async function fetchMediaPersonWorks(opts: {
   return ((await res.json()) as Envelope<MediaPersonWorksResult>).data;
 }
 
-/* —— 片商目录（七区） —— */
+/* —— 片商目录（六区；japan_gravure 为旧写真别名，已并入有码） —— */
 
 export type MakerCatalogSourceId =
   | 'japan_censored'
   | 'japan_uncensored'
   | 'japan_amateur'
+  /** @deprecated 已并入 japan_censored */
   | 'japan_gravure'
   | 'fc2'
   | 'china'
@@ -4241,12 +4355,14 @@ export async function testMakersCatalog(body: {
   };
 }
 
-/* —— 七区前缀/番号目录 —— */
+/* —— 六区前缀/番号目录 —— */
 
 export type PrefixCatalogRegionSummary = {
   id: string;
   label: string;
   prefix_count: number;
+  /** 目录扫描后实际有番号的前缀数（不看本地刮削库） */
+  scrap_prefix_count?: number;
   code_count: number;
 };
 
@@ -4256,6 +4372,8 @@ export type PrefixCatalogSummary = {
   principle?: string;
   regions: PrefixCatalogRegionSummary[];
   prefix_total: number;
+  /** 各区「扫描后有番号的前缀」合计 */
+  scrap_prefix_total?: number;
   code_total: number;
 };
 
@@ -4369,10 +4487,12 @@ export type CatalogEmbedSkeletonResult = {
   skipped?: boolean;
   reason?: string;
   error?: string;
+  mode?: string;
   inserted?: number;
   skipped_existing?: number;
   purged?: number;
   purged_codes?: number;
+  purged_skeletons?: number;
   total?: number;
   pending?: number;
 };
@@ -4424,36 +4544,6 @@ export type PrefixCatalogHarvestStatus = {
   } | null;
   error: string | null;
 };
-
-/** AVWikiDB 厂牌↔前缀同步（回填 maker_ja，并可按已有厂牌扩前缀） */
-export async function startPrefixCatalogAvwikidbSync(opts?: {
-  region?: string;
-  expand?: boolean;
-  minMovieCount?: number;
-  limit?: number;
-  prefixes?: string[];
-}): Promise<{ started: boolean; region: string; mode: string }> {
-  const res = await apiFetch('/prefix-catalog/harvest', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      region: opts?.region || 'japan_censored',
-      mode: 'avwikidb',
-      expand: opts?.expand !== false,
-      min_movie_count: opts?.minMovieCount ?? 5,
-      limit: opts?.limit ?? 0,
-      prefixes: opts?.prefixes || [],
-    }),
-  });
-  if (!res.ok) throw new Error(await parseError(res));
-  return (
-    (await res.json()) as Envelope<{
-      started: boolean;
-      region: string;
-      mode: string;
-    }>
-  ).data;
-}
 
 export async function getPrefixCatalogHarvestStatus(): Promise<PrefixCatalogHarvestStatus> {
   const res = await apiFetch('/prefix-catalog/harvest/status');

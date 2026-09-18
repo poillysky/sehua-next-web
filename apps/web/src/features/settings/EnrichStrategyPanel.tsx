@@ -127,20 +127,28 @@ const REGION_SOURCE_RESTORE: Record<string, string[]> = {
     'avbase',
     'mgstage',
   ],
-  japan_gravure: [
-    'dmm',
-    'libredmm',
-    'r18dev',
-    'javbus',
-    'mgstage',
-    'jav321',
-  ],
-  japan_uncensored: ['carib', 'javbus', 'avbase'],
+  // 无码：仅通用兜底；专用站按前缀内置
+  japan_uncensored: ['avsox', 'javbus', 'airav_io', 'miss_av'],
   japan_amateur: ['mgstage', 'javbus', 'carib', 'airav_io'],
   fc2: ['fc2', 'fd2ppv', 'airav_io'],
   china: ['madouqu', 'madou', 'xiao_huang_shu'],
   western: ['theporndb'],
 };
+
+const UNCENSORED_OFFICIAL_FALLBACK = [
+  'heyzo',
+  '1pondo',
+  'pacopacomama',
+  'carib',
+  '10musume',
+  'kin8',
+  'h0930',
+  'h4610',
+  'c0930',
+  'tokyohot',
+  'nyoshin',
+  'heydouga',
+] as const;
 
 const FIELD_PRIORITY_RESTORE: Record<string, string[]> = {
   title: ['airav_io', 'iqqtv', 'javbus'],
@@ -434,6 +442,15 @@ export function EnrichStrategyPanel({
   }
 
   function toggleRegionSource(regionId: string, sourceId: string) {
+    const official = new Set(
+      (cfg?.uncensoredOfficialSources?.length
+        ? cfg.uncensoredOfficialSources
+        : UNCENSORED_OFFICIAL_FALLBACK
+      ).map((s) => s),
+    );
+    if (regionId === 'japan_uncensored' && official.has(sourceId)) {
+      return;
+    }
     patchAndPersist((prev) => {
       const cur = [...((prev.regionSources || {})[regionId] || [])];
       const i = cur.indexOf(sourceId);
@@ -676,7 +693,8 @@ export function EnrichStrategyPanel({
     const n = Object.values(fp).filter((v) => Array.isArray(v) && v.length > 0)
       .length;
     const total = (cfg.fieldPriorityFields || []).length || 9;
-    return n > 0 ? `${n}/${total} 字段已配` : '未配置 · 用默认链';
+    const base = n > 0 ? `${n}/${total} 字段已配` : '未配置 · 用默认链';
+    return `${base} · 仅有码`;
   })();
   const localMapsHint = (() => {
     if (!cfg) return '…';
@@ -1283,12 +1301,28 @@ export function EnrichStrategyPanel({
       sources.find((s) => s.id === sid)?.label || sid;
     const isOn = (sid: string) =>
       sources.find((s) => s.id === sid)?.enabled !== false;
+    const officialSet = new Set(
+      (cfg.uncensoredOfficialSources?.length
+        ? cfg.uncensoredOfficialSources
+        : UNCENSORED_OFFICIAL_FALLBACK
+      ).map((s) => s),
+    );
+    const visibleChain = (regionId: string, chain: string[]) =>
+      regionId === 'japan_uncensored'
+        ? chain.filter((sid) => !officialSet.has(sid))
+        : chain;
     return (
       <div className="enrich-strategy__rs">
+        <p className="enrich-strategy__rs-note">
+          {cfg.uncensoredOfficialHint ||
+            '无码：专用站按番号前缀自动启用（含 Tokyo Hot / Nyoshin）；此处只排通用兜底站。'}
+        </p>
         <ul className="enrich-strategy__rs-list">
           {regions.map((region) => {
-            const chain =
-              (cfg.regionSources || {})[region.id] || region.sources || [];
+            const chain = visibleChain(
+              region.id,
+              (cfg.regionSources || {})[region.id] || region.sources || [],
+            );
             const open = rsOpen === region.id;
             return (
               <li key={region.id} className="enrich-strategy__rs-row">
@@ -1351,7 +1385,7 @@ export function EnrichStrategyPanel({
                                 }
                               }}
                             >
-                              <X size={11} strokeWidth={2.6} aria-hidden />
+                              <X size={12} strokeWidth={2.4} aria-hidden />
                             </span>
                           </span>
                         ))
@@ -1429,7 +1463,14 @@ export function EnrichStrategyPanel({
                         </div>
                       ))}
                       {sources
-                        .filter((s) => !chain.includes(s.id))
+                        .filter(
+                          (s) =>
+                            !chain.includes(s.id) &&
+                            !(
+                              region.id === 'japan_uncensored' &&
+                              officialSet.has(s.id)
+                            ),
+                        )
                         .map((src) => (
                           <button
                             key={`${region.id}-opt-${src.id}`}
@@ -1529,6 +1570,9 @@ export function EnrichStrategyPanel({
 
     return (
       <div className="enrich-strategy__rs">
+        <p className="enrich-strategy__rs-note settings-nav__desc">
+          仅对有码区生效；无码 / 素人 / FC2 等只看「优先级设置(全局)」分区源。
+        </p>
         <div className="enrich-strategy__rs-toolbar enrich-strategy__rs-toolbar--split">
           <label className="enrich-strategy__rs-hide">
             <span>隐藏未配置</span>
@@ -1973,7 +2017,7 @@ export function EnrichStrategyPanel({
         </ul>
 
         <p className="settings-group-label settings-group-label--spaced">
-          七区封面逻辑
+          六区封面逻辑
         </p>
         <div className="enrich-strategy__cover-regions">
           {regions.map((region) => {

@@ -7,7 +7,8 @@
   - ``<tag>`` 与 ``<genre>`` 镜像（类型 + 前缀 + 女优 + 系列:/片商:/发行:）
   - 不写 actor_all / mosaic / outlineshow / badge 等程序私有节点
 
-解析仍兼容旧程序格式与 MDCx：无 ``<actor>`` 时从 tag/genre 回填女优。
+解析约定：只认 ``<actor>`` / ``actor_all``；**禁止**从 tag/genre 硬套女优。
+无女优则不写女优行 / 不写 ``<actor>``。
 """
 
 from __future__ import annotations
@@ -113,9 +114,12 @@ def _looks_like_actress_token(raw: str, *, code: str = "", studio: str = "") -> 
         return False
     # 已知类型词
     try:
-        from app.scrap_library.enrich import _JUNK_ACTOR_TAGS
+        from app.scrap_library.enrich import _JUNK_ACTOR_TAGS, _JUNK_ACTOR_SUBSTR
 
         if s in _JUNK_ACTOR_TAGS or s.casefold() in _JUNK_ACTOR_TAGS:
+            return False
+        low = s.casefold()
+        if any(p in s or p in low for p in _JUNK_ACTOR_SUBSTR):
             return False
     except Exception:  # noqa: BLE001
         pass
@@ -145,7 +149,42 @@ def _looks_like_actress_token(raw: str, *, code: str = "", studio: str = "") -> 
         "口交",
         "调教",
         "調教",
+        "无套性交",
+        "無套性交",
+        "户外露出",
+        "戶外露出",
+        "熟女人妻",
+        "偶像艺人",
+        "偶像藝人",
+        "按摩棒",
+        "插入手指",
+        "雪白肌肤",
+        "雪白肌膚",
+        "大保健",
+        "主观视角",
+        "主觀視角",
+        "风俗娘",
+        "風俗娘",
+        "ご奉仕",
+        "エロマッサージ",
+        "固定カメラ",
+        "なまハメ",
+        "自拍",
+        "业余",
+        "業餘",
     }:
+        return False
+    # 行为/道具类日文片段
+    if re.search(
+        r"(マッサージ|カメラ|ハメ|プレイ|オナニー|フェラ|中出し|騎乗)",
+        s,
+    ):
+        return False
+    # 行为类中文片段
+    if re.search(
+        r"(性交|插入|按摩|露出|视角|視角|保健|肌肤|肌膚|手指|无套|無套|中出|骑乘|騎乘|自拍|舔阴|舔陰)",
+        s,
+    ):
         return False
     # 类型复合：出轨/NTR、痴女/OL
     if "/" in s or "|" in s or "／" in s:
@@ -158,6 +197,12 @@ def _looks_like_actress_token(raw: str, *, code: str = "", studio: str = "") -> 
     han_only = re.fullmatch(r"[\u3400-\u9fff]{2,}", s)
     if han_only and len(s) <= 2 and not has_kana:
         return False
+    # 纯汉字 3～4 字题材词仍偏类型（无套性交/户外露出）；真名多带・或假名
+    if han_only and len(s) <= 4 and not has_kana and "・" not in s and "·" not in s:
+        # 放行像「三上悠亚」这类 4 字常见艺名形态：末字多为常见名用字且非动宾结构
+        # 保守：无间隔的 3～4 字纯汉字默认不当女优（FC2 误把标签写入 actor）
+        if len(s) <= 3:
+            return False
     # 句段/过长短语不像艺名
     if re.search(r"[がをにはへでも]", s) and len(s) >= 4:
         return False
@@ -174,44 +219,28 @@ def actors_from_mdcx_side_channels(
     code: str = "",
     studio: str = "",
 ) -> list[str]:
-    """MDCx 转入 NFO：女优常在 tag/genre/actor_all，不在 ``<actor>``。"""
+    """仅从 ``actor_all`` 取女优（原文保留）；**不再**从 tag/genre 升格。"""
+    del tags, genres, code, studio  # 保留参数兼容旧调用
     out: list[str] = []
     seen: set[str] = set()
-
-    def _push(raw: str) -> None:
+    for raw in actors_all or []:
         s = _WS_RE.sub(" ", str(raw or "").strip())
-        if not s:
-            return
-        # 「片商: NON」整段丢掉；纯名才收
-        if _TAG_META_PREFIX_RE.match(s):
-            return
-        if not _looks_like_actress_token(s, code=code, studio=studio):
-            return
+        if not s or _TAG_META_PREFIX_RE.match(s):
+            continue
         key = s.casefold()
         if key in seen:
-            return
+            continue
         seen.add(key)
         out.append(s)
-
-    for src in (actors_all or [], tags or [], genres or []):
-        for item in src:
-            _push(str(item))
-            if len(out) >= _MAX_LIST:
-                return out
-    # 过滤类型噪声（与 enrich._clean_actors 对齐；失败则原样）
-    try:
-        from app.scrap_library.enrich import _clean_actors
-
-        cleaned = _clean_actors(out)
-        return cleaned[:_MAX_LIST] if cleaned else []
-    except Exception:  # noqa: BLE001
-        return out[:_MAX_LIST]
+        if len(out) >= _MAX_LIST:
+            break
+    return out
 
 
 def parse_nfo(path: Path) -> dict[str, Any]:
     """解析 movie NFO；失败返回空 dict。
 
-    兼容本程序写出与 MDCx 转入：无 ``<actor>`` 时从 tag/genre/actor_all 回填女优。
+    只认 ``<actor>`` / ``actor_all``；无则女优为空（不从 tag/genre 硬套）。
     """
     try:
         raw = path.read_text(encoding="utf-8", errors="replace")
@@ -252,15 +281,22 @@ def parse_nfo(path: Path) -> dict[str, Any]:
     mosaic = _text(root.find("mosaic"))
     outline_show = _text(root.find("outlineshow")) or "zh"
 
-    # MDCx：女优在 tag/genre；标准格式：actor / actor_all
-    if not actors:
-        actors = actors_from_mdcx_side_channels(
-            tags=tags,
-            genres=genres,
-            actors_all=actors_all,
-            code=num,
-            studio=studio,
-        )
+    # 只认 <actor> / actor_all；按 NFO 原文保留，不做 junk 清洗
+    if not actors and actors_all:
+        actors = [str(a).strip() for a in actors_all if str(a).strip()]
+    # 去重保序
+    _seen: set[str] = set()
+    _uniq: list[str] = []
+    for a in actors:
+        s = str(a or "").strip()
+        if not s:
+            continue
+        k = s.casefold()
+        if k in _seen:
+            continue
+        _seen.add(k)
+        _uniq.append(s)
+    actors = _uniq[:_MAX_LIST]
 
     # 女优名从 tag/genre 展示列表里拿掉，避免类型区重复
     actor_fold = {a.casefold() for a in actors}
@@ -327,23 +363,7 @@ def build_nfo_embed_text(
     actors = [str(x).strip() for x in (meta.get("actors") or []) if str(x).strip()]
     genres = [str(x).strip() for x in (meta.get("genres") or []) if str(x).strip()]
     tags = [str(x).strip() for x in (meta.get("tags") or []) if str(x).strip()]
-    # 入库前滤掉类型标签 / 登录页噪声，并映射标准女优名、排除导演
-    try:
-        from app.scrap_library.enrich import _clean_actors
-        from app.scrape.metadata_optimize import polish_actress_names
-
-        actors = _clean_actors(actors)
-        directors: list[str] = []
-        for key in ("director",):
-            d = str(meta.get(key) or "").strip()
-            if d:
-                directors.append(d)
-        actors = polish_actress_names(actors, exclude=directors)
-    except Exception:  # noqa: BLE001
-        pass
-    # 仅排除片商/发行商撞名；类型/标签里常带真名，不能当女优黑名单
-    skip = {studio.casefold(), publisher.casefold()} - {""}
-    actors = [a for a in actors if a.casefold() not in skip]
+    # 女优按 NFO <actor> 原文写入，不清洗、不因撞片商名剔除
 
     lines: list[str] = []
     if region:
@@ -452,38 +472,9 @@ def preserve_actress_line(prev_source: str, new_source: str) -> str:
 def polish_source_text_actresses(
     source_text: str, *, exclude: list[str] | None = None
 ) -> str:
-    """对 source_text 女优行做标准名映射 + 排除导演/男优（刮削/同步自动调用）。"""
-    text = str(source_text or "")
-    if not text or "女优：" not in text:
-        return text
-    try:
-        from app.scrap_library.enrich import _clean_actors
-        from app.scrape.metadata_optimize import polish_actress_names
-    except Exception:  # noqa: BLE001
-        return text
-
-    studio_m = _STUDIO_LINE_RE.search(text)
-    publisher_m = _PUBLISHER_LINE_RE.search(text)
-    ban = {
-        str(x).strip()
-        for x in (exclude or [])
-        if str(x or "").strip()
-    }
-    ban |= {
-        str(studio_m.group(1) if studio_m else "").strip(),
-        str(publisher_m.group(1) if publisher_m else "").strip(),
-    } - {""}
-
-    def _repl(m: re.Match[str]) -> str:
-        parts = [p for p in re.split(r"[\s、,/|]+", m.group(2).strip()) if p.strip()]
-        cleaned = _clean_actors(parts)
-        polished = polish_actress_names(cleaned, exclude=list(ban))
-        if not polished:
-            return ""
-        return f"{m.group(1)}{' '.join(polished[:8])}"
-
-    out = _ACTRESS_LINE_RE.sub(_repl, text)
-    return re.sub(r"\n{2,}", "\n", out).strip()
+    """保留女优行原文（不再 junk 清洗 / 撞名剔除）。``exclude`` 仅兼容旧调用。"""
+    del exclude
+    return str(source_text or "")
 
 
 def item_id_from_rel(rel: str) -> str:
@@ -763,27 +754,19 @@ def fields_from_movie_root(src: ET.Element, *, code_fallback: str = "") -> dict[
         elif kind in {"导演", "導演"} and not director:
             director = val
 
-    actors = list(raw_actors)
-    if not actors:
-        actors = actors_from_mdcx_side_channels(
-            tags=raw_tags,
-            genres=raw_genres,
-            actors_all=raw_actor_all,
-            code=num,
-            studio=studio,
-        )
+    # 按 NFO <actor> / actor_all 原文保留
+    actors = [str(a).strip() for a in raw_actors if str(a).strip()]
     if not actors and raw_actor_all:
-        actors = list(raw_actor_all)
-    try:
-        from app.scrap_library.enrich import _clean_actors
-
-        actors = _clean_actors(actors)
-    except Exception:  # noqa: BLE001
-        actors = [
-            a
-            for a in actors
-            if _looks_like_actress_token(a, code=num, studio=studio)
-        ]
+        actors = [str(a).strip() for a in raw_actor_all if str(a).strip()]
+    _seen_a: set[str] = set()
+    _uniq_a: list[str] = []
+    for a in actors:
+        k = a.casefold()
+        if k in _seen_a:
+            continue
+        _seen_a.add(k)
+        _uniq_a.append(a)
+    actors = _uniq_a[:_MAX_LIST]
 
     # 类型池：原 genre/tag，去掉元数据前缀 / 女优 / 纯前缀（重建时再补）
     actor_fold = {a.casefold() for a in actors}

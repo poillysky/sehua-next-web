@@ -67,117 +67,12 @@ function cleanGenres(raw: string, actresses: string[], prefix: string): string[]
   return out;
 }
 
-/** 站点标签 / UI 文案误入女优行时的防御过滤 */
-const JUNK_ACTRESS = new Set(
-  [
-    '显示更多',
-    '顯示更多',
-    '查看更多',
-    '更多',
-    '巨乳',
-    '美乳',
-    '淫乱',
-    '淫亂',
-    '角色扮演',
-    '原创',
-    '原創',
-    '高清',
-    '高畫質',
-    '高画质',
-    '独家',
-    '獨家',
-    '中出',
-    '中出し',
-    '痴女',
-    '漫改',
-    '剧情',
-    '劇情',
-    '苗条',
-    '苗條',
-    '美少女',
-    '单体作品',
-    '單體作品',
-    '出道',
-    '出道作品',
-    'AV出道',
-    'デビュー',
-    '新人',
-    '收藏',
-    '字幕',
-    '翻译',
-    '翻譯',
-    '绝顶高潮',
-    '絕頂高潮',
-    '其他恋物癖',
-    '其他戀物癖',
-    '羞耻',
-    '羞恥',
-    '羞辱',
-    '打手枪',
-    '打手槍',
-    '强制口交',
-    '強制口交',
-    '打屁股',
-    '玩具',
-    '多P',
-    '3P',
-    '4P',
-    '合集',
-    'VR',
-    '4K',
-    'HD',
-    'UHD',
-    'FC2',
-    'SOD',
-    'M女',
-    '素人',
-    '人妻',
-    '熟女',
-    '制服',
-    '口交',
-    '颜射',
-    '顏射',
-    '内射',
-    '潮吹',
-    '露出',
-    '偷拍',
-    '调教',
-    '調教',
-    '丝袜',
-    '絲襪',
-    '黑丝',
-    '黑絲',
-    '足交',
-    '肛交',
-    '群交',
-    '无套',
-    '無套',
-    '有码',
-    '有碼',
-    '无码',
-    '無碼',
-    '中文',
-    '中文字幕',
-    '免费',
-    '免費',
-    '未知',
-    '暂无',
-    '暫無',
-    'N/A',
-    '女优',
-    '女優',
-  ].map((s) => s.toLowerCase()),
-);
-
-function cleanActresses(raw: string): string[] {
+/** 从女优行拆词：保序去重，不做 junk 过滤（NFO actor 原文即展示） */
+function parseActresses(raw: string): string[] {
   const out: string[] = [];
   for (const token of splitTokens(raw)) {
     const name = token.replace(/\s*[（(][^）)]*[）)]\s*$/, '').trim();
-    if (!name || name.length > 40) continue;
-    if (JUNK_ACTRESS.has(name.toLowerCase())) continue;
-    if (/排行|登入|登录|密码|註冊|注册/i.test(name)) continue;
-    if (/^[A-Z]{2,10}\d{2,}$/i.test(name)) continue;
-    if (/^\d+$/.test(name) || /https?:\/\//i.test(name)) continue;
+    if (!name || name.length > 80) continue;
     if (!out.includes(name)) out.push(name);
   }
   return out;
@@ -185,7 +80,7 @@ function cleanActresses(raw: string): string[] {
 
 export function parseScrapSourceText(sourceText?: string | null): ScrapSourceMeta {
   const text = String(sourceText || '');
-  const actresses = cleanActresses(line(text, 'actress'));
+  const actresses = parseActresses(line(text, 'actress'));
   const prefix = line(text, 'prefix');
   const genreRaw = line(text, 'genre');
   let plot = line(text, 'plot');

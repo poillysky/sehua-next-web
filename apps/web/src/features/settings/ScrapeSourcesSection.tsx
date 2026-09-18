@@ -167,14 +167,7 @@ export function ScrapeSourcesSection({
       setLatency((prev) => ({ ...prev, ...latNext }));
       setProbeNote((prev) => ({ ...prev, ...noteNext }));
       const enabled = (data.sources || []).filter((s) => s.enabled).length;
-      const total = (data.sources || []).length;
-      const probedOk = (data.sources || []).filter(
-        (s) => s.enabled && s.lastProbe?.ok,
-      ).length;
-      onStatus?.(
-        `${enabled}/${total} 启用 · ${probedOk} 最近测通成功`,
-        enabled ? 'ok' : 'warn',
-      );
+      onStatus?.(enabled ? '已就绪' : '未启用', enabled ? 'ok' : 'warn');
     },
     [onStatus],
   );

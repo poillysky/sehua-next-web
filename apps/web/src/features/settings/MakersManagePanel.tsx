@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from 'react';
 import { ChevronRight, Folder, FolderPlus, RefreshCw } from 'lucide-react';
 import {
   browsePrefixCatalogStrmDirs,
-  getPrefixCatalogHarvestStatus,
   getPrefixCatalogLocalIndexStatus,
   getPrefixCatalogPrefixDetail,
   getPrefixCatalogPrefixes,
@@ -14,9 +13,9 @@ import {
   getScrapLibraryEmbedSettings,
   getScrapLibraryEmbedStatus,
   getScrapActressOptimizeStatus,
+  getScrapNfoOptimizeStatus,
   getScrapActressAvatarStatus,
   getScrapLibraryEnrichStatus,
-  subscribeScrapLibraryEnrichStatus,
   pauseScrapLibraryEnrich,
   getScrapLibraryQuality,
   getScrapLibraryQualityGate,
@@ -26,11 +25,11 @@ import {
   mkdirPrefixCatalogStrmDir,
   putPrefixCatalogStrmSyncSettings,
   putScrapLibraryEmbedSettings,
-  startPrefixCatalogAvwikidbSync,
   startPrefixCatalogLocalIndex,
   startPrefixCatalogStrmSync,
   startScrapLibraryEmbed,
   startScrapActressOptimize,
+  startScrapNfoOptimize,
   startScrapActressAvatar,
   startScrapLibraryEnrich,
   type PrefixCatalogLocalIndexProgress,
@@ -42,6 +41,7 @@ import {
   type ScrapLibraryEnrichJobStatus,
   type ScrapLibraryQualityStats,
   type ScrapActressOptimizeJobStatus,
+  type ScrapNfoOptimizeJobStatus,
   type ScrapActressAvatarJobStatus,
 } from '@/lib/api';
 import { MAKER_KIND_TABS } from '@/features/makers/makersUi';
@@ -59,10 +59,10 @@ const CODES_PAGE_SIZE = 50;
 
 type ScanLogModal =
   | 'local'
-  | 'avwikidb'
   | 'strm'
   | 'scrap'
   | 'actress'
+  | 'nfoOpt'
   | 'actressAvatar'
   | 'enrich'
   | { qualityRegion: string; label: string }
@@ -84,6 +84,27 @@ function normalizeEnrichFillMode(
   if (raw === 'overwrite') return 'overwrite';
   if (raw === 'refresh_weak') return 'refresh_weak';
   return 'incremental';
+}
+
+type EnrichRegionRow = { id: string; label: string; enabled: boolean };
+
+/** 六区开关互斥：任一时刻至多一个区为「开」。onId=null 表示六个区全关。 */
+function applyExclusiveRegion(
+  rows: EnrichRegionRow[],
+  onId: string | null,
+): EnrichRegionRow[] {
+  return rows.map((r) => ({ ...r, enabled: Boolean(onId) && r.id === onId }));
+}
+
+/** 与 applyExclusiveRegion 同口径的落库值：只留 onId 为 true。 */
+function exclusiveRegionsEnabled(
+  current: Record<string, boolean> | undefined,
+  onId: string | null,
+): Record<string, boolean> {
+  const out: Record<string, boolean> = {};
+  for (const rid of Object.keys(current || {})) out[rid] = rid === onId;
+  if (onId && !(onId in out)) out[onId] = true;
+  return out;
 }
 
 export function MakersManagePanel({
@@ -121,11 +142,6 @@ export function MakersManagePanel({
   const [localIndexLog, setLocalIndexLog] = useState<string[]>([]);
   const localIndexPollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const localIndexPollingRef = useRef(false);
-  const [avwikiBusy, setAvwikiBusy] = useState(false);
-  const [avwikiPhase, setAvwikiPhase] = useState('');
-  const [avwikiLog, setAvwikiLog] = useState<string[]>([]);
-  const avwikiPollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const avwikiPollingRef = useRef(false);
   const [strmRoot, setStrmRoot] = useState('');
   const [strmBusy, setStrmBusy] = useState(false);
   const [strmPhase, setStrmPhase] = useState('');
@@ -145,6 +161,11 @@ export function MakersManagePanel({
   const [scrapRoot, setScrapRoot] = useState('scrap-library');
   const [scrapBusy, setScrapBusy] = useState(false);
   const [scrapPhase, setScrapPhase] = useState('');
+  /** 当前灌库任务：meta=同步数据库 · embed=向量化 · full=旧合一 */
+  const [scrapJobMode, setScrapJobMode] = useState<
+    'meta' | 'embed' | 'full' | null
+  >(null);
+  const scrapJobModeRef = useRef<'meta' | 'embed' | 'full' | null>(null);
   const [scrapProgress, setScrapProgress] =
     useState<PrefixCatalogLocalIndexProgress | null>(null);
   const [scrapLog, setScrapLog] = useState<string[]>([]);
@@ -157,6 +178,14 @@ export function MakersManagePanel({
   const [actressOptLog, setActressOptLog] = useState<string[]>([]);
   const actressOptPollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const actressOptPollingRef = useRef(false);
+
+  const [nfoOptBusy, setNfoOptBusy] = useState(false);
+  const [nfoOptPhase, setNfoOptPhase] = useState('');
+  const [nfoOptProgress, setNfoOptProgress] =
+    useState<PrefixCatalogLocalIndexProgress | null>(null);
+  const [nfoOptLog, setNfoOptLog] = useState<string[]>([]);
+  const nfoOptPollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const nfoOptPollingRef = useRef(false);
 
   const [actressAvatarBusy, setActressAvatarBusy] = useState(false);
   const [actressAvatarPhase, setActressAvatarPhase] = useState('');
@@ -195,6 +224,18 @@ export function MakersManagePanel({
     soft: number;
     fail: number;
   } | null>(null);
+  const [enrichRegionQueueCounts, setEnrichRegionQueueCounts] = useState<
+    Record<
+      string,
+      {
+        pending: number;
+        running: number;
+        done: number;
+        soft: number;
+        fail: number;
+      }
+    >
+  >({});
   const [enrichLibrary, setEnrichLibrary] = useState<
     Record<
       string,
@@ -209,9 +250,7 @@ export function MakersManagePanel({
   const [enrichMode, setEnrichMode] = useState<
     'incremental' | 'refresh_weak' | 'overwrite'
   >('incremental');
-  const [enrichRegions, setEnrichRegions] = useState<
-    Array<{ id: string; label: string; enabled: boolean }>
-  >([]);
+  const [enrichRegions, setEnrichRegions] = useState<EnrichRegionRow[]>([]);
   const [enrichRegionBusy, setEnrichRegionBusy] = useState(false);
   const enrichPollRef = useRef<AbortController | null>(null);
   const enrichPollingRef = useRef(false);
@@ -228,6 +267,8 @@ export function MakersManagePanel({
     rateEma: number | null;
     /** 上次展示的速率文案 */
     rateText: string;
+    /** 近窗采样：算滑动部/分 */
+    samples?: { t: number; fin: number }[];
   } | null>(null);
   const [scanLogModal, setScanLogModal] = useState<ScanLogModal>(null);
   const [gateBusy, setGateBusy] = useState(false);
@@ -284,6 +325,15 @@ export function MakersManagePanel({
           setScrapPhase(st.phase || '同步中…');
           setScrapProgress(st.progress || null);
           setScrapLog(Array.isArray(st.log) ? st.log.slice(-40) : []);
+          const logText = (Array.isArray(st.log) ? st.log : []).join('\n');
+          const resumedMode: 'meta' | 'embed' | 'full' =
+            logText.includes('开始向量化') || logText.includes('待向量化')
+              ? 'embed'
+              : logText.includes('同步数据库') || logText.includes('仅写元数据')
+                ? 'meta'
+                : 'full';
+          setScrapJobMode(resumedMode);
+          scrapJobModeRef.current = resumedMode;
           void pollScrapEmbedUntilDone();
         }
         // 已完成的结果不在每次打开时再弹提示（完成时已提示过）
@@ -303,7 +353,19 @@ export function MakersManagePanel({
         /* ignore */
       }
       try {
-        const st = await getScrapLibraryEnrichStatus();
+        const st = await getScrapNfoOptimizeStatus();
+        if (st.running) {
+          setNfoOptBusy(true);
+          setNfoOptPhase(st.phase || '优化中…');
+          setNfoOptProgress(st.progress || null);
+          setNfoOptLog(Array.isArray(st.log) ? st.log.slice(-40) : []);
+          void pollNfoOptUntilDone();
+        }
+      } catch {
+        /* ignore */
+      }
+      try {
+        const st = await getScrapLibraryEnrichStatus({ lite: true });
         setEnrichCheckpoints(
           st.checkpoints && typeof st.checkpoints === 'object'
             ? st.checkpoints
@@ -317,6 +379,29 @@ export function MakersManagePanel({
             soft: Number(st.queueCounts.soft || 0),
             fail: Number(st.queueCounts.fail || 0),
           });
+        }
+        if (st.regionQueueCounts && typeof st.regionQueueCounts === 'object') {
+          const next: Record<
+            string,
+            {
+              pending: number;
+              running: number;
+              done: number;
+              soft: number;
+              fail: number;
+            }
+          > = {};
+          for (const [rid, qc] of Object.entries(st.regionQueueCounts)) {
+            if (!qc) continue;
+            next[rid] = {
+              pending: Number(qc.pending || 0),
+              running: Number(qc.running || 0),
+              done: Number(qc.done || 0),
+              soft: Number(qc.soft || 0),
+              fail: Number(qc.fail || 0),
+            };
+          }
+          setEnrichRegionQueueCounts(next);
         }
         if (st.library && typeof st.library === 'object') {
           setEnrichLibrary(st.library);
@@ -386,15 +471,21 @@ export function MakersManagePanel({
               ? 'overwrite'
               : 'incremental',
           );
-          // 开关 = 开始/暂停：仅当前正在跑的分区保持开
+          // 六区互斥：运行中只亮当前区；空闲时回显落库的分区选择。
+          // 仅当落库值本身互斥（至多一个 true）才回显，否则沿用「全灭」惯例，
+          // 避免老配置 regionsEnabled 全 True 时六灯齐亮。
+          const rows =
+            strat.regions ||
+            MAKER_KIND_TABS.map((t) => ({ id: t.id, label: t.label, enabled: true }));
+          const savedOn = rows.filter((r) => Boolean(r.enabled)).length;
           setEnrichRegions(
-            (strat.regions || MAKER_KIND_TABS.map((t) => ({ id: t.id, label: t.label }))).map(
-              (r) => ({
-                id: r.id,
-                label: r.label,
-                enabled: Boolean(st.running && runningRegion === r.id),
-              }),
-            ),
+            rows.map((r) => ({
+              id: r.id,
+              label: r.label,
+              enabled: st.running
+                ? runningRegion === r.id
+                : savedOn === 1 && Boolean(r.enabled),
+            })),
           );
         } catch {
           setEnrichRegions(
@@ -439,10 +530,10 @@ export function MakersManagePanel({
   useEffect(() => {
     return () => {
       if (localIndexPollRef.current) clearTimeout(localIndexPollRef.current);
-      if (avwikiPollRef.current) clearTimeout(avwikiPollRef.current);
       if (strmPollRef.current) clearTimeout(strmPollRef.current);
       if (scrapPollRef.current) clearTimeout(scrapPollRef.current);
       if (actressOptPollRef.current) clearTimeout(actressOptPollRef.current);
+      if (nfoOptPollRef.current) clearTimeout(nfoOptPollRef.current);
       if (actressAvatarPollRef.current)
         clearTimeout(actressAvatarPollRef.current);
       enrichPollRef.current?.abort();
@@ -477,10 +568,14 @@ export function MakersManagePanel({
             const skIns = st.result.skeleton?.inserted ?? 0;
             const skSkip = st.result.skeleton?.skipped_existing ?? 0;
             const skCodes = st.result.skeleton?.purged_codes ?? 0;
+            const skPurged = st.result.skeleton?.purged_skeletons ?? 0;
             const skBits: string[] = [];
             if (st.result.skeleton?.ok) {
-              skBits.push(`骨架 +${skIns} / 已有 ${skSkip}`);
-              if (skCodes > 0) skBits.push(`清目录外向量 ${skCodes}`);
+              skBits.push(
+                `骨架重建 删壳${skPurged} 目录外-${skCodes} 新壳+${skIns} 保留已刮${skSkip}`,
+              );
+            } else if (st.result.skeleton?.error) {
+              skBits.push(`骨架失败 · ${st.result.skeleton.error}`);
             }
             const skPart = skBits.length ? ` · ${skBits.join(' · ')}` : '';
             setMsg(
@@ -506,7 +601,7 @@ export function MakersManagePanel({
   }
 
   async function onLocalIndexScan() {
-    if (localIndexBusy || avwikiBusy || catalogBusy || strmBusy) return;
+    if (localIndexBusy || catalogBusy || strmBusy) return;
     setMsg('');
     setLocalIndexBusy(true);
     setLocalIndexPhase('starting');
@@ -530,66 +625,6 @@ export function MakersManagePanel({
     }
   }
 
-  async function pollAvwikiUntilDone() {
-    if (avwikiPollingRef.current) return;
-    avwikiPollingRef.current = true;
-    try {
-      for (;;) {
-        const st = await getPrefixCatalogHarvestStatus();
-        setAvwikiBusy(st.running);
-        setAvwikiPhase(st.phase || (st.running ? '同步中…' : ''));
-        setAvwikiLog(Array.isArray(st.log) ? st.log.slice(-40) : []);
-        if (!st.running) {
-          if (st.error) {
-            setMsg(st.error);
-            onStatus('AVWikiDB 同步失败', 'warn');
-          } else if (st.result) {
-            const added = st.result.added ?? 0;
-            const refreshed = st.result.refreshed ?? st.result.checked ?? 0;
-            const prefixes = st.result.summary?.prefix_total;
-            setMsg(
-              prefixes != null
-                ? `厂牌映射完成 · 核对 ${refreshed} · 新增前缀 ${added} · 合计 ${prefixes}`
-                : `厂牌映射完成 · 核对 ${refreshed} · 新增前缀 ${added}`,
-            );
-            onStatus('AVWikiDB 厂牌映射完成', 'ok');
-            await refreshCatalogSummary();
-          }
-          setAvwikiPhase('');
-          return;
-        }
-        await new Promise<void>((resolve) => {
-          avwikiPollRef.current = setTimeout(resolve, 600);
-        });
-      }
-    } finally {
-      avwikiPollingRef.current = false;
-    }
-  }
-
-  async function onAvwikiSync() {
-    if (avwikiBusy || localIndexBusy || catalogBusy || strmBusy) return;
-    setMsg('');
-    setAvwikiBusy(true);
-    setAvwikiPhase('starting');
-    setAvwikiLog([]);
-    onStatus('AVWikiDB 厂牌映射中…', 'mute');
-    try {
-      await startPrefixCatalogAvwikidbSync({
-        region: 'japan_censored',
-        expand: true,
-        minMovieCount: 5,
-      });
-      await pollAvwikiUntilDone();
-    } catch (e) {
-      setAvwikiBusy(false);
-      setAvwikiPhase('');
-      const text = e instanceof Error ? e.message : '启动 AVWikiDB 同步失败';
-      setMsg(text);
-      onStatus(text, 'warn');
-    }
-  }
-
   async function pollStrmSyncUntilDone() {
     if (strmPollingRef.current) return;
     strmPollingRef.current = true;
@@ -603,22 +638,15 @@ export function MakersManagePanel({
         if (!st.running) {
           if (st.error) {
             setMsg(st.error);
-            onStatus('STRM 同步失败', 'warn');
+            onStatus('本地同步失败', 'warn');
           } else if (st.result) {
             const written = st.result.written ?? 0;
             const deleted = st.result.deleted ?? 0;
             const total = st.result.total ?? 0;
-            const skIns = st.result.skeleton?.inserted ?? 0;
-            const skSkip = st.result.skeleton?.skipped_existing ?? 0;
-            const skCodes = st.result.skeleton?.purged_codes ?? 0;
             const bits = [`写入 ${written}`, `合计 ${total}`];
             if (deleted > 0) bits.push(`删多余 ${deleted}`);
-            if (st.result.skeleton?.ok) {
-              bits.push(`骨架 +${skIns} / 已有 ${skSkip}`);
-              if (skCodes > 0) bits.push(`清目录外向量 ${skCodes}`);
-            }
-            setMsg(`STRM 同步完成 · ${bits.join(' · ')}`);
-            onStatus('STRM 同步完成', 'ok');
+            setMsg(`本地同步完成 · ${bits.join(' · ')}`);
+            onStatus('本地同步完成', 'ok');
           }
           setStrmPhase('');
           setStrmProgress(null);
@@ -720,7 +748,7 @@ export function MakersManagePanel({
     setStrmPhase('starting');
     setStrmProgress({ stage: 'prepare', percent: 0, label: 'starting' });
     setStrmLog([]);
-    onStatus('STRM 同步中…', 'mute');
+    onStatus('本地同步中…', 'mute');
     try {
       await startPrefixCatalogStrmSync(root);
       await pollStrmSyncUntilDone();
@@ -728,7 +756,7 @@ export function MakersManagePanel({
       setStrmBusy(false);
       setStrmPhase('');
       setStrmProgress(null);
-      const text = e instanceof Error ? e.message : '启动 STRM 同步失败';
+      const text = e instanceof Error ? e.message : '启动本地同步失败';
       setMsg(text);
       onStatus(text, 'warn');
     }
@@ -749,25 +777,47 @@ export function MakersManagePanel({
         setScrapLog(Array.isArray(st.log) ? st.log.slice(-40) : []);
         if (!st.running) {
           if (seenRunning) {
+            const mode = String(
+              st.result?.mode || scrapJobModeRef.current || 'full',
+            );
             if (st.error) {
               setMsg(st.error);
-              onStatus('刮削库向量同步失败', 'warn');
+              onStatus(
+                mode === 'embed'
+                  ? '数据库向量化失败'
+                  : mode === 'meta'
+                    ? '同步数据库失败'
+                    : '刮削库向量同步失败',
+                'warn',
+              );
             } else if (st.result) {
               const written = st.result.written ?? 0;
               const total = st.result.total ?? 0;
               const deleted = st.result.deleted ?? 0;
-              setMsg(
-                deleted > 0
-                  ? `刮削库已写入元库 · ${written}/${total} · 删多余 ${deleted}`
-                  : `刮削库已写入元库 · ${written}/${total}`,
-              );
-              onStatus('刮削库向量已同步', 'ok');
+              if (mode === 'embed') {
+                setMsg(`数据库向量化完成 · ${written}/${total}`);
+                onStatus('数据库向量化完成', 'ok');
+              } else if (mode === 'meta') {
+                setMsg(
+                  deleted > 0
+                    ? `数据库已同步 · ${written}/${total} · 删多余 ${deleted}`
+                    : `数据库已同步 · ${written}/${total}`,
+                );
+                onStatus('数据库已同步', 'ok');
+              } else {
+                setMsg(
+                  deleted > 0
+                    ? `刮削库已写入元库 · ${written}/${total} · 删多余 ${deleted}`
+                    : `刮削库已写入元库 · ${written}/${total}`,
+                );
+                onStatus('刮削库向量已同步', 'ok');
+              }
             }
           }
           setScrapBusy(false);
           setScrapPhase('');
           setScrapProgress(null);
-          // 保留日志供弹窗回看
+          // 保留 scrapJobMode，日志按钮仍挂在对应行
           return;
         }
         await new Promise<void>((resolve) => {
@@ -779,7 +829,10 @@ export function MakersManagePanel({
     }
   }
 
-  async function onScrapEmbedSync(force = false) {
+  async function onScrapEmbedSync(
+    force = false,
+    mode: 'meta' | 'embed' = 'meta',
+  ) {
     if (
       strmBusy ||
       localIndexBusy ||
@@ -787,27 +840,51 @@ export function MakersManagePanel({
       scrapBusy ||
       enrichBusy ||
       actressOptBusy ||
+      nfoOptBusy ||
       actressAvatarBusy
     )
       return;
     const root = scrapRoot.trim() || 'scrap-library';
     setMsg('');
     setScrapBusy(true);
-    setScrapPhase(force ? '全量同步…' : '增量同步…');
+    setScrapJobMode(mode);
+    scrapJobModeRef.current = mode;
+    const phase =
+      mode === 'embed'
+        ? force
+          ? '全量向量化…'
+          : '增量向量化…'
+        : force
+          ? '全量同步数据库…'
+          : '增量同步数据库…';
+    setScrapPhase(phase);
     setScrapProgress({ stage: 'prepare', percent: 0, label: 'starting' });
     setScrapLog([]);
     onStatus(
-      force ? '刮削库全量向量同步中…' : '刮削库增量向量同步中（跳过已有）…',
+      mode === 'embed'
+        ? force
+          ? '数据库全量向量化中…'
+          : '数据库增量向量化中（仅零向量）…'
+        : force
+          ? '全量同步数据库中…'
+          : '增量同步数据库中（跳过未变）…',
       'mute',
     );
     try {
-      await startScrapLibraryEmbed({ root, force });
+      await startScrapLibraryEmbed({ root, force, mode });
       await pollScrapEmbedUntilDone({ notify: true });
     } catch (e) {
       setScrapBusy(false);
       setScrapPhase('');
       setScrapProgress(null);
-      const text = e instanceof Error ? e.message : '启动刮削库同步失败';
+      setScrapJobMode(null);
+      scrapJobModeRef.current = null;
+      const text =
+        e instanceof Error
+          ? e.message
+          : mode === 'embed'
+            ? '启动向量化失败'
+            : '启动数据库同步失败';
       setMsg(text);
       onStatus(text, 'warn');
     }
@@ -863,6 +940,7 @@ export function MakersManagePanel({
       scrapBusy ||
       enrichBusy ||
       actressOptBusy ||
+      nfoOptBusy ||
       actressAvatarBusy
     )
       return;
@@ -885,6 +963,83 @@ export function MakersManagePanel({
       setActressOptPhase('');
       setActressOptProgress(null);
       const text = e instanceof Error ? e.message : '启动女优优化失败';
+      setMsg(text);
+      onStatus(text, 'warn');
+    }
+  }
+
+  async function pollNfoOptUntilDone(opts?: { notify?: boolean }) {
+    if (nfoOptPollingRef.current) return;
+    nfoOptPollingRef.current = true;
+    let seenRunning = Boolean(opts?.notify);
+    try {
+      for (;;) {
+        const st: ScrapNfoOptimizeJobStatus = await getScrapNfoOptimizeStatus();
+        if (st.running) seenRunning = true;
+        setNfoOptBusy(st.running);
+        setNfoOptPhase(st.phase || (st.running ? '优化中…' : ''));
+        setNfoOptProgress(st.progress || null);
+        setNfoOptLog(Array.isArray(st.log) ? st.log.slice(-40) : []);
+        if (!st.running) {
+          if (seenRunning) {
+            if (st.error) {
+              setMsg(st.error);
+              onStatus('NFO 优化失败', 'warn');
+            } else if (st.result) {
+              const updated = st.result.updated ?? 0;
+              const total = st.result.total ?? 0;
+              const unchanged = st.result.unchanged ?? 0;
+              setMsg(
+                `NFO 已优化 · 更新 ${updated}/${total} · 未变 ${unchanged}`,
+              );
+              onStatus('NFO 已优化', 'ok');
+            }
+          }
+          setNfoOptBusy(false);
+          setNfoOptPhase('');
+          setNfoOptProgress(null);
+          return;
+        }
+        await new Promise<void>((resolve) => {
+          nfoOptPollRef.current = setTimeout(resolve, 450);
+        });
+      }
+    } finally {
+      nfoOptPollingRef.current = false;
+    }
+  }
+
+  async function onNfoOptimize(force = false) {
+    if (
+      strmBusy ||
+      localIndexBusy ||
+      catalogBusy ||
+      scrapBusy ||
+      enrichBusy ||
+      actressOptBusy ||
+      nfoOptBusy ||
+      actressAvatarBusy
+    )
+      return;
+    setMsg('');
+    setNfoOptBusy(true);
+    setNfoOptPhase(force ? '全量优化…' : '增量优化…');
+    setNfoOptProgress({ stage: 'prepare', percent: 0, label: 'starting' });
+    setNfoOptLog([]);
+    onStatus(
+      force
+        ? '全量用本地映射重写 NFO…'
+        : '增量用本地映射优化 NFO（有变才写）…',
+      'mute',
+    );
+    try {
+      await startScrapNfoOptimize({ force });
+      await pollNfoOptUntilDone({ notify: true });
+    } catch (e) {
+      setNfoOptBusy(false);
+      setNfoOptPhase('');
+      setNfoOptProgress(null);
+      const text = e instanceof Error ? e.message : '启动 NFO 优化失败';
       setMsg(text);
       onStatus(text, 'warn');
     }
@@ -973,6 +1128,7 @@ export function MakersManagePanel({
       scrapBusy ||
       enrichBusy ||
       actressOptBusy ||
+      nfoOptBusy ||
       actressAvatarBusy
     )
       return;
@@ -1100,6 +1256,7 @@ export function MakersManagePanel({
               setEnrichRegionLogs({});
               setEnrichLog([]);
               setEnrichQueueCounts(null);
+              setEnrichRegionQueueCounts({});
               setEnrichRegions((prev) =>
                 prev.map((r) => ({ ...r, enabled: false })),
               );
@@ -1127,93 +1284,145 @@ export function MakersManagePanel({
       return false;
     };
 
+    const OVERVIEW_POLL_MS = 1800;
+
+    const flushOverviewUi = (st: ScrapLibraryEnrichJobStatus) => {
+      if (st.running) seenRunning = true;
+      setEnrichBusy(st.running);
+      setEnrichPhase(st.phase || (st.running ? '补齐中…' : ''));
+      setEnrichProgress(st.progress || null);
+      // 总览用轻量 GET，不挂 SSE；详情页自有直播流
+      setEnrichCurrentRegion(String(st.currentRegion || ''));
+      if (!st.running) {
+        setEnrichCheckpoints(
+          st.checkpoints && typeof st.checkpoints === 'object'
+            ? st.checkpoints
+            : {},
+        );
+        if (Array.isArray(st.log) && st.log.length) {
+          setEnrichLog(st.log.slice(-40));
+        }
+        if (st.regionLogs && typeof st.regionLogs === 'object') {
+          setEnrichRegionLogs(st.regionLogs);
+        }
+      }
+      setEnrichQueueCounts((prev) => {
+        if (st.queueCounts) {
+          return {
+            pending: Number(st.queueCounts.pending || 0),
+            running: Number(st.queueCounts.running || 0),
+            done: Number(st.queueCounts.done || 0),
+            soft: Number(st.queueCounts.soft || 0),
+            fail: Number(st.queueCounts.fail || 0),
+          };
+        }
+        if (st.running && prev) return prev;
+        if (st.paused || st.phase === 'paused' || st.halt === 'pause') {
+          return prev;
+        }
+        return null;
+      });
+      if (st.regionQueueCounts && typeof st.regionQueueCounts === 'object') {
+        const next: Record<
+          string,
+          {
+            pending: number;
+            running: number;
+            done: number;
+            soft: number;
+            fail: number;
+          }
+        > = {};
+        for (const [rid, qc] of Object.entries(st.regionQueueCounts)) {
+          if (!qc) continue;
+          next[rid] = {
+            pending: Number(qc.pending || 0),
+            running: Number(qc.running || 0),
+            done: Number(qc.done || 0),
+            soft: Number(qc.soft || 0),
+            fail: Number(qc.fail || 0),
+          };
+        }
+        setEnrichRegionQueueCounts(next);
+      }
+      if (st.library && typeof st.library === 'object') {
+        setEnrichLibrary(st.library);
+      }
+      if (st.running) {
+        const speedRid = String(st.currentRegion || '').trim() || '_';
+        const fin =
+          Number(st.queueCounts?.done || 0) +
+          Number(st.queueCounts?.soft || 0) +
+          Number(st.queueCounts?.fail || 0);
+        const prevSp = enrichSpeedRef.current;
+        if (!prevSp || prevSp.regionId !== speedRid) {
+          enrichSpeedRef.current = {
+            regionId: speedRid,
+            t0: Date.now(),
+            fin0: fin,
+            lockedEnrich: false,
+            rateEma: null,
+            rateText: '',
+            samples: [{ t: Date.now(), fin }],
+          };
+        }
+      } else {
+        enrichSpeedRef.current = null;
+      }
+      const rid = String(st.currentRegion || '').trim();
+      if (rid && st.progress) {
+        setEnrichProgressByRegion((prev) => ({
+          ...prev,
+          [rid]: st.progress || null,
+        }));
+      }
+      if (
+        st.running &&
+        rid &&
+        !enrichStopRequestedRef.current &&
+        st.halt !== 'stop' &&
+        st.halt !== 'pause' &&
+        st.phase !== 'paused'
+      ) {
+        setEnrichRegions((prev) =>
+          prev.map((r) => ({
+            ...r,
+            enabled: r.id === rid,
+          })),
+        );
+      }
+    };
+
+    const sleepPoll = (ms: number) =>
+      new Promise<void>((resolve, reject) => {
+        if (ac.signal.aborted) {
+          reject(new DOMException('Aborted', 'AbortError'));
+          return;
+        }
+        const t = setTimeout(() => {
+          ac.signal.removeEventListener('abort', onAbort);
+          resolve();
+        }, ms);
+        const onAbort = () => {
+          clearTimeout(t);
+          reject(new DOMException('Aborted', 'AbortError'));
+        };
+        ac.signal.addEventListener('abort', onAbort, { once: true });
+      });
+
     try {
-      await subscribeScrapLibraryEnrichStatus(
-        (st) => {
-          if (st.running) seenRunning = true;
-          setEnrichBusy(st.running);
-          setEnrichPhase(st.phase || (st.running ? '补齐中…' : ''));
-          setEnrichProgress(st.progress || null);
-          setEnrichLog(Array.isArray(st.log) ? st.log.slice(-40) : []);
-          setEnrichRegionLogs(
-            st.regionLogs && typeof st.regionLogs === 'object'
-              ? st.regionLogs
-              : {},
-          );
-          setEnrichCurrentRegion(String(st.currentRegion || ''));
-          setEnrichCheckpoints(
-            st.checkpoints && typeof st.checkpoints === 'object'
-              ? st.checkpoints
-              : {},
-          );
-          setEnrichQueueCounts((prev) => {
-            if (st.queueCounts) {
-              return {
-                pending: Number(st.queueCounts.pending || 0),
-                running: Number(st.queueCounts.running || 0),
-                done: Number(st.queueCounts.done || 0),
-                soft: Number(st.queueCounts.soft || 0),
-                fail: Number(st.queueCounts.fail || 0),
-              };
-            }
-            // 运行中偶发缺字段时保留上次计数，避免进度条闪跳
-            if (st.running && prev) return prev;
-            if (st.paused || st.phase === 'paused' || st.halt === 'pause') {
-              return prev;
-            }
-            return null;
-          });
-          if (st.library && typeof st.library === 'object') {
-            setEnrichLibrary(st.library);
+      // 总览改间隔 GET：SSE 在刮削通知风暴下仍会拖垮设置页主线程
+      while (!ac.signal.aborted) {
+        const st = await getScrapLibraryEnrichStatus({ lite: true });
+        if (applyTerminal(st)) {
+          if (seenRunning || st.running === false) {
+            flushOverviewUi(st);
           }
-          if (st.running) {
-            const speedRid = String(st.currentRegion || '').trim() || '_';
-            const fin =
-              Number(st.queueCounts?.done || 0) +
-              Number(st.queueCounts?.soft || 0) +
-              Number(st.queueCounts?.fail || 0);
-            const prevSp = enrichSpeedRef.current;
-            if (!prevSp || prevSp.regionId !== speedRid) {
-              enrichSpeedRef.current = {
-                regionId: speedRid,
-                t0: Date.now(),
-                fin0: fin,
-                lockedEnrich: false,
-                rateEma: null,
-                rateText: '',
-              };
-            }
-          } else {
-            enrichSpeedRef.current = null;
-          }
-          const rid = String(st.currentRegion || '').trim();
-          if (rid && st.progress) {
-            setEnrichProgressByRegion((prev) => ({
-              ...prev,
-              [rid]: st.progress || null,
-            }));
-          }
-          if (
-            st.running &&
-            rid &&
-            !enrichStopRequestedRef.current &&
-            st.halt !== 'stop' &&
-            st.halt !== 'pause' &&
-            st.phase !== 'paused'
-          ) {
-            setEnrichRegions((prev) =>
-              prev.map((r) => ({
-                ...r,
-                enabled: r.id === rid,
-              })),
-            );
-          }
-          if (applyTerminal(st)) {
-            ac.abort();
-          }
-        },
-        { signal: ac.signal },
-      );
+          break;
+        }
+        flushOverviewUi(st);
+        await sleepPoll(OVERVIEW_POLL_MS);
+      }
     } catch (e) {
       if (e instanceof DOMException && e.name === 'AbortError') return;
       if (e instanceof Error && e.name === 'AbortError') return;
@@ -1314,8 +1523,16 @@ export function MakersManagePanel({
   async function toggleEnrichRegion(regionId: string, enabled: boolean) {
     if (enrichRegionBusy) return;
     if (enrichBusy) {
-      // 关掉开关 = 暂停：保留队列/检查点，下次打开继续
-      if (enabled) return;
+      // 六区互斥：任务运行中只允许「关当前区（= 暂停）」，不允许直接切到别的区，
+      // 否则等于「暂停 A + 启动 B」两个动作被一次点击隐式合并。
+      if (enabled) {
+        if (regionId !== enrichCurrentRegion) {
+          const text = '刮削进行中：先关闭当前分区暂停，再开启其它分区';
+          setMsg(text);
+          onStatus(text, 'warn');
+        }
+        return;
+      }
       if (enrichCurrentRegion !== regionId) return;
       setEnrichRegions((prev) =>
         prev.map((r) => (r.id === regionId ? { ...r, enabled: false } : r)),
@@ -1328,7 +1545,7 @@ export function MakersManagePanel({
       onStatus('正在暂停刮削…', 'mute');
       try {
         await pauseScrapLibraryEnrich();
-        const st = await getScrapLibraryEnrichStatus();
+        const st = await getScrapLibraryEnrichStatus({ lite: true });
         setEnrichPhase('paused');
         setEnrichBusy(false);
         setEnrichProgress(st.progress || null);
@@ -1380,23 +1597,19 @@ export function MakersManagePanel({
     }
 
     const prev = enrichRegions;
-    const next = prev.map((r) =>
-      r.id === regionId ? { ...r, enabled } : r,
-    );
-    setEnrichRegions(next);
-    if (!enabled) return;
+    // 六区互斥：打开一个 → 其余五个立即关闭（并落库）；关闭一个 → 六个全关
+    setEnrichRegions(applyExclusiveRegion(prev, enabled ? regionId : null));
 
     // 仅短暂占用 busy（写策略）；长跑期间必须放开开关以便暂停
     setEnrichRegionBusy(true);
     try {
       const cur = await getScrapEnrichStrategy();
-      const regionsEnabled: Record<string, boolean> = {
-        ...(cur.regionsEnabled || {}),
-        [regionId]: true,
-      };
       await putScrapEnrichStrategy({
         ...cur,
-        regionsEnabled,
+        regionsEnabled: exclusiveRegionsEnabled(
+          cur.regionsEnabled,
+          enabled ? regionId : null,
+        ),
       });
     } catch (e) {
       setEnrichRegions(prev);
@@ -1407,21 +1620,17 @@ export function MakersManagePanel({
       return;
     }
     setEnrichRegionBusy(false);
+    if (!enabled) return;
 
     try {
       await onScrapEnrich(false, regionId, { force: true });
-      // 结束或暂停后关掉开关；有检查点时下次打开即继续
-      setEnrichRegions((rows) =>
-        rows.map((r) => (r.id === regionId ? { ...r, enabled: false } : r)),
-      );
+      // 结束或暂停后六区全关；有检查点时下次打开即继续
+      setEnrichRegions((rows) => applyExclusiveRegion(rows, null));
       try {
         const after = await getScrapEnrichStrategy();
         await putScrapEnrichStrategy({
           ...after,
-          regionsEnabled: {
-            ...(after.regionsEnabled || {}),
-            [regionId]: false,
-          },
+          regionsEnabled: exclusiveRegionsEnabled(after.regionsEnabled, null),
         });
       } catch {
         /* ignore persist */
@@ -1807,7 +2016,7 @@ export function MakersManagePanel({
       : catalogNav?.level === 'region'
         ? catalogNav.label
         : catalogNav?.level === 'regions'
-          ? '七区目录'
+          ? '六区目录'
           : '片商管理';
   const catalogPushBack = scrapHubOpen
     ? () => {
@@ -1828,8 +2037,18 @@ export function MakersManagePanel({
       id: t.id,
       label: t.label,
       prefix_count: 0,
+      scrap_prefix_count: 0,
       code_count: 0,
     }));
+
+  const formatCatalogRegionDesc = (reg: {
+    prefix_count: number;
+    scrap_prefix_count?: number;
+    code_count: number;
+  }) => {
+    const scrap = Math.max(0, Number(reg.scrap_prefix_count) || 0);
+    return `${reg.prefix_count} 前缀 · ${scrap} 有片 · ${reg.code_count} 番号`;
+  };
 
   const localIndexPct =
     typeof localIndexProgress?.percent === 'number'
@@ -1883,6 +2102,20 @@ export function MakersManagePanel({
       : typeof actressOptProgress?.done === 'number' &&
           actressOptProgress.done > 0
         ? actressOptProgress.done.toLocaleString()
+        : '';
+  const nfoOptPct =
+    typeof nfoOptProgress?.percent === 'number'
+      ? Math.max(0, Math.min(100, nfoOptProgress.percent))
+      : nfoOptBusy
+        ? 0
+        : null;
+  const nfoOptCountLabel =
+    typeof nfoOptProgress?.done === 'number' &&
+    typeof nfoOptProgress?.total === 'number' &&
+    nfoOptProgress.total > 0
+      ? `${nfoOptProgress.done.toLocaleString()} / ${nfoOptProgress.total.toLocaleString()}`
+      : typeof nfoOptProgress?.done === 'number' && nfoOptProgress.done > 0
+        ? nfoOptProgress.done.toLocaleString()
         : '';
   const formatQualityDetail = (stats?: ScrapLibraryQualityStats | null) => {
     if (!stats) {
@@ -1959,7 +2192,7 @@ export function MakersManagePanel({
                 <span className="settings-nav__main">
                   <span className="settings-nav__title">刮削策略</span>
                   <span className="settings-nav__desc">
-                    增量/覆盖 · 头像模式 · 调度 · 七区数据源
+                    增量/覆盖 · 头像模式 · 调度 · 六区数据源
                   </span>
                 </span>
                 <ChevronRight
@@ -1997,7 +2230,7 @@ export function MakersManagePanel({
           </ul>
 
           <p className="settings-group-label">刮削分区</p>
-          <ul className="settings-group makers-manage__rise" aria-label="七区刮削开关">
+          <ul className="settings-group makers-manage__rise" aria-label="六区刮削开关">
             {(enrichRegions.length
               ? enrichRegions
               : MAKER_KIND_TABS.map((t) => ({
@@ -2013,10 +2246,16 @@ export function MakersManagePanel({
                 ? enrichProgress
                 : enrichProgressByRegion[region.id] || null;
               // 暂停态也用队列表角标（成功/失败），勿只信本轮 checkpoint.ok=15
+              // 优先本区 regionQueueCounts，避免 FC2 卡片吃到有码全局数
+              const regionQc =
+                enrichRegionQueueCounts?.[region.id] || null;
               const qc =
-                (active || Boolean(cp)) && enrichQueueCounts
+                regionQc ||
+                ((active || Boolean(cp)) &&
+                enrichQueueCounts &&
+                enrichCurrentRegion === region.id
                   ? enrichQueueCounts
-                  : null;
+                  : null);
               const okN = (() => {
                 if (qc)
                   return Number(qc.done || 0) + Number(qc.soft || 0);
@@ -2110,26 +2349,10 @@ export function MakersManagePanel({
                 }
                 return active ? 0 : null;
               })();
-              const totalN =
-                okN != null || failN != null || remainingN != null
-                  ? Number(okN || 0) +
-                    Number(failN || 0) +
-                    Number(remainingN || 0)
-                  : null;
               const queueStage = prog?.stage === 'queue';
-              const remainLabel =
-                enrichMode === 'incremental' || enrichMode === 'refresh_weak'
-                  ? remainingN != null && !queueStage
-                    ? `未处理 ${remainingN.toLocaleString()}`
-                    : ''
-                  : totalN != null
-                    ? `总数 ${totalN.toLocaleString()}`
-                    : '';
-              const showProgress =
-                active ||
-                Boolean(cp) ||
-                (prog != null &&
-                  (remainLabel || okN != null || failN != null));
+              // 六区互斥：仅当前激活分区显示进度条（开着 / 正在跑）；
+              // 关闭区即使有库内完成度或检查点也不占位。
+              const showProgress = active || region.enabled;
               const finN = Number(okN || 0) + Number(failN || 0);
               const speedState =
                 enrichSpeedRef.current?.regionId === region.id
@@ -2147,6 +2370,8 @@ export function MakersManagePanel({
                 speedState.lockedEnrich = true;
               }
               const stickEnrich = Boolean(active && speedState?.lockedEnrich);
+              // 关闭区绝不显示「已暂停」——检查点只在该区再次开启时用于续跑。
+              // 开着但未在跑 + 有检查点 → 才是真正的暂停态。
               let stageLabel = active
                 ? queueStage && !stickEnrich
                   ? String(prog?.label || '').trim() ||
@@ -2154,38 +2379,55 @@ export function MakersManagePanel({
                   : prog?.stage === 'done'
                     ? '完成'
                     : '补齐中'
-                : cp
-                  ? '已暂停'
-                  : prog?.stage === 'done'
+                : !region.enabled
+                  ? prog?.stage === 'done' && !cp
                     ? '已完成'
-                    : '进度';
+                    : '进度'
+                  : cp
+                    ? '已暂停'
+                    : prog?.stage === 'done'
+                      ? '已完成'
+                      : '进度';
+              // 速率：短窗滑动，避免 lifetime 大基数 + EMA 粘在「5 部/分」
               const rateLabel = (() => {
                 if (!active) return '';
                 if (stageLabel !== '补齐中') {
-                  // 短暂非补齐阶段仍保留已显示的速率，避免「· 25部/分」闪没
                   return stickEnrich && speedState?.rateText
                     ? speedState.rateText
                     : '';
                 }
                 const sp = speedState;
                 if (!sp) return '';
-                const mins = (Date.now() - sp.t0) / 60000;
-                if (mins < 0.08) return sp.rateText || '';
-                const instant = Math.max(0, finN - sp.fin0) / mins;
-                if (instant < 0.05 && mins < 0.6 && sp.rateEma == null) {
+                const now = Date.now();
+                const minsAll = (now - sp.t0) / 60000;
+                if (minsAll < 0.08) return sp.rateText || '';
+                // 优先近 60s 增量（更贴近当前吞吐）；窗口不足再用全程
+                const samples = sp.samples || (sp.samples = []);
+                samples.push({ t: now, fin: finN });
+                const cutoff = now - 60_000;
+                while (samples.length > 2 && samples[0]!.t < cutoff) {
+                  samples.shift();
+                }
+                const first = samples[0]!;
+                const last = samples[samples.length - 1]!;
+                const winMins = Math.max(0.05, (last.t - first.t) / 60000);
+                const winDelta = Math.max(0, last.fin - first.fin);
+                const instant =
+                  samples.length >= 2 && winMins >= 0.15
+                    ? winDelta / winMins
+                    : Math.max(0, finN - sp.fin0) / minsAll;
+                if (instant < 0.05 && minsAll < 0.6 && sp.rateEma == null) {
                   return sp.rateText || '';
                 }
-                // EMA 平滑，避免部/分来回跳
                 const next =
                   sp.rateEma == null
                     ? instant
-                    : sp.rateEma * 0.72 + instant * 0.28;
+                    : sp.rateEma * 0.55 + instant * 0.45;
                 sp.rateEma = next;
-                // 整数档位滞后：变化不足 1 不改展示数字
                 const prevShown = Number.parseFloat(sp.rateText) || 0;
                 let show = next;
                 if (sp.rateText) {
-                  if (Math.abs(next - prevShown) < 1.0) show = prevShown;
+                  if (Math.abs(next - prevShown) < 0.8) show = prevShown;
                   else show = Math.round(next);
                 } else {
                   show = next >= 10 ? Math.round(next) : next;
@@ -2329,16 +2571,16 @@ export function MakersManagePanel({
             })}
           </ul>
 
-          <p className="settings-group-label">向量入库</p>
+          <p className="settings-group-label">NFO优化</p>
           <ul className="settings-group makers-manage__rise">
             <li>
               <div className="settings-nav makers-manage__status">
                 <span className="settings-nav__main">
-                  <span className="settings-nav__title">同步向量数据库</span>
+                  <span className="settings-nav__title">映射修正 NFO</span>
                   <span className="settings-nav__desc">
-                    {scrapBusy
-                      ? scrapPhase || '同步中…'
-                      : '本地 NFO→向量 · 增量跳过已有 · 全量重写（磁盘无则删库）'}
+                    {nfoOptBusy
+                      ? nfoOptPhase || '优化中…'
+                      : '用本地标题/女优/标签/片商映射扫一遍磁盘 NFO · 增量仅写有变 · 全量强制覆盖'}
                   </span>
                 </span>
                 <span className="makers-manage__status-actions">
@@ -2352,11 +2594,118 @@ export function MakersManagePanel({
                       scrapBusy ||
                       enrichBusy ||
                       actressOptBusy ||
+                      nfoOptBusy ||
                       actressAvatarBusy
                     }
-                    onClick={() => void onScrapEmbedSync(false)}
+                    onClick={() => void onNfoOptimize(false)}
                   >
-                    {scrapBusy
+                    {nfoOptBusy
+                      ? nfoOptPct != null
+                        ? `${Math.round(nfoOptPct)}%`
+                        : '优化中…'
+                      : '增量优化'}
+                  </button>
+                  <button
+                    type="button"
+                    className="makers-manage__probe-btn"
+                    disabled={
+                      strmBusy ||
+                      localIndexBusy ||
+                      catalogBusy ||
+                      scrapBusy ||
+                      enrichBusy ||
+                      actressOptBusy ||
+                      nfoOptBusy ||
+                      actressAvatarBusy
+                    }
+                    onClick={() => void onNfoOptimize(true)}
+                  >
+                    {nfoOptBusy ? '…' : '全量优化'}
+                  </button>
+                </span>
+              </div>
+              {nfoOptBusy || nfoOptProgress || nfoOptLog.length > 0 ? (
+                <div
+                  className="makers-manage__scan-progress"
+                  aria-live="polite"
+                >
+                  {nfoOptBusy || nfoOptProgress ? (
+                    <div
+                      className="makers-manage__scan-bar"
+                      role="progressbar"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={
+                        nfoOptPct != null ? Math.round(nfoOptPct) : 0
+                      }
+                      aria-label="NFO 优化进度"
+                    >
+                      <span
+                        style={{
+                          width: `${nfoOptPct != null ? nfoOptPct : 0}%`,
+                        }}
+                      />
+                    </div>
+                  ) : null}
+                  <div className="makers-manage__scan-meta">
+                    <span>
+                      {nfoOptBusy || nfoOptProgress
+                        ? nfoOptProgress?.stage === 'done'
+                          ? '完成'
+                          : nfoOptProgress?.stage === 'write'
+                            ? '写入'
+                            : nfoOptProgress?.stage === 'scan'
+                              ? '扫描'
+                              : '准备'
+                        : '已完成'}
+                      {nfoOptCountLabel ? ` · ${nfoOptCountLabel}` : ''}
+                    </span>
+                    <span className="makers-manage__scan-meta-actions">
+                      {nfoOptLog.length > 0 ? (
+                        <button
+                          type="button"
+                          className="makers-manage__log-btn"
+                          onClick={() => setScanLogModal('nfoOpt')}
+                        >
+                          日志
+                        </button>
+                      ) : null}
+                    </span>
+                  </div>
+                </div>
+              ) : null}
+            </li>
+          </ul>
+
+          <p className="settings-group-label">向量入库</p>
+          <ul className="settings-group makers-manage__rise">
+            <li>
+              <div className="settings-nav makers-manage__status">
+                <span className="settings-nav__main">
+                  <span className="settings-nav__title">同步数据库</span>
+                  <span className="settings-nav__desc">
+                    {scrapBusy && scrapJobMode === 'meta'
+                      ? scrapPhase || '同步中…'
+                      : '本地 NFO→元库 · 增量跳过未变 · 全量重写（磁盘无则删库）· 不编码向量'}
+                  </span>
+                </span>
+                <span className="makers-manage__status-actions">
+                  <button
+                    type="button"
+                    className="makers-manage__probe-btn"
+                    disabled={
+                      strmBusy ||
+                      localIndexBusy ||
+                      catalogBusy ||
+                      scrapBusy ||
+                      enrichBusy ||
+                      actressOptBusy ||
+                      nfoOptBusy ||
+                      actressAvatarBusy
+                    }
+                    onClick={() => void onScrapEmbedSync(false, 'meta')}
+                  >
+                    {scrapBusy && scrapJobMode === 'meta'
                       ? scrapPct != null
                         ? `${Math.round(scrapPct)}%`
                         : '同步中…'
@@ -2372,15 +2721,17 @@ export function MakersManagePanel({
                       scrapBusy ||
                       enrichBusy ||
                       actressOptBusy ||
+                      nfoOptBusy ||
                       actressAvatarBusy
                     }
-                    onClick={() => void onScrapEmbedSync(true)}
+                    onClick={() => void onScrapEmbedSync(true, 'meta')}
                   >
-                    {scrapBusy ? '…' : '全量同步'}
+                    {scrapBusy && scrapJobMode === 'meta' ? '…' : '全量同步'}
                   </button>
                 </span>
               </div>
-              {scrapBusy || scrapProgress || scrapLog.length > 0 ? (
+              {(scrapJobMode === 'meta' || scrapJobMode === 'full') &&
+              (scrapBusy || scrapProgress || scrapLog.length > 0) ? (
                 <div
                   className="makers-manage__scan-progress"
                   aria-live="polite"
@@ -2392,7 +2743,115 @@ export function MakersManagePanel({
                       aria-valuemin={0}
                       aria-valuemax={100}
                       aria-valuenow={scrapPct != null ? Math.round(scrapPct) : 0}
-                      aria-label="刮削库向量同步进度"
+                      aria-label="同步数据库进度"
+                    >
+                      <span
+                        style={{
+                          width: `${scrapPct != null ? scrapPct : 0}%`,
+                        }}
+                      />
+                    </div>
+                  ) : null}
+                  <div className="makers-manage__scan-meta">
+                    <span>
+                      {scrapBusy || scrapProgress
+                        ? scrapProgress?.stage === 'scan'
+                          ? '扫描'
+                          : scrapProgress?.stage === 'diff'
+                            ? '比对'
+                            : scrapProgress?.stage === 'covers'
+                              ? '封面'
+                              : scrapProgress?.stage === 'done'
+                                ? '完成'
+                                : '准备'
+                        : '已完成'}
+                      {scrapCountLabel ? ` · ${scrapCountLabel}` : ''}
+                    </span>
+                    <span className="makers-manage__scan-meta-actions">
+                      {scrapPct != null && (scrapBusy || scrapProgress) ? (
+                        <span className="makers-manage__scan-pct">
+                          {`${Math.round(scrapPct)}%`}
+                        </span>
+                      ) : null}
+                      {scrapLog.length > 0 ? (
+                        <button
+                          type="button"
+                          className="makers-manage__log-btn"
+                          onClick={() => setScanLogModal('scrap')}
+                        >
+                          日志
+                        </button>
+                      ) : null}
+                    </span>
+                  </div>
+                </div>
+              ) : null}
+            </li>
+            <li>
+              <div className="settings-nav makers-manage__status">
+                <span className="settings-nav__main">
+                  <span className="settings-nav__title">数据库向量化</span>
+                  <span className="settings-nav__desc">
+                    {scrapBusy && scrapJobMode === 'embed'
+                      ? scrapPhase || '向量化中…'
+                      : '对元库零向量/待嵌条目编码写入 · 增量只补缺 · 全量重嵌'}
+                  </span>
+                </span>
+                <span className="makers-manage__status-actions">
+                  <button
+                    type="button"
+                    className="makers-manage__probe-btn"
+                    disabled={
+                      strmBusy ||
+                      localIndexBusy ||
+                      catalogBusy ||
+                      scrapBusy ||
+                      enrichBusy ||
+                      actressOptBusy ||
+                      nfoOptBusy ||
+                      actressAvatarBusy
+                    }
+                    onClick={() => void onScrapEmbedSync(false, 'embed')}
+                  >
+                    {scrapBusy && scrapJobMode === 'embed'
+                      ? scrapPct != null
+                        ? `${Math.round(scrapPct)}%`
+                        : '向量化…'
+                      : '增量向量化'}
+                  </button>
+                  <button
+                    type="button"
+                    className="makers-manage__probe-btn"
+                    disabled={
+                      strmBusy ||
+                      localIndexBusy ||
+                      catalogBusy ||
+                      scrapBusy ||
+                      enrichBusy ||
+                      actressOptBusy ||
+                      nfoOptBusy ||
+                      actressAvatarBusy
+                    }
+                    onClick={() => void onScrapEmbedSync(true, 'embed')}
+                  >
+                    {scrapBusy && scrapJobMode === 'embed' ? '…' : '全量向量化'}
+                  </button>
+                </span>
+              </div>
+              {scrapJobMode === 'embed' &&
+              (scrapBusy || scrapProgress || scrapLog.length > 0) ? (
+                <div
+                  className="makers-manage__scan-progress"
+                  aria-live="polite"
+                >
+                  {scrapBusy || scrapProgress ? (
+                    <div
+                      className="makers-manage__scan-bar"
+                      role="progressbar"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={scrapPct != null ? Math.round(scrapPct) : 0}
+                      aria-label="数据库向量化进度"
                     >
                       <span
                         style={{
@@ -2405,16 +2864,12 @@ export function MakersManagePanel({
                     <span>
                       {scrapBusy || scrapProgress
                         ? scrapProgress?.stage === 'embed'
-                          ? '写入'
-                          : scrapProgress?.stage === 'scan'
-                            ? '扫描'
-                            : scrapProgress?.stage === 'diff'
-                              ? '比对'
-                              : scrapProgress?.stage === 'covers'
-                                ? '封面'
-                                : scrapProgress?.stage === 'done'
-                                  ? '完成'
-                                  : '准备'
+                          ? '编码'
+                          : scrapProgress?.stage === 'diff'
+                            ? '筛选'
+                            : scrapProgress?.stage === 'done'
+                              ? '完成'
+                              : '准备'
                         : '已完成'}
                       {scrapCountLabel ? ` · ${scrapCountLabel}` : ''}
                     </span>
@@ -2465,6 +2920,7 @@ export function MakersManagePanel({
                       scrapBusy ||
                       enrichBusy ||
                       actressOptBusy ||
+                      nfoOptBusy ||
                       actressAvatarBusy
                     }
                     onClick={() => void onActressAvatarScrape(false)}
@@ -2485,6 +2941,7 @@ export function MakersManagePanel({
                       scrapBusy ||
                       enrichBusy ||
                       actressOptBusy ||
+                      nfoOptBusy ||
                       actressAvatarBusy
                     }
                     onClick={() => void onActressAvatarScrape(true)}
@@ -2583,6 +3040,7 @@ export function MakersManagePanel({
                       scrapBusy ||
                       enrichBusy ||
                       actressOptBusy ||
+                      nfoOptBusy ||
                       actressAvatarBusy
                     }
                     onClick={() => void onActressOptimize(false)}
@@ -2603,6 +3061,7 @@ export function MakersManagePanel({
                       scrapBusy ||
                       enrichBusy ||
                       actressOptBusy ||
+                      nfoOptBusy ||
                       actressAvatarBusy
                     }
                     onClick={() => void onActressOptimize(true)}
@@ -2818,13 +3277,13 @@ export function MakersManagePanel({
                   <span className="settings-nav__desc">
                     {localIndexBusy
                       ? localIndexPhase || '扫描中…'
-                      : 'Sehua · Bitmagnet 少补多删 · 同步番号骨架进向量供刮削'}
+                      : 'Sehua · Bitmagnet 合并去脏 · 扫完删骨架按目录重建进向量'}
                   </span>
                 </span>
                 <button
                   type="button"
                   className="makers-manage__probe-btn"
-                  disabled={localIndexBusy || avwikiBusy || catalogBusy || strmBusy || scrapBusy}
+                  disabled={localIndexBusy || catalogBusy || strmBusy || scrapBusy}
                   onClick={() => void onLocalIndexScan()}
                 >
                   {localIndexBusy
@@ -2926,7 +3385,7 @@ export function MakersManagePanel({
                   <span className="settings-nav__desc">
                     {strmBusy
                       ? strmPhase || '同步中…'
-                      : '按七区少补多删 .strm · 同步番号骨架进向量供刮削'}
+                      : '按六区少补多删 .strm · 只写本地文件夹，不碰向量库'}
                   </span>
                 </span>
                 <button
@@ -2954,7 +3413,7 @@ export function MakersManagePanel({
                       aria-valuemin={0}
                       aria-valuemax={100}
                       aria-valuenow={strmPct != null ? Math.round(strmPct) : 0}
-                      aria-label="STRM 同步进度"
+                      aria-label="本地同步进度"
                     >
                       <span
                         style={{
@@ -2968,8 +3427,8 @@ export function MakersManagePanel({
                       {strmBusy
                         ? strmProgress?.stage === 'write'
                           ? '写入'
-                          : strmProgress?.stage === 'skeleton'
-                            ? '番号骨架'
+                          : strmProgress?.stage === 'prune'
+                            ? '清理'
                           : strmProgress?.stage === 'done'
                             ? '完成'
                             : '准备'
@@ -2998,7 +3457,7 @@ export function MakersManagePanel({
             </li>
           </ul>
 
-          <ul className="settings-group" aria-label="七区前缀番号">
+          <ul className="settings-group" aria-label="六区前缀番号">
             {catalogRegionRows.map((reg) => (
               <li key={reg.id}>
                 <button
@@ -3010,7 +3469,7 @@ export function MakersManagePanel({
                 <span className="settings-nav__main">
                     <span className="settings-nav__title">{reg.label}</span>
                   <span className="settings-nav__desc">
-                      {`${reg.prefix_count} 前缀 · ${reg.code_count} 番号`}
+                      {formatCatalogRegionDesc(reg)}
                   </span>
                 </span>
                   <ChevronRight
@@ -3024,60 +3483,6 @@ export function MakersManagePanel({
             ))}
           </ul>
 
-          <p className="settings-group-label">维护</p>
-          <ul className="settings-group makers-manage__rise">
-            <li>
-              <div className="settings-nav makers-manage__status">
-                <span className="settings-nav__main">
-                  <span className="settings-nav__title">AVWikiDB 厂牌映射</span>
-                  <span className="settings-nav__desc">
-                    {avwikiBusy
-                      ? avwikiPhase || '同步中…'
-                      : '回填日文厂牌 · 按已有厂牌补缺前缀（日本有码）'}
-                  </span>
-                </span>
-                  <button
-                    type="button"
-                    className="makers-manage__probe-btn"
-                    disabled={
-                    avwikiBusy ||
-                      localIndexBusy ||
-                      catalogBusy ||
-                      strmBusy ||
-                    scrapBusy
-                  }
-                  onClick={() => void onAvwikiSync()}
-                >
-                  {avwikiBusy ? '同步中…' : '开始同步'}
-                  </button>
-              </div>
-              {avwikiBusy || avwikiLog.length > 0 ? (
-                <div
-                  className="makers-manage__scan-progress"
-                  aria-live="polite"
-                >
-                  <div className="makers-manage__scan-meta">
-                    <span className="allow-select">
-                      {avwikiBusy
-                        ? avwikiPhase || '同步中…'
-                        : '已完成'}
-                    </span>
-                    <span className="makers-manage__scan-meta-actions">
-                      {avwikiLog.length > 0 ? (
-                        <button
-                          type="button"
-                          className="makers-manage__log-btn"
-                          onClick={() => setScanLogModal('avwikidb')}
-                        >
-                          日志
-                        </button>
-                      ) : null}
-                    </span>
-                  </div>
-                </div>
-              ) : null}
-            </li>
-          </ul>
           <AppMsg allowSelect onDismiss={() => setMsg('')}>
             {msg}
           </AppMsg>
@@ -3093,10 +3498,10 @@ export function MakersManagePanel({
                 onClick={openCatalogRegions}
               >
                 <span className="settings-nav__main">
-                  <span className="settings-nav__title">七区目录</span>
+                  <span className="settings-nav__title">六区目录</span>
                   <span className="settings-nav__desc">
                     {catalogSummary
-                      ? `${catalogSummary.prefix_total} 前缀 · ${catalogSummary.code_total} 番号`
+                      ? `${catalogSummary.prefix_total} 前缀 · ${catalogSummary.scrap_prefix_total ?? 0} 有片 · ${catalogSummary.code_total} 番号`
                       : '前缀与真实番号'}
                   </span>
                 </span>
@@ -3149,12 +3554,17 @@ export function MakersManagePanel({
                   <span className="settings-nav__title">刮削库</span>
                   <span className="settings-nav__desc">
                     {scrapBusy
-                      ? scrapPhase || '向量同步中…'
+                      ? scrapPhase ||
+                        (scrapJobMode === 'embed'
+                          ? '向量化中…'
+                          : scrapJobMode === 'meta'
+                            ? '同步数据库中…'
+                            : '向量入库中…')
                       : enrichBusy
                         ? enrichPhase || '刮削补齐中…'
                         : actressAvatarBusy
                           ? actressAvatarPhase || '女优刮削中…'
-                          : '产物目录 · 刮削补齐 · 向量入库'}
+                          : '产物目录 · 刮削补齐 · 同步库 / 向量化'}
                   </span>
                 </span>
                 <ChevronRight
@@ -3181,15 +3591,19 @@ export function MakersManagePanel({
             : scanLogModal === 'strm'
             ? 'STRM 同步日志'
             : scanLogModal === 'scrap'
-              ? '刮削库同步日志'
+              ? scrapJobMode === 'embed'
+                ? '数据库向量化日志'
+                : scrapJobMode === 'meta'
+                  ? '同步数据库日志'
+                  : '刮削库同步日志'
                 : scanLogModal === 'actress'
                   ? '女优同步向量日志'
+                  : scanLogModal === 'nfoOpt'
+                    ? 'NFO 优化日志'
                   : scanLogModal === 'actressAvatar'
                     ? '女优刮削日志'
               : scanLogModal === 'enrich'
                     ? '刮削补齐日志'
-                : scanLogModal === 'avwikidb'
-                  ? 'AVWikiDB 厂牌映射日志'
                   : '双库扫描日志'
         }
         onClose={() => setScanLogModal(null)}
@@ -3339,12 +3753,12 @@ export function MakersManagePanel({
                 ? scrapLog
                 : scanLogModal === 'actress'
                   ? actressOptLog
+                  : scanLogModal === 'nfoOpt'
+                    ? nfoOptLog
                   : scanLogModal === 'actressAvatar'
                     ? actressAvatarLog
                     : scanLogModal === 'enrich'
                       ? enrichLog
-                      : scanLogModal === 'avwikidb'
-                        ? avwikiLog
                         : localIndexLog
           }
         />

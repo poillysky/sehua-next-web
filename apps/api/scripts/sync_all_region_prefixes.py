@@ -27,7 +27,7 @@ VERIFY = ROOT / "data" / "debug" / "dmm-prefix-verify.json"
 
 KIND_TO_REGION = {
     "有码": "japan_censored",
-    "写真": "japan_gravure",
+    "写真": "japan_censored",  # 已并入有码
     "无码": "japan_uncensored",
     "素人": "japan_amateur",
     "FC2": "fc2",
@@ -53,6 +53,17 @@ EXTRA: dict[str, dict[str, dict]] = {
         "RKI": {"maker": "ROOKIE"},
         "VENU": {"maker": "VENUS"},
         "VEC": {"maker": "VENUS"},
+        # 原写真前缀（已并入有码）
+        "ENFD": {"maker": "イーネット・フロンティア"},
+        "OAE": {"maker": "Air control"},
+        "REBD": {"maker": "Bamboo / REbecca"},
+        "REBDB": {"maker": "Bamboo / REbecca"},
+        "MBRAA": {"maker": "スパイスビジュアル"},
+        "MBRBA": {"maker": "スパイスビジュアル"},
+        "MBDD": {"maker": "メディアブランド"},
+        "SYD": {"maker": "スパイスビジュアル"},
+        "GGSID": {"maker": "グレイズ"},
+        "BFAZ": {"maker": "ファインピクチャーズ"},
     },
     "japan_uncensored": {
         "HEYZO": {"maker": "HEYZO", "pad": 4, "sources": ["heyzo"]},
@@ -88,18 +99,6 @@ EXTRA: dict[str, dict[str, dict]] = {
         "NAMH": {"maker": "生ハメ"},
         "EKDV": {"maker": "クリスタル映像"},
         "KBI": {"maker": "KANBi"},
-    },
-    "japan_gravure": {
-        "ENFD": {"maker": "イーネット・フロンティア"},
-        "OAE": {"maker": "Air control"},
-        "REBD": {"maker": "Bamboo / REbecca"},
-        "REBDB": {"maker": "Bamboo / REbecca"},
-        "MBRAA": {"maker": "スパイスビジュアル"},
-        "MBRBA": {"maker": "スパイスビジュアル"},
-        "MBDD": {"maker": "メディアブランド"},
-        "SYD": {"maker": "スパイスビジュアル"},
-        "GGSID": {"maker": "グレイズ"},
-        "BFAZ": {"maker": "ファインピクチャーズ"},
     },
     "fc2": {
         "FC2": {"maker": "FC2", "pad": 0, "sources": ["fc2"], "format": "FC2-{num}"},
@@ -149,7 +148,6 @@ EXTRA: dict[str, dict[str, dict]] = {
 
 DEFAULT_SOURCE = {
     "japan_censored": ["dmm"],
-    "japan_gravure": ["dmm"],
     "japan_uncensored": ["site"],
     "japan_amateur": ["dmm"],
     "fc2": ["fc2"],

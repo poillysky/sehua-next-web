@@ -402,17 +402,259 @@ def _zero_vec_literal(dim: int) -> str:
     return "[" + ",".join(["0"] * d) + "]"
 
 
+def _catalog_code_locations() -> dict[str, tuple[str, str]]:
+    """番号 → (区中文名, 前缀)。同号多路径按 REGION_ORDER 先出现的为准。"""
+    import app.prefix.catalog_store as store
+    from app.core.region_meta import REGION_META, REGION_ORDER
+
+    doc = store.load_catalog(force=True)
+    out: dict[str, tuple[str, str]] = {}
+    for rid in REGION_ORDER:
+        reg = (doc.get("regions") or {}).get(rid) or {}
+        label = str(reg.get("label") or REGION_META.get(rid, {}).get("label") or rid)
+        for pref, ent in (reg.get("prefixes") or {}).items():
+            p = str(pref or "").strip().upper()
+            if not p:
+                continue
+            for code in store.codes_of(ent):
+                cu = str(code or "").strip().upper()
+                if cu and cu not in out:
+                    out[cu] = (label, p)
+    return out
+
+
+def _catalog_prefix_labels() -> dict[str, str]:
+    """前缀 → 唯一区中文名。跨区同名前缀（如 MKY）不自动搬磁盘。"""
+    import app.prefix.catalog_store as store
+    from app.core.region_meta import REGION_META, REGION_ORDER
+    from collections import defaultdict
+
+    doc = store.load_catalog(force=True)
+    buckets: dict[str, set[str]] = defaultdict(set)
+    for rid in REGION_ORDER:
+        reg = (doc.get("regions") or {}).get(rid) or {}
+        label = str(reg.get("label") or REGION_META.get(rid, {}).get("label") or rid)
+        for pref in (reg.get("prefixes") or {}):
+            p = str(pref or "").strip().upper()
+            if p:
+                buckets[p].add(label)
+    return {p: next(iter(labels)) for p, labels in buckets.items() if len(labels) == 1}
+
+
+def relocate_disk_prefix_dirs(*, on_progress: ProgressCb | None = None) -> dict[str, int]:
+    """把刮削库磁盘上的前缀目录搬到目录所属分区，并改写向量行路径。
+
+    item_id 等于相对路径，搬完必须一起改，否则封面和 NFO 对不上。
+    """
+    import shutil
+
+    from app.core.db import media_dir
+
+    def prog(label: str, **kw: Any) -> None:
+        if on_progress:
+            on_progress({"stage": "skeleton", "label": label, **kw})
+
+    root = (media_dir() / DEFAULT_REL_ROOT).resolve()
+    if not root.is_dir():
+        return {"dirs": 0, "folders": 0, "rows": 0}
+
+    labels = _catalog_prefix_labels()
+    plans: list[tuple[Path, Path, str, str, str]] = []
+    for region_dir in root.iterdir():
+        if not region_dir.is_dir() or region_dir.name.startswith("_"):
+            continue
+        for pref_dir in region_dir.iterdir():
+            if not pref_dir.is_dir():
+                continue
+            pref = pref_dir.name.strip().upper()
+            want = labels.get(pref)
+            if not want or want == region_dir.name:
+                continue
+            plans.append((pref_dir, root / want / pref, region_dir.name, want, pref))
+
+    moved_dirs = moved_folders = updated_rows = 0
+    pool = get_meta_pool()
+    for src, dst, old_label, new_label, pref in plans:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        folder_n = 0
+        if not dst.exists():
+            src.rename(dst)
+            folder_n = sum(1 for p in dst.iterdir() if p.is_dir())
+        else:
+            for child in list(src.iterdir()):
+                target = dst / child.name
+                if target.exists():
+                    continue
+                shutil.move(str(child), str(target))
+                if child.is_dir() or target.is_dir():
+                    folder_n += 1
+            try:
+                if not any(src.iterdir()):
+                    src.rmdir()
+            except OSError:
+                pass
+        old_seg = f"{old_label}/{pref}/"
+        new_seg = f"{new_label}/{pref}/"
+        with pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"""
+                UPDATE {TABLE}
+                   SET item_id = replace(item_id, %s, %s),
+                       rel_path = replace(rel_path, %s, %s),
+                       poster_path = replace(poster_path, %s, %s),
+                       thumb_path = replace(thumb_path, %s, %s),
+                       fanart_path = replace(fanart_path, %s, %s),
+                       region = %s,
+                       prefix = %s,
+                       updated_at = now()
+                 WHERE item_id LIKE %s
+                    OR rel_path LIKE %s
+                    OR poster_path LIKE %s
+                """,
+                (
+                    old_seg,
+                    new_seg,
+                    old_seg,
+                    new_seg,
+                    old_seg,
+                    new_seg,
+                    old_seg,
+                    new_seg,
+                    old_seg,
+                    new_seg,
+                    new_label,
+                    pref,
+                    old_seg + "%",
+                    "%" + old_seg + "%",
+                    "%" + old_seg + "%",
+                ),
+            )
+            updated_rows += int(cur.rowcount or 0)
+            conn.commit()
+        moved_dirs += 1
+        moved_folders += folder_n
+        prog(f"磁盘分区 · {pref} {old_label} → {new_label}")
+
+    if moved_dirs:
+        try:
+            _FACETS_CACHE.clear()
+            _ITEMS_HUB_CACHE.clear()
+            _RECOMMEND_CACHE.clear()
+        except Exception:  # noqa: BLE001
+            pass
+    return {"dirs": moved_dirs, "folders": moved_folders, "rows": updated_rows}
+
+
+def realign_embed_locations(*, on_progress: ProgressCb | None = None) -> dict[str, int]:
+    """把已有向量行的 region/prefix 对齐到当前目录，并把刮削库磁盘前缀目录搬过去。
+
+    已刮削行保留正文。路径（item_id / rel_path）随磁盘目录一起改。
+    """
+    def prog(label: str, **kw: Any) -> None:
+        if on_progress:
+            on_progress({"stage": "skeleton", "label": label, **kw})
+
+    locations = _catalog_code_locations()
+    prog("对齐已有番号的分区…", percent=3)
+    pool = get_meta_pool()
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"SELECT item_id, region, prefix, code, content_sha FROM {TABLE}"
+        )
+        raw_rows = cur.fetchall() or []
+
+    by_code: dict[str, list[dict[str, str]]] = {}
+    for row in raw_rows:
+        if isinstance(row, dict):
+            item = {
+                "item_id": str(row.get("item_id") or "").strip(),
+                "region": str(row.get("region") or "").strip(),
+                "prefix": str(row.get("prefix") or "").strip().upper(),
+                "code": str(row.get("code") or "").strip().upper(),
+                "sha": str(row.get("content_sha") or ""),
+            }
+        else:
+            item = {
+                "item_id": str(row[0] or "").strip(),
+                "region": str(row[1] or "").strip(),
+                "prefix": str(row[2] or "").strip().upper(),
+                "code": str(row[3] or "").strip().upper(),
+                "sha": str(row[4] or ""),
+            }
+        if not item["item_id"] or not item["code"]:
+            continue
+        by_code.setdefault(item["code"], []).append(item)
+
+    updates: list[tuple[str, str, str]] = []
+    drop_ids: list[str] = []
+    for code, items in by_code.items():
+        target = locations.get(code)
+        if not target:
+            continue
+        label, pref = target
+        scraped = [x for x in items if not is_skeleton_sha(x["sha"])]
+        keeper = scraped[0] if scraped else items[0]
+        for extra in items:
+            if extra["item_id"] != keeper["item_id"]:
+                drop_ids.append(extra["item_id"])
+        if keeper["region"] != label or keeper["prefix"] != pref:
+            updates.append((label, pref, keeper["item_id"]))
+
+    moved = dropped = 0
+    with pool.connection() as conn, conn.cursor() as cur:
+        for i in range(0, len(updates), 800):
+            chunk = updates[i : i + 800]
+            cur.executemany(
+                f"""
+                UPDATE {TABLE}
+                   SET region = %s, prefix = %s, updated_at = now()
+                 WHERE item_id = %s
+                """,
+                chunk,
+            )
+            moved += len(chunk)
+        for i in range(0, len(drop_ids), 800):
+            chunk = drop_ids[i : i + 800]
+            cur.execute(
+                f"DELETE FROM {TABLE} WHERE item_id = ANY(%s)",
+                (chunk,),
+            )
+            dropped += int(cur.rowcount or 0)
+        conn.commit()
+
+    if moved or dropped:
+        try:
+            _FACETS_CACHE.clear()
+            _ITEMS_HUB_CACHE.clear()
+            _RECOMMEND_CACHE.clear()
+        except Exception:  # noqa: BLE001
+            pass
+    disk = relocate_disk_prefix_dirs(on_progress=on_progress)
+    prog(
+        f"分区对齐 · 调整 {moved:,} · 去掉重复 {dropped:,} · 磁盘 {disk.get('dirs', 0)} 个前缀",
+        percent=5,
+        done=moved,
+        total=moved,
+    )
+    return {
+        "moved": moved,
+        "dropped_dupes": dropped,
+        "disk_dirs": int(disk.get("dirs") or 0),
+        "disk_rows": int(disk.get("rows") or 0),
+    }
+
+
 def upsert_catalog_skeletons(
     *,
     on_progress: ProgressCb | None = None,
     batch_size: int = 4000,
 ) -> dict[str, Any]:
-    """按七区目录 1:1 同步番号骨架到向量库。
+    """按六区目录 1:1 同步番号骨架到向量库。
 
     - 目录无 / 向量有 → 删（prune_embed_not_in_catalog）
     - 目录有 / 向量无 → 插入仅骨架行（空壳态）
-    - 两边都有（含已刮削）→ 跳过，绝不覆盖清零
-    - 同番号多区/多前缀只保留一条骨架（先出现的区优先）
+    - 两边都有（含已刮削）→ 对齐 region/prefix，不覆盖正文
+    - 同番号多行保留已刮削，删多余骨架
     - embedding 用零向量占位；语义检索排除骨架
     """
     import app.prefix.catalog_store as store
@@ -460,7 +702,24 @@ def upsert_catalog_skeletons(
             "total": 0,
         }
 
-    prog("skeleton", percent=6, label="加载七区目录…", done=0, total=None)
+    try:
+        relocated = realign_embed_locations(on_progress=on_progress)
+    except Exception as e:  # noqa: BLE001
+        prog("skeleton", percent=100, label=f"分区对齐失败 · {e}")
+        return {
+            "ok": False,
+            "skipped": False,
+            "error": f"realign: {e}",
+            "inserted": 0,
+            "skipped_existing": 0,
+            "purged": 0,
+            "purged_codes": purged_codes,
+            "relocated": 0,
+            "dropped_dupes": 0,
+            "total": 0,
+        }
+
+    prog("skeleton", percent=6, label="加载六区目录…", done=0, total=None)
     doc = store.load_catalog(force=True)
     # 按番号去重：同 code 多路径只插一条
     jobs: list[tuple[str, str, str, str, str]] = []
@@ -613,6 +872,7 @@ def upsert_catalog_skeletons(
         percent=100,
         label=(
             f"骨架同步完成 · 新写入 {inserted:,} · 跳过 {skipped_existing:,}"
+            f" · 分区调整 {int(relocated.get('moved') or 0):,}"
             f" · 清目录外 {purged_codes:,} · {elapsed}s"
         ),
         done=inserted,
@@ -625,6 +885,8 @@ def upsert_catalog_skeletons(
         "skipped_existing": skipped_existing,
         "purged": 0,
         "purged_codes": purged_codes,
+        "relocated": int(relocated.get("moved") or 0),
+        "dropped_dupes": int(relocated.get("dropped_dupes") or 0),
         "total": total,
         "pending": len(pending),
         "dup_paths": dup_paths,
@@ -649,12 +911,100 @@ def purge_catalog_skeletons() -> int:
     return n
 
 
+def rebuild_catalog_skeletons(
+    *,
+    on_progress: ProgressCb | None = None,
+    batch_size: int = 4000,
+) -> dict[str, Any]:
+    """双库扫描后：删光骨架 → 按目录少删多补重建。
+
+    - 已刮削行保留（非 skeleton）
+    - 目录外番号整行删除
+    - 目录有、向量无 → 重新插入骨架
+    保证向量库番号集合与 catalog 扫描结果 1:1（已刮削仍占位，不重复插骨架）。
+    """
+
+    def prog(stage: str, **kw: Any) -> None:
+        if on_progress:
+            on_progress({"stage": stage, **kw})
+
+    t0 = time.monotonic()
+    cfg = resolve_embed_config(include_secret=True)
+    if not cfg.get("enabled"):
+        prog("skeleton", percent=100, label="嵌入未启用，跳过骨架重建")
+        return {
+            "ok": False,
+            "skipped": True,
+            "reason": "embed_disabled",
+            "purged_skeletons": 0,
+            "inserted": 0,
+            "skipped_existing": 0,
+            "purged_codes": 0,
+            "total": 0,
+            "mode": "rebuild",
+        }
+
+    prog("skeleton", percent=1, label="删除旧番号骨架…")
+    try:
+        purged_skel = purge_catalog_skeletons()
+    except Exception as e:  # noqa: BLE001
+        prog("skeleton", percent=100, label=f"删骨架失败 · {e}")
+        return {
+            "ok": False,
+            "error": f"purge_skeletons: {e}",
+            "purged_skeletons": 0,
+            "inserted": 0,
+            "skipped_existing": 0,
+            "purged_codes": 0,
+            "total": 0,
+            "mode": "rebuild",
+        }
+    prog(
+        "skeleton",
+        percent=4,
+        label=f"已删骨架 {purged_skel:,} · 按目录重建…",
+        done=0,
+        total=None,
+    )
+
+    # 清分面缓存，避免旧骨架聚合
+    try:
+        _FACETS_CACHE.clear()
+        _ITEMS_HUB_CACHE.clear()
+        _RECOMMEND_CACHE.clear()
+    except Exception:  # noqa: BLE001
+        pass
+
+    sync = upsert_catalog_skeletons(on_progress=on_progress, batch_size=batch_size)
+    out = {
+        **sync,
+        "mode": "rebuild",
+        "purged_skeletons": purged_skel,
+        "elapsed_sec": round(time.monotonic() - t0, 1),
+    }
+    if sync.get("ok"):
+        inserted = int(sync.get("inserted") or 0)
+        purged_codes = int(sync.get("purged_codes") or 0)
+        total = int(sync.get("total") or 0)
+        prog(
+            "skeleton",
+            percent=100,
+            label=(
+                f"骨架重建完成 · 删壳 {purged_skel:,} · 目录外 -{purged_codes:,}"
+                f" · 新壳 +{inserted:,} · 目录 {total:,}"
+            ),
+            done=total,
+            total=total,
+        )
+    return out
+
+
 def reset_embed_to_catalog_skeletons(
     *,
     on_progress: ProgressCb | None = None,
     batch_size: int = 4000,
 ) -> dict[str, Any]:
-    """清空向量库全部行，再按七区目录 1:1 重建仅番号骨架。
+    """清空向量库全部行，再按六区目录 1:1 重建仅番号骨架。
 
     用于「刮削前只留骨架、逐号重刮入库」测试/重建。
     不删本地 scrap-library 磁盘上的 NFO/封面；单号 overwrite 刮削时会覆盖写回。
@@ -723,7 +1073,7 @@ def reset_embed_to_catalog_skeletons(
 
 
 def catalog_code_set() -> set[str]:
-    """七区目录全部番号（大写）。"""
+    """六区目录全部番号（大写）。"""
     import app.prefix.catalog_store as store
 
     doc = store.load_catalog(force=True)
@@ -739,7 +1089,7 @@ def catalog_code_set() -> set[str]:
 
 
 def prune_embed_not_in_catalog() -> int:
-    """删除向量库中番号不在七区目录里的行（多的删）。"""
+    """删除向量库中番号不在六区目录里的行（多的删）。"""
     ensure_schema()
     codes = catalog_code_set()
     pool = get_meta_pool()
@@ -932,6 +1282,10 @@ _QUALITY_PRED: dict[str, str] = {
 _SHELL_GAPS = list(QUALITY_KINDS)
 _SKELETON_SQL = f"content_sha LIKE '{SKELETON_SHA_PREFIX}:%%'"
 _NOT_SKELETON_SQL = f"content_sha NOT LIKE '{SKELETON_SHA_PREFIX}:%%'"
+# 片商浏览：非骨架，且本地有海报（无 nfo/poster 的空壳不进货架）
+_DISPLAY_READY_SQL = (
+    f"{_NOT_SKELETON_SQL} AND coalesce(poster_path, '') <> ''"
+)
 
 
 def _quality_region_sql(region: str) -> tuple[str, list[Any]]:
@@ -942,7 +1296,7 @@ def _quality_region_sql(region: str) -> tuple[str, list[Any]]:
 
 
 def _catalog_region_ids(region: str) -> list[str]:
-    """quality/enrich 用的目录区 id 列表；空 = 七区全开。"""
+    """quality/enrich 用的目录区 id 列表；空 = 六区全开。"""
     from app.core.region_meta import REGION_META, REGION_ORDER, resolve_fs_region
 
     raw = str(region or "").strip()
@@ -983,12 +1337,18 @@ def _shell_rel_path(region_label: str, prefix: str, code: str) -> str:
 
     label = str(region_label or "").strip()
     code_u = str(code or "").strip()
-    # FC2 扁平：FC2/{CODE}（无制作商/无多余前缀层）
+    pref = str(prefix or "").strip()
+    # 六区统一：区/前缀/番号；FC2 磁盘夹为 FC2 与 FC2-PPV
     if label.casefold() in {"fc2", "fc2ppv"} or label.upper() == "FC2":
-        return f"{safe_name(label)}/{safe_name(code_u)}"
+        from app.core.region_meta import fc2_fs_prefix, normalize_fc2_code
+
+        code_u = normalize_fc2_code(code_u)
+        pref = fc2_fs_prefix(pref, code=code_u)
+    elif not pref:
+        pref = str(prefix or "").strip()
     return (
         f"{safe_name(label)}/"
-        f"{safe_name(prefix)}/"
+        f"{safe_name(pref)}/"
         f"{safe_name(code_u)}"
     )
 
@@ -1116,13 +1476,13 @@ def list_skeleton_shell_items(
             continue
         seen_p.add(p)
         prefs_u.append(p)
-    order_sql = "ORDER BY code ASC"
+    order_sql = "ORDER BY updated_at DESC NULLS LAST, code ASC"
     sql_params: list[Any] = [*params]
     if prefs_u:
-        # 热门前缀靠前，其余空壳殿后
+        # 热门前缀靠前，同档内最新变更优先
         order_sql = (
             "ORDER BY CASE WHEN upper(prefix) = ANY(%s) THEN 0 ELSE 1 END, "
-            "code ASC"
+            "updated_at DESC NULLS LAST, code ASC"
         )
         sql_params.append(prefs_u)
     sql_limit = ""
@@ -1177,6 +1537,32 @@ def _row_gaps(row: dict[str, Any]) -> list[str]:
     if (not title) or len(title) < 4 or title.casefold() == code.casefold():
         gaps.append("thin_title")
     return gaps
+
+
+def region_library_totals_fast(*, region: str = "") -> dict[str, int]:
+    """角标用：仅向量库 COUNT(*)。
+
+    不做分项 quality COUNT、也不扫未入库目录壳（后者在大库上可达数百毫秒）。
+    准确「未处理」= tip.total（扫描写入）或本 COUNT − tip(done/soft/fail)。
+    目录壳数量通常个位数，相对 10 万+ 可忽略；完整壳统计留给 quality 面板。
+    """
+    ensure_schema()
+    region_sql, params = _quality_region_sql(region)
+    pool = get_meta_pool()
+    embed_total = 0
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"SELECT count(*) AS n FROM {TABLE} WHERE true{region_sql}",
+            params,
+        )
+        row = cur.fetchone() or {}
+        embed_total = int((row.get("n") if isinstance(row, dict) else row[0]) or 0)
+    total = max(0, embed_total)
+    return {
+        "total": total,
+        "embedTotal": total,
+        "shells": 0,
+    }
 
 
 def quality_stats(*, region: str = "") -> dict[str, Any]:
@@ -1465,10 +1851,13 @@ def list_region_code_items(
     region: str = "",
     limit: int = 0,
     offset: int = 0,
+    order: str = "code",
 ) -> list[dict[str, Any]]:
-    """分区全部有番号行，按 code ASC（含已齐元数据）。
+    """分区全部有番号行（含已齐元数据）。
 
-    用于「向量有、本地无」回填未处理；与 quality_incomplete 不同，不按缺口过滤。
+    order:
+      - ``code``（默认）：code ASC，兼容旧回填/扫描
+      - ``updated``：updated_at DESC，未处理列表「最新入队在上」
     """
     ensure_schema()
     raw_lim = int(limit) if limit is not None else 0
@@ -1485,6 +1874,11 @@ def list_region_code_items(
         # 无上限但带 offset：用大 LIMIT + OFFSET
         sql_limit = " LIMIT %s OFFSET %s"
         sql_params.extend([2_000_000, off])
+    order_u = str(order or "code").strip().lower()
+    if order_u in {"updated", "updated_at", "mtime", "recent"}:
+        order_sql = "updated_at DESC NULLS LAST, code ASC"
+    else:
+        order_sql = "code ASC"
     pool = get_meta_pool()
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -1494,7 +1888,7 @@ def list_region_code_items(
             FROM {TABLE}
             WHERE coalesce(trim(code), '') <> ''
               {region_sql}
-            ORDER BY code ASC
+            ORDER BY {order_sql}
             {sql_limit}
             """,
             sql_params,
@@ -1933,6 +2327,48 @@ def _update_item_poster_path(item_id: str, poster_path: str) -> None:
         conn.commit()
 
 
+def canonical_fc2_scrap_rel(rel: str) -> str:
+    """扁平 FC2/{CODE}、旧夹 FC2PPV → 现行 FC2/FC2|FC2-PPV/{CODE}。
+
+    非 FC2 路径原样返回。写入封面/NFO 前必须走这里，避免根目录再冒出扁平残留。
+    """
+    text = str(rel or "").strip().replace("\\", "/").strip("/")
+    if not text:
+        return ""
+    parts = [p for p in text.split("/") if p and p not in (".",)]
+    if not parts or any(p == ".." for p in parts):
+        return text
+    region = str(parts[0] or "")
+    if region.casefold() not in {"fc2", "fc2ppv"} and region.upper() != "FC2":
+        return text
+    from app.core.region_meta import fc2_fs_prefix, normalize_fc2_code
+
+    if len(parts) == 1:
+        return text
+    nxt = str(parts[1] or "")
+    nxt_u = nxt.upper().replace("_", "-")
+    # 旧前缀夹名
+    if nxt_u in {"FC2PPV", "FC2_PPV"}:
+        parts[1] = "FC2-PPV"
+        if len(parts) >= 3:
+            parts[2] = normalize_fc2_code(parts[2])
+        return "/".join(parts)
+    # 已是现行三层
+    if nxt_u in {"FC2", "FC2-PPV"}:
+        if len(parts) >= 3:
+            parts[2] = normalize_fc2_code(parts[2])
+            # 前缀夹与番号不一致时按番号纠正
+            parts[1] = fc2_fs_prefix(code=parts[2])
+        return "/".join(parts)
+    # 扁平 FC2/{CODE}/…
+    if nxt_u.startswith("FC2"):
+        code = normalize_fc2_code(nxt)
+        pref = fc2_fs_prefix(code=code)
+        rest = parts[2:]
+        return "/".join([parts[0], pref, code, *rest])
+    return text
+
+
 def ensure_local_poster(
     *,
     item_id: str = "",
@@ -1973,6 +2409,27 @@ def ensure_local_poster(
 
     if not rel or not _is_http_url(url):
         return {"ok": False, "reason": "no_cover"}
+
+    # 禁止再往扁平 FC2/{CODE} 落盘；顺带把库里的旧 rel 纠正到三层
+    canon = canonical_fc2_scrap_rel(rel)
+    if canon and canon != rel.replace("\\", "/").strip("/"):
+        rel = canon
+        if iid:
+            try:
+                pool = get_meta_pool()
+                with pool.connection() as conn, conn.cursor() as cur:
+                    cur.execute(
+                        f"""
+                        UPDATE {TABLE}
+                        SET rel_path = %s, updated_at = now()
+                        WHERE item_id = %s
+                          AND (rel_path IS DISTINCT FROM %s)
+                        """,
+                        (rel, iid, rel),
+                    )
+                    conn.commit()
+            except Exception:  # noqa: BLE001
+                pass
 
     root = resolve_root(get_settings().get("root"))
     folder = (root / rel).resolve()
@@ -2099,33 +2556,39 @@ def _scan_one_nfo(
     except ValueError:
         return None
     parts = [p for p in rel.split("/") if p]
-    # FC2 扁平：FC2/{CODE}；其它区仍是 region/prefix/code
+    # 标准：region/prefix/code；兼容旧扁平 FC2/{CODE}
     if len(parts) == 2 and str(parts[0] or "").casefold() in {"fc2", "fc2ppv"}:
+        from app.core.region_meta import fc2_prefix_from_code, normalize_fc2_code
+
         region = parts[0]
-        prefix = "FC2"
-        code = parts[1]
+        code = normalize_fc2_code(parts[1])
+        prefix = fc2_prefix_from_code(code)
     else:
         region = parts[0] if len(parts) >= 1 else ""
         prefix = parts[1] if len(parts) >= 2 else ""
         code = parts[2] if len(parts) >= 3 else nfo.stem
+        # FC2 区若误把前缀层当番号，按番号纠正
+        if (
+            str(region or "").casefold() in {"fc2", "fc2ppv"}
+            and prefix
+            and str(prefix).upper().replace("-", "").startswith("FC2")
+            and any(ch.isdigit() for ch in prefix)
+            and (not code or code == nfo.stem)
+        ):
+            from app.core.region_meta import fc2_prefix_from_code, normalize_fc2_code
+
+            code = normalize_fc2_code(prefix)
+            prefix = fc2_prefix_from_code(code)
+        elif str(region or "").casefold() in {"fc2", "fc2ppv"}:
+            from app.core.region_meta import fc2_prefix_from_code, normalize_fc2_code
+
+            code = normalize_fc2_code(code)
+            prefix = _canonical_folder_prefix(prefix) or fc2_prefix_from_code(code)
     meta = parse_nfo(nfo)
     if not meta:
         return None
 
-    # 仅内存清洗进向量；NFO 是存档，禁止写回
-    try:
-        from app.scrap_library.enrich import _clean_actors
-
-        raw_actors = list(meta.get("actors") or [])
-        cleaned = _clean_actors(raw_actors)
-        studio = str(meta.get("studio") or "").strip()
-        publisher = str(meta.get("publisher") or "").strip()
-        skip = {studio.casefold(), publisher.casefold()} - {""}
-        cleaned = [a for a in cleaned if a.casefold() not in skip]
-        if cleaned != raw_actors:
-            meta["actors"] = cleaned
-    except Exception:  # noqa: BLE001
-        pass
+    # actors 按 NFO 原文进向量；不再 junk 清洗 / 撞片商剔除
 
     files = _folder_file_names(folder)
 
@@ -2309,24 +2772,235 @@ def _existing_shas(item_ids: list[str]) -> dict[str, str]:
     }
 
 
-def ingest(
+def _normalize_ingest_mode(mode: str | None) -> str:
+    m = str(mode or "full").strip().lower()
+    return m if m in {"full", "meta", "embed"} else "full"
+
+
+def vectorize_db_embeddings(
     *,
-    root: str | None = None,
     batch_size: int = 32,
     force: bool = False,
     limit: int | None = None,
     on_progress: ProgressCb | None = None,
     resume_done_ids: set[str] | None = None,
 ) -> dict[str, Any]:
+    """对元库已有行做向量编码（不扫磁盘 NFO）。
+
+    增量：仅非骨架且 embedding 为零向量的行。
+    全量：非骨架行全部重嵌。
+    """
+    init_db()
+    schema = ensure_schema()
+    assert_embed_ready()
+    done_ids = set(resume_done_ids or ())
+    dim = int(schema["dim"])
+    zero_lit = _zero_vec_literal(dim)
+    cfg_root = str(get_settings().get("root") or DEFAULT_REL_ROOT)
+
+    def prog(stage: str, **kw: Any) -> None:
+        payload = {"stage": stage, **kw}
+        _set_progress(**payload)
+        if on_progress:
+            on_progress(payload)
+        if stage in {"diff", "embed", "done"}:
+            _persist_embed_job(
+                status="running" if stage != "done" else "done",
+                params={
+                    "force": bool(force),
+                    "root": cfg_root,
+                    "mode": "embed",
+                },
+                doneIds=sorted(done_ids)[-8000:],
+            )
+
+    prog("diff", percent=8, label="筛选待向量化…", done=0, total=None)
+    pool = get_meta_pool()
+    rows: list[dict[str, Any]] = []
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            if force:
+                cur.execute(
+                    f"""
+                    SELECT item_id, source_text, dim
+                    FROM {TABLE}
+                    WHERE {_NOT_SKELETON_SQL}
+                    ORDER BY item_id
+                    """
+                )
+            else:
+                cur.execute(
+                    f"""
+                    SELECT item_id, source_text, dim
+                    FROM {TABLE}
+                    WHERE {_NOT_SKELETON_SQL}
+                      AND embedding = %s::vector
+                    ORDER BY item_id
+                    """,
+                    (zero_lit,),
+                )
+            for raw in cur.fetchall() or []:
+                if isinstance(raw, dict):
+                    rows.append(raw)
+                else:
+                    rows.append(
+                        {
+                            "item_id": raw[0],
+                            "source_text": raw[1],
+                            "dim": raw[2],
+                        }
+                    )
+    if limit is not None and int(limit) > 0:
+        rows = rows[: int(limit)]
+    if done_ids:
+        before = len(rows)
+        rows = [
+            r
+            for r in rows
+            if str(r.get("item_id") or "") not in done_ids
+        ]
+        skipped_done = before - len(rows)
+        if skipped_done:
+            _push_log(f"续跑跳过已编码 {skipped_done:,}")
+
+    total = len(rows)
+    _push_log(
+        f"待向量化 {total:,}"
+        + (" · 全量重嵌" if force else " · 仅零向量")
+    )
+    if total == 0:
+        prog("done", percent=100, label="无需向量化", done=0, total=0)
+        return {
+            "written": 0,
+            "skipped": 0,
+            "deleted": 0,
+            "total": 0,
+            "root": cfg_root,
+            "meta_db": meta_dsn_label(),
+            "table": TABLE,
+            "dim": dim,
+            "mode": "embed",
+        }
+
+    prog("embed", percent=12, label=f"编码 {total}", done=0, total=total)
+    _push_log("向量模型预热…")
+    encode_texts_sync(["."], query=False)
+    _push_log("向量模型已预热")
+
+    cfg = resolve_embed_config(include_secret=True)
+    model_name = str(cfg["model"])
+    emb_dim = int(cfg["dim"])
+    bs = max(1, min(64, int(batch_size)))
+    written = 0
+    update_sql = f"""
+        UPDATE {TABLE} SET
+          model = %s,
+          dim = %s,
+          embedding = %s::vector,
+          updated_at = now()
+        WHERE item_id = %s
+    """
+    for i in range(0, total, bs):
+        chunk = rows[i : i + bs]
+        texts = [str(r.get("source_text") or "") for r in chunk]
+        vecs = encode_texts_sync(texts, query=False)
+        if len(vecs) != len(chunk):
+            raise RuntimeError(f"向量条数不匹配: {len(vecs)} != {len(chunk)}")
+        if any(len(v) != emb_dim for v in vecs):
+            raise RuntimeError(f"向量维度不是 {emb_dim}")
+        with pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    update_sql,
+                    [
+                        (
+                            model_name,
+                            emb_dim,
+                            _vec_literal(vec),
+                            str(r.get("item_id") or ""),
+                        )
+                        for r, vec in zip(chunk, vecs, strict=True)
+                    ],
+                )
+            conn.commit()
+        written += len(chunk)
+        for r in chunk:
+            iid = str(r.get("item_id") or "")
+            if iid:
+                done_ids.add(iid)
+        pct = 12 + int(80 * written / max(1, total))
+        prog(
+            "embed",
+            percent=min(94, pct),
+            label=f"编码 {written}/{total}",
+            done=written,
+            total=total,
+        )
+        _persist_embed_job(
+            status="running",
+            params={"force": bool(force), "root": cfg_root, "mode": "embed"},
+            doneIds=sorted(done_ids)[-8000:],
+        )
+        if written == len(chunk) or written % max(bs * 4, 1) == 0:
+            _push_log(f"编码 {written}/{total}")
+
+    try:
+        ensure_hnsw()
+        _push_log("HNSW 向量索引就绪")
+    except Exception as e:  # noqa: BLE001
+        _push_log(f"HNSW 跳过: {e}")
+
+    result = {
+        "written": written,
+        "skipped": 0,
+        "deleted": 0,
+        "total": total,
+        "root": cfg_root,
+        "meta_db": meta_dsn_label(),
+        "table": TABLE,
+        "dim": emb_dim,
+        "mode": "embed",
+    }
+    prog("done", percent=100, label="完成", done=written, total=total)
+    _push_log(f"向量化完成 · 写入 {written:,} / {total:,}")
+    return result
+
+
+def ingest(
+    *,
+    root: str | None = None,
+    batch_size: int = 32,
+    force: bool = False,
+    limit: int | None = None,
+    mode: str = "full",
+    on_progress: ProgressCb | None = None,
+    resume_done_ids: set[str] | None = None,
+) -> dict[str, Any]:
     """扫描 scrap-library，把 NFO 元数据写入元库向量表。
+
+    mode:
+      - full: 元数据 + 向量编码（默认，兼容旧行为）
+      - meta: 仅同步元数据（新/变更行写零向量，待向量化）
+      - embed: 仅对元库待嵌行编码（见 vectorize_db_embeddings）
 
     resume_done_ids: 断点续跑时已写入的 item_id，跳过不再编码。
     """
+    ingest_mode = _normalize_ingest_mode(mode)
+    if ingest_mode == "embed":
+        return vectorize_db_embeddings(
+            batch_size=batch_size,
+            force=force,
+            limit=limit,
+            on_progress=on_progress,
+            resume_done_ids=resume_done_ids,
+        )
+
     init_db()
     schema = ensure_schema()
     cfg_root = root if root is not None else get_settings().get("root")
     abs_root = resolve_root(str(cfg_root or DEFAULT_REL_ROOT))
     done_ids = set(resume_done_ids or ())
+    meta_only = ingest_mode == "meta"
 
     def prog(stage: str, **kw: Any) -> None:
         payload = {"stage": stage, **kw}
@@ -2337,12 +3011,18 @@ def ingest(
         if stage in {"scan", "diff", "embed", "covers", "done"}:
             _persist_embed_job(
                 status="running" if stage != "done" else "done",
-                params={"force": bool(force), "root": str(cfg_root or "")},
+                params={
+                    "force": bool(force),
+                    "root": str(cfg_root or ""),
+                    "mode": ingest_mode,
+                },
                 doneIds=sorted(done_ids)[-8000:],
             )
 
     # 扫描与模型预热并行：避免「扫完才开始加载模型」的长时间假死
+    # meta 模式不编码，跳过预热
     warmup_err: list[BaseException] = []
+    warmup_thread: threading.Thread | None = None
 
     def _warmup_model() -> None:
         try:
@@ -2351,11 +3031,13 @@ def ingest(
         except BaseException as e:  # noqa: BLE001
             warmup_err.append(e)
 
-    warmup_thread = threading.Thread(
-        target=_warmup_model, name="scrap-embed-warmup", daemon=True
-    )
-    warmup_thread.start()
-
+    if not meta_only:
+        warmup_thread = threading.Thread(
+            target=_warmup_model, name="scrap-embed-warmup", daemon=True
+        )
+        warmup_thread.start()
+    else:
+        _push_log("同步数据库 · 仅写元数据（不编码向量）")
     prog("scan", percent=2, label="扫描 NFO…", done=0, total=None)
     _push_log(f"扫描 {abs_root}")
 
@@ -2382,7 +3064,8 @@ def ingest(
     total = len(items)
     _push_log(f"发现 {total} 条有效 NFO · 元库 {meta_dsn_label()}")
     if total == 0:
-        warmup_thread.join(timeout=1)
+        if warmup_thread is not None:
+            warmup_thread.join(timeout=1)
         prog("done", percent=100, label="无 NFO", done=0, total=0)
         return {
             "written": 0,
@@ -2392,6 +3075,7 @@ def ingest(
             "root": str(abs_root),
             "meta_db": meta_dsn_label(),
             "dim": schema["dim"],
+            "mode": ingest_mode,
         }
 
     prog("diff", percent=22, label="比对已有向量…", done=0, total=total)
@@ -2474,9 +3158,10 @@ def ingest(
     _push_log(
         f"待写入 {len(pending)} · 跳过未变 {len(skipped_items)}"
         f" · 清洗等价仅改文本 {len(text_only_items)}"
+        + (" · 仅元数据" if meta_only else "")
     )
     prog(
-        "embed",
+        "embed" if not meta_only else "diff",
         percent=24,
         label=f"待写入 {len(pending)}",
         done=0,
@@ -2579,8 +3264,74 @@ def ingest(
                     )
             conn.commit()
         _push_log(f"清洗等价 · 仅更新文本 {len(text_only_items)}（未重嵌）")
-    if pending:
-        warmup_thread.join()
+    if pending and meta_only:
+        # 仅同步元数据：新/变更行写零向量，留给「数据库向量化」
+        dim = int(schema["dim"])
+        zero_lit = _zero_vec_literal(dim)
+        embed_cfg = resolve_embed_config()
+        model_name = str(embed_cfg["model"])
+        prog(
+            "diff",
+            percent=30,
+            label=f"写元数据 {len(pending)}",
+            done=0,
+            total=len(pending),
+        )
+        _push_log(f"写元数据 {len(pending):,}（零向量占位）")
+        bs_meta = max(1, min(500, int(batch_size) * 8))
+        for i in range(0, len(pending), bs_meta):
+            chunk = pending[i : i + bs_meta]
+            rows = [
+                [
+                    p["item_id"],
+                    p["region"],
+                    p["prefix"],
+                    p["code"],
+                    p["rel_path"],
+                    p["title"],
+                    p["poster_path"],
+                    p["thumb_path"],
+                    p["fanart_path"],
+                    p["cover_url"],
+                    model_name,
+                    dim,
+                    p["content_sha"],
+                    p["source_text"],
+                    zero_lit,
+                ]
+                for p in chunk
+            ]
+            with pool.connection() as conn:
+                with conn.cursor() as cur:
+                    cur.executemany(insert_sql, rows)
+                conn.commit()
+            written += len(chunk)
+            for p in chunk:
+                iid = str(p.get("item_id") or "")
+                if iid:
+                    done_ids.add(iid)
+            pct = 30 + int(55 * written / max(1, len(pending)))
+            prog(
+                "diff",
+                percent=min(88, pct),
+                label=f"写元数据 {written}/{len(pending)}",
+                done=written,
+                total=len(pending),
+            )
+            _persist_embed_job(
+                status="running",
+                params={
+                    "force": bool(force),
+                    "root": str(cfg_root or ""),
+                    "mode": ingest_mode,
+                },
+                doneIds=sorted(done_ids)[-8000:],
+            )
+            if written == len(chunk) or written % max(bs_meta * 2, 1) == 0:
+                _push_log(f"写元数据 {written}/{len(pending)}")
+    elif pending:
+        if warmup_thread is not None:
+            warmup_thread.join()
         if warmup_err:
             raise RuntimeError(f"向量模型预热失败: {warmup_err[0]}") from warmup_err[0]
         cfg = resolve_embed_config(include_secret=True)
@@ -2641,13 +3392,18 @@ def ingest(
             )
             _persist_embed_job(
                 status="running",
-                params={"force": bool(force), "root": str(cfg_root or "")},
+                params={
+                    "force": bool(force),
+                    "root": str(cfg_root or ""),
+                    "mode": ingest_mode,
+                },
                 doneIds=sorted(done_ids)[-8000:],
             )
             if written == len(chunk) or written % max(bs * 4, 1) == 0:
                 _push_log(f"写入 {written}/{len(pending)}")
     else:
-        warmup_thread.join(timeout=0.2)
+        if warmup_thread is not None:
+            warmup_thread.join(timeout=0.2)
 
     # 文本未变也刷新封面路径，方便后续直接调用
     if skipped_items:
@@ -2676,8 +3432,11 @@ def ingest(
         _push_log(f"封面路径已刷新 {len(skipped_items)}")
 
     try:
-        ensure_hnsw()
-        _push_log("HNSW 向量索引就绪")
+        if not meta_only:
+            ensure_hnsw()
+            _push_log("HNSW 向量索引就绪")
+        else:
+            _push_log("跳过 HNSW（仅元数据同步）")
     except Exception as e:  # noqa: BLE001
         _push_log(f"HNSW 跳过: {e}")
 
@@ -2692,18 +3451,29 @@ def ingest(
         "table": TABLE,
         "dim": schema["dim"],
         "index": f"{TABLE}_hnsw",
+        "mode": ingest_mode,
     }
     prog("done", percent=100, label="完成", done=written, total=len(pending))
     _push_log(
-        f"完成 · 写入 {written} · 跳过 {skipped}"
-        f"（含文本对齐 {len(text_only_items)}）· 删多余 {purged_disk}"
-        f" · 合计 {total} · HNSW → {meta_dsn_label()}"
+        (
+            f"完成 · 写元数据 {written} · 跳过 {skipped}"
+            if meta_only
+            else f"完成 · 写入 {written} · 跳过 {skipped}"
+        )
+        + f"（含文本对齐 {len(text_only_items)}）· 删多余 {purged_disk}"
+        + f" · 合计 {total} · → {meta_dsn_label()}"
     )
     return result
 
 
-def start_ingest_job(*, root: str = "", force: bool = False) -> dict[str, Any]:
-    assert_embed_ready()
+def start_ingest_job(
+    *, root: str = "", force: bool = False, mode: str = "full"
+) -> dict[str, Any]:
+    ingest_mode = _normalize_ingest_mode(mode)
+    if ingest_mode != "meta":
+        assert_embed_ready()
+    else:
+        ensure_schema()
     prev = _hydrate_embed_job()
     resume_done: set[str] = set()
     resumed = False
@@ -2715,6 +3485,8 @@ def start_ingest_job(*, root: str = "", force: bool = False) -> dict[str, Any]:
     same_params = (
         bool(prev_params.get("force")) == bool(force)
         and str(prev_params.get("root") or "").strip() in {"", want_root}
+        and _normalize_ingest_mode(str(prev_params.get("mode") or "full"))
+        == ingest_mode
     )
     if (
         prev_status in {"interrupted", "running", "paused"}
@@ -2723,6 +3495,12 @@ def start_ingest_job(*, root: str = "", force: bool = False) -> dict[str, Any]:
     ):
         resume_done = {str(x) for x in prev["doneIds"] if str(x).strip()}
         resumed = bool(resume_done)
+
+    mode_label = {
+        "meta": "同步数据库",
+        "embed": "向量化",
+        "full": "同步向量",
+    }.get(ingest_mode, "同步向量")
 
     with _job_lock:
         if _job["running"]:
@@ -2745,7 +3523,11 @@ def start_ingest_job(*, root: str = "", force: bool = False) -> dict[str, Any]:
         )
     _persist_embed_job(
         status="running",
-        params={"force": bool(force), "root": want_root},
+        params={
+            "force": bool(force),
+            "root": want_root,
+            "mode": ingest_mode,
+        },
         doneIds=sorted(resume_done)[-8000:],
     )
 
@@ -2755,8 +3537,13 @@ def start_ingest_job(*, root: str = "", force: bool = False) -> dict[str, Any]:
                 put_settings(root=root.strip())
             if resumed:
                 _push_log(f"续跑 · 已跳过 {len(resume_done):,} 条")
+            else:
+                _push_log(
+                    f"开始{mode_label}" + (" · 全量" if force else " · 增量")
+                )
             result = ingest(
                 force=force,
+                mode=ingest_mode,
                 resume_done_ids=resume_done or None,
             )
             with _job_lock:
@@ -2764,7 +3551,11 @@ def start_ingest_job(*, root: str = "", force: bool = False) -> dict[str, Any]:
                 _job["phase"] = "done"
             _persist_embed_job(
                 status="done",
-                params={"force": bool(force), "root": want_root},
+                params={
+                    "force": bool(force),
+                    "root": want_root,
+                    "mode": ingest_mode,
+                },
                 doneIds=[],
             )
         except Exception as e:  # noqa: BLE001
@@ -2777,7 +3568,11 @@ def start_ingest_job(*, root: str = "", force: bool = False) -> dict[str, Any]:
                 _job["log"] = log_list[-40:]
             _persist_embed_job(
                 status="error",
-                params={"force": bool(force), "root": want_root},
+                params={
+                    "force": bool(force),
+                    "root": want_root,
+                    "mode": ingest_mode,
+                },
                 doneIds=sorted(resume_done)[-8000:],
             )
         finally:
@@ -2786,7 +3581,7 @@ def start_ingest_job(*, root: str = "", force: bool = False) -> dict[str, Any]:
             _persist_embed_job()
 
     threading.Thread(target=run, name="scrap-library-embed", daemon=True).start()
-    return {"started": True, "resumed": resumed}
+    return {"started": True, "mode": ingest_mode, "resumed": resumed}
 
 
 def _hit_from_row(row: dict[str, Any], *, score: float | None = None) -> dict[str, Any]:
@@ -2795,8 +3590,16 @@ def _hit_from_row(row: dict[str, Any], *, score: float | None = None) -> dict[st
     fanart = str(row.get("fanart_path") or "")
     cover = str(row.get("cover_url") or "")
     item_id = str(row.get("item_id") or "")
-    rel_path = str(row.get("rel_path") or "")
+    rel_path = str(row.get("rel_path") or "").replace("\\", "/").strip("/")
     source_text = str(row.get("source_text") or "")
+    # FC2 迁目录后库内路径常滞后：改写到现行文件
+    poster = resolve_existing_media_rel(poster) or poster
+    thumb = resolve_existing_media_rel(thumb) or thumb
+    fanart = resolve_existing_media_rel(fanart) or fanart
+    if not poster and rel_path:
+        poster = resolve_existing_media_rel(
+            f"scrap-library/{rel_path}/poster.jpg"
+        )
     # 浏览时发现缺本地：后台把远程 cover 落到番号目录（不挡列表）
     if cover and not poster:
         schedule_ensure_local_poster(
@@ -2843,13 +3646,11 @@ def _list_card_meta(source_text: str) -> dict[str, Any]:
     actresses: list[str] = []
     m = _LIST_ACTRESS_RE.search(src)
     if m:
-        from app.scrap_library.enrich import _clean_actors
-        from app.scrape.metadata_optimize import polish_actress_names
-
-        cleaned = _clean_actors(re.split(r"[\s、,/|]+", m.group(1).strip()))
-        for name in polish_actress_names(cleaned):
-            if name not in actresses:
-                actresses.append(name)
+        for name in re.split(r"[\s、,/|]+", m.group(1).strip()):
+            name = name.strip()
+            if not name or name in actresses:
+                continue
+            actresses.append(name)
             if len(actresses) >= 3:
                 break
 
@@ -2933,8 +3734,47 @@ def _studio_blurb(studio_name: str) -> str:
     return resolve_maker_intro_for_studio(raw)
 
 
+_FC2_FOLDER_PREFIXES = ("FC2", "FC2PPV")  # 文档/兼容保留
+
+
+def _folder_prefix_aliases(prefix: str) -> list[str]:
+    """前缀查询别名。FC2 / FC2PPV 已分目录，各自独立。"""
+    p = str(prefix or "").strip().upper()
+    if not p:
+        return []
+    return [_canonical_folder_prefix(p)]
+
+
+def _canonical_folder_prefix(prefix: str) -> str:
+    """磁盘/查询前缀 → catalog 键（FC2-PPV → FC2PPV）。"""
+    p = str(prefix or "").strip().upper()
+    compact = re.sub(r"[-_\s]", "", p)
+    if compact.startswith("FC2PPV") or p in {"FC2-PPV", "FC2_PPV"}:
+        return "FC2PPV"
+    if compact == "FC2":
+        return "FC2"
+    return p
+
+
+def _append_prefix_clause(
+    clauses: list[str], params: list[Any], prefix: str
+) -> None:
+    prefs = _folder_prefix_aliases(prefix)
+    if not prefs:
+        return
+    if len(prefs) == 1:
+        clauses.append("upper(prefix) = %s")
+        params.append(prefs[0])
+        return
+    clauses.append("upper(prefix) = ANY(%s)")
+    params.append(prefs)
+
+
 def _region_match_values(region: str | None) -> list[str]:
-    """japan_censored / 日本有码 → 可匹配的 region 列取值。"""
+    """japan_censored / 日本有码 → 可匹配的 region 列取值。
+
+    含旧写真区遗留：japan_gravure / 日本写真 / 写真。
+    """
     from app.core.region_meta import REGION_META, resolve_fs_region
 
     raw = str(region or "").strip()
@@ -2950,6 +3790,16 @@ def _region_match_values(region: str | None) -> list[str]:
         if raw == label or raw == rid:
             values.add(rid)
             values.add(label)
+    # 写真已并入有码：查有码时一并命中旧区磁盘/库行
+    if key == "japan_censored" or raw in {
+        "japan_censored",
+        "日本有码",
+        "有码",
+        "japan_gravure",
+        "日本写真",
+        "写真",
+    }:
+        values.update({"japan_gravure", "日本写真", "写真"})
     return [v for v in values if v]
 
 
@@ -2974,7 +3824,7 @@ def list_regions() -> list[dict[str, Any]]:
                     continue
                 counts[str(row.get("region") or "")] = int(row.get("n") or 0)
 
-    # 按七区顺序输出；库内孤儿区追加在后
+    # 按六区顺序输出；库内孤儿区追加在后
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
     for rid in REGION_ORDER:
@@ -2993,6 +3843,10 @@ def list_regions() -> list[dict[str, Any]]:
 def list_prefixes(
     *, region: str = "", studio: str = "", q: str = "", limit: int | None = None
 ) -> list[dict[str, Any]]:
+    """厂牌下的前缀夹列表。
+
+    计数含骨架（否则仅空壳的 FC2-PPV 等前缀会消失）；封面优先磁盘现行路径。
+    """
     ensure_schema()
     pool = get_meta_pool()
     clauses: list[str] = ["coalesce(prefix,'') <> ''"]
@@ -3014,7 +3868,9 @@ def list_prefixes(
         with conn.cursor() as cur:
             cur.execute(
                 f"""
-                SELECT prefix, count(*)::int AS n,
+                SELECT
+                       prefix,
+                       count(*)::int AS n,
                        max(code) AS latest_code,
                        max(
                          NULLIF(
@@ -3030,6 +3886,12 @@ def list_prefixes(
                            NULLIF(cover_url, '')
                          )
                          ORDER BY
+                           CASE
+                             WHEN content_sha NOT LIKE '{SKELETON_SHA_PREFIX}:%%'
+                                  AND coalesce(poster_path, '') <> '' THEN 0
+                             WHEN coalesce(poster_path, '') <> '' THEN 1
+                             ELSE 2
+                           END,
                            NULLIF(
                              substring(source_text from '年份：([0-9]{{4}})'),
                              ''
@@ -3042,7 +3904,7 @@ def list_prefixes(
                        ) AS posters
                 FROM {TABLE}
                 WHERE {where}
-                GROUP BY prefix
+                GROUP BY 1
                 ORDER BY
                   max(
                     NULLIF(
@@ -3062,15 +3924,19 @@ def list_prefixes(
             continue
         raw = row.get("posters") or []
         candidates: list[str] = []
+        pref = str(row.get("prefix") or "")
+        for s in _sample_prefix_disk_posters(region, pref, limit=8):
+            if s and s not in candidates:
+                candidates.append(s)
         if isinstance(raw, (list, tuple)):
             for p in raw:
-                s = str(p or "").strip()
+                s = resolve_existing_media_rel(str(p or "").strip())
                 if s and s not in candidates:
                     candidates.append(s)
                 if len(candidates) >= 8:
                     break
         # 列表页单封面：优先本地，否则外链 coverUrl
-        poster_api, _, cover_url = _facet_media_refs(candidates[:4])
+        poster_api, poster_apis, cover_url = _facet_media_refs(candidates[:4])
         primary = ""
         for c in candidates:
             if c and not str(c).startswith(("http://", "https://")):
@@ -3088,15 +3954,18 @@ def list_prefixes(
                 latest_at_s = latest_at.isoformat()  # datetime
             except AttributeError:
                 latest_at_s = str(latest_at)
-        pref = str(row.get("prefix") or "")
         blurb = _prefix_blurb(pref)
         from app.prefix.maker_names import prefix_line_rank
+        from app.core.region_meta import fc2_fs_prefix
         from app.scrap_library.studio_display_names import resolve_studio_for_prefix
 
         studio_name = resolve_studio_for_prefix(pref, region=region) or ""
+        display_pref = (
+            fc2_fs_prefix(pref) if str(region or "").strip() == "fc2" else pref
+        ) or pref
         out.append(
             {
-                "prefix": pref,
+                "prefix": display_pref,
                 "count": int(row.get("n") or 0),
                 "latestCode": str(row.get("latest_code") or "").strip().upper(),
                 "latestYear": latest_year,
@@ -3104,7 +3973,7 @@ def list_prefixes(
                 "lineRank": prefix_line_rank(pref, blurb),
                 "posterPath": primary,
                 "posterApi": poster_api,
-                "posterApis": [],
+                "posterApis": poster_apis,
                 "coverUrl": cover_url,
                 "blurb": blurb,
                 "studio": studio_name,
@@ -3152,6 +4021,7 @@ def _list_items_uncached(
     offset: int = 0,
     limit: int = 36,
     exclude_skeleton: bool = False,
+    display_only: bool = False,
 ) -> dict[str, Any]:
     """分页浏览刮削库条目（海报墙）— 无缓存实现。"""
     ensure_schema()
@@ -3173,15 +4043,17 @@ def _list_items_uncached(
 
     clauses: list[str] = ["TRUE"]
     params: list[Any] = []
-    if exclude_skeleton:
+    if display_only:
+        # 有本地海报即可（含磁盘已落图、向量仍标 skeleton 的 FC2-PPV 等）
+        clauses.append("coalesce(poster_path, '') <> ''")
+    elif exclude_skeleton:
         clauses.append(_NOT_SKELETON_SQL)
     match = _region_match_values(region)
     if match:
         clauses.append("region = ANY(%s)")
         params.append(match)
     if pref:
-        clauses.append("upper(prefix) = %s")
-        params.append(pref)
+        _append_prefix_clause(clauses, params, pref)
     if query:
         like = f"%{query}%"
         clauses.append(
@@ -3348,6 +4220,7 @@ def list_items(
     offset: int = 0,
     limit: int = 36,
     exclude_skeleton: bool = False,
+    display_only: bool = False,
 ) -> dict[str, Any]:
     """分页浏览刮削库条目（海报墙）。
 
@@ -3367,8 +4240,8 @@ def list_items(
     cache_key = ""
     if hub_level:
         cache_key = (
-            f"v1|{region}|{sort}|{order}|{int(offset or 0)}|{int(limit or 36)}"
-            f"|sk={1 if exclude_skeleton else 0}"
+            f"v2|{region}|{sort}|{order}|{int(offset or 0)}|{int(limit or 36)}"
+            f"|sk={1 if exclude_skeleton else 0}|d={1 if display_only else 0}"
         )
         now = time.monotonic()
         prune_by_age(_ITEMS_HUB_CACHE, _ITEMS_HUB_CACHE_TTL_S, now=now)
@@ -3390,6 +4263,7 @@ def list_items(
         offset=offset,
         limit=limit,
         exclude_skeleton=exclude_skeleton,
+        display_only=display_only,
     )
     if hub_level and cache_key:
         _ITEMS_HUB_CACHE[cache_key] = (time.monotonic(), dict(data))
@@ -3505,7 +4379,12 @@ def _append_studio_clause(
 
 
 def _build_studio_facets_by_prefix(*, region: str = "") -> list[dict[str, Any]]:
-    """厂牌货架：按库内 prefix 汇总，再用标准「前缀→厂牌」表归位（不读 NFO 片商）。"""
+    """厂牌货架：按库内 prefix 汇总，再用标准「前缀→厂牌」表归位（不读 NFO 片商）。
+
+    计数含骨架行（否则仅空壳的前缀如 FC2-PPV 不会出现在厂牌墙）；
+    封面优先磁盘前缀夹取样，再补库内海报。
+    合并后无任何封面的厂牌会被丢掉（避免「奢华TV」这类仅骨架空壳卡）。
+    """
     from app.scrap_library.studio_display_names import resolve_studio_for_prefix
 
     ensure_schema()
@@ -3528,7 +4407,14 @@ def _build_studio_facets_by_prefix(*, region: str = "") -> list[dict[str, Any]]:
                            NULLIF(thumb_path, ''),
                            NULLIF(cover_url, '')
                          )
-                         ORDER BY code ASC
+                         ORDER BY
+                           CASE
+                             WHEN content_sha NOT LIKE '{SKELETON_SHA_PREFIX}:%%'
+                                  AND coalesce(poster_path, '') <> '' THEN 0
+                             WHEN coalesce(poster_path, '') <> '' THEN 1
+                             ELSE 2
+                           END,
+                           code ASC
                        ) FILTER (
                          WHERE coalesce(poster_path, '') <> ''
                             OR coalesce(thumb_path, '') <> ''
@@ -3553,8 +4439,14 @@ def _build_studio_facets_by_prefix(*, region: str = "") -> list[dict[str, Any]]:
         if not pref or n <= 0:
             continue
         paths: list[str] = []
+        # 优先磁盘现行路径（FC2 三层），再补库内仍有效的海报
+        for s in _sample_prefix_disk_posters(region, pref, limit=8):
+            if s and s not in paths:
+                paths.append(s)
+            if len(paths) >= 8:
+                break
         for p in row.get("posters") or []:
-            s = str(p or "").strip()
+            s = resolve_existing_media_rel(str(p or "").strip())
             if s and s not in paths:
                 paths.append(s)
             if len(paths) >= 8:
@@ -3589,6 +4481,89 @@ def _build_studio_facets_by_prefix(*, region: str = "") -> list[dict[str, Any]]:
                 validate_covers=False,
             )
         )
+    return out
+
+
+def _sample_prefix_disk_posters(
+    region: str, prefix: str, *, limit: int = 8
+) -> list[str]:
+    """前缀夹下取样本地海报路径（相对 media 根），供厂牌墙封面。"""
+    pref = str(prefix or "").strip()
+    if not pref or limit <= 0:
+        return []
+    try:
+        root = resolve_root(get_settings().get("root")).resolve()
+    except Exception:  # noqa: BLE001
+        return []
+    media_root = media_dir().resolve()
+    try:
+        scrap_rel = root.relative_to(media_root).as_posix()
+    except ValueError:
+        scrap_rel = ""
+
+    from app.core.region_meta import fc2_fs_prefix
+
+    rid = str(region or "").strip()
+    bases: list[Path] = []
+    for name in _region_match_values(rid) or [rid]:
+        region_dir = root / str(name)
+        if not region_dir.is_dir():
+            continue
+        if rid == "fc2" or str(name).upper() == "FC2":
+            bases.append(region_dir / fc2_fs_prefix(pref))
+            # 兼容旧夹名
+            if fc2_fs_prefix(pref) == "FC2-PPV":
+                bases.append(region_dir / "FC2PPV")
+        else:
+            bases.append(region_dir / pref)
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for base in bases:
+        if not base.is_dir():
+            continue
+        try:
+            kids = list(base.iterdir())
+        except Exception:  # noqa: BLE001
+            continue
+        for folder in kids:
+            if not folder.is_dir():
+                continue
+            poster = folder / "poster.jpg"
+            if not poster.is_file():
+                # 偶发其它后缀
+                hit = next(
+                    (
+                        p
+                        for p in folder.iterdir()
+                        if p.is_file()
+                        and p.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}
+                        and "poster" in p.stem.lower()
+                    ),
+                    None,
+                )
+                if hit is None:
+                    continue
+                poster = hit
+            try:
+                rel = poster.resolve().relative_to(media_root).as_posix()
+            except ValueError:
+                if scrap_rel:
+                    try:
+                        rel = (
+                            f"{scrap_rel}/"
+                            f"{poster.resolve().relative_to(root).as_posix()}"
+                        )
+                    except ValueError:
+                        continue
+                else:
+                    continue
+            if rel in seen:
+                continue
+            seen.add(rel)
+            out.append(rel)
+            if len(out) >= limit:
+                return out
     return out
 
 
@@ -3642,7 +4617,14 @@ def _merge_studio_facets(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             }
         )
         out.append(primary)
-    return out
+    # 无封面的纯骨架厂牌不进墙（如仅有目录号、本地未刮的「奢华TV」「Dogma」）
+    return [
+        r
+        for r in out
+        if str(r.get("posterApi") or "").strip()
+        or list(r.get("posterApis") or [])
+        or str(r.get("coverUrl") or "").strip()
+    ]
 
 
 def _null_studio_prefix_buckets(region: str) -> list[dict[str, Any]]:
@@ -3844,7 +4826,7 @@ _FACETS_CACHE_MAX = 48
 # 路径：data/cache/facets/
 _FACETS_SNAP_DIR = ("cache", "facets")
 # v3：女优分面过滤类型标签噪声
-_FACETS_SNAP_VERSION = 3
+_FACETS_SNAP_VERSION = 4
 _FACETS_SNAP_KINDS = ("genre", "actress", "studio", "tag")
 _facets_snap_lock = threading.Lock()
 
@@ -3936,7 +4918,7 @@ def _build_facets_sql_line_tokens(
     """用 Postgres 抽取「女优：/片商：」行并汇总（比 Python 扫表快一个数量级）。"""
     ensure_schema()
     match = _region_match_values(region)
-    clauses = ["TRUE"]
+    clauses = ["TRUE", _DISPLAY_READY_SQL]
     params: list[Any] = []
     if match:
         clauses.append("region = ANY(%s)")
@@ -3946,8 +4928,7 @@ def _build_facets_sql_line_tokens(
     if studio_q:
         _append_studio_clause(clauses, params, studio_q, region=region)
     if pref:
-        clauses.append("upper(prefix) = %s")
-        params.append(pref)
+        _append_prefix_clause(clauses, params, pref)
     where = " AND ".join(clauses)
     # 与 _split_tokens / list_items 一致
     split_re = _TOKEN_SPLIT_SQL
@@ -4139,7 +5120,7 @@ def _build_facets_all(
 
     ensure_schema()
     match = _region_match_values(region)
-    clauses = ["TRUE"]
+    clauses = ["TRUE", _DISPLAY_READY_SQL]
     params: list[Any] = []
     if match:
         clauses.append("region = ANY(%s)")
@@ -4149,8 +5130,7 @@ def _build_facets_all(
     if studio_q:
         _append_studio_clause(clauses, params, studio_q, region=region)
     if pref:
-        clauses.append("upper(prefix) = %s")
-        params.append(pref)
+        _append_prefix_clause(clauses, params, pref)
     where = " AND ".join(clauses)
 
     pool = get_meta_pool()
@@ -4399,7 +5379,7 @@ def refresh_facets_snapshot(
 
     默认策略：
     - 种类：studio / genre / actress（片商页三个分面）
-    - 范围：all_regions 或 region 为空 → 七区全量；否则仅指定区
+    - 范围：all_regions 或 region 为空 → 六区全量；否则仅指定区
     - 附带：推荐货架快照 + 影片一级首页（发行日期）内存预热
     全量约数秒，可同步完成。
     """
@@ -4508,7 +5488,7 @@ def list_facets(
     studio_q = str(studio or "").strip()
     pref = str(prefix or "").strip().upper()
     query = str(q or "").strip()
-    cache_key = f"v8|{region}|{key}|{studio_q}|{pref}"
+    cache_key = f"v10|{region}|{key}|{studio_q}|{pref}"
     hub_level = not studio_q and not pref
 
     now = time.monotonic()
@@ -4582,7 +5562,7 @@ def list_facets(
 
 
 def list_recommend(*, region: str = "") -> dict[str, Any]:
-    """Emby「推荐」：七区各自一条「最近刮削入库」横向货架。
+    """Emby「推荐」：六区各自一条「最近刮削入库」横向货架。
 
     region 参数保留兼容；推荐页始终返回全部有内容的区。
     按向量库 updated_at 新→旧（enrich/写回会刷新该字段），排除仅番号骨架。
@@ -4623,7 +5603,7 @@ def list_recommend(*, region: str = "") -> dict[str, Any]:
 
 _RECOMMEND_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _RECOMMEND_CACHE_TTL_S = 180.0
-_RECOMMEND_SNAP_VERSION = 1
+_RECOMMEND_SNAP_VERSION = 2
 
 
 def _recommend_snap_path() -> Path:
@@ -4682,7 +5662,7 @@ def _build_recommend() -> dict[str, Any]:
             order="desc",
             offset=0,
             limit=12,
-            exclude_skeleton=True,
+            display_only=True,
         )
         items = page.get("items") or []
         if not items:
@@ -4725,7 +5705,7 @@ def search(query: str, *, limit: int = 8, region: str = "") -> list[dict[str, An
     pool = get_meta_pool()
     match = _region_match_values(region)
     # 空壳零向量不参与语义检索
-    where_parts = [_NOT_SKELETON_SQL]
+    where_parts = [_DISPLAY_READY_SQL]
     params: list[Any] = [vec]
     if match:
         where_parts.append("region = ANY(%s)")
@@ -5163,6 +6143,15 @@ def start_actress_optimize_job(
             raise RuntimeError("刮削库向量同步进行中，请稍后再试")
         if av.get_job_status().get("running"):
             raise RuntimeError("女优刮削进行中，请稍后再试")
+        try:
+            from app.scrap_library import nfo_optimize as nfo_opt
+
+            if nfo_opt.get_job_status().get("running"):
+                raise RuntimeError("NFO 优化进行中，请稍后再试")
+        except RuntimeError:
+            raise
+        except Exception:  # noqa: BLE001
+            pass
         _actress_opt_job.update(
             {
                 "running": True,
@@ -5234,17 +6223,81 @@ def local_file_api(rel: str) -> str:
     return f"/scrap-library/file?path={quote(r, safe='')}"
 
 
+def _fc2_rel_path_aliases(parts: list[str]) -> list[list[str]]:
+    """FC2 扁平/旧夹名 → 现行三层路径候选。"""
+    if len(parts) < 3:
+        return []
+    try:
+        i = next(idx for idx, p in enumerate(parts) if str(p).upper() == "FC2")
+    except StopIteration:
+        return []
+    if i + 1 >= len(parts):
+        return []
+    out: list[list[str]] = []
+    nxt = str(parts[i + 1] or "")
+    nxt_u = nxt.upper()
+    # 旧前缀夹 FC2PPV → FC2-PPV
+    if nxt_u in {"FC2PPV", "FC2_PPV"}:
+        out.append([*parts[: i + 1], "FC2-PPV", *parts[i + 2 :]])
+    # 扁平 FC2/{CODE}/… → FC2/FC2/{CODE}/… 或 FC2/FC2-PPV/{CODE}/…
+    elif nxt_u not in {"FC2", "FC2-PPV", "FC2PPV"} and nxt_u.startswith("FC2"):
+        from app.core.region_meta import fc2_fs_prefix
+
+        pref = fc2_fs_prefix(code=nxt)
+        out.append([*parts[: i + 1], pref, *parts[i + 1 :]])
+    return out
+
+
+def resolve_existing_media_rel(rel: str) -> str:
+    """返回实际存在的 media 相对路径；FC2 迁移后旧路径自动改写。"""
+    text = str(rel or "").strip().replace("\\", "/").lstrip("/")
+    if not text:
+        return ""
+    parts = [x for x in Path(text).parts if x not in ("", ".", "/")]
+    if not parts or any(x == ".." for x in parts):
+        return ""
+    root = media_dir().resolve()
+    candidates = [parts, *_fc2_rel_path_aliases(parts)]
+    seen: set[str] = set()
+    for cand in candidates:
+        key = "/".join(cand)
+        if key in seen:
+            continue
+        seen.add(key)
+        abs_path = (root / Path(*cand)).resolve()
+        try:
+            abs_path.relative_to(root)
+        except ValueError:
+            continue
+        if abs_path.is_file():
+            return key
+    return ""
+
+
 def resolve_local_file(rel: str) -> Path:
-    """把 media 相对路径解析为绝对文件；禁止逃逸。"""
-    text = str(rel or "").strip().replace("\\", "/")
+    """把 media 相对路径解析为绝对文件；禁止逃逸。
+
+    兼容 FC2 目录迁移：扁平 FC2/{CODE}、旧夹名 FC2PPV → 现行 FC2/FC2|FC2-PPV。
+    """
+    text = str(rel or "").strip().replace("\\", "/").lstrip("/")
     parts = [x for x in Path(text).parts if x not in ("", ".", "/")]
     if not parts or any(x == ".." for x in parts):
         raise ValueError("非法路径")
-    abs_path = (media_dir() / Path(*parts)).resolve()
-    try:
-        abs_path.relative_to(media_dir().resolve())
-    except ValueError as e:
-        raise ValueError("路径越界") from e
-    if not abs_path.is_file():
-        raise FileNotFoundError(f"文件不存在: {text}")
-    return abs_path
+    root = media_dir().resolve()
+    candidates = [parts, *_fc2_rel_path_aliases(parts)]
+    seen: set[str] = set()
+    last_miss = text
+    for cand in candidates:
+        key = "/".join(cand)
+        if key in seen:
+            continue
+        seen.add(key)
+        abs_path = (root / Path(*cand)).resolve()
+        try:
+            abs_path.relative_to(root)
+        except ValueError as e:
+            raise ValueError("路径越界") from e
+        if abs_path.is_file():
+            return abs_path
+        last_miss = key
+    raise FileNotFoundError(f"文件不存在: {last_miss}")

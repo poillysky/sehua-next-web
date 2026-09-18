@@ -283,16 +283,20 @@ def resolve_maker_intro_for_prefix(prefix: str) -> str:
         names.get("maker"),
         base,
     ):
-        hit = _intro_for_maker_key(str(key or ""))
+        s = str(key or "").strip()
+        if not s:
+            continue
+        hit = _intro_for_maker_key(s)
         if hit:
             return hit
-        s = str(key or "").strip()
         if s in MAKER_I18N:
             hit = _intro_for_maker_key(s)
             if hit:
                 return hit
         for canon, trip in MAKER_I18N.items():
-            if s in trip or s == canon:
+            # 勿用空串匹配：i18n 缺省位是 ""，会误命中 Aurora 等条目
+            parts = [str(x).strip() for x in (trip or ()) if str(x).strip()]
+            if s == canon or s in parts:
                 hit = _intro_for_maker_key(canon)
                 if hit:
                     return hit
@@ -363,9 +367,18 @@ def resolve_maker_intro_for_studio(studio_name: str) -> str:
     text = ""
     canon_hit = ""
 
+    # 「A / B」拆开，避免只认英文侧
+    name_parts = [raw]
+    for part in re.split(r"[/／]", raw):
+        p = part.strip()
+        if p and p not in name_parts:
+            name_parts.append(p)
+
     # 1) 直接命中简介表
-    if _intro_for_maker_key(raw):
-        text = _intro_for_maker_key(raw)
+    for cand in name_parts:
+        if _intro_for_maker_key(cand):
+            text = _intro_for_maker_key(cand)
+            break
 
     try:
         from app.scrap_library.studio_display_names import (
@@ -388,36 +401,53 @@ def resolve_maker_intro_for_studio(studio_name: str) -> str:
         if not text:
             text = _intro_for_maker_key(canon)
 
-    # 2) MAKER_I18N / 别名 / 卡片短名 → canon
-    if raw in MAKER_I18N:
-        _set_canon(raw)
-    else:
-        for canon, trip in MAKER_I18N.items():
-            zh, ja, en = trip
-            if raw in {canon, zh, ja, en}:
-                _set_canon(canon)
+    # 1b) 显式别名
+    for cand in name_parts:
+        alias_hit = STUDIO_ALIASES.get(cand) if isinstance(STUDIO_ALIASES, dict) else None
+        if alias_hit:
+            _set_canon(str(alias_hit))
+            if text:
                 break
-            if " / " in zh and raw in {p.strip() for p in zh.split("/")}:
-                _set_canon(canon)
+
+    # 2) MAKER_I18N / 别名 / 卡片短名 → canon
+    if not canon_hit and raw in MAKER_I18N:
+        _set_canon(raw)
+    elif not canon_hit:
+        for cand in name_parts:
+            for canon, trip in MAKER_I18N.items():
+                zh, ja, en = trip
+                if cand in {canon, zh, ja, en}:
+                    _set_canon(canon)
+                    break
+                if " / " in zh and cand in {p.strip() for p in zh.split("/")}:
+                    _set_canon(canon)
+                    break
+            if canon_hit:
                 break
 
     if not canon_hit and studio_norm_key:
-        nk = studio_norm_key(raw)
-        for canon, label in STUDIO_CARD_LABEL.items():
-            if label == raw or studio_norm_key(label) == nk or canon == raw:
-                _set_canon(canon)
+        for cand in name_parts:
+            nk = studio_norm_key(cand)
+            for canon, label in STUDIO_CARD_LABEL.items():
+                if label == cand or studio_norm_key(label) == nk or canon == cand:
+                    _set_canon(canon)
+                    break
+            if canon_hit:
                 break
-        if not canon_hit:
             for alias, canon in STUDIO_ALIASES.items():
                 if studio_norm_key(alias) == nk or studio_norm_key(canon) == nk:
                     _set_canon(canon)
                     break
-        if not canon_hit and preferred_studio_label and resolve_studio_display:
-            for canon in MAKER_I18N:
-                label = preferred_studio_label(canon) or resolve_studio_display(canon) or ""
-                if label == raw or studio_norm_key(canon) == nk:
-                    _set_canon(canon)
-                    break
+            if canon_hit:
+                break
+            if preferred_studio_label and resolve_studio_display:
+                for canon in MAKER_I18N:
+                    label = preferred_studio_label(canon) or resolve_studio_display(canon) or ""
+                    if label == cand or studio_norm_key(canon) == nk:
+                        _set_canon(canon)
+                        break
+            if canon_hit:
+                break
 
     if not text:
         return ""

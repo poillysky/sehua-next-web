@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""七区目录 → 本地 STRM 树：区/前缀/番号/番号.strm（供刮削）。
+"""六区目录 → 本地 STRM 树：区/前缀/番号/番号.strm（供刮削）。
 
 路径策略（Docker 友好）：
 - 相对路径：相对项目 media/，如 strm-library → media/strm-library
@@ -311,34 +311,7 @@ def run_strm_sync(
             percent=96,
         )
 
-    # 空目录框架写入向量库：仅补缺失番号，已有数据不覆盖
-    skeleton: dict[str, Any] = {"ok": False, "skipped": True, "reason": "not_run"}
-    try:
-        import app.scrap_library.embed as embed_svc
-
-        def _skel_prog(payload: dict[str, Any]) -> None:
-            stage = str(payload.get("stage") or "skeleton")
-            label = str(payload.get("label") or "")
-            emit(
-                label or "同步番号骨架…",
-                stage=stage,
-                done=payload.get("done"),
-                total=payload.get("total"),
-                percent=payload.get("percent"),
-            )
-
-        emit(
-            "同步番号骨架…",
-            stage="skeleton",
-            done=0,
-            total=total,
-            percent=97,
-        )
-        skeleton = embed_svc.upsert_catalog_skeletons(on_progress=_skel_prog)
-    except Exception as e:  # noqa: BLE001
-        skeleton = {"ok": False, "error": str(e)}
-        emit(f"骨架同步失败 · {e}", stage="skeleton", done=total, total=total, percent=99)
-
+    # 只同步本地 .strm 目录，不碰向量库（骨架由双库扫描重建）
     result = {
         "root": configured,
         "resolved": str(out_root),
@@ -350,19 +323,9 @@ def run_strm_sync(
         "errors": errors,
         "by_region": by_region,
         "workers": workers,
-        "skeleton": skeleton,
     }
-    sk_ins = int(skeleton.get("inserted") or 0) if isinstance(skeleton, dict) else 0
-    sk_skip = (
-        int(skeleton.get("skipped_existing") or 0) if isinstance(skeleton, dict) else 0
-    )
-    sk_codes = (
-        int(skeleton.get("purged_codes") or 0) if isinstance(skeleton, dict) else 0
-    )
     emit(
-        f"完成 · 写入 {written} · 跳过 {skipped} · 删多余 {deleted}"
-        f" · 合计 {total} · 骨架 +{sk_ins} / 已有 {sk_skip}"
-        f" · 清目录外向量 {sk_codes}",
+        f"完成 · 写入 {written} · 跳过 {skipped} · 删多余 {deleted} · 合计 {total}",
         stage="done",
         done=total,
         total=total,

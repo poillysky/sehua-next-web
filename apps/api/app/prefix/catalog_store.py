@@ -1,4 +1,4 @@
-"""七区前缀/番号目录：网络校验真相源（不依赖资源仓库）。
+"""六区前缀/番号目录：网络校验真相源（不依赖资源仓库）。
 
 运行时：`data/prefix/catalog/catalog.json`
 种子：`apps/maps/prefixes/catalog.seed.json`
@@ -27,6 +27,11 @@ CATALOG_VERSION = 1
 _lock = threading.RLock()
 _cache: dict[str, Any] | None = None
 _cache_mtime: float | None = None
+
+# 刮削库「实际有番号」前缀数缓存（按区）
+_scrap_prefix_counts_cache: dict[str, int] | None = None
+_scrap_prefix_counts_at: float = 0.0
+_SCRAP_PREFIX_COUNTS_TTL_SEC = 60.0
 
 
 def catalog_dir() -> Path:
@@ -334,10 +339,92 @@ def delete_prefix(region_id: str, prefix: str) -> bool:
 
 
 def rebuild_empty() -> dict[str, Any]:
-    """清空运行时表，仅保留七区壳。"""
+    """清空运行时表，仅保留六区壳。"""
     doc = empty_catalog()
     save_catalog(doc)
     return doc
+
+
+def scrap_library_prefix_counts(*, force: bool = False) -> dict[str, int]:
+    """刮削库磁盘上「实际有番号夹」的前缀数（按六区 id）。
+
+    六区统一区/前缀/番号；FC2 为 FC2/FC2 与 FC2/FC2-PPV。结果短缓存。
+    """
+    import time
+
+    global _scrap_prefix_counts_cache, _scrap_prefix_counts_at
+    now = time.monotonic()
+    if (
+        not force
+        and _scrap_prefix_counts_cache is not None
+        and (now - _scrap_prefix_counts_at) < _SCRAP_PREFIX_COUNTS_TTL_SEC
+    ):
+        return dict(_scrap_prefix_counts_cache)
+
+    out: dict[str, int] = {rid: 0 for rid in REGION_ORDER}
+    try:
+        from app.scrap_library.embed import resolve_root
+
+        root = resolve_root(None)
+    except Exception:  # noqa: BLE001
+        root = None
+    if root is None or not root.is_dir():
+        _scrap_prefix_counts_cache = dict(out)
+        _scrap_prefix_counts_at = now
+        return dict(out)
+
+    for rid in REGION_ORDER:
+        label = str(REGION_META.get(rid, {}).get("label") or rid).strip()
+        region_dir = root / label
+        if not region_dir.is_dir():
+            alt = root / rid
+            region_dir = alt if alt.is_dir() else region_dir
+        if not region_dir.is_dir():
+            continue
+        try:
+            count = 0
+            for pref_dir in region_dir.iterdir():
+                if not pref_dir.is_dir() or pref_dir.name.startswith("_"):
+                    continue
+                name_u = pref_dir.name.strip().upper().replace("_", "-")
+                # FC2 前缀夹：FC2 / FC2-PPV / 旧 FC2PPV
+                if rid == "fc2" and name_u in {"FC2", "FC2-PPV", "FC2PPV"}:
+                    pass  # 正常前缀夹，继续往下数番号
+                elif rid == "fc2" and name_u.startswith("FC2") and any(
+                    ch.isdigit() for ch in name_u
+                ):
+                    # 扁平残留 FC2-{num}，不算前缀夹
+                    continue
+                try:
+                    has_code = any(
+                        c.is_dir() and not c.name.startswith("_")
+                        for c in pref_dir.iterdir()
+                    )
+                except OSError:
+                    has_code = False
+                if has_code:
+                    count += 1
+            # 若仍是纯扁平（无前缀夹），按番号形态估 1~2
+            if rid == "fc2" and count == 0:
+                from app.core.region_meta import fc2_prefix_from_code
+
+                seen: set[str] = set()
+                for code_dir in region_dir.iterdir():
+                    if not code_dir.is_dir() or code_dir.name.startswith("_"):
+                        continue
+                    nu = code_dir.name.strip().upper().replace("_", "-")
+                    if nu in {"FC2", "FC2PPV", "FC2-PPV"}:
+                        continue
+                    if any(ch.isdigit() for ch in code_dir.name):
+                        seen.add(fc2_prefix_from_code(code_dir.name))
+                count = len(seen)
+            out[rid] = count
+        except OSError:
+            out[rid] = 0
+
+    _scrap_prefix_counts_cache = dict(out)
+    _scrap_prefix_counts_at = now
+    return dict(out)
 
 
 def public_summary(doc: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -347,11 +434,14 @@ def public_summary(doc: dict[str, Any] | None = None) -> dict[str, Any]:
         reg = d["regions"].get(rid) or {}
         prefs = reg.get("prefixes") or {}
         code_total = sum(effective_code_count(p) for p in prefs.values())
+        # 有片 = 目录扫描后实际有番号的前缀，不看刮削库磁盘
+        coded = sum(1 for p in prefs.values() if effective_code_count(p) > 0)
         regions.append(
             {
                 "id": rid,
                 "label": reg.get("label") or REGION_META.get(rid, {}).get("label"),
                 "prefix_count": len(prefs),
+                "scrap_prefix_count": coded,
                 "code_count": code_total,
             }
         )
@@ -361,6 +451,7 @@ def public_summary(doc: dict[str, Any] | None = None) -> dict[str, Any]:
         "principle": d.get("principle"),
         "regions": regions,
         "prefix_total": sum(r["prefix_count"] for r in regions),
+        "scrap_prefix_total": sum(r["scrap_prefix_count"] for r in regions),
         "code_total": sum(r["code_count"] for r in regions),
     }
 

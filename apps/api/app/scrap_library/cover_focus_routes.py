@@ -23,17 +23,6 @@ log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["cover-proxy"])
 
-_FORUM_IMG_HOST_RE = re.compile(
-    r"(?:^|\.)("
-    r"ewrewej\.la|ymawv\.la|ldkms\.la|picdcd\.com|adipcd\.com|"
-    r"pkapic\.cc|imgccc\.com|11img\.com|yichkp\.com|qpic\.ws|"
-    r"gdvdvb\.com|img906\.com|microsoftsa\.com|xunse\.pics|"
-    r"023pic3\.cc|pic26077\.cc|pic2607a\.cc|pic505hz\.cc|pid505st\.cc|"
-    r"djhdhs\.us"
-    r")(?:$|:)",
-    re.I,
-)
-
 _COVER_FETCH_TIMEOUT = httpx.Timeout(6.0, connect=2.5)
 _MEM_CACHE_MAX = 96
 _MEM_CACHE_MAX_BYTES = 24 * 1024 * 1024
@@ -109,13 +98,20 @@ def _looks_like_image(data: bytes, ctype: str) -> bool:
     return False
 
 
-def _is_forum_image_host(host: str) -> bool:
-    return bool(_FORUM_IMG_HOST_RE.search(host or ""))
-
-
 def _is_slow_cover_host(host: str) -> bool:
+    """慢/不稳图床：短 HTTP 超时，避免占满 cover 槽干等。
+
+    错误分类（与 Grok 方案对齐）：
+    - 连接层失败（timeout / reset）→ 立刻抛错换 URL，不换 Referer
+    - 403/401 → 才允许备选 Referer 一次
+    """
     h = (host or "").lower()
-    return "javbus" in h or "seejav" in h
+    return (
+        "javbus" in h
+        or "seejav" in h
+        or "jav321.com" in h
+        or h.endswith("jav321.com")
+    )
 
 
 def _is_dmm_cover_host(host: str) -> bool:
@@ -123,57 +119,28 @@ def _is_dmm_cover_host(host: str) -> bool:
     return "dmm.co.jp" in h or "awsimgsrc.dmm." in h or "netcdn.space" in h
 
 
-def _referers_for_host(host: str, scheme: str) -> list[str | None]:
-    """论坛图床优先 sehuatang Referer；CDN 只用同源/官方 Referer，避免无用重试拖超时。"""
-    referers: list[str | None] = []
-    if host.endswith("doubanio.com") or host.endswith("douban.com"):
-        referers.extend(
-            [
-                "https://m.douban.com/",
-                "https://movie.douban.com/",
-            ]
-        )
-    if _is_dmm_cover_host(host):
-        # DMM 图床：官方 Referer + 无 Referer 即可，勿叠论坛站
-        referers.append("https://www.dmm.co.jp/")
-        if host:
-            referers.append(f"{scheme}://{host}/")
-        referers.append(None)
-    elif _is_slow_cover_host(host):
-        # javbus/seejav：最多试 2 个同源镜像，超时即放弃（见 _fetch_bytes_unlocked）
-        referers.extend(
-            [
-                "https://www.javbus.com/",
-                f"{scheme}://{host}/" if host else None,
-                None,
-            ]
-        )
-    else:
-        if _is_forum_image_host(host):
-            referers.extend(
-                [
-                    "https://www.sehuatang.org/",
-                    "https://sehuatang.net/",
-                ]
-            )
-        if host:
-            referers.append(f"{scheme}://{host}/")
-        if not _is_forum_image_host(host):
-            referers.extend(
-                [
-                    "https://www.sehuatang.org/",
-                    "https://sehuatang.net/",
-                ]
-            )
-        referers.append(None)
-    seen: set[str | None] = set()
-    uniq: list[str | None] = []
-    for ref in referers:
-        if ref in seen:
-            continue
-        seen.add(ref)
-        uniq.append(ref)
-    return uniq
+def _referer_plan(host: str, scheme: str) -> tuple[str | None, str | None]:
+    """(主 Referer, 仅在 HTTP 403 时再试的备选)。
+
+    六个分区共用本函数。连接被掐（10054/超时）换 Referer 没有意义，只会占着
+    cover 槽空转。备选只留给「防盗链 403」这一种情况，且最多一次。
+    """
+    h = (host or "").lower()
+    if h.endswith("doubanio.com") or h.endswith("douban.com"):
+        return "https://m.douban.com/", None
+    if _is_dmm_cover_host(h):
+        return "https://www.dmm.co.jp/", None
+    if "javbus" in h or "seejav" in h:
+        return "https://www.javbus.com/", None
+    if "jav321.com" in h:
+        return "https://www.jav321.com/", None
+    # miss_av 图床 fourhoi：必须带 missav.ws/live Referer，自域或 missav.com 会 403
+    if "fourhoi.com" in h:
+        return "https://missav.ws/", "https://missav.live/"
+    # 刮削不访问色花堂：图床只用自身 Referer，不再带 sehuatang.org
+    if h:
+        return f"{scheme}://{h}/", None
+    return None, None
 
 
 def _fetch_bytes(url: str) -> tuple[bytes, str]:
@@ -217,13 +184,9 @@ def _fetch_bytes_core(
     parsed = urlparse(url)
     host = (parsed.hostname or "").lower()
     scheme = parsed.scheme or "https"
-    uniq_refs = _referers_for_host(host, scheme)
+    primary_ref, alt_ref = _referer_plan(host, scheme)
     slow = _is_slow_cover_host(host)
     dmm = _is_dmm_cover_host(host)
-    # 慢图床少试 Referer；DMM 也只需 2 个
-    ref_cap = 2 if (slow or dmm) else 4
-    # 慢图床/DMM：连接失败立刻换下一 URL，勿连撞 3 次超时
-    fail_cap = 1 if (slow or dmm) else 3
     timeout = (
         httpx.Timeout(3.0, connect=1.5)
         if slow
@@ -239,69 +202,75 @@ def _fetch_bytes_core(
 
     scheduler = sched or get_scheduler()
     proxy = resolve_scrape_proxy_url()
-    # 先代理再直连；共用长寿命 Client
-    attempts: list[tuple[str | None, bool]] = []
-    if proxy:
-        attempts.append((proxy, False))
-    attempts.append((None, False))
+    # 有代理只走代理。连接被掐（10054）说明这条 URL 已经死了，再直连一次只是空占槽。
+    attempts: list[str | None] = [proxy] if proxy else [None]
 
     last_status = 0
     last_err: Exception | None = None
-    transport_fails = 0
-    for proxy_u, verify in attempts:
+    for proxy_u in attempts:
         try:
             client = scheduler.shared_client(
-                proxy=proxy_u, verify=verify, timeout=timeout
+                proxy=proxy_u, verify=False, timeout=timeout
             )
-            for ref in uniq_refs[:ref_cap]:
-                try:
-                    headers = _image_headers(url, referer=ref)
-                    if host.endswith("doubanio.com"):
-                        headers["User-Agent"] = (
-                            "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) "
-                            "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 "
-                            "Mobile/15E148 Safari/604.1"
-                        )
-                    r = client.get(url, headers=headers, timeout=timeout)
-                except Exception as e:
-                    last_err = e
-                    transport_fails += 1
-                    log.warning("cover fetch transport error ref=%s: %s", ref, e)
-                    if transport_fails >= fail_cap:
-                        break
-                    continue
-                last_status = r.status_code
-                if last_status in {429, 503}:
-                    ra = r.headers.get("Retry-After")
-                    try:
-                        if ra and str(ra).strip().isdigit():
-                            scheduler.note_retry_after(url, float(ra))
-                        else:
-                            scheduler.note_status(url, last_status)
-                    except Exception:  # noqa: BLE001
-                        scheduler.note_status(url, last_status)
-                    continue
-                if r.status_code in {403, 404, 418}:
-                    continue
-                if r.status_code >= 400:
-                    continue
-                ctype = (
-                    (r.headers.get("content-type") or "image/jpeg")
-                    .split(";")[0]
-                    .strip()
-                )
-                data = r.content
-                if not data or len(data) > 12 * 1024 * 1024:
-                    continue
-                if not _looks_like_image(data, ctype):
-                    continue
-                return data, ctype if "image/" in ctype.lower() else "image/jpeg"
         except Exception as e:
             last_err = e
             log.warning("cover client proxy=%s: %s", bool(proxy_u), e)
-            continue
-        if transport_fails >= fail_cap:
             break
+        refs: list[str | None] = [primary_ref]
+        used_alt = False
+        idx = 0
+        while idx < len(refs):
+            ref = refs[idx]
+            idx += 1
+            try:
+                headers = _image_headers(url, referer=ref)
+                if host.endswith("doubanio.com"):
+                    headers["User-Agent"] = (
+                        "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) "
+                        "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 "
+                        "Mobile/15E148 Safari/604.1"
+                    )
+                r = client.get(url, headers=headers, timeout=timeout)
+            except Exception as e:
+                last_err = e
+                log.warning("cover fetch transport error ref=%s: %s", ref, e)
+                # 10054/超时：换路径、换 Referer 都救不回来
+                raise HTTPException(
+                    status_code=502, detail=f"拉图失败: {e}"
+                ) from e
+            last_status = r.status_code
+            if last_status in {429, 503}:
+                ra = r.headers.get("Retry-After")
+                try:
+                    if ra and str(ra).strip().isdigit():
+                        scheduler.note_retry_after(url, float(ra))
+                    else:
+                        scheduler.note_status(url, last_status)
+                except Exception:  # noqa: BLE001
+                    scheduler.note_status(url, last_status)
+                break
+            if last_status == 404:
+                break
+            if last_status in {403, 418}:
+                if alt_ref and not used_alt and alt_ref != ref:
+                    refs.append(alt_ref)
+                    used_alt = True
+                    continue
+                break
+            if r.status_code >= 400:
+                break
+            ctype = (
+                (r.headers.get("content-type") or "image/jpeg")
+                .split(";")[0]
+                .strip()
+            )
+            data = r.content
+            if not data or len(data) > 12 * 1024 * 1024:
+                break
+            if not _looks_like_image(data, ctype):
+                break
+            return data, ctype if "image/" in ctype.lower() else "image/jpeg"
+        break
     if last_err is not None and last_status == 0:
         raise HTTPException(status_code=502, detail=f"拉图失败: {last_err}") from last_err
     raise HTTPException(status_code=502, detail=f"拉图失败 {last_status or 403}")

@@ -486,12 +486,22 @@ def init_db() -> None:
                 )
                 """
             )
-            conn.execute(
+            # 索引存在则跳过，避免多 worker 同时 CREATE INDEX 堵死表
+            idx_rows = conn.execute(
                 """
-                CREATE INDEX IF NOT EXISTS idx_enrich_queue_log_region_status_id
-                ON enrich_queue_log (region, status, id DESC)
+                SELECT 1 FROM pg_indexes
+                WHERE schemaname = current_schema()
+                  AND indexname = 'idx_enrich_queue_log_region_status_id'
+                LIMIT 1
                 """
-            )
+            ).fetchall()
+            if not idx_rows:
+                conn.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_enrich_queue_log_region_status_id
+                    ON enrich_queue_log (region, status, id DESC)
+                    """
+                )
             conn.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_enrich_queue_log_region_code

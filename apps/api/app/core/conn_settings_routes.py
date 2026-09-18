@@ -243,7 +243,7 @@ class P115QrCompleteBody(BaseModel):
 
 P115_SOURCES = ("warehouse", "movie", "tv", "makers")
 
-# 先入「最近接受」、再移到指定目录（影视 movie/tv + 片商 makers；仓库一并）
+# 先入「最近接收」、再移到指定目录（影视 movie/tv + 片商 makers；仓库一并）
 P115_INBOX_RELOCATE_SOURCES = frozenset({"warehouse", "movie", "tv", "makers", "media"})
 
 
@@ -1301,7 +1301,7 @@ def post_p115_offline(
     body: P115OfflineBody,
     _user: dict[str, Any] = Depends(require_user),
 ) -> JSONResponse:
-    """离线转存：影视/片商/仓库均先入「最近接受」，完成后再移到指定目录。"""
+    """离线转存：影视/片商/仓库均先入「最近接收」，完成后再移到指定目录。"""
     try:
         prev = settings_store.get_setting(settings_store.P115_KEY) or {}
         cookie = str(prev.get("cookie") or "").strip()
@@ -1345,7 +1345,7 @@ def post_p115_offline(
             if resolved:
                 dest_name = resolved
 
-        # 影视 / 片商 / 仓库：先入根目录「最近接受」
+        # 影视 / 片商 / 仓库：先入根目录「最近接收」
         want_inbox = _use_receive_inbox(body.source)
         inbox = (
             p115_client.ensure_receive_inbox(cookie) if want_inbox else {"ok": False}
@@ -1385,7 +1385,7 @@ def post_p115_offline(
             )
             relocate_scheduled = True
         elif want_extract:
-            # 未走接受目录时：保持原云解压轮询
+            # 未走接收目录时：保持原云解压轮询
             p115_extract.schedule_deferred_extract(
                 {
                     "cookie": cookie,
@@ -1411,7 +1411,7 @@ def post_p115_offline(
 
         message = str(result.get("message") or "")
         if use_inbox:
-            message = f"{message} · 已入「最近接受」"
+            message = f"{message} · 已入「最近接收」"
         if relocate_scheduled:
             dest_label = dest_name or "指定目录"
             message = (
@@ -1460,7 +1460,7 @@ def post_p115_share(
     body: P115ShareBody,
     _user: dict[str, Any] = Depends(require_user),
 ) -> JSONResponse:
-    """分享转存：影视/片商/仓库均先入「最近接受」，再移到指定目录。"""
+    """分享转存：影视/片商/仓库均先入「最近接收」，再移到指定目录。"""
     try:
         prev = settings_store.get_setting(settings_store.P115_KEY) or {}
         cookie = str(prev.get("cookie") or "").strip()
@@ -1499,7 +1499,7 @@ def post_p115_share(
             if resolved:
                 dest_name = resolved
 
-        # 影视 / 片商 / 仓库：先入「最近接受」再转移
+        # 影视 / 片商 / 仓库：先入「最近接收」再转移
         want_inbox = _use_receive_inbox(body.source)
         inbox = (
             p115_client.ensure_receive_inbox(cookie) if want_inbox else {"ok": False}
@@ -1541,7 +1541,7 @@ def post_p115_share(
             )
         message = str(result.get("message") or "")
         if use_inbox:
-            message = f"{message} · 已入「最近接受」"
+            message = f"{message} · 已入「最近接收」"
         if relocate_info and relocate_info.get("ok") and relocate_info.get("moved"):
             message = (
                 f"{message} · 已移到「{dest_name or '指定目录'}」"

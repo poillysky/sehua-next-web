@@ -383,7 +383,7 @@ _JAVBUS_HOST_RE = re.compile(r"(?:^|\.)(?:javbus|seejav)\b", re.I)
 # 对齐 MDCS flaresolverr NEVER_REGISTER_FLARE_RE：稳定 curl/代理源，勿吸入过盾通道
 _NEVER_FLARE_HOST_RE = re.compile(
     r"(?:^|\.)("
-    r"madouqu|madou\.club|theporndb|javbus|seejav|caribbeancom|"
+    r"madouqu|madou\.club|theporndb|javbus|seejav|caribbeancom|10musume|"
     r"jav321|freejavbt|libredmm|contents\.fc2|dmm\.co\.jp|xchina|iqq[0-9]"
     r")\b",
     re.I,
@@ -1238,6 +1238,47 @@ def _timeout_seconds(timeout: httpx.Timeout | float | None, default: float = 22.
     return float(timeout)
 
 
+def decode_html_bytes(raw: bytes, *, content_type: str = "") -> str:
+    """按 meta/HTTP charset 解码 HTML；caribbeancompr 等站为 euc-jp，勿默认 utf-8。"""
+    data = raw or b""
+    if not data:
+        return ""
+    ctype = str(content_type or "").lower()
+    candidates: list[str] = []
+
+    def _add(enc: str) -> None:
+        e = str(enc or "").strip().lower().replace('"', "")
+        if not e:
+            return
+        # 别名归一
+        if e in {"shift_jis", "shift-jis", "sjis", "x-sjis"}:
+            e = "cp932"
+        if e in {"euc_jp", "euc-jp", "x-euc-jp"}:
+            e = "euc_jp"
+        if e not in candidates:
+            candidates.append(e)
+
+    m = re.search(rb"charset\s*=\s*['\"]?\s*([a-zA-Z0-9_\-]+)", data[:4096], re.I)
+    if m:
+        _add(m.group(1).decode("ascii", errors="ignore"))
+    m2 = re.search(r"charset\s*=\s*([\w\-]+)", ctype, re.I)
+    if m2:
+        _add(m2.group(1))
+    for enc in ("utf-8", "euc_jp", "cp932", "latin-1"):
+        _add(enc)
+
+    for enc in candidates:
+        try:
+            text = data.decode(enc)
+        except (LookupError, UnicodeDecodeError):
+            continue
+        # utf-8 误解 euc-jp 时替换符很多；优先无 � 的解码
+        if enc == "utf-8" and "\ufffd" in text[:8000] and len(data) > 2000:
+            continue
+        return text
+    return data.decode("utf-8", errors="replace")
+
+
 def curl_request(
     method: str,
     url: str,
@@ -1321,7 +1362,15 @@ def _http_get_once(
             kwargs["proxy"] = proxy
         r = creq.get(url, **kwargs)
         status = int(getattr(r, "status_code", 500) or 500)
-        html = str(getattr(r, "text", "") or "")
+        raw = getattr(r, "content", None) or b""
+        ctype = ""
+        try:
+            ctype = str((getattr(r, "headers", None) or {}).get("content-type") or "")
+        except Exception:
+            ctype = ""
+        html = decode_html_bytes(raw, content_type=ctype) if raw else str(
+            getattr(r, "text", "") or ""
+        )
         final = str(getattr(r, "url", "") or url)
         hit = _accept_http_body(
             url, status=status, html=html, final_url=final, via="curl"
@@ -1343,7 +1392,7 @@ def _http_get_once(
         with httpx.Client(**opts) as client:
             r2 = client.get(url, headers=headers)
         status = int(r2.status_code or 500)
-        html = r2.text or ""
+        html = decode_html_bytes(r2.content or b"", content_type=str(r2.headers.get("content-type") or ""))
         hit = _accept_http_body(
             url,
             status=status,

@@ -1,4 +1,4 @@
-"""七区前缀/番号目录 API（维护用，不读资源仓库）。"""
+"""六区前缀/番号目录 API（维护用，不读资源仓库）。"""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-import app.prefix.catalog_avwikidb as avwikidb
 import app.prefix.catalog_harvest as harvest
 import app.prefix.catalog_local_index as local_index
 import app.prefix.catalog_store as store
@@ -216,9 +215,7 @@ class HarvestBody(BaseModel):
     hi_cap: int = 800
     full_scan_limit: int = 80
     pages: int = 2
-    mode: str = "quick"  # quick | dense | latest | avwikidb
-    expand: bool = True
-    min_movie_count: int = 5
+    mode: str = "quick"  # quick | dense | latest
 
 
 class PrefixUpsertBody(BaseModel):
@@ -252,6 +249,9 @@ def get_regions() -> dict[str, Any]:
                 "id": rid,
                 "label": reg.get("label"),
                 "prefix_count": len(prefs),
+                "scrap_prefix_count": sum(
+                    1 for p in prefs.values() if store.effective_code_count(p) > 0
+                ),
                 "code_count": sum(store.effective_code_count(p) for p in prefs.values()),
             }
         )
@@ -348,20 +348,18 @@ def harvest_status() -> dict[str, Any]:
 def post_harvest(body: HarvestBody) -> dict[str, Any]:
     mode = (body.mode or "quick").strip().lower() or "quick"
     allowed = {
-        "japan_censored": {"quick", "dense", "latest", "avwikidb"},
-        "japan_gravure": {"latest", "avwikidb"},
-        "japan_amateur": {"latest", "avwikidb"},
-        "japan_uncensored": {"avwikidb"},
+        "japan_censored": {"quick", "dense", "latest"},
+        "japan_amateur": {"latest"},
         "china": {"latest"},
         "western": {"latest"},
     }
     if body.region not in allowed or mode not in allowed[body.region]:
         raise HTTPException(
             400,
-            "支持：japan_censored(quick|dense|latest|avwikidb)；"
-            "japan_gravure/japan_amateur(latest|avwikidb)；"
-            "japan_uncensored(avwikidb)；"
-            "china/western(latest)",
+            "支持：japan_censored(quick|dense|latest)；"
+            "japan_amateur(latest)；"
+            "china/western(latest)。"
+            "前缀清单以 catalog.seed 为准，扫描只补番号不新增前缀。",
         )
     with _job_lock:
         if _job["running"]:
@@ -378,16 +376,7 @@ def post_harvest(body: HarvestBody) -> dict[str, Any]:
 
     def run() -> None:
         try:
-            if mode == "avwikidb":
-                result = avwikidb.sync_maker_prefix_map(
-                    region=body.region,
-                    prefixes=body.prefixes or None,
-                    limit=body.limit,
-                    expand=bool(body.expand),
-                    min_movie_count=max(1, int(body.min_movie_count or 5)),
-                    on_progress=_job_log,
-                )
-            elif mode == "latest":
+            if mode == "latest":
                 result = harvest.harvest_latest_via_search(
                     body.region,
                     prefixes=body.prefixes or None,
@@ -433,7 +422,7 @@ def local_index_status() -> dict[str, Any]:
 
 @router.post("/local-index")
 def post_local_index() -> dict[str, Any]:
-    """手动触发 Sehua + Bitmagnet 双库扫描，更新七区番号。"""
+    """手动触发 Sehua + Bitmagnet 双库扫描，更新六区番号。"""
     with _local_index_lock:
         if _local_index_job["running"]:
             raise HTTPException(409, "双库扫描已在运行")
@@ -457,7 +446,7 @@ def post_local_index() -> dict[str, Any]:
     def run() -> None:
         try:
             result = local_index.run_local_db_index(on_progress=_local_index_log)
-            # 扫描结束后：按目录 1:1 同步番号骨架（少补多删，不覆盖已刮削）
+            # 扫描结束后：删光旧骨架，按目录 1:1 重建（保留已刮削，删目录外）
             skeleton: dict[str, Any] = {"ok": False, "skipped": True}
             try:
                 import app.scrap_library.embed as embed_svc
@@ -466,7 +455,7 @@ def post_local_index() -> dict[str, Any]:
                     _local_index_log(
                         {
                             "stage": "skeleton",
-                            "phase": str(payload.get("label") or "同步番号骨架…"),
+                            "phase": str(payload.get("label") or "重建番号骨架…"),
                             "done": payload.get("done"),
                             "total": payload.get("total"),
                             "percent": payload.get("percent"),
@@ -477,20 +466,20 @@ def post_local_index() -> dict[str, Any]:
                 _local_index_log(
                     {
                         "stage": "skeleton",
-                        "phase": "同步番号骨架…",
+                        "phase": "重建番号骨架…",
                         "percent": 96,
-                        "label": "同步番号骨架…",
+                        "label": "重建番号骨架…",
                     }
                 )
-                skeleton = embed_svc.upsert_catalog_skeletons(on_progress=_skel_prog)
+                skeleton = embed_svc.rebuild_catalog_skeletons(on_progress=_skel_prog)
             except Exception as sk_e:  # noqa: BLE001
                 skeleton = {"ok": False, "error": str(sk_e)}
                 _local_index_log(
                     {
                         "stage": "skeleton",
-                        "phase": f"骨架同步失败 · {sk_e}",
+                        "phase": f"骨架重建失败 · {sk_e}",
                         "percent": 99,
-                        "label": f"骨架同步失败 · {sk_e}",
+                        "label": f"骨架重建失败 · {sk_e}",
                     }
                 )
             _local_index_job["result"] = {
@@ -503,6 +492,7 @@ def post_local_index() -> dict[str, Any]:
             sk_ins = int(skeleton.get("inserted") or 0)
             sk_skip = int(skeleton.get("skipped_existing") or 0)
             sk_codes = int(skeleton.get("purged_codes") or 0)
+            sk_purged = int(skeleton.get("purged_skeletons") or 0)
             _local_index_job["phase"] = "done"
             _local_index_job["progress"] = {
                 "stage": "done",
@@ -510,8 +500,8 @@ def post_local_index() -> dict[str, Any]:
                 "total": None,
                 "percent": 100,
                 "label": (
-                    f"done · 骨架 +{sk_ins} / 已有 {sk_skip}"
-                    f" · 清目录外向量 {sk_codes}"
+                    f"done · 骨架重建 删壳{sk_purged} 目录外-{sk_codes}"
+                    f" 新壳+{sk_ins} 保留已刮{sk_skip}"
                 ),
             }
         except Exception as e:  # noqa: BLE001
@@ -594,7 +584,7 @@ def strm_sync_status() -> dict[str, Any]:
 
 @router.post("/strm-sync")
 def post_strm_sync(body: StrmSyncStartBody | None = None) -> dict[str, Any]:
-    """同步七区番号为本地 STRM 树：区/前缀/番号/番号.strm。"""
+    """同步六区番号为本地 STRM 树：区/前缀/番号/番号.strm。"""
     root = str((body.root if body else "") or "").strip()
     if root:
         try:

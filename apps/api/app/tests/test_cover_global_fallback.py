@@ -89,14 +89,22 @@ class GlobalFallbackTest(unittest.TestCase):
         )
 
     def test_global_fallback_still_capped(self):
-        """放开额度不能变成无限补试：全局池尝试数仍受 GLOBAL_SUPPLEMENT_N 约束。"""
+        """放开额度不能变成无限补试：全局池 host 数仍受 GLOBAL_SUPPLEMENT_N 约束。"""
+        from urllib.parse import urlparse
+
         res = self._run(priority_n=6, global_n=6)
         tried = [str(u) for u in (res.get("tried") or [])]
-        global_tried = [u for u in tried if "g" in u.split("//", 1)[-1][:2]]
-        self.assertEqual(
-            len(global_tried),
+        global_hosts = {
+            (urlparse(u).hostname or "")
+            for u in tried
+            if (urlparse(u).hostname or "").startswith("g")
+        }
+        global_hosts.discard("")
+        self.assertTrue(global_hosts)
+        self.assertLessEqual(
+            len(global_hosts),
             cd.GLOBAL_SUPPLEMENT_N,
-            f"全局池尝试数应恰好为 GLOBAL_SUPPLEMENT_N —— tried={tried}",
+            f"全局池 host 数应 ≤ GLOBAL_SUPPLEMENT_N —— tried={tried}",
         )
 
 
@@ -108,12 +116,12 @@ class MidScoreSupplementaryTest(unittest.TestCase):
     触发条件（读 `_run_pool` + `need_more` 分支链可以推出来）：
 
     - 优先池**有**候选进了 `all_scored`（所以 `not all_scored` 那条放开分支不生效）；
-    - 候选尺寸都不到 `meets_disk_min_size`（宽<600 且 高<800，`best_disk_ok=False`）
+    - 候选尺寸都不到 `meets_disk_min_size`（图标级极小图，`best_disk_ok=False`）
       → 所有 `need_more=False` 的分支都不成立 → `need_more` 保持 True；
     - 优先池源数 ≥ `max_urls`（批量 5），`tried` 被占满 → `remain_budget = 0`。
 
     结果：`take_n = 0`，全局池拿不到机会，而优先池的图又落不了盘 → 封面直接失败。
-    这正是「字段优先级配满 5 个源、全是小 `ps/thumb` 图」的现场。
+    这正是「字段优先级配满 5 个源、全是废图」的现场。
     """
 
     def _run(self, *, priority_n: int, global_n: int) -> dict:
@@ -126,7 +134,7 @@ class MidScoreSupplementaryTest(unittest.TestCase):
             {"source": f"gz{i}", "url": f"https://g{i}.example.com/pl.jpg"}
             for i in range(global_n)
         ]
-        low = _noisy_jpeg(400, 600)  # 宽<600 且 高<800 → 不满足落盘最小尺寸
+        low = _noisy_jpeg(16, 16)  # 低于落盘地板 → 仍视为不可用
         high = _noisy_jpeg(900, 1300)
 
         def fake_fetch(url: str, *, slot_timeout=None):
@@ -155,9 +163,95 @@ class MidScoreSupplementaryTest(unittest.TestCase):
             reached_global,
             f"优先池候选都不够落盘时未补试全局池 —— tried={tried}",
         )
-        # 优先池 5 个候选（max_urls=5）已占满额度，但补试数仍守 GLOBAL_SUPPLEMENT_N
-        global_tried = [u for u in tried if "g" in u.split("//", 1)[-1][:2]]
-        self.assertEqual(len(global_tried), cd.GLOBAL_SUPPLEMENT_N)
+        # 优先池 5 个候选（max_urls=5）已占满额度；补试 host 数 ≤ GLOBAL_SUPPLEMENT_N
+        # （单 URL 可能被 upgrade 裂成 pl/ps，故按 host 计）
+        from urllib.parse import urlparse
+
+        global_hosts = {
+            (urlparse(u).hostname or "")
+            for u in tried
+            if "g" in (urlparse(u).hostname or "")[:2]
+        }
+        global_hosts.discard("")
+        self.assertTrue(global_hosts)
+        self.assertLessEqual(
+            len(global_hosts),
+            cd.GLOBAL_SUPPLEMENT_N,
+            f"全局补试 host 数应 ≤ GLOBAL_SUPPLEMENT_N —— tried={tried}",
+        )
+
+
+class FallbackSourceReservedTest(unittest.TestCase):
+    """全局补充必须给 miss_av 留席，不能被 jav321 慢 CDN 挤掉。"""
+
+    def test_pick_global_supplement_reserves_miss_av(self) -> None:
+        pool = [
+            {"source": "jav321", "url": "https://www.jav321.com/a.jpg"},
+            {"source": "airav_io", "url": "https://airav.example/a.jpg"},
+            {"source": "miss_av", "url": "https://missav.example/a.jpg"},
+            {"source": "freejavbt", "url": "https://fjb.example/a.jpg"},
+        ]
+        # 模拟已按 unstable 殿后排好：airav → freejavbt → miss → jav321
+        ordered = [
+            pool[1],
+            pool[3],
+            pool[2],
+            pool[0],
+        ]
+        got = cd.pick_global_supplement(ordered, used=set(), take_n=2)
+        srcs = [str(e.get("source")) for e in got]
+        self.assertEqual(len(got), 2)
+        self.assertIn("miss_av", srcs, f"兜底源必须占一席 —— {srcs}")
+        self.assertNotIn("jav321", srcs, f"不稳 CDN 不应挤掉兜底 —— {srcs}")
+
+    def test_miss_av_tried_when_jav321_fails(self) -> None:
+        fp = ["mgstage", "javbus"]
+        entries = [
+            {"source": "mgstage", "url": "https://image.mgstage.com/x.jpg"},
+            {"source": "jav321", "url": "https://www.jav321.com/x.jpg"},
+            {"source": "miss_av", "url": "https://missav.example/pl.jpg"},
+        ]
+        jpeg = _noisy_jpeg(420, 600)
+
+        def fake_fetch(url: str, *, slot_timeout=None):
+            if "missav.example" in url:
+                return jpeg, "image/jpeg"
+            return None
+
+        with TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            with mock.patch.object(embed_svc, "_fetch_cover_bytes", side_effect=fake_fetch):
+                res = cd.download_best_cover(
+                    folder,
+                    entries,
+                    region="japan_amateur",
+                    batch_mode=True,
+                    field_priority=fp,
+                    region_sources=fp + ["jav321", "miss_av"],
+                    overwrite=True,
+                )
+        tried = [str(u) for u in (res.get("tried") or [])]
+        self.assertTrue(
+            any("missav.example" in u for u in tried),
+            f"jav321/mgstage 失败后应试 miss_av —— tried={tried}",
+        )
+        self.assertTrue(res.get("ok"), res)
+        self.assertEqual(res.get("coverSource"), "miss_av")
+
+
+class FourhoiRefererPlanTest(unittest.TestCase):
+    def test_fourhoi_uses_missav_referer(self) -> None:
+        from app.scrap_library.cover_focus_routes import _referer_plan
+
+        primary, alt = _referer_plan("fourhoi.com", "https")
+        self.assertEqual(primary, "https://missav.ws/")
+        self.assertEqual(alt, "https://missav.live/")
+
+    def test_jav321_is_slow_host(self) -> None:
+        from app.scrap_library.cover_focus_routes import _is_slow_cover_host
+
+        self.assertTrue(_is_slow_cover_host("www.jav321.com"))
+        self.assertTrue(_is_slow_cover_host("jav321.com"))
 
 
 if __name__ == "__main__":

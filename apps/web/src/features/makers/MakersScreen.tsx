@@ -30,6 +30,9 @@ import { useTabNavigation } from '@/shell';
 import { useStackCover } from '@/hooks/useStackCover';
 import { SEARCH_KEYWORD_LENGTH_MIN } from '@/config/search';
 import {
+  isFc2DirectStudio,
+  isCensoredRightCropRegion,
+  isMakerLandscapeRegion,
   makerSourceLabel,
   MAKER_ACTRESS_SORT_OPTS,
   MAKER_FACET_SORT_OPTS,
@@ -289,11 +292,17 @@ export function MakersScreen() {
     libraryView === 'movies' ||
     stack.kind === 'folderPrefix' ||
     stack.kind === 'facet' ||
+    (stack.kind === 'folderStudio' && isFc2DirectStudio(stack.studio)) ||
     (stack.kind === 'detail' &&
-      (stack.from.kind === 'folderPrefix' || stack.from.kind === 'facet'));
+      (stack.from.kind === 'folderPrefix' ||
+        stack.from.kind === 'facet' ||
+        (stack.from.kind === 'folderStudio' &&
+          isFc2DirectStudio(stack.from.studio))));
   const isPrefixSortView =
-    stack.kind === 'folderStudio' ||
-    (stack.kind === 'detail' && stack.from.kind === 'folderStudio');
+    (stack.kind === 'folderStudio' && !isFc2DirectStudio(stack.studio)) ||
+    (stack.kind === 'detail' &&
+      stack.from.kind === 'folderStudio' &&
+      !isFc2DirectStudio(stack.from.studio));
 
   const loadItems = useCallback(
     async (offset: number) => {
@@ -567,7 +576,7 @@ export function MakersScreen() {
   ]);
 
   // Hub 数据：不要依赖 stack.kind，否则详情返回会整页重载（闪烁 + 丢滚动）
-  // 推荐页与七区无关，切换区时不要重拉
+  // 推荐页与分区顶栏无关，切换区时不要重拉
   const hubQueryKey = `${hubTab}|${libraryView}|${itemSort}|${activeFacetSort}|${sortOrder}`;
   const hubQueryKeyRef = useRef(hubQueryKey);
   useEffect(() => {
@@ -643,12 +652,14 @@ export function MakersScreen() {
     },
     [scrollDrillTop],
   );
-  // 文件夹中间层：厂牌下的前缀列表
+  // 文件夹中间层：厂牌下的前缀列表（FC2 / FC2-PPV 跳过，直接番号）
   const folderMidKey = useMemo(() => {
     if (stack.kind === 'folderStudio') {
+      if (isFc2DirectStudio(stack.studio)) return '';
       return `fs|${hubTab}|${stack.studio}|${prefixSort}|${sortOrder}`;
     }
     if (stack.kind === 'detail' && stack.from.kind === 'folderStudio') {
+      if (isFc2DirectStudio(stack.from.studio)) return '';
       return `fs|${hubTab}|${stack.from.studio}|${prefixSort}|${sortOrder}`;
     }
     return '';
@@ -719,11 +730,21 @@ export function MakersScreen() {
 
   // 钻取列表：详情盖住时保持同一 drillKey，避免返回时重新拉数
   const drillLoadKey = useMemo(() => {
+    if (stack.kind === 'folderStudio' && isFc2DirectStudio(stack.studio)) {
+      return `${hubTab}|fs-items|${stack.studio}|${itemSort}|${sortOrder}`;
+    }
     if (stack.kind === 'folderPrefix') {
       return `${hubTab}|fp|${stack.studio}|${stack.prefix}|${itemSort}|${sortOrder}`;
     }
     if (stack.kind === 'facet') {
       return `${hubTab}|facet|${stack.facet}|${stack.value}|${itemSort}|${sortOrder}`;
+    }
+    if (
+      stack.kind === 'detail' &&
+      stack.from.kind === 'folderStudio' &&
+      isFc2DirectStudio(stack.from.studio)
+    ) {
+      return `${hubTab}|fs-items|${stack.from.studio}|${itemSort}|${sortOrder}`;
     }
     if (stack.kind === 'detail' && stack.from.kind === 'folderPrefix') {
       return `${hubTab}|fp|${stack.from.studio}|${stack.from.prefix}|${itemSort}|${sortOrder}`;
@@ -1042,6 +1063,7 @@ export function MakersScreen() {
               key={String(item.itemId || item.code)}
               item={item}
               eager={i < 18}
+              rightCrop={isCensoredRightCropRegion(hubTab)}
               onClick={() => openItem(item)}
             />
           ))}
@@ -1137,9 +1159,17 @@ export function MakersScreen() {
     title: string,
     children: ReactNode,
     onMore?: () => void,
+    opts?: { landscape?: boolean },
   ) {
     return (
-      <section key={railKey} className="media-shelf makers-shelf">
+      <section
+        key={railKey}
+        className={
+          opts?.landscape
+            ? 'media-shelf makers-shelf makers-shelf--landscape'
+            : 'media-shelf makers-shelf'
+        }
+      >
         <button
           type="button"
           className="media-shelf__head"
@@ -1166,7 +1196,7 @@ export function MakersScreen() {
     if (loading) return `${base} · 加载中…`;
     switch (libraryView) {
       case 'recommended':
-        return loading ? '推荐 · 加载中…' : '推荐 · 七区最新';
+        return loading ? '推荐 · 加载中…' : '推荐 · 各区最新';
       case 'folders':
         return `${base} · ${total} 个厂牌`;
       case 'genres':
@@ -1214,7 +1244,14 @@ export function MakersScreen() {
         return (
           <div className="makers-hub__shelves" aria-hidden>
             {MAKER_KIND_TABS.map((tab) => (
-              <section key={tab.id} className="media-shelf makers-shelf">
+              <section
+                key={tab.id}
+                className={
+                  isMakerLandscapeRegion(tab.id)
+                    ? 'media-shelf makers-shelf makers-shelf--landscape'
+                    : 'media-shelf makers-shelf'
+                }
+              >
                 <div className="media-shelf__head">
                   <span className="media-shelf__title">
                     {tab.label} · 最近刮削
@@ -1271,6 +1308,7 @@ export function MakersScreen() {
                   key={`${shelf.region}-${String(item.itemId || item.code)}`}
                   item={item}
                   eager={i < 6}
+                  rightCrop={isCensoredRightCropRegion(shelf.region)}
                   onClick={() => openItem(item)}
                 />
               )),
@@ -1280,6 +1318,7 @@ export function MakersScreen() {
                 }
                 setLibraryView('movies');
               },
+              { landscape: isMakerLandscapeRegion(shelf.region) },
             );
           })}
         </div>
@@ -1312,6 +1351,7 @@ export function MakersScreen() {
                 count={f.count}
                 blurb={f.blurb}
                 posterApi={f.posterApi}
+                posterApis={f.posterApis}
                 coverUrl={f.coverUrl}
                 onClick={() =>
                   setStack({ kind: 'folderStudio', studio: f.name })
@@ -1439,7 +1479,7 @@ export function MakersScreen() {
                   : 'media-hub__search-btn makers-hub__refresh-btn'
               }
               aria-label="刷新浏览快照"
-              title="刷新七区厂牌/标签/女优 + 推荐 + 影片首页快照"
+              title="刷新各区厂牌/标签/女优 + 推荐 + 影片首页快照"
               disabled={snapRefreshing}
               onClick={() => {
                 void refreshFacetsSnapshot();
@@ -1755,6 +1795,7 @@ export function MakersScreen() {
       </AppPush>
     );
   } else if (stack.kind === 'folderStudio') {
+    const directItems = isFc2DirectStudio(stack.studio);
     push = (
       <AppPush
         title={stack.studio}
@@ -1768,14 +1809,25 @@ export function MakersScreen() {
             ref={sortSlotRef}
           >
             <p className="makers-drill-toolbar__meta allow-select">
-              {drillLoading && drillPrefixes.length === 0
-                ? '加载中…'
-                : `${drillTotal} 个前缀`}
+              {directItems
+                ? loading && items.length === 0
+                  ? '加载中…'
+                  : `${total} 项`
+                : drillLoading && drillPrefixes.length === 0
+                  ? '加载中…'
+                  : `${drillTotal} 个前缀`}
             </p>
             {combinedSortBtn(true, 'makers-drill-sort')}
             {sortDropdown}
           </div>
-          {drillLoading && drillPrefixes.length === 0 ? (
+          {directItems ? (
+            <>
+              {wall(items, '暂无匹配条目', {
+                loading: loading && items.length === 0,
+              })}
+              {drillPager}
+            </>
+          ) : drillLoading && drillPrefixes.length === 0 ? (
             <div className="makers-collage-grid makers-collage-grid--skel" aria-hidden>
               {Array.from({ length: 6 }).map((_, i) => (
                 <span key={i} className="makers-collage-skel" />
@@ -1794,6 +1846,7 @@ export function MakersScreen() {
                   count={p.count}
                   blurb={p.blurb}
                   posterApi={p.posterApi}
+                  posterApis={p.posterApis}
                   coverUrl={p.coverUrl}
                   onClick={() =>
                     setStack({
@@ -1953,7 +2006,14 @@ export function MakersScreen() {
   }
 
   return (
-    <div className="app-stack-root media-stack">
+    <div
+      className={
+        // 推荐页按货架自定横竖；其它库页才跟当前分区
+        libraryView !== 'recommended' && isMakerLandscapeRegion(hubTab)
+          ? 'app-stack-root media-stack makers-landscape'
+          : 'app-stack-root media-stack'
+      }
+    >
       {hub}
       {msg ? <AppMsg onDismiss={() => setMsg('')}>{msg}</AppMsg> : null}
       {push}

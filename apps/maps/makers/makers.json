@@ -11,7 +11,6 @@
   "Alpha International": "Alpha International",
   "Aroma": "アロマ企画",
   "Aroma Planning": "アロマ企画",
-  "Art Mode": "Art Mode",
   "Attackers": "Attackers",
   "Aurora Project": "Aurora Project",
   "Aurora Project Annex": "Aurora Project Annex",
@@ -24,8 +23,8 @@
   "Center Village": "Center Village",
   "Chijo Heaven": "痴女ヘブン",
   "Cinemagic": "Cinemagic",
-  "Cosmos": "Cosmos",
-  "Crystal": "クリスタル映像",
+  "Cosmos": "コスモス映像",
+  "Crystal": "Crystal",
   "DAHLIA": "DAHLIA",
   "DANDY": "DANDY",
   "DAS!": "ダスッ！",
@@ -37,10 +36,7 @@
   "E-BODY": "E-BODY",
   "EBODY": "E-BODY",
   "FALENO": "FALENO",
-  "FIRST STAR": "SOD Create",
-  "First Star": "SOD Create",
   "Fitch": "Fitch",
-  "Glanz": "REbecca",
   "Global Media": "Global Media",
   "Glory Quest": "Glory Quest",
   "Graphis": "Graphis",
@@ -77,7 +73,6 @@
   "MUTEKI": "Muteki",
   "Madonna": "Madonna",
   "Marx Brothers": "マルクス兄弟",
-  "Media Brand": "Media Brand",
   "Million": "Million",
   "Moodyz": "MOODYZ",
   "Mother": "マザー",
@@ -94,7 +89,6 @@
   "Nadeshiko": "なでしこ",
   "Nadesiko": "なでしこ",
   "Nagae STYLE": "ながえSTYLE",
-  "Nama Nama": "Nama Nama",
   "Nanpa JAPAN": "Nanpa Japan",
   "Nanpa Japan": "Nanpa Japan",
   "Natural High": "ナチュラルハイ",
@@ -106,7 +100,6 @@
   "P-BOX VR": "P-BOX VR",
   "PREMIUM": "プレミアム",
   "PRESTIGE": "PRESTIGE",
-  "Plum": "SWITCH",
   "Premium": "プレミアム",
   "Prestige": "PRESTIGE",
   "REAL": "REAL",
@@ -116,7 +109,6 @@
   "ROCKET": "ROCKET",
   "ROOKIE": "ROOKIE",
   "ROYD": "ROYD",
-  "Radix": "S1 NO.1 STYLE",
   "Real Works": "REAL",
   "Rebecca": "REbecca",
   "Royd": "ROYD",
@@ -136,9 +128,6 @@
   "Side B": "ながえSTYLE",
   "Side-B": "ながえSTYLE",
   "Soft On Demand": "SOD Create",
-  "Spice Visual": "Spice Visual",
-  "Star Paradise": "NEXTGROUP",
-  "Sunset Color": "Sunset Color",
   "S級素人": "S级素人",
   "S级素人": "S级素人",
   "T-Club": "Trans Club",
@@ -148,14 +137,12 @@
   "Takara Eizou": "タカラ映像",
   "U&K": "U＆K",
   "Unfinished": "Unfinished",
-  "Usagi": "Usagi",
   "U＆K": "U＆K",
   "V&R PRODUCE": "V＆R PRODUCE",
   "V&R Planning": "V&R Planning",
   "V&Rプランニング": "V&R Planning",
   "VENUS": "Venus",
   "Venus": "Venus",
-  "Vi": "Vi",
   "V＆R PRODUCE": "V＆R PRODUCE",
   "V＆Rプランニング": "V&R Planning",
   "WANZ": "WANZ",
@@ -168,18 +155,13 @@
   "unfinished": "Unfinished",
   "unfinished VR": "Unfinished",
   "unfinished-VR": "Unfinished",
-  "うさぎ/妄想族": "Usagi",
-  "うれまん/妄想族": "Ureman",
   "おっぱい": "OPPAI",
   "かぐや姫Pt/妄想族": "かぐや姫Pt",
-  "きゃんたま清掃員": "Kantama",
   "こあらVR": "Koala VR",
   "ながえSTYLE": "ながえSTYLE",
   "ながえスタイル": "ながえSTYLE",
   "なでしこ": "なでしこ",
-  "なまなま": "Nama Nama",
   "はじめ企画": "Hajime Kikaku",
-  "ゆず故障マシマシ/妄想族": "Yuzu",
   "アイエナジー": "アイエナジー",
   "アイデアポケット": "IDEA POCKET",
   "アキノリ": "アキノリ",
@@ -187,7 +169,6 @@
   "アリスJAPAN": "アリスJAPAN",
   "アルファーインターナショナル": "Alpha International",
   "アロマ企画": "アロマ企画",
-  "アートモード": "Art Mode",
   "エスワン": "S1 NO.1 STYLE",
   "エスワン ナンバーワンスタイル": "S1 NO.1 STYLE",
   "エスワンナンバーワンスタイル": "S1 NO.1 STYLE",
@@ -199,7 +180,7 @@
   "オーロラプロジェクト·アネックス": "Aurora Project Annex",
   "オーロラプロジェクト・アネックス": "Aurora Project Annex",
   "キラ☆キラ": "kira☆kira",
-  "クリスタル映像": "クリスタル映像",
+  "クリスタル映像": "Crystal",
   "グラッツコーポレーション": "REbecca",
   "グラフィス": "Graphis",
   "グローバルメディアアネックス": "Global Media Annex",
@@ -209,13 +190,10 @@
   "ケー·トライブ": "K-Tribe",
   "ケートライブ": "K-Tribe",
   "ケー・トライブ": "K-Tribe",
-  "コスモス映像": "Cosmos",
+  "コスモス映像": "コスモス映像",
   "サイドビー": "ながえSTYLE",
   "サディスティックヴィレッジ": "Sadistic Village",
-  "サンセットカラー": "Sunset Color",
   "シネマジック": "Cinemagic",
-  "スパイスビジュアル": "Spice Visual",
-  "スパルタン/妄想族": "Spartan",
   "セレブの友": "Celeb no Tomo",
   "センタービレッジ": "Center Village",
   "ソフトオンデマンド": "SOD Create",
@@ -231,7 +209,6 @@
   "ナデシコ": "なでしこ",
   "ナンパJAPAN": "Nanpa Japan",
   "ネクスト": "NEXTGROUP",
-  "ハイカラ/妄想族": "Haikara",
   "ハンター": "Hunter",
   "バズーカ": "BAZOOKA",
   "ヒビノ": "ヒビノ",
@@ -255,8 +232,6 @@
   "ミリオン": "Million",
   "ミルク": "MILK",
   "ムーディーズ": "MOODYZ",
-  "メディアブランド": "Media Brand",
-  "ヤリ上手": "Yari Jouzu",
   "ルビー": "Ruby",
   "ルーキー": "ROOKIE",
   "レアル": "REAL",
@@ -267,7 +242,6 @@
   "ロイヤル": "ROYD",
   "ロケット": "ROCKET",
   "ワンズファクトリー": "WANZ",
-  "ヴィ": "Vi",
   "ヴィーナス": "Venus",
   "卡哇伊": "kawaii",
   "同人AV倶楽部/妄想族": "Doujin AV",
@@ -289,14 +263,542 @@
   "痴女社": "痴女ヘブン",
   "维纳斯": "Venus",
   "美汁流": "Mr.Michiru",
-  "脱ぐのは恥だがペニス立つ": "NuPenis",
-  "脱ぐのは恥だがペニス立つ/妄想族": "NuPenis",
-  "邪恶帝国": "S1 NO.1 STYLE",
   "阿洛玛企划": "アロマ企画",
-  "魔笛": "MOODYZ",
   "麦当娜": "Madonna",
   "黑妹社": "kira☆kira",
-  "S-cute": "S-Cute"
+  "S-cute": "S-Cute",
+  "ドグマ": "ドグマ",
+  "Dogma": "ドグマ",
+  "DOGMA": "ドグマ",
+  "犬马": "ドグマ",
+  "DDT": "ドグマ",
+  "DDK": "ドグマ",
+  "DOKS": "ドグマ",
+  "理念口袋": "IDEA POCKET",
+  "想法口袋": "IDEA POCKET",
+  "菲奇": "Fitch",
+  "Ore no Shirouto": "Ore no Shirouto",
+  "俺的素人": "Ore no Shirouto",
+  "俺の素人": "Ore no Shirouto",
+  "Ore no Shirouto / 俺的素人": "Ore no Shirouto",
+  "中心村": "Center Village",
+  "中心乡村": "Center Village",
+  "欧派": "OPPAI",
+  "巨乳": "OPPAI",
+  "V&R制作": "V＆R PRODUCE",
+  "V&R": "V＆R PRODUCE",
+  "いんすた": "いんすた",
+  "印斯塔": "いんすた",
+  "インスタ": "いんすた",
+  "HMN WORKS": "いんすた",
+  "INSTV": "いんすた",
+  "ピーターズ": "ピーターズ",
+  "彼得斯": "ピーターズ",
+  "Peters": "ピーターズ",
+  "Peters MAX": "ピーターズ",
+  "俺の素人-Z-": "俺の素人-Z-",
+  "俺的素人-Z-": "俺の素人-Z-",
+  "俺の素人-Z- SECOND IMPACT": "俺の素人-Z-",
+  "Ore no Shirouto-Z-": "俺の素人-Z-",
+  "ビッグモーカル": "ビッグモーカル",
+  "大莫卡": "ビッグモーカル",
+  "Big Morkal": "ビッグモーカル",
+  "DOC": "DOC",
+  "光荣任务": "Glory Quest",
+  "光荣探索": "Glory Quest",
+  "真实": "REAL",
+  "S-Cute": "S-Cute",
+  "エスキュート": "S-Cute",
+  "229SCUTE": "S-Cute",
+  "施虐村": "Sadistic Village",
+  "虐待村": "Sadistic Village",
+  "10musume": "10musume",
+  "天然少女": "10musume",
+  "天然むすめ": "10musume",
+  "10musume / 天然少女": "10musume",
+  "10MUSUME": "10musume",
+  "恋慕": "恋慕",
+  "Koi no Bo": "恋慕",
+  "Koi no Bo / 恋慕": "恋慕",
+  "恋の母": "恋慕",
+  "MARRION": "MARRION",
+  "玛丽昂": "MARRION",
+  "Marrion": "MARRION",
+  "マリオン": "MARRION",
+  "Maji Nanpa": "Maji Nanpa",
+  "真面目软派": "Maji Nanpa",
+  "Maji Nanpa / 真面目软派": "Maji Nanpa",
+  "マジナンパ": "Maji Nanpa",
+  "マジ軟派": "Maji Nanpa",
+  "パラダイステレビ": "パラダイステレビ",
+  "天堂电视": "パラダイステレビ",
+  "乐园电视": "パラダイステレビ",
+  "Paradise TV": "パラダイステレビ",
+  "083PPP": "パラダイステレビ",
+  "おかず。": "おかず。",
+  "小菜": "おかず。",
+  "おかず": "おかず。",
+  "Okazu": "おかず。",
+  "Pacopacomama": "Pacopacomama",
+  "啪啪妈妈": "Pacopacomama",
+  "パコパコママ": "Pacopacomama",
+  "Pacopacomama / 啪啪妈妈": "Pacopacomama",
+  "PACOMA": "Pacopacomama",
+  "Nanpa TV": "Nanpa TV",
+  "搭讪TV": "Nanpa TV",
+  "ナンパTV": "Nanpa TV",
+  "Nanpa TV / ナンパTV": "Nanpa TV",
+  "GANA": "Nanpa TV",
+  "Prestige Premium": "Prestige Premium",
+  "プレステージプレミアム": "Prestige Premium",
+  "Prestige Premium / プレステージプレミアム": "Prestige Premium",
+  "MIUM": "Prestige Premium",
+  "K部落": "K-Tribe",
+  "Trans Club": "Trans Club",
+  "变性俱乐部": "Trans Club",
+  "伪娘俱乐部": "Trans Club",
+  "乱丸": "乱丸",
+  "Ranmaru": "乱丸",
+  "TYOD": "乱丸",
+  "TMA": "TMA",
+  "T28": "TMA",
+  "ラグジュTV": "ラグジュTV",
+  "奢华TV": "ラグジュTV",
+  "LUXU": "ラグジュTV",
+  "Luxu TV": "ラグジュTV",
+  "Caribbeancom Premium": "Caribbeancom Premium",
+  "加勒比高级版": "Caribbeancom Premium",
+  "カリビアンコムプレミアム": "Caribbeancom Premium",
+  "CWPBD": "Caribbeancom Premium",
+  "いきなりエロざんまい": "いきなりエロざんまい",
+  "突然エロ盛宴": "いきなりエロざんまい",
+  "SGSR": "いきなりエロざんまい",
+  "Hsoda": "Hsoda",
+  "HSODA": "Hsoda",
+  "初企画": "Hajime Kikaku",
+  "クロス": "クロス",
+  "Cross": "クロス",
+  "CRPD": "クロス",
+  "h.m.p DORAMA": "h.m.p DORAMA",
+  "h.m.p剧场版": "h.m.p DORAMA",
+  "HOMA": "h.m.p DORAMA",
+  "FAIR＆WAY": "FAIR＆WAY",
+  "FAIR&WAY": "FAIR＆WAY",
+  "Fair & Way": "FAIR＆WAY",
+  "FWAY": "FAIR＆WAY",
+  "ABC/妄想族": "ABC/妄想族",
+  "ABC": "ABC/妄想族",
+  "OKSN": "ABC/妄想族",
+  "レッド": "レッド",
+  "红": "レッド",
+  "Red": "レッド",
+  "REXD": "レッド",
+  "熟女JAPAN": "熟女JAPAN",
+  "JUTA": "熟女JAPAN",
+  "カルマ": "カルマ",
+  "业力": "カルマ",
+  "Karma": "カルマ",
+  "KAM": "カルマ",
+  "Fetish Box/妄想族": "Fetish Box/妄想族",
+  "Fetish Box": "Fetish Box/妄想族",
+  "ATFB": "Fetish Box/妄想族",
+  "チェリーズれぼ/妄想族": "チェリーズれぼ/妄想族",
+  "樱桃Revo/妄想族": "チェリーズれぼ/妄想族",
+  "CHRV": "チェリーズれぼ/妄想族",
+  "電脳ラスプーチン": "電脳ラスプーチン",
+  "电脑拉斯普京": "電脳ラスプーチン",
+  "DRPT": "電脳ラスプーチン",
+  "AVS collector's": "AVS collector's",
+  "AVS收藏家": "AVS collector's",
+  "AVS collector": "AVS collector's",
+  "AVScollector": "AVS collector's",
+  "ASW": "AVS collector's",
+  "FALENO TUBE": "FALENO TUBE",
+  "FTHTD": "FALENO TUBE",
+  "パコパコ団とゆかいな仲間たち/妄想族": "パコパコ団とゆかいな仲間たち/妄想族",
+  "啪啪团与快乐伙伴们/妄想族": "パコパコ団とゆかいな仲間たち/妄想族",
+  "PKPD": "パコパコ団とゆかいな仲間たち/妄想族",
+  "チキチキカマー/妄想族": "チキチキカマー/妄想族",
+  "奇奇奇卡玛/妄想族": "チキチキカマー/妄想族",
+  "TIKB": "チキチキカマー/妄想族",
+  "NEXT集团": "NEXTGROUP",
+  "NEXT": "NEXTGROUP",
+  "SPZ": "NEXTGROUP",
+  "アンナと花子": "アンナと花子",
+  "安娜与花子": "アンナと花子",
+  "ANND": "アンナと花子",
+  "五十路ん": "五十路ん",
+  "GOJU": "五十路ん",
+  "有閑ミセス/エマニエル": "有閑ミセス/エマニエル",
+  "有闲太太/Emaniel": "有閑ミセス/エマニエル",
+  "SYKH": "有閑ミセス/エマニエル",
+  "ミニマム": "ミニマム",
+  "迷你姆": "ミニマム",
+  "Minimum": "ミニマム",
+  "MUM": "ミニマム",
+  "あいすまん": "あいすまん",
+  "冰淇淋男": "あいすまん",
+  "Aisuman": "あいすまん",
+  "BEAF": "あいすまん",
+  "エロチカ": "エロチカ",
+  "情色卡": "エロチカ",
+  "Erotica": "エロチカ",
+  "ELO": "エロチカ",
+  "数字方舟": "Digital Ark",
+  "KCDA": "Digital Ark",
+  "SHIGEKI": "SHIGEKI",
+  "刺激": "SHIGEKI",
+  "SGKI": "SHIGEKI",
+  "親父の個撮": "親父の個撮",
+  "老爹的个拍": "親父の個撮",
+  "OKB": "親父の個撮",
+  "中嶋興業": "中嶋興業",
+  "中嶋兴业": "中嶋興業",
+  "NTRD": "中嶋興業",
+  "LAFBD": "LAFBD",
+  "WORLD PG": "WORLD PG",
+  "AMCP": "WORLD PG",
+  "北池袋": "北池袋",
+  "KITAIKE": "北池袋",
+  "訳ありZ世代": "訳ありZ世代",
+  "有问题的Z世代": "訳ありZ世代",
+  "SUKE": "訳ありZ世代",
+  "I.B.WORKS": "I.B.WORKS",
+  "IBW": "I.B.WORKS",
+  "Around": "Around",
+  "ARSO": "Around",
+  "熟女LABO": "熟女LABO",
+  "MEKO": "熟女LABO",
+  "熟女はつらいよ/熟女卍": "熟女はつらいよ/熟女卍",
+  "熟女好辛苦/熟女卍": "熟女はつらいよ/熟女卍",
+  "JYMA": "熟女はつらいよ/熟女卍",
+  "ひよこ": "ひよこ",
+  "雏鸟": "ひよこ",
+  "Hiyoko": "ひよこ",
+  "PIYO": "ひよこ",
+  "YONAKA": "YONAKA",
+  "MOON": "YONAKA",
+  "エロVR": "エロVR",
+  "情色VR": "エロVR",
+  "EROFV": "エロVR",
+  "ズッコン/バッコン": "ズッコン/バッコン",
+  "ZUKO": "ズッコン/バッコン",
+  "MBM": "MBM",
+  "アクアモール/エマニエル": "アクアモール/エマニエル",
+  "水上商场/Emaniel": "アクアモール/エマニエル",
+  "AQSH": "アクアモール/エマニエル",
+  "MOON FORCE 2nd": "MOON FORCE 2nd",
+  "MFCS": "MOON FORCE 2nd",
+  "PoRO": "PoRO",
+  "ACRN": "PoRO",
+  "ケラ工房": "ケラ工房",
+  "CLO": "ケラ工房",
+  "ゲインコーポレーション": "ゲインコーポレーション",
+  "ONSG": "ゲインコーポレーション",
+  "ミル": "ミル",
+  "米尔": "ミル",
+  "Miru": "ミル",
+  "MIBB": "ミル",
+  "H4610": "H4610",
+  "好色4610": "H4610",
+  "H4610 / 好色4610": "H4610",
+  "C0930": "C0930",
+  "人妻0930": "C0930",
+  "C0930 / 人妻0930": "C0930",
+  "H0930": "H0930",
+  "好色0930": "H0930",
+  "H0930 / 好色0930": "H0930",
+  "Heydouga": "Heydouga",
+  "嘿动画": "Heydouga",
+  "Heydouga / 嘿动画": "Heydouga",
+  "HEYDOUGA": "Heydouga",
+  "XXX-AV": "XXX-AV",
+  "解禁AV": "XXX-AV",
+  "XXX-AV / 解禁AV": "XXX-AV",
+  "XXXAV": "XXX-AV",
+  "Red Hot Jam": "Red Hot Jam",
+  "红热果酱": "Red Hot Jam",
+  "レッドホットジャム": "Red Hot Jam",
+  "RHJ": "Red Hot Jam",
+  "Sperm Mania": "Sperm Mania",
+  "精液狂热": "Sperm Mania",
+  "スペルママニア": "Sperm Mania",
+  "SPERMMANIA": "Sperm Mania",
+  "Nyoshin": "Nyoshin",
+  "女体神秘": "Nyoshin",
+  "Nyoshin / 女体神秘": "Nyoshin",
+  "NYOSHIN": "Nyoshin",
+  "Legs Japan": "Legs Japan",
+  "レッグスジャパン": "Legs Japan",
+  "LEGSJAPAN": "Legs Japan",
+  "Fellatio Japan": "Fellatio Japan",
+  "フェラチオジャパン": "Fellatio Japan",
+  "FELLATIOJAPAN": "Fellatio Japan",
+  "JapornXXX": "JapornXXX",
+  "日产无码": "JapornXXX",
+  "JapornXXX / 日产无码": "JapornXXX",
+  "JAPORNXXX": "JapornXXX",
+  "Ura Bukkake": "Ura Bukkake",
+  "里颜射": "Ura Bukkake",
+  "ウラブッカケ": "Ura Bukkake",
+  "URABUKKAKE": "Ura Bukkake",
+  "Rose Lip Fetish": "Rose Lip Fetish",
+  "ROSELIPFETISH": "Rose Lip Fetish",
+  "Handjob Japan": "Handjob Japan",
+  "HANDJOBJAPAN": "Handjob Japan",
+  "SM-Miracle": "SM-Miracle",
+  "SM奇迹": "SM-Miracle",
+  "SM-Miracle / SM奇迹": "SM-Miracle",
+  "SMMIRACLE": "SM-Miracle",
+  "Ura Lesbian": "Ura Lesbian",
+  "里女同": "Ura Lesbian",
+  "URALESBIAN": "Ura Lesbian",
+  "Rose Lip": "Rose Lip",
+  "ROSELIP": "Rose Lip",
+  "Shirouto TV": "Shirouto TV",
+  "素人TV": "Shirouto TV",
+  "Shirouto TV / 素人TV": "Shirouto TV",
+  "SIRO": "Shirouto TV",
+  "Nanpa Tengoku": "Nanpa Tengoku",
+  "搭讪天国": "Nanpa Tengoku",
+  "Nanpa Tengoku / Nanpa天国": "Nanpa Tengoku",
+  "300NTK": "Nanpa Tengoku",
+  "Jackson": "Jackson",
+  "杰克逊": "Jackson",
+  "Jackson / 杰克逊": "Jackson",
+  "390JAC": "Jackson",
+  "Hamedori": "Hamedori",
+  "ハメ撮り": "Hamedori",
+  "Hamedori / ハメ撮り": "Hamedori",
+  "328HMDN": "Hamedori",
+  "261ARA": "261ARA",
+  "募集酱": "261ARA",
+  "261ARA / 募集酱": "261ARA",
+  "ARA": "261ARA",
+  "ARA（募集ちゃん）": "261ARA",
+  "himemix": "himemix",
+  "姬混": "himemix",
+  "himemix / 姬混": "himemix",
+  "HIMEMIX": "himemix",
+  "Siro Hame": "Siro Hame",
+  "白ハメ": "Siro Hame",
+  "Siro Hame / 白ハメ": "Siro Hame",
+  "SIROHAME": "Siro Hame",
+  "r-file": "r-file",
+  "R档案": "r-file",
+  "r-file / R档案": "r-file",
+  "RFILE": "r-file",
+  "G-area": "G-area",
+  "G区": "G-area",
+  "G-area / G区": "G-area",
+  "GAREA": "G-area",
+  "しろうとまんまん": "しろうとまんまん",
+  "素人人まん": "しろうとまんまん",
+  "345SIMM": "しろうとまんまん",
+  "ペロンゲリオン": "ペロンゲリオン",
+  "594PRGO": "ペロンゲリオン",
+  "MOON FORCE": "MOON FORCE",
+  "435MFC": "MOON FORCE",
+  "素人ホイホイZ": "素人ホイホイZ",
+  "420HOI": "素人ホイホイZ",
+  "ドキュメンTV": "ドキュメンTV",
+  "文档TV": "ドキュメンTV",
+  "277DCV": "ドキュメンTV",
+  "IENFH（MGS素人）": "IENFH（MGS素人）",
+  "IENFH": "IENFH（MGS素人）",
+  "MGS素人": "IENFH（MGS素人）",
+  "109IENFH": "IENFH（MGS素人）",
+  "投稿マーケット素人イッてQ": "投稿マーケット素人イッてQ",
+  "投稿市场素人去Q": "投稿マーケット素人イッてQ",
+  "324SRTD": "投稿マーケット素人イッてQ",
+  "おっぱいちゃん": "おっぱいちゃん",
+  "胸部酱": "おっぱいちゃん",
+  "355OPCYN": "おっぱいちゃん",
+  "NTR.net": "NTR.net",
+  "348NTR": "NTR.net",
+  "インディ": "インディ",
+  "独立": "インディ",
+  "Indy": "インディ",
+  "534IND": "インディ",
+  "白完素人": "白完素人",
+  "494SIKA": "白完素人",
+  "E★人妻DX": "E★人妻DX",
+  "299EWDX": "E★人妻DX",
+  "ときわ映像": "ときわ映像",
+  "常盘映像": "ときわ映像",
+  "491TKWA": "ときわ映像",
+  "黒船": "黒船",
+  "黑船": "黒船",
+  "Kurofune": "黒船",
+  "326FCT": "黒船",
+  "E★ナンパDX": "E★ナンパDX",
+  "E★搭讪DX": "E★ナンパDX",
+  "285ENDX": "E★ナンパDX",
+  "LadyHunter": "LadyHunter",
+  "淑女猎人": "LadyHunter",
+  "318LADY": "LadyHunter",
+  "A子さん": "A子さん",
+  "A子桑": "A子さん",
+  "210AKO": "A子さん",
+  "JVID": "JVID",
+  "台湾写真": "JVID",
+  "JVID / 台湾写真": "JVID",
+  "Tushy": "Tushy",
+  "塔希": "Tushy",
+  "Tushy / 塔希": "Tushy",
+  "TUSHY": "Tushy",
+  "Deeper": "Deeper",
+  "更深": "Deeper",
+  "Deeper / 更深": "Deeper",
+  "DEEPER": "Deeper",
+  "Blacked Raw": "Blacked Raw",
+  "黑蚀生": "Blacked Raw",
+  "Blacked Raw / 黑蚀生": "Blacked Raw",
+  "BLACKEDRAW": "Blacked Raw",
+  "Tushy Raw": "Tushy Raw",
+  "塔希生": "Tushy Raw",
+  "Tushy Raw / 塔希生": "Tushy Raw",
+  "TUSHYRAW": "Tushy Raw",
+  "RK Prime": "RK Prime",
+  "现实国王精选": "RK Prime",
+  "RK Prime / 现实国王精选": "RK Prime",
+  "RKPRIME": "RK Prime",
+  "Fake Taxi": "Fake Taxi",
+  "假出租车": "Fake Taxi",
+  "Fake Taxi / 假出租车": "Fake Taxi",
+  "FAKETAXI": "Fake Taxi",
+  "Adult Time": "Adult Time",
+  "成人时间": "Adult Time",
+  "Adult Time / 成人时间": "Adult Time",
+  "ADULTTIME": "Adult Time",
+  "Elegant Angel": "Elegant Angel",
+  "优雅天使": "Elegant Angel",
+  "Elegant Angel / 优雅天使": "Elegant Angel",
+  "ELEGANTANGEL": "Elegant Angel",
+  "Lethal Hardcore": "Lethal Hardcore",
+  "致命硬核": "Lethal Hardcore",
+  "Lethal Hardcore / 致命硬核": "Lethal Hardcore",
+  "LETHALHARDCORE": "Lethal Hardcore",
+  "Anal Vids": "Anal Vids",
+  "肛门视频": "Anal Vids",
+  "Anal Vids / 肛门视频": "Anal Vids",
+  "ANALVIDS": "Anal Vids",
+  "Public Agent": "Public Agent",
+  "公共探员": "Public Agent",
+  "Public Agent / 公共探员": "Public Agent",
+  "PUBLICAGENT": "Public Agent",
+  "Family Strokes": "Family Strokes",
+  "家庭爱抚": "Family Strokes",
+  "Family Strokes / 家庭爱抚": "Family Strokes",
+  "FAMILYSTROKES": "Family Strokes",
+  "TeamSkeet": "TeamSkeet",
+  "队小子": "TeamSkeet",
+  "TeamSkeet / 队小子": "TeamSkeet",
+  "TEAMSKEET": "TeamSkeet",
+  "Bratty Sis": "Bratty Sis",
+  "顽皮姐妹": "Bratty Sis",
+  "Bratty Sis / 顽皮姐妹": "Bratty Sis",
+  "BRATTYSIS": "Bratty Sis",
+  "Nubiles": "Nubiles",
+  "嫩模": "Nubiles",
+  "Nubiles / 嫩模": "Nubiles",
+  "NUBILES": "Nubiles",
+  "SexMex": "SexMex",
+  "墨西哥性": "SexMex",
+  "SexMex / 墨西哥性": "SexMex",
+  "SEXMEX": "SexMex",
+  "PornWorld": "PornWorld",
+  "色情世界": "PornWorld",
+  "PornWorld / 色情世界": "PornWorld",
+  "PORNWORLD": "PornWorld",
+  "MILFY": "MILFY",
+  "MILFY / 熟女": "MILFY",
+  "Wicked": "Wicked",
+  "邪恶": "Wicked",
+  "Wicked / 邪恶": "Wicked",
+  "WICKED": "Wicked",
+  "Nubile Films": "Nubile Films",
+  "嫩模电影": "Nubile Films",
+  "Nubile Films / 嫩模电影": "Nubile Films",
+  "NUBILEFILMS": "Nubile Films",
+  "SexArt": "SexArt",
+  "性艺术": "SexArt",
+  "SexArt / 性艺术": "SexArt",
+  "SEXART": "SexArt",
+  "Watch4Beauty": "Watch4Beauty",
+  "赏美": "Watch4Beauty",
+  "Watch4Beauty / 赏美": "Watch4Beauty",
+  "WATCH4BEAUTY": "Watch4Beauty",
+  "Playboy Plus": "Playboy Plus",
+  "花花公子+": "Playboy Plus",
+  "Playboy Plus / 花花公子+": "Playboy Plus",
+  "PLAYBOYPLUS": "Playboy Plus",
+  "Dorcel Club": "Dorcel Club",
+  "多塞尔俱乐部": "Dorcel Club",
+  "Dorcel Club / 多塞尔俱乐部": "Dorcel Club",
+  "DORCELCLUB": "Dorcel Club",
+  "Digital Playground": "Digital Playground",
+  "数字乐园": "Digital Playground",
+  "Digital Playground / 数字乐园": "Digital Playground",
+  "DIGITALPLAYGROUND": "Digital Playground",
+  "大摩卡": "ビッグモーカル",
+  "水上商场": "アクアモール/エマニエル",
+  "猎户": "Hunter",
+  "Amateur Kikaku": "Amateur Kikaku",
+  "JET": "JET映像",
+  "空调": "Air Control",
+  "MVG": "M's Video",
+  "エムズ": "M's Video",
+  "M’s Video": "M's Video",
+  "M's Video Group": "M's Video",
+  "Shemale a la carte": "SHEMALE a la carte",
+  "SAL": "SHEMALE a la carte",
+  "人妖拼盘": "SHEMALE a la carte",
+  "Bermuda": "Bermuda",
+  "百慕大": "Bermuda",
+  "Doujin AV": "Doujin AV",
+  "同人AV": "Doujin AV",
+  "EMBZ": "EMBZ",
+  "Mothers": "Mothers",
+  "マザーズ": "Mothers",
+  "BALTAN": "BALTAN",
+  "バルタン": "BALTAN",
+  "BAGUS": "BALTAN",
+  "巴古斯": "BALTAN",
+  "FLAV": "Digital Ark",
+  "FLAVOUR": "Digital Ark",
+  "犬/妄想族": "犬/妄想族",
+  "犬": "犬/妄想族",
+  "DNJR": "犬/妄想族",
+  "SEX Agent/妄想族": "SEX Agent/妄想族",
+  "SEX Agent": "SEX Agent/妄想族",
+  "AGAV": "SEX Agent/妄想族",
+  "ブロッコリー/妄想族": "ブロッコリー/妄想族",
+  "ブロッコリー": "ブロッコリー/妄想族",
+  "BLOR": "ブロッコリー/妄想族",
+  "姦乱者/妄想族": "姦乱者/妄想族",
+  "姦乱者": "姦乱者/妄想族",
+  "SUJI": "姦乱者/妄想族",
+  "かぐや姫Pt": "かぐや姫Pt",
+  "辉夜姬": "かぐや姫Pt",
+  "Kaguya Hime Pt": "かぐや姫Pt",
+  "MKON": "かぐや姫Pt",
+  "バミューダ": "Bermuda",
+  "バミューダ/妄想族": "Bermuda",
+  "DOA": "Bermuda",
+  "First Star": "First Star",
+  "FIRST STAR": "First Star",
+  "ファーストスター": "First Star",
+  "Crystal Eizou": "Crystal",
+  "桃太郎": "桃太郎映像",
+  "JET Eizou": "JET映像",
+  "JET Eizou / JET映像": "JET映像",
+  "Momotaro": "桃太郎映像",
+  "Momotaro / 桃太郎映像": "桃太郎映像",
+  "TME": "桃太郎映像",
+  "FC2PPV": "FC2-PPV",
+  "FC2 PPV": "FC2-PPV",
+  "FC2_PPV": "FC2-PPV"
  },
  "makers": {
   "91制片厂": {
@@ -308,17 +810,14 @@
    "intro": "华语自制片商「91制片厂」，早期国产短片厂牌之一。",
    "card": "91制片厂"
   },
-  "AVS collector": {
-   "card": "AVS",
-   "i18n": [
-    "AVS / 收藏家",
-    "AVScollector",
-    "AVS collector"
-   ],
-   "intro": "恋物与特殊嗜好合集"
-  },
   "Air Control": {
-   "card": "Air Control"
+   "card": "Air Control",
+   "i18n": [
+    "Air Control / 空调",
+    "エアコンロール",
+    "Air Control"
+   ],
+   "intro": "以偶像・グラビア女优形象视频为主的厂牌，偏软情色。"
   },
   "Alpha International": {
    "card": "Alpha International",
@@ -330,11 +829,8 @@
     "素人企画",
     "Amateur Kikaku"
    ],
-   "intro": "素人企划系合集厂。",
+   "intro": "素人企划合集向，街头与约拍风格作品多。",
    "card": "Amateur Kikaku"
-  },
-  "Art Mode": {
-   "card": "Art Mode"
   },
   "Attackers": {
    "card": "Attackers",
@@ -349,24 +845,28 @@
    "card": "Aurora Project",
    "intro": "オーロラ・プロジェクト，凌辱・剧情系企划厂。",
    "i18n": [
-    "オーロラ・プロジェクト"
+    "Aurora Project / 极光工程",
+    "オーロラ・プロジェクト",
+    "Aurora Project"
    ]
   },
   "Aurora Project Annex": {
    "card": "Aurora Project Annex",
    "intro": "オーロラ・プロジェクト支线，题材与主线相近。",
    "i18n": [
-    "オーロラ・プロジェクト"
+    "Aurora Project Annex / 极光工程支线",
+    "オーロラプロジェクト・アネックス",
+    "Aurora Project Annex"
    ]
   },
   "BAZOOKA": {
    "card": "BAZOOKA",
    "i18n": [
-    "Bazooka",
+    "BAZOOKA",
     "バズーカ",
     "BAZOOKA"
    ],
-   "intro": "企划与合集向"
+   "intro": "KMP旗下企画レーベル，主打巨乳、ギャル、素人合集。"
   },
   "Bang Bros": {
    "i18n": [
@@ -402,7 +902,7 @@
     "ボインボックス",
     "Boin Box"
    ],
-   "intro": "巨乳专题"
+   "intro": "巨乳专题厂，胸围向单体与企划为主。"
   },
   "Brazzers": {
    "i18n": [
@@ -422,9 +922,11 @@
   },
   "Center Village": {
    "card": "Center Village",
-   "intro": "センタービレッジ，熟女专门老厂，人妻主角剧见长。",
+   "intro": "熟女・人妻专业厂。以中年、熟女、近亲、人妻题材为主，作品量大。",
    "i18n": [
-    "センタービレッジ"
+    "Center Village",
+    "センタービレッジ",
+    "Center Village"
    ]
   },
   "Cinemagic": {
@@ -434,16 +936,14 @@
     "シネマジック"
    ]
   },
-  "Cosmos": {
-   "card": "Cosmos",
-   "intro": "コスモス映像，人妻素人系（HAWA）。",
-   "i18n": [
-    "コスモス映像"
-   ]
-  },
   "Crystal": {
-   "intro": "综合量产与系列",
-   "card": "Crystal"
+   "intro": "老牌企画厂牌，作品风格多元。",
+   "card": "Crystal",
+   "i18n": [
+    "Crystal",
+    "クリスタル映像",
+    "Crystal"
+   ]
   },
   "DAHLIA": {
    "card": "DAHLIA",
@@ -452,7 +952,7 @@
     "ダリア",
     "DAHLIA"
    ],
-   "intro": "精品剧情与气质单体"
+   "intro": "精品人妻戏剧厂，气质单体与完成度取向明确。"
   },
   "DANDY": {
    "card": "DANDY",
@@ -475,14 +975,20 @@
   "DOC": {
    "i18n": [
     "DOC",
-    "ドック",
+    "DOC",
     "DOC"
    ],
-   "intro": "素人纪实与访谈风",
+   "intro": "素人・企画・搭讪系厂。风格轻松，常有街头、家访、素人互动题材。",
    "card": "DOC"
   },
   "Digital Ark": {
-   "card": "Digital Ark"
+   "card": "数字方舟",
+   "i18n": [
+    "数字方舟 / Digital Ark",
+    "デジタルアーク",
+    "Digital Ark"
+   ],
+   "intro": "痴女・ギャル・フェチ专业厂。以黑ギャル、ハイレグ、ミニスカ、痴女系列闻名。"
   },
   "Dorcel / Private": {
    "i18n": [
@@ -494,8 +1000,13 @@
    "card": "Dorcel / Private"
   },
   "Doujin AV": {
-   "card": "Doujin AV",
-   "intro": "同人 AV 内容分组。"
+   "card": "同人AV",
+   "intro": "同人风格、非主流制作的AV作品统称。",
+   "i18n": [
+    "同人AV",
+    "同人AV",
+    "Doujin AV"
+   ]
   },
   "Dream Ticket": {
    "card": "Dream Ticket",
@@ -537,7 +1048,7 @@
     "FAプロ",
     "FA Pro"
    ],
-   "intro": "昭和风情色剧情",
+   "intro": "昭和风情色剧情老厂，怀旧氛围与戏剧感强。",
    "card": "FAプロ"
   },
   "FC2": {
@@ -546,17 +1057,17 @@
     "FC2",
     "FC2"
    ],
-   "intro": "同人平台，个人撮影与素人为主",
+   "intro": "FC2 同人平台，个人撮影与素人配信（非 PPV 前缀）。",
    "card": "FC2"
   },
   "Fitch": {
-   "card": "Fitch",
+   "card": "菲奇",
    "i18n": [
-    "Fitch",
+    "菲奇 / Fitch",
     "フィッチ",
     "Fitch"
    ],
-   "intro": "巨乳肉感向，强调体型与浓密互动"
+   "intro": "巨乳・肉感・丰满女优专业厂。以「肉感」为核心卖点，主打大胸与丰满身材。"
   },
   "GIGOLO": {
    "i18n": [
@@ -564,11 +1075,8 @@
     "ジゴロ",
     "GIGOLO"
    ],
-   "intro": "综合企划",
+   "intro": "综合企划厂，题材覆盖广、量产向。",
    "card": "GIGOLO"
-  },
-  "Glanz": {
-   "card": "Glanz"
   },
   "Global Media": {
    "card": "Global Media",
@@ -588,7 +1096,7 @@
     "グローリークエスト",
     "Glory Quest"
    ],
-   "intro": "熟女/人妻与剧情向较多"
+   "intro": "硬核・拘束・凌辱・体液系厂。风格偏激烈，有铁拘束、潮吹等特色系列。"
   },
   "Graphis": {
    "card": "Graphis",
@@ -606,45 +1114,41 @@
    "intro": "无码官网，更新勤题材广",
    "card": "HEYZO"
   },
-  "Haikara": {
-   "card": "Haikara"
-  },
   "Hajime Kikaku": {
-   "card": "Hajime Kikaku"
+   "card": "初企画",
+   "i18n": [
+    "初企画 / Hajime Kikaku",
+    "はじめ企画",
+    "Hajime Kikaku"
+   ],
+   "intro": "老牌企画厂。主打剧情、凌辱、特殊玩法。"
   },
   "Hunter": {
-   "card": "Hunter",
+   "card": "猎人",
    "i18n": [
-    "Hunter / 猎人",
+    "猎人 / Hunter",
     "ハンター",
     "Hunter"
    ],
-   "intro": "猎户，家庭与情境企划多"
+   "intro": "家庭与情境企划多见，猎人题材与潜入系作品常见。"
   },
   "IDEA POCKET": {
-   "card": "Idea Pocket",
+   "card": "IP社",
    "i18n": [
-    "Idea Pocket",
+    "IP社 / Idea Pocket",
     "アイデアポケット",
     "IDEA POCKET"
    ],
-   "intro": "偶像风与剧情单体见长"
-  },
-  "JET": {
-   "intro": "黑人/跨文化刺激企划",
-   "card": "JET",
-   "i18n": [
-    "JET映像"
-   ]
+   "intro": "美少女单体路线老牌厂。以高质量颜值、剧情、FIRST IMPRESSION出道系列闻名，专属女优众多。"
   },
   "JET映像": {
-   "card": "JET",
+   "card": "JET映像",
    "i18n": [
-    "JET",
+    "JET映像",
     "JET映像",
     "JET Eizou"
    ],
-   "intro": "黑人/跨文化等刺激企划"
+   "intro": "以NTR（被绿）题材著称的厂牌，代表系列「くやしいのでそのままAV発売」。"
   },
   "Jules Jordan": {
    "i18n": [
@@ -656,7 +1160,13 @@
    "card": "Jules Jordan"
   },
   "K-Tribe": {
-   "card": "K-Tribe"
+   "card": "K部落",
+   "i18n": [
+    "K部落 / K-Tribe",
+    "ケートライブ",
+    "K-Tribe"
+   ],
+   "intro": "以ロリ・美少女・制服系为主，风格偏清纯与禁忌。"
   },
   "KMP": {
    "card": "KMP",
@@ -672,10 +1182,7 @@
     "KSB企画",
     "KSB Kikaku"
    ],
-   "intro": "熟女与地方感题材"
-  },
-  "Kantama": {
-   "card": "Kantama"
+   "intro": "熟女与地方感题材，纪实风人妻作品多。"
   },
   "Koala VR": {
    "card": "Koala VR",
@@ -688,7 +1195,7 @@
     "レオ",
     "LEO"
    ],
-   "intro": "熟女与量产系列"
+   "intro": "熟女量产系列厂，合集与长时程作品常见。"
   },
   "LUNATICS": {
    "i18n": [
@@ -696,7 +1203,7 @@
     "ルナティックス",
     "LUNATICS"
    ],
-   "intro": "暗黑幻想向",
+   "intro": "暗黑幻想与禁忌题材企划，氛围偏压抑。",
    "card": "LUNATICS"
   },
   "LegalPorno": {
@@ -709,7 +1216,13 @@
    "card": "LegalPorno"
   },
   "M's Video": {
-   "card": "M's Video"
+   "card": "M's Video",
+   "i18n": [
+    "M's Video / エムズ",
+    "エムズビデオ",
+    "M's Video"
+   ],
+   "intro": "以吞精・精液系著称的老牌厂牌（M's Video Group）。"
   },
   "MAX-A": {
    "card": "MAX-A",
@@ -718,7 +1231,7 @@
     "マックスエー",
     "MAX-A"
    ],
-   "intro": "综合单体与系列"
+   "intro": "综合单体老厂，女优单片与系列作品并重。"
   },
   "MAXING": {
    "card": "MAXING",
@@ -735,7 +1248,7 @@
     "ミルク",
     "MILK"
    ],
-   "intro": "年轻向与企划",
+   "intro": "年轻向企划厂，清新单体与主题片为主。",
    "card": "MILK"
   },
   "MOODYZ": {
@@ -762,11 +1275,8 @@
     "マテリアル",
     "Materiall"
    ],
-   "intro": "材质感与恋物企划",
+   "intro": "材质感与恋物企划，服装/触感题材多见。",
    "card": "Materiall"
-  },
-  "Media Brand": {
-   "card": "Media Brand"
   },
   "Million": {
    "card": "Million",
@@ -775,7 +1285,7 @@
     "ミリオン",
     "Million"
    ],
-   "intro": "偶像风与企划"
+   "intro": "偶像风综合厂，单体与企划、VR 线并存。"
   },
   "Mofos / FakeHub": {
    "i18n": [
@@ -802,41 +1312,28 @@
     "ミュートキ",
     "Muteki"
    ],
-   "intro": "无敌，跨界名人出道企划"
+   "intro": "「无敌」跨界名人出道企划，单发冲击强。"
   },
   "NEXTGROUP": {
-   "card": "Next Group"
+   "card": "NEXT集团",
+   "i18n": [
+    "NEXT集团 / NEXTGROUP",
+    "ネクストグループ",
+    "NEXTGROUP"
+   ],
+   "intro": "综合厂牌集团，旗下有多个レーベル，风格多元。"
   },
   "NON": {
    "card": "NON",
    "intro": "清淡素人与日常风"
   },
-  "Nadeshiko": {
-   "intro": "专注人妻熟女，偏日常剧情与写实演技",
-   "card": "Nadeshiko",
-   "i18n": [
-    "なでしこ"
-   ]
-  },
-  "Nagae STYLE": {
-   "intro": "背德剧情与阴郁美学",
-   "card": "Nagae STYLE",
-   "i18n": [
-    "ながえSTYLE"
-   ]
-  },
-  "Nama Nama": {
-   "card": "Nama Nama"
-  },
   "Nanpa Japan": {
    "card": "Nanpa Japan",
-   "intro": "搭讪纪实系合集厂。"
-  },
-  "Natural High": {
-   "intro": "痴汉/露出等极限企划",
-   "card": "Natural High",
+   "intro": "搭讪纪实系合集厂，街头ナンパ与约拍为主。",
    "i18n": [
-    "ナチュラルハイ"
+    "Nanpa Japan / ナンパジャパン",
+    "ナンパジャパン",
+    "Nanpa Japan"
    ]
   },
   "Naughty America": {
@@ -848,21 +1345,14 @@
    "intro": "邻居/情境系列经典",
    "card": "Naughty America"
   },
-  "Next Group": {
-   "intro": "综合量产厂牌群",
-   "card": "Next Group"
-  },
-  "NuPenis": {
-   "card": "NuPenis"
-  },
   "OPPAI": {
-   "card": "OPPAI",
+   "card": "欧派",
    "i18n": [
-    "OPPAI",
+    "欧派 / OPPAI",
     "おっぱい",
     "OPPAI"
    ],
-   "intro": "胸器专题厂，巨乳玩法与系列感强"
+   "intro": "巨乳专业厂。专注大胸女优与巨乳题材，画质和女优质量较高。"
   },
   "OnlyFans / ManyVids": {
    "i18n": [
@@ -874,7 +1364,13 @@
    "card": "OnlyFans / ManyVids"
   },
   "Opera": {
-   "card": "Opera"
+   "card": "Opera",
+   "i18n": [
+    "Opera",
+    "オペラ",
+    "Opera"
+   ],
+   "intro": "以伪娘・ニューハーフ、肛交为主的专业厂牌。"
   },
   "P-BOX VR": {
    "card": "P-BOX VR",
@@ -887,23 +1383,13 @@
     "プレステージ",
     "PRESTIGE"
    ],
-   "intro": "素人街访与企划片量大"
+   "intro": "蚊香社系大厂，专属女优与素人街访、企划片体量都很大。"
   },
   "Planet Plus": {
-   "intro": "熟女家庭剧",
+   "intro": "熟女家政妇/家庭角色企划，日常感强。",
    "card": "Planet Plus",
    "i18n": [
     "プラネットプラス"
-   ]
-  },
-  "Plum": {
-   "card": "Plum"
-  },
-  "Premium": {
-   "intro": "气质单体与高完成度",
-   "card": "Premium",
-   "i18n": [
-    "プレミアム"
    ]
   },
   "Pure Taboo": {
@@ -918,11 +1404,11 @@
   "REAL": {
    "card": "REAL",
    "i18n": [
-    "REAL",
+    "REAL / 真实",
     "レアル",
     "REAL"
    ],
-   "intro": "硬派写实与强制向"
+   "intro": "老牌厂牌，风格偏真实、剧情、凌辱、NTR等，作品质量稳定。"
   },
   "REbecca": {
    "card": "REbecca",
@@ -931,7 +1417,7 @@
     "レベッカ",
     "REbecca"
    ],
-   "intro": "写真级美艳单体"
+   "intro": "写真级美艳单体厂，偏形象展示与高完成度单片。"
   },
   "ROCKET": {
    "card": "ROCKET",
@@ -940,7 +1426,7 @@
     "ロケット",
     "ROCKET"
    ],
-   "intro": "奇葩企划与道具玩法出名"
+   "intro": "奇葩道具与极端企划著称，脑洞向作品多。"
   },
   "ROOKIE": {
    "card": "ROOKIE",
@@ -957,15 +1443,8 @@
     "ロイド",
     "ROYD"
    ],
-   "intro": "弟弟向/家庭情境剧情",
+   "intro": "弟弟向/家庭情境剧情，关系崩坏戏常见。",
    "card": "Royd"
-  },
-  "Radix": {
-   "card": "Radix",
-   "intro": "レイディックス，剧情・凌辱系标签。",
-   "i18n": [
-    "レイディックス"
-   ]
   },
   "Reality Kings": {
    "i18n": [
@@ -989,7 +1468,7 @@
     "エスキュート",
     "S-Cute"
    ],
-   "intro": "清新短片与可爱风",
+   "intro": "清新美少女・恋爱风格厂。以可爱、温柔、恋爱感拍摄著称，画质精致。",
    "card": "S-Cute"
   },
   "S1 NO.1 STYLE": {
@@ -1007,11 +1486,17 @@
     "スクープ",
     "SCOOP"
    ],
-   "intro": "偷拍/猎奇纪实风",
+   "intro": "偷拍/猎奇纪实风，窥探与现场感是卖点。",
    "card": "SCOOP"
   },
   "SHEMALE a la carte": {
-   "card": "Shemale a la carte"
+   "card": "人妖拼盘",
+   "i18n": [
+    "人妖拼盘 / SHEMALE a la carte",
+    "シーメールアラカルト",
+    "SHEMALE a la carte"
+   ],
+   "intro": "ニューハーフ（伪娘）专业系列，作品量较多。"
   },
   "SOD Create": {
    "card": "SOD",
@@ -1024,7 +1509,12 @@
   },
   "SPICY VR": {
    "card": "SPICY VR",
-   "intro": "VR 内容分组。"
+   "intro": "VR专用系列。",
+   "i18n": [
+    "SPICY VR",
+    "スパイシーVR",
+    "SPICY VR"
+   ]
   },
   "SWITCH": {
    "card": "SWITCH",
@@ -1034,27 +1524,22 @@
    ]
   },
   "Sadistic Village": {
-   "card": "Sadistic Village",
-   "intro": "虐村，极限凌辱与群体企划",
+   "card": "施虐村",
+   "intro": "硬核・凌辱・拘束・变态系厂。风格极端，与Dogma类似但更偏策划向。",
    "i18n": [
-    "サディスティックヴィレッジ"
+    "施虐村 / Sadistic Village",
+    "サディスティックヴィレッジ",
+    "Sadistic Village"
    ]
-  },
-  "Spartan": {
-   "card": "Spartan"
-  },
-  "Spice Visual": {
-   "card": "Spice Visual"
-  },
-  "Star Paradise": {
-   "card": "Star Paradise"
-  },
-  "Sunset Color": {
-   "card": "Sunset Color"
   },
   "S级素人": {
    "card": "S级素人",
-   "intro": "街头素人高颜值向"
+   "intro": "街头高颜值素人向，约拍与素人单片为主。",
+   "i18n": [
+    "S级素人",
+    "S級素人",
+    "S-class Amateur"
+   ]
   },
   "TEPPAN": {
    "i18n": [
@@ -1062,28 +1547,21 @@
     "テッパン",
     "TEPPAN"
    ],
-   "intro": "铁板系列与合集",
+   "intro": "铁板高强度纪实向，汗水感与体能戏突出。",
    "card": "TEPPAN"
   },
-  "Takara": {
-   "intro": "人妻戏剧与伦理剧情",
-   "card": "Takara",
-   "i18n": [
-    "タカラ镜像"
-   ]
-  },
   "Trans Club": {
-   "card": "Trans Club"
+   "card": "变性俱乐部",
+   "i18n": [
+    "变性俱乐部 / Trans Club",
+    "トランスクラブ",
+    "Trans Club"
+   ],
+   "intro": "ニューハーフ・男の娘专业厂。主打真实伪娘、肛交、变态玩法。"
   },
   "Unfinished": {
    "card": "Unfinished",
    "intro": "未完结企划风"
-  },
-  "Ureman": {
-   "card": "Ureman"
-  },
-  "Usagi": {
-   "card": "Usagi"
   },
   "U＆K": {
    "card": "U&K",
@@ -1092,7 +1570,7 @@
     "ユーアンドケー",
     "U&K"
    ],
-   "intro": "女同与轻调教向"
+   "intro": "女同与轻调教向专业厂，关系戏细腻。"
   },
   "V&R Planning": {
    "card": "V&R Planning",
@@ -1108,19 +1586,16 @@
     "ヴィーナス",
     "Venus"
    ],
-   "intro": "熟女人妻剧情量大"
-  },
-  "Vi": {
-   "card": "Vi"
+   "intro": "熟女人妻剧情大厂，家庭伦理与出轨题材产量高。"
   },
   "V＆R PRODUCE": {
-   "card": "V&R PRODUCE",
+   "card": "V&R制作",
    "i18n": [
-    "V&R PRODUCE",
+    "V&R制作 / V&R",
     "ブイアンドアールプロデュース",
     "V&R PRODUCE"
    ],
-   "intro": "V&R，恶搞企划与奇葩设定"
+   "intro": "老牌厂牌，风格多元，含剧情、凌辱、变态系，有一定历史积淀。"
   },
   "WANZ": {
    "card": "WANZ",
@@ -1129,13 +1604,7 @@
     "ワンズファクトリー",
     "WANZ FACTORY"
    ],
-   "intro": "痴女与强势女性向题材多"
-  },
-  "Yari Jouzu": {
-   "card": "Yari Jouzu"
-  },
-  "Yuzu": {
-   "card": "Yuzu"
+   "intro": "痴女与强势女性向厂牌，节奏快、玩法直球。"
   },
   "h.m.p": {
    "card": "h.m.p",
@@ -1144,7 +1613,7 @@
     "エイチエムピー",
     "h.m.p"
    ],
-   "intro": "老牌厂，单体传统与系列"
+   "intro": "历史悠久的综合老厂，传统单体与系列并存。"
   },
   "kawaii": {
    "card": "kawaii*",
@@ -1180,7 +1649,7 @@
     "かぐや姫Pt",
     "Kaguya Hime Pt"
    ],
-   "intro": "轻度调教与角色向"
+   "intro": "轻度调教与角色扮演企划，题材轻快。"
   },
   "その他有码": {
    "i18n": [
@@ -1198,7 +1667,7 @@
     "ながえSTYLE",
     "Nagae STYLE"
    ],
-   "intro": "背德剧情与阴郁美学"
+   "intro": "背德与阴郁美学剧情厂，心理戏与和姦氛围突出。"
   },
   "なでしこ": {
    "card": "Nadeshiko",
@@ -1216,7 +1685,7 @@
     "アイエナジー",
     "IEnergy"
    ],
-   "intro": "素人与企划片量大"
+   "intro": "素人与量产企划厂，题材杂、片量大。"
   },
   "アキノリ": {
    "card": "AKNR",
@@ -1225,7 +1694,7 @@
     "アキノリ",
     "AKNR"
    ],
-   "intro": "纪实风与情境企划"
+   "intro": "明纪系纪实/情境企划厂，恶搞与日常情景并重。"
   },
   "アリスJAPAN": {
    "card": "Alice Japan",
@@ -1245,33 +1714,6 @@
    ],
    "intro": "阿洛玛，轻微恋物与近景企划"
   },
-  "エムズビデオ": {
-   "card": "M's Video",
-   "i18n": [
-    "M's Video",
-    "エムズビデオグループ",
-    "M's Video Group"
-   ],
-   "intro": "M's，口技与浓厚玩法专题"
-  },
-  "オーロラプロジェクト": {
-   "card": "Aurora Project",
-   "i18n": [
-    "Aurora Project",
-    "オーロラプロジェクト",
-    "Aurora Project"
-   ],
-   "intro": "Aurora，剧情与氛围片"
-  },
-  "クリスタル映像": {
-   "card": "Crystal",
-   "i18n": [
-    "Crystal",
-    "クリスタル映像",
-    "Crystal Eizou"
-   ],
-   "intro": "综合量产与系列多"
-  },
   "コスモス映像": {
    "card": "Cosmos",
    "i18n": [
@@ -1279,41 +1721,7 @@
     "コスモス映像",
     "Cosmos Eizou"
    ],
-   "intro": "人妻NTR 纪实风"
-  },
-  "サディスティックヴィレッジ": {
-   "card": "Sadistic Village",
-   "i18n": [
-    "Sadistic Village",
-    "サディスティックヴィレッジ",
-    "Sadistic Village"
-   ],
-   "intro": "虐村，极限凌辱与群体企划"
-  },
-  "シネマジック": {
-   "card": "Cinemagic",
-   "intro": "シネマジック，老牌剧情・SM 系厂。",
-   "i18n": [
-    "シネマジック"
-   ]
-  },
-  "セレブの友": {
-   "card": "Celeb no Tomo",
-   "i18n": [
-    "Celeb no Tomo",
-    "セレブの友",
-    "Celeb no Tomo"
-   ],
-   "intro": "名媛之友，熟女人妻向"
-  },
-  "センタービレッジ": {
-   "card": "Center Village",
-   "i18n": [
-    "Center Village",
-    "センタービレッジ",
-    "Center Village"
-   ],
-   "intro": "熟女中心村，五十路等熟女向"
+   "intro": "人妻 NTR 纪实风，出轨偷情题材为主。"
   },
   "タカラ映像": {
    "card": "Takara",
@@ -1322,7 +1730,7 @@
     "タカラ映像",
     "Takara Eizou"
    ],
-   "intro": "人妻戏剧与家庭伦理"
+   "intro": "人妻家庭剧老厂，继子・邻居等伦理戏是主轴。"
   },
   "ダスッ！": {
    "card": "Das!",
@@ -1333,15 +1741,6 @@
    ],
    "intro": "硬派凌辱/激烈向，压迫感强"
   },
-  "ドリームチケット": {
-   "card": "Dream Ticket",
-   "i18n": [
-    "Dream Ticket",
-    "ドリームチケット",
-    "Dream Ticket"
-   ],
-   "intro": "企划与角色扮演"
-  },
   "ナチュラルハイ": {
    "card": "Natural High",
    "i18n": [
@@ -1349,16 +1748,7 @@
     "ナチュラルハイ",
     "Natural High"
    ],
-   "intro": "痴汉/露出等极限企划"
-  },
-  "ナンパJAPAN": {
-   "card": "Nanpa Japan",
-   "i18n": [
-    "Nanpa Japan",
-    "ナンパJAPAN",
-    "Nanpa JAPAN"
-   ],
-   "intro": "搭讪素人纪实"
+   "intro": "极限企划老牌，痴汉・露出・公开场合玩法出名。"
   },
   "ヒビノ": {
    "card": "Hibino",
@@ -1376,7 +1766,7 @@
     "ビッグモーカル",
     "Big Morkal"
    ],
-   "intro": "熟女与合集向"
+   "intro": "素人・人妻・ナンパ文档系老牌厂。以街拍、中出人妻、真实记录风格著称。"
   },
   "ビビアン": {
    "card": "Bibian",
@@ -1394,7 +1784,7 @@
     "フォーカス",
     "Focus"
    ],
-   "intro": "特写与局部恋物"
+   "intro": "特写与局部恋物、NTR 关系戏并存。"
   },
   "フリーダム": {
    "card": "Freedom",
@@ -1403,7 +1793,7 @@
     "フリーダム",
     "Freedom"
    ],
-   "intro": "脚颜面等恋物企划"
+   "intro": "脚・颜面等恋物企划专业向。"
   },
   "プラネットプラス": {
    "card": "Planet Plus",
@@ -1421,7 +1811,7 @@
     "プレミアム",
     "PREMIUM"
    ],
-   "intro": "气质单体与高完成度作品"
+   "intro": "气质单体精品线，强调完成度与专属女优质感。"
   },
   "ボニータ": {
    "card": "Bonita",
@@ -1430,7 +1820,7 @@
     "ボニータ",
     "Bonita"
    ],
-   "intro": "拉丁风/性感向"
+   "intro": "性感/拉丁风企划向，肢体表现突出。"
   },
   "マザー": {
    "card": "Mother",
@@ -1439,7 +1829,7 @@
     "マザー",
     "Mother"
    ],
-   "intro": "母亲角色与禁忌剧情"
+   "intro": "母亲角色与禁忌家庭剧，熟女向明确。"
   },
   "マルクス兄弟": {
    "card": "Marx Brothers",
@@ -1457,7 +1847,7 @@
     "ミセスの素顔",
     "Mrs no Sugao"
    ],
-   "intro": "纪实素人妻"
+   "intro": "纪实素人妻，素颜日常感与真实感取向。"
   },
   "一本道": {
    "i18n": [
@@ -1493,7 +1883,7 @@
     "人妻花園劇場",
     "Hitozuma Hanazono"
    ],
-   "intro": "戏剧向人妻"
+   "intro": "戏剧向人妻厂，感情线与家庭冲突并重。"
   },
   "兔子先生": {
    "i18n": [
@@ -1556,7 +1946,7 @@
     "変態紳士倶楽部",
     "Hentai Shinshi Club"
    ],
-   "intro": "偷拍/偷窥向"
+   "intro": "偷拍/偷窥风邻居人妻企划，情景代入感强。"
   },
   "大象传媒": {
    "i18n": [
@@ -1583,7 +1973,7 @@
     "宇宙企画",
     "Uchu Kikaku"
    ],
-   "intro": "偶像风经典老厂"
+   "intro": "偶像风经典老厂，美少女单体传统强。"
   },
   "山と空": {
    "card": "山与空",
@@ -1592,7 +1982,7 @@
     "山と空",
     "Yama to Sora"
    ],
-   "intro": "户外露出与极限企划"
+   "intro": "户外露出与极限企划，野外・公开场景为主。"
   },
   "性视界传媒": {
    "i18n": [
@@ -1647,15 +2037,6 @@
    ],
    "intro": "果冻，国产都市剧情向",
    "card": "果冻传媒"
-  },
-  "桃太郎": {
-   "card": "桃太郎映像",
-   "i18n": [
-    "Momotaro / 桃太郎映像",
-    "桃太郎映像出版",
-    "Momotaro"
-   ],
-   "intro": "综合与特色系列"
   },
   "溜池ゴロー": {
    "card": "溜池五郎",
@@ -1713,7 +2094,7 @@
     "痴女ヘブン",
     "Chijo Heaven"
    ],
-   "intro": "主动进攻与群戏多"
+   "intro": "痴女天堂，主动进攻与群戏、女优主导向明显。"
   },
   "皇家华人": {
    "i18n": [
@@ -1758,7 +2139,7 @@
     "美人魔女",
     "Bijin Majo"
    ],
-   "intro": "美艳熟女专题"
+   "intro": "美艳熟女专题，形象与魅力展示为主。"
   },
   "舞ワイフ": {
    "card": "舞Wife",
@@ -1803,7 +2184,7 @@
     "赤面女子",
     "Sekimen Joshi"
    ],
-   "intro": "害羞素人女子向"
+   "intro": "害羞素人女子向，初体验与紧张感题材多。"
   },
   "起点传媒": {
    "i18n": [
@@ -1850,244 +2231,39 @@
    "intro": "麻豆，国产影视化剧情大厂",
    "card": "麻豆传媒"
   },
-  "DOJN": {
-   "card": "DOJN",
-   "i18n": [
-    "DOJN",
-    "DOJN"
-   ],
-   "intro": "小众独立系（同人系？），公开资料有限。"
-  },
-  "OERO": {
-   "card": "OERO",
-   "i18n": [
-    "OERO",
-    "OERO"
-   ],
-   "intro": "小众独立系，公开资料有限。"
-  },
-  "DEL": {
-   "card": "DEL",
-   "i18n": [
-    "DEL",
-    "DEL"
-   ],
-   "intro": "厂牌 DEL（前缀 DEL）。小众独立厂牌，公开资料有限，简介待核实后补充。"
-  },
-  "MSQ": {
-   "card": "MSQ",
-   "i18n": [
-    "MSQ",
-    "MSQ"
-   ],
-   "intro": "小众企划系（人妻女王系？），公开资料有限。"
-  },
-  "MZQ": {
-   "card": "MZQ",
-   "i18n": [
-    "MZQ",
-    "MZQ"
-   ],
-   "intro": "小众独立系，公开资料有限。"
-  },
-  "SPND": {
-   "card": "SPND",
-   "i18n": [
-    "SPND",
-    "SPND"
-   ],
-   "intro": "小众独立系，公开资料有限。"
-  },
-  "BAGUS": {
-   "card": "BAGUS",
-   "i18n": [
-    "BAGUS",
-    "BAGUS"
-   ],
-   "intro": "小众独立系（バグス，前缀 BAGR），公开资料有限。"
-  },
-  "KOJA": {
-   "card": "KOJA",
-   "i18n": [
-    "KOJA",
-    "KOJA"
-   ],
-   "intro": "小众独立系（前缀 KOJA），公开资料有限。"
-  },
-  "MVG": {
-   "card": "MVG",
-   "i18n": [
-    "MVG",
-    "MVG"
-   ],
-   "intro": "Movie Gate 系（前缀 MVG），公开资料有限。"
-  },
-  "MOOC": {
-   "card": "MOOC",
-   "i18n": [
-    "MOOC",
-    "MOOC"
-   ],
-   "intro": "小众独立系，公开资料有限。"
-  },
-  "GOGOS": {
-   "card": "GOGOS",
-   "i18n": [
-    "GOGOS",
-    "GOGOS"
-   ],
-   "intro": "GOGOS 系（使用前缀 GS），公开资料有限。"
-  },
-  "GARA": {
-   "card": "GARA",
-   "i18n": [
-    "GARA",
-    "GARA"
-   ],
-   "intro": "小众独立系（前缀 GARA），公开资料有限。"
-  },
   "EMBZ": {
    "card": "EMBZ",
    "i18n": [
     "EMBZ",
+    "EMBZ",
     "EMBZ"
    ],
-   "intro": "小众独立系（前缀 EMBZ），公开资料有限。"
-  },
-  "DAVK": {
-   "card": "DAVK",
-   "i18n": [
-    "DAVK",
-    "DAVK"
-   ],
-   "intro": "小众独立系（前缀 DAVK），公开资料有限。"
-  },
-  "YDNS": {
-   "card": "YDNS",
-   "i18n": [
-    "YDNS",
-    "YDNS"
-   ],
-   "intro": "小众独立系（前缀 YDNS），公开资料有限。"
-  },
-  "USAG": {
-   "card": "USAG",
-   "i18n": [
-    "USAG",
-    "USAG"
-   ],
-   "intro": "小众独立系（うさぎ？，前缀 USAG），公开资料有限。"
-  },
-  "SITW": {
-   "card": "SITW",
-   "i18n": [
-    "SITW",
-    "SITW"
-   ],
-   "intro": "小众独立系（前缀 SITW），公开资料有限。"
-  },
-  "SAL": {
-   "card": "SAL",
-   "i18n": [
-    "SAL",
-    "SAL"
-   ],
-   "intro": "小众独立系（前缀 SAL），公开资料有限。"
-  },
-  "NGHJ": {
-   "card": "NGHJ",
-   "i18n": [
-    "NGHJ",
-    "NGHJ"
-   ],
-   "intro": "小众企划系（前缀 NGHJ），公开资料有限。"
+   "intro": "熟女专业レーベル（エマニエル系），主打中年女性。"
   },
   "Mothers": {
    "card": "Mothers",
    "i18n": [
     "Mothers",
+    "マザーズ",
     "Mothers"
    ],
-   "intro": "Mothers（マザーズ，前缀 MKD），小众熟女/企划系，公开资料有限。"
-  },
-  "Garage": {
-   "card": "Garage",
-   "i18n": [
-    "Garage",
-    "Garage"
-   ],
-   "intro": "Garage 系（前缀 GAJK），小众企划，公开资料有限。"
-  },
-  "FLAVOUR": {
-   "card": "FLAVOUR",
-   "i18n": [
-    "FLAVOUR",
-    "FLAVOUR"
-   ],
-   "intro": "FLAVOUR 系（前缀 FLAV），小众企划，公开资料有限。"
-  },
-  "CLOTH": {
-   "card": "CLOTH",
-   "i18n": [
-    "CLOTH",
-    "CLOTH"
-   ],
-   "intro": "CLOTH 系（前缀 CLOT），小众企划，公开资料有限。"
+   "intro": "熟女・人妻系小众厂，母亲角色题材常见。"
   },
   "Bermuda": {
    "card": "Bermuda",
    "i18n": [
-    "Bermuda",
+    "Bermuda / 百慕大",
+    "バミューダ",
     "Bermuda"
    ],
-   "intro": "Bermuda（バミューダ，前缀 BACJ），小众企划，公开资料有限。"
-  },
-  "APAKA": {
-   "card": "APAKA",
-   "i18n": [
-    "APAKA",
-    "APAKA"
-   ],
-   "intro": "APAKA 系（前缀 APAK），小众企划，公开资料有限。"
-  },
-  "ANB": {
-   "card": "ANB",
-   "i18n": [
-    "ANB",
-    "ANB"
-   ],
-   "intro": "小众企划系（前缀 ANB），公开资料有限。"
-  },
-  "UMAN": {
-   "card": "UMAN",
-   "i18n": [
-    "UMAN",
-    "UMAN"
-   ],
-   "intro": "UMAN（うまなみ？，前缀 UMAN），小众企划，公开资料有限。"
-  },
-  "HHF": {
-   "card": "HHF",
-   "i18n": [
-    "HHF",
-    "HHF"
-   ],
-   "intro": "小众独立系（前缀 HHF），公开资料有限。"
-  },
-  "NNOD": {
-   "card": "NNOD",
-   "i18n": [
-    "NNOD",
-    "NNOD"
-   ],
-   "intro": "小众独立系（前缀 NNOD），公开资料有限。"
+   "intro": "妄想族旗下，主打陵辱、紧缚、黑人、特殊调教题材。"
   },
   "桃太郎映像": {
    "card": "桃太郎映像出版",
    "i18n": [
     "桃太郎映像出版",
     "桃太郎映像出版",
-    "TME"
+    "Momotaro"
    ],
    "intro": "独立系大厂，直销模式起家，兼营欧美片日本引进。"
   },
@@ -2095,9 +2271,1252 @@
    "card": "独占素人",
    "i18n": [
     "独占素人",
-    "独占素人"
+    "独占素人",
+    "Dokusen Shirouto"
    ],
-   "intro": "素人系标签，公开资料有限。"
+   "intro": "素人独占配信系列。"
+  },
+  "ドグマ": {
+   "card": "Dogma",
+   "i18n": [
+    "Dogma",
+    "ドグマ",
+    "Dogma"
+   ],
+   "intro": "2001年由监督TOHJIRO创立。主打硬核SM、拘束、深喉、变态系，风格极端、艺术感强，业界硬核标杆。"
+  },
+  "Ore no Shirouto": {
+   "card": "俺的素人",
+   "i18n": [
+    "俺的素人",
+    "俺の素人",
+    "Ore no Shirouto"
+   ],
+   "intro": "素人中出、个人拍摄风格，真实感强。"
+  },
+  "いんすた": {
+   "card": "印斯塔",
+   "i18n": [
+    "印斯塔 / いんすた",
+    "いんすた",
+    "Insta"
+   ],
+   "intro": "素人个拍、中出系列（HMN WORKS旗下）。主打真实素人、社交风格拍摄。"
+  },
+  "ピーターズ": {
+   "card": "彼得斯",
+   "i18n": [
+    "彼得斯 / Peters",
+    "ピーターズ",
+    "Peters"
+   ],
+   "intro": "素人ナンパ专业厂。以「ガチナンパ！」系列闻名，街头搭讪、按摩、レズ题材较多。"
+  },
+  "俺の素人-Z-": {
+   "card": "俺的素人-Z-",
+   "i18n": [
+    "俺的素人-Z-",
+    "俺の素人-Z-",
+    "Ore no Shirouto-Z-"
+   ],
+   "intro": "「俺的素人」系列升级版 / SECOND IMPACT。更强调素人真实感与企画。"
+  },
+  "10musume": {
+   "card": "天然少女",
+   "i18n": [
+    "天然少女 / 10musume",
+    "天然むすめ",
+    "10musume"
+   ],
+   "intro": "素人美少女、清纯系个拍风格，真实感强。"
+  },
+  "恋慕": {
+   "card": "恋慕",
+   "i18n": [
+    "恋慕",
+    "恋の母",
+    "Koi no Bo"
+   ],
+   "intro": "偏恋爱、温柔、情感向风格。"
+  },
+  "MARRION": {
+   "card": "玛丽昂",
+   "i18n": [
+    "玛丽昂 / Marrion",
+    "マリオン",
+    "MARRION"
+   ],
+   "intro": "以女优颜值与剧情为主，风格相对柔和、偏单体女优。"
+  },
+  "Maji Nanpa": {
+   "card": "真面目软派",
+   "i18n": [
+    "真面目软派",
+    "マジ軟派",
+    "Maji Nanpa"
+   ],
+   "intro": "主打认真搭讪、真实素人ナンパ风格。"
+  },
+  "パラダイステレビ": {
+   "card": "天堂电视",
+   "i18n": [
+    "天堂电视 / Paradise TV",
+    "パラダイステレビ",
+    "Paradise TV"
+   ],
+   "intro": "スカパー成人频道出身的企画厂。主打「笑えるエロ」、素人、熟女、文档、盗撮、ナンパ等，自社节目风格鲜明。"
+  },
+  "おかず。": {
+   "card": "小菜",
+   "i18n": [
+    "小菜 / おかず。",
+    "おかず。",
+    "Okazu"
+   ],
+   "intro": "KMP旗下企画・素人・合集系厂。作品量极大，风格轻松、日常向。"
+  },
+  "Pacopacomama": {
+   "card": "啪啪妈妈",
+   "i18n": [
+    "啪啪妈妈",
+    "パコパコママ",
+    "Pacopacomama"
+   ],
+   "intro": "人妻・熟女素人中出专业系列，真实感强。"
+  },
+  "Nanpa TV": {
+   "card": "搭讪TV",
+   "i18n": [
+    "搭讪TV / ナンパTV",
+    "ナンパTV",
+    "Nanpa TV"
+   ],
+   "intro": "Prestige旗下素人搭讪系列。街头搭讪、真实记录风格，常与Premium合作。"
+  },
+  "Prestige Premium": {
+   "card": "Prestige Premium",
+   "i18n": [
+    "Prestige Premium",
+    "プレステージプレミアム",
+    "Prestige Premium"
+   ],
+   "intro": "Prestige高端配信系列。精选高质量素人、搭讪、企画作品。"
+  },
+  "乱丸": {
+   "card": "乱丸",
+   "i18n": [
+    "乱丸",
+    "乱丸",
+    "Ranmaru"
+   ],
+   "intro": "痴女・淫乱专业厂（已停止新作）。以极度痴女、白眼高潮、潮吹乱交闻名。"
+  },
+  "TMA": {
+   "card": "TMA",
+   "i18n": [
+    "TMA",
+    "ティーエムエー",
+    "TMA"
+   ],
+   "intro": "コスプレ・パロディ专业厂。以ACG还原、剧情コス著名，也有女装、近亲题材。"
+  },
+  "ラグジュTV": {
+   "card": "奢华TV",
+   "i18n": [
+    "奢华TV / ラグジュTV",
+    "ラグジュTV",
+    "Luxu TV"
+   ],
+   "intro": "高端素人系列。以气质美女、OL、人妻为主，拍摄精致、氛围感强。"
+  },
+  "Caribbeancom Premium": {
+   "card": "加勒比高级版",
+   "i18n": [
+    "加勒比高级版",
+    "カリビアンコムプレミアム",
+    "Caribbeancom Premium"
+   ],
+   "intro": "加勒比（Caribbeancom）的高画质・无码高端系列。"
+  },
+  "いきなりエロざんまい": {
+   "card": "いきなりエロざんまい",
+   "i18n": [
+    "いきなりエロざんまい",
+    "いきなりエロざんまい",
+    "Ikinari Erozanmai"
+   ],
+   "intro": "素人ナンパ・ハメ撮り配信レーベル。多重新包装既有素人作品。"
+  },
+  "Hsoda": {
+   "card": "Hsoda",
+   "i18n": [
+    "Hsoda",
+    "エイチソーダ",
+    "Hsoda"
+   ],
+   "intro": "以NTR、特殊体质、乳首・アナル等偏门题材为主的企画厂牌。"
+  },
+  "クロス": {
+   "card": "Cross",
+   "i18n": [
+    "Cross / クロス",
+    "クロス",
+    "Cross"
+   ],
+   "intro": "硬核・凌辱・变态系厂，风格偏激烈。"
+  },
+  "h.m.p DORAMA": {
+   "card": "h.m.p剧场版",
+   "i18n": [
+    "h.m.p剧场版",
+    "h.m.p DORAMA",
+    "h.m.p DORAMA"
+   ],
+   "intro": "h.m.p旗下剧情向系列。老牌厂，风格多元，含SM、剧情、单体。"
+  },
+  "FAIR＆WAY": {
+   "card": "Fair & Way",
+   "i18n": [
+    "Fair & Way",
+    "フェアアンドウェイ",
+    "FAIR&WAY"
+   ],
+   "intro": "以巨乳女优单体作品为主的厂牌，画质较高，常拍丰满身材。"
+  },
+  "ABC/妄想族": {
+   "card": "ABC/妄想族",
+   "i18n": [
+    "ABC/妄想族",
+    "ABC/妄想族",
+    "ABC"
+   ],
+   "intro": "妄想族集团旗下。主打巨乳、故事性、剧情向巨乳作品。"
+  },
+  "レッド": {
+   "card": "红",
+   "i18n": [
+    "红 / Red",
+    "レッド",
+    "Red"
+   ],
+   "intro": "老牌硬核・凌辱・变态系厂。"
+  },
+  "熟女JAPAN": {
+   "card": "熟女JAPAN",
+   "i18n": [
+    "熟女JAPAN",
+    "熟女JAPAN",
+    "Jukujo Japan"
+   ],
+   "intro": "熟女专业厂，主打中年、人妻、熟女题材。"
+  },
+  "カルマ": {
+   "card": "Karma",
+   "i18n": [
+    "Karma",
+    "カルマ",
+    "Karma"
+   ],
+   "intro": "盗撮・偷拍・真实记录风格老牌厂。"
+  },
+  "Fetish Box/妄想族": {
+   "card": "Fetish Box/妄想族",
+   "i18n": [
+    "Fetish Box/妄想族",
+    "フェティッシュボックス/妄想族",
+    "Fetish Box"
+   ],
+   "intro": "妄想族旗下フェチ（恋物）专业レーベル。"
+  },
+  "チェリーズれぼ/妄想族": {
+   "card": "樱桃Revo/妄想族",
+   "i18n": [
+    "樱桃Revo/妄想族",
+    "チェリーズれぼ/妄想族",
+    "Cherries Revo"
+   ],
+   "intro": "妄想族旗下爆乳・妹系专业レーベル。以「妹の爆乳は一見にしかず」系列闻名。"
+  },
+  "電脳ラスプーチン": {
+   "card": "电脑拉斯普京",
+   "i18n": [
+    "电脑拉斯普京",
+    "電脳ラスプーチン",
+    "Dennou Rasputin"
+   ],
+   "intro": "较少见的特殊题材厂牌。"
+  },
+  "AVS collector's": {
+   "card": "AVS收藏家",
+   "i18n": [
+    "AVS收藏家",
+    "AVS collector's",
+    "AVS collector's"
+   ],
+   "intro": "着衣フェチ、妄想、非日常情境专业厂。主打パンスト、巨乳、熟女着衣。"
+  },
+  "FALENO TUBE": {
+   "card": "FALENO TUBE",
+   "i18n": [
+    "FALENO TUBE",
+    "ファレノチューブ",
+    "FALENO TUBE"
+   ],
+   "intro": "FALENO旗下配信・YouTube风格系列。"
+  },
+  "パコパコ団とゆかいな仲間たち/妄想族": {
+   "card": "啪啪团与快乐伙伴们/妄想族",
+   "i18n": [
+    "啪啪团与快乐伙伴们/妄想族",
+    "パコパコ団とゆかいな仲間たち/妄想族",
+    "Pacopaco Dan"
+   ],
+   "intro": "妄想族旗下轻松、搞笑、团体向レーベル。"
+  },
+  "チキチキカマー/妄想族": {
+   "card": "奇奇奇卡玛/妄想族",
+   "i18n": [
+    "奇奇奇卡玛/妄想族",
+    "チキチキカマー/妄想族",
+    "Chikichiki Kamaa"
+   ],
+   "intro": "妄想族旗下特殊・搞笑・变态向レーベル。"
+  },
+  "アンナと花子": {
+   "card": "安娜与花子",
+   "i18n": [
+    "安娜与花子",
+    "アンナと花子",
+    "Anna to Hanako"
+   ],
+   "intro": "レズビアン专业レーベル（已停止新作）。主打正统女同、接吻、潮吹。"
+  },
+  "五十路ん": {
+   "card": "五十路ん",
+   "i18n": [
+    "五十路ん",
+    "五十路ん",
+    "Gojuurun"
+   ],
+   "intro": "五十路（50岁以上）熟女专业レーベル。主打真实熟女、母性、羞耻与淫乱反差，作品量大。"
+  },
+  "有閑ミセス/エマニエル": {
+   "card": "有闲太太/Emaniel",
+   "i18n": [
+    "有闲太太/Emaniel",
+    "有閑ミセス/エマニエル",
+    "Yukan Mrs"
+   ],
+   "intro": "エマニエル集团旗下。主打优雅人妻、熟女、富裕阶层女性题材。"
+  },
+  "ミニマム": {
+   "card": "迷你姆",
+   "i18n": [
+    "迷你姆 / Minimum",
+    "ミニマム",
+    "Minimum"
+   ],
+   "intro": "娇小・ロリ系专业厂。以矮小、幼齿、美少女身材为主打。"
+  },
+  "あいすまん": {
+   "card": "冰淇淋男",
+   "i18n": [
+    "冰淇淋男 / Aisuman",
+    "あいすまん",
+    "Aisuman"
+   ],
+   "intro": "素人・企画系厂，风格轻松、日常向。"
+  },
+  "エロチカ": {
+   "card": "Erotica",
+   "i18n": [
+    "Erotica",
+    "エロチカ",
+    "Erotica"
+   ],
+   "intro": "老牌厂，风格多元，含剧情、凌辱、单体作品。"
+  },
+  "SHIGEKI": {
+   "card": "SHIGEKI",
+   "i18n": [
+    "SHIGEKI / 刺激",
+    "シゲキ",
+    "SHIGEKI"
+   ],
+   "intro": "以「イキ我慢」（忍耐高潮）为核心的企画厂。主打羞耻、忍耐、特殊挑战。"
+  },
+  "親父の個撮": {
+   "card": "老爹的个拍",
+   "i18n": [
+    "老爹的个拍",
+    "親父の個撮",
+    "Oyaji no Kosatsu"
+   ],
+   "intro": "着衣フェチ专业厂。主打スクール水着、ブルマ、競泳水着完全着衣接写、ローション、ぶっかけ。"
+  },
+  "中嶋興業": {
+   "card": "中嶋兴业",
+   "i18n": [
+    "中嶋兴业",
+    "中嶋興業",
+    "Nakajima Kogyo"
+   ],
+   "intro": "硬核・変態・性玩系厂。主打调教、M女、极端玩法。"
+  },
+  "LAFBD": {
+   "card": "LAFBD",
+   "i18n": [
+    "LAFBD",
+    "LAFBD",
+    "LAFBD"
+   ],
+   "intro": "无码高清系列（多为海外或特殊发行）。"
+  },
+  "WORLD PG": {
+   "card": "WORLD PG",
+   "i18n": [
+    "WORLD PG",
+    "ワールドPG",
+    "WORLD PG"
+   ],
+   "intro": "モーションアニメ（动态漫画）系列厂。"
+  },
+  "北池袋": {
+   "card": "北池袋",
+   "i18n": [
+    "北池袋",
+    "北池袋",
+    "Kitaikebukuro"
+   ],
+   "intro": "素人・ハメ撮り・个人拍摄系厂。"
+  },
+  "訳ありZ世代": {
+   "card": "有问题的Z世代",
+   "i18n": [
+    "有问题的Z世代",
+    "訳ありZ世代",
+    "Wakeari Z Sedai"
+   ],
+   "intro": "素人・Z世代题材系列，主打年轻女性真实记录。"
+  },
+  "I.B.WORKS": {
+   "card": "I.B.WORKS",
+   "i18n": [
+    "I.B.WORKS",
+    "アイビーワークス",
+    "I.B.WORKS"
+   ],
+   "intro": "ロリ・美少女・制服系老牌厂。风格清纯与禁忌并存。"
+  },
+  "Around": {
+   "card": "Around",
+   "i18n": [
+    "Around",
+    "アラウンド",
+    "Around"
+   ],
+   "intro": "人妻・熟女系厂，主打「Around 30/40」年龄层。"
+  },
+  "熟女LABO": {
+   "card": "熟女LABO",
+   "i18n": [
+    "熟女LABO",
+    "熟女LABO",
+    "Jukujo LABO"
+   ],
+   "intro": "熟女实验・中出・匹配应用系厂。真实感强，作品量大。"
+  },
+  "熟女はつらいよ/熟女卍": {
+   "card": "熟女好辛苦/熟女卍",
+   "i18n": [
+    "熟女好辛苦/熟女卍",
+    "熟女はつらいよ/熟女卍",
+    "Jukujo wa Tsuraiyo"
+   ],
+   "intro": "熟女专业レーベル。主打中年女性的真实性欲与生活感。"
+  },
+  "ひよこ": {
+   "card": "雏鸟",
+   "i18n": [
+    "雏鸟 / Hiyoko",
+    "ひよこ",
+    "Hiyoko"
+   ],
+   "intro": "ロリ・美少女・清纯系厂。风格偏幼齿、可爱。"
+  },
+  "YONAKA": {
+   "card": "YONAKA",
+   "i18n": [
+    "YONAKA",
+    "ヨナカ",
+    "YONAKA"
+   ],
+   "intro": "以「夜」为主题的剧情向厂牌，主打夜间背德、诱惑、人妻题材。"
+  },
+  "エロVR": {
+   "card": "情色VR",
+   "i18n": [
+    "情色VR",
+    "エロVR",
+    "Ero VR"
+   ],
+   "intro": "VR专用系列，主打沉浸式体验。"
+  },
+  "ズッコン/バッコン": {
+   "card": "ズッコン/バッコン",
+   "i18n": [
+    "ズッコン/バッコン",
+    "ズッコン/バッコン",
+    "Zukkon Bakkon"
+   ],
+   "intro": "乱交・多人运动专业厂。风格激烈、集体向。"
+  },
+  "MBM": {
+   "card": "MBM",
+   "i18n": [
+    "MBM",
+    "エムビーエム",
+    "MBM"
+   ],
+   "intro": "素人・人妻系小众厂牌，作品量不大。"
+  },
+  "アクアモール/エマニエル": {
+   "card": "Aqua Mall / エマニエル",
+   "i18n": [
+    "Aqua Mall / エマニエル",
+    "アクアモール/エマニエル",
+    "Aqua Mall"
+   ],
+   "intro": "エマニエル集团旗下，人妻・熟女题材。"
+  },
+  "MOON FORCE 2nd": {
+   "card": "MOON FORCE 2nd",
+   "i18n": [
+    "MOON FORCE 2nd",
+    "ムーンフォースセカンド",
+    "MOON FORCE 2nd"
+   ],
+   "intro": "素人ハメ撮り・中出系列（DOC关联），主打真实素人。"
+  },
+  "PoRO": {
+   "card": "PoRO",
+   "i18n": [
+    "PoRO",
+    "ポロ",
+    "PoRO"
+   ],
+   "intro": "モーションアニメ（动态漫画）专业厂，风格偏剧情动画。"
+  },
+  "ケラ工房": {
+   "card": "ケラ工房",
+   "i18n": [
+    "ケラ工房",
+    "ケラ工房",
+    "Kera Kobo"
+   ],
+   "intro": "小众厂牌，作品较少，风格偏特殊。"
+  },
+  "ゲインコーポレーション": {
+   "card": "Gain Corporation",
+   "i18n": [
+    "Gain Corporation",
+    "ゲインコーポレーション",
+    "Gain Corporation"
+   ],
+   "intro": "老牌厂牌，风格多元。"
+  },
+  "ミル": {
+   "card": "ミル",
+   "i18n": [
+    "ミル / Miru",
+    "ミル",
+    "Miru"
+   ],
+   "intro": "小众厂牌，作品量少。"
+  },
+  "H4610": {
+   "card": "好色4610",
+   "i18n": [
+    "好色4610",
+    "H4610",
+    "H4610"
+   ],
+   "intro": "素人・中出・真实记录系列，风格朴实。"
+  },
+  "C0930": {
+   "card": "人妻0930",
+   "i18n": [
+    "人妻0930",
+    "人妻0930",
+    "C0930"
+   ],
+   "intro": "人妻素人中出系列。真实人妻、个拍风格，无码配信为主。"
+  },
+  "H0930": {
+   "card": "好色0930",
+   "i18n": [
+    "好色0930",
+    "好色0930",
+    "H0930"
+   ],
+   "intro": "与好色4610同系。素人・人妻中出真实记录，风格朴实。"
+  },
+  "Heydouga": {
+   "card": "嘿动画",
+   "i18n": [
+    "嘿动画 / Heydouga",
+    "Hey動画",
+    "Heydouga"
+   ],
+   "intro": "日本老牌无码配信平台。大量素人、人妻、个拍作品的集散地。"
+  },
+  "XXX-AV": {
+   "card": "解禁AV",
+   "i18n": [
+    "解禁AV",
+    "XXX-AV",
+    "XXX-AV"
+   ],
+   "intro": "无码解禁系列，多为有码作品的无码版本或特殊发行。"
+  },
+  "Red Hot Jam": {
+   "card": "红热果酱",
+   "i18n": [
+    "红热果酱",
+    "レッドホットジャム",
+    "Red Hot Jam"
+   ],
+   "intro": "无码高画质系列，风格多样，包含单体与企画。"
+  },
+  "Sperm Mania": {
+   "card": "精液狂热",
+   "i18n": [
+    "精液狂热",
+    "スペルママニア",
+    "Sperm Mania"
+   ],
+   "intro": "无码精液・颜射・口内射精专业系列。"
+  },
+  "Nyoshin": {
+   "card": "女体神秘",
+   "i18n": [
+    "女体神秘",
+    "女体のしんぴ",
+    "Nyoshin"
+   ],
+   "intro": "女体观察・自慰・特殊玩法无码系列。"
+  },
+  "Legs Japan": {
+   "card": "Legs Japan",
+   "i18n": [
+    "Legs Japan",
+    "レッグスジャパン",
+    "Legs Japan"
+   ],
+   "intro": "美腿・足交专业无码系列。"
+  },
+  "Fellatio Japan": {
+   "card": "Fellatio Japan",
+   "i18n": [
+    "Fellatio Japan",
+    "フェラチオジャパン",
+    "Fellatio Japan"
+   ],
+   "intro": "口交专业无码系列。"
+  },
+  "JapornXXX": {
+   "card": "日产无码",
+   "i18n": [
+    "日产无码",
+    "ジャポルノXXX",
+    "JapornXXX"
+   ],
+   "intro": "无码综合平台/系列，涵盖多种日本无码内容。"
+  },
+  "Ura Bukkake": {
+   "card": "里颜射",
+   "i18n": [
+    "里颜射 / Ura Bukkake",
+    "ウラブッカケ",
+    "Ura Bukkake"
+   ],
+   "intro": "无码颜射・大量精液专业系列。"
+  },
+  "Rose Lip Fetish": {
+   "card": "Rose Lip Fetish",
+   "i18n": [
+    "Rose Lip Fetish",
+    "ローゼリップフェティシ",
+    "Rose Lip Fetish"
+   ],
+   "intro": "恋物・特殊玩法无码系列。"
+  },
+  "Handjob Japan": {
+   "card": "Handjob Japan",
+   "i18n": [
+    "Handjob Japan",
+    "ハンドジョブジャパン",
+    "Handjob Japan"
+   ],
+   "intro": "手交专业无码系列。"
+  },
+  "SM-Miracle": {
+   "card": "SM奇迹",
+   "i18n": [
+    "SM奇迹",
+    "SM-Miracle",
+    "SM-Miracle"
+   ],
+   "intro": "素人SM・调教无码系列，真实感强。"
+  },
+  "Ura Lesbian": {
+   "card": "里女同",
+   "i18n": [
+    "里女同",
+    "ウラレズビアン",
+    "Ura Lesbian"
+   ],
+   "intro": "无码女同系列。"
+  },
+  "Rose Lip": {
+   "card": "Rose Lip",
+   "i18n": [
+    "Rose Lip",
+    "ローゼリップ",
+    "Rose Lip"
+   ],
+   "intro": "无码恋物・特殊系列。"
+  },
+  "Shirouto TV": {
+   "card": "素人TV",
+   "i18n": [
+    "素人TV",
+    "シロウトTV",
+    "Shirouto TV"
+   ],
+   "intro": "素人个拍・真实记录系列。"
+  },
+  "Nanpa Tengoku": {
+   "card": "搭讪天国",
+   "i18n": [
+    "搭讪天国",
+    "ナンパ天国",
+    "Nanpa Tengoku"
+   ],
+   "intro": "街头搭讪素人系列。"
+  },
+  "Jackson": {
+   "card": "杰克逊",
+   "i18n": [
+    "杰克逊",
+    "ジャクソン",
+    "Jackson"
+   ],
+   "intro": "MGS系素人レーベル，主打ギャル到清纯多种类型的真实素人。"
+  },
+  "Hamedori": {
+   "card": "个拍",
+   "i18n": [
+    "个拍 / ハメ撮り",
+    "ハメ撮り",
+    "Hamedori"
+   ],
+   "intro": "泛指个人拍摄、真实素人中出风格。"
+  },
+  "261ARA": {
+   "card": "募集酱",
+   "i18n": [
+    "募集酱",
+    "ARA",
+    "261ARA"
+   ],
+   "intro": "著名素人募集系列。真实素人面试、中出风格，番号ARA。"
+  },
+  "himemix": {
+   "card": "姬混",
+   "i18n": [
+    "姬混",
+    "ひめみっくす",
+    "himemix"
+   ],
+   "intro": "素人美少女・混合题材系列。"
+  },
+  "Siro Hame": {
+   "card": "白ハメ",
+   "i18n": [
+    "白ハメ",
+    "シロハメ",
+    "Siro Hame"
+   ],
+   "intro": "素人ハメ撮り系列。"
+  },
+  "r-file": {
+   "card": "R档案",
+   "i18n": [
+    "R档案",
+    "アールファイル",
+    "r-file"
+   ],
+   "intro": "素人档案・真实记录系列。"
+  },
+  "G-area": {
+   "card": "G区",
+   "i18n": [
+    "G区",
+    "ジーエリア",
+    "G-area"
+   ],
+   "intro": "素人美少女・中出系列，画质较好。"
+  },
+  "しろうとまんまん": {
+   "card": "素人人まん",
+   "i18n": [
+    "素人人まん",
+    "しろうとまんまん",
+    "Shirouto Manman"
+   ],
+   "intro": "素人系列，风格轻松真实。"
+  },
+  "ペロンゲリオン": {
+   "card": "ペロンゲリオン",
+   "i18n": [
+    "ペロンゲリオン",
+    "ペロンゲリオン",
+    "Perongelion"
+   ],
+   "intro": "较少见的特殊或恶搞向系列。"
+  },
+  "MOON FORCE": {
+   "card": "MOON FORCE",
+   "i18n": [
+    "MOON FORCE",
+    "ムーンフォース",
+    "MOON FORCE"
+   ],
+   "intro": "DOC旗下素人ハメ撮り系列。主打美形素人、恋爱感中出。"
+  },
+  "素人ホイホイZ": {
+   "card": "素人ホイホイZ",
+   "i18n": [
+    "素人ホイホイZ",
+    "素人ホイホイZ",
+    "Shirouto Hoihoi Z"
+   ],
+   "intro": "素人搭讪・中出系列（ホイホイ系列升级版）。"
+  },
+  "ドキュメンTV": {
+   "card": "文档TV",
+   "i18n": [
+    "文档TV",
+    "ドキュメンTV",
+    "Document TV"
+   ],
+   "intro": "文档风格素人系列，真实记录感强。"
+  },
+  "IENFH（MGS素人）": {
+   "card": "IENFH",
+   "i18n": [
+    "IENFH / MGS素人",
+    "IENFH",
+    "IENFH"
+   ],
+   "intro": "MGS配信的素人系列，真实素人中出、个拍风格。"
+  },
+  "投稿マーケット素人イッてQ": {
+   "card": "投稿マーケット素人イッてQ",
+   "i18n": [
+    "投稿マーケット素人イッてQ",
+    "投稿マーケット素人イッてQ",
+    "Toukou Market"
+   ],
+   "intro": "素人投稿平台系列，真实用户投稿的素人作品。「イッてQ」为双关品牌名。"
+  },
+  "おっぱいちゃん": {
+   "card": "胸部酱",
+   "i18n": [
+    "胸部酱",
+    "おっぱいちゃん",
+    "Oppai-chan"
+   ],
+   "intro": "巨乳素人专门系列，主打大胸素人。"
+  },
+  "NTR.net": {
+   "card": "NTR.net",
+   "i18n": [
+    "NTR.net",
+    "NTR.net",
+    "NTR.net"
+   ],
+   "intro": "以NTR（绿帽）题材为主的素人系列。"
+  },
+  "インディ": {
+   "card": "独立",
+   "i18n": [
+    "独立 / Indy",
+    "インディ",
+    "Indy"
+   ],
+   "intro": "素人独立制作、真实感强的中出系列。"
+  },
+  "白完素人": {
+   "card": "白完素人",
+   "i18n": [
+    "白完素人",
+    "白完素人",
+    "Shirokan Shirouto"
+   ],
+   "intro": "素人完整版系列，画质与完整性较好。"
+  },
+  "E★人妻DX": {
+   "card": "E★人妻DX",
+   "i18n": [
+    "E★人妻DX",
+    "E★人妻DX",
+    "E Hitodzuma DX"
+   ],
+   "intro": "人妻素人升级系列，主打真实人妻。"
+  },
+  "ときわ映像": {
+   "card": "常盘映像",
+   "i18n": [
+    "常盘映像",
+    "ときわ映像",
+    "Tokiwa Eizou"
+   ],
+   "intro": "素人个拍、真实记录风格厂牌。"
+  },
+  "黒船": {
+   "card": "黑船",
+   "i18n": [
+    "黑船",
+    "黒船",
+    "Kurofune"
+   ],
+   "intro": "风格偏硬核或特殊题材的素人系列。"
+  },
+  "E★ナンパDX": {
+   "card": "E★搭讪DX",
+   "i18n": [
+    "E★搭讪DX",
+    "E★ナンパDX",
+    "E Nanpa DX"
+   ],
+   "intro": "搭讪素人升级系列，街头真实搭讪。"
+  },
+  "LadyHunter": {
+   "card": "淑女猎人",
+   "i18n": [
+    "淑女猎人",
+    "LadyHunter",
+    "LadyHunter"
+   ],
+   "intro": "以猎取淑女、人妻为主的搭讪系列。"
+  },
+  "A子さん": {
+   "card": "A子桑",
+   "i18n": [
+    "A子桑",
+    "A子さん",
+    "A-ko san"
+   ],
+   "intro": "特定素人女优系列，常以A子名义出演。"
+  },
+  "JVID": {
+   "card": "台湾写真",
+   "i18n": [
+    "台湾写真 / JVID",
+    "JVID",
+    "JVID"
+   ],
+   "intro": "台湾写真与短片平台，主打高颜值女优写真与轻度情色内容。"
+  },
+  "Tushy": {
+   "card": "塔希",
+   "i18n": [
+    "塔希",
+    "Tushy",
+    "Tushy"
+   ],
+   "intro": "高端肛交专业工作室，画质精致、剧情感强。"
+  },
+  "Deeper": {
+   "card": "更深",
+   "i18n": [
+    "更深",
+    "Deeper",
+    "Deeper"
+   ],
+   "intro": "由Tushy团队打造，主打情色、心理与硬核结合的高端系列。"
+  },
+  "Blacked Raw": {
+   "card": "黑蚀生",
+   "i18n": [
+    "黑蚀生",
+    "Blacked Raw",
+    "Blacked Raw"
+   ],
+   "intro": "Blacked的无套生版本，主打Interracial无套中出。"
+  },
+  "Tushy Raw": {
+   "card": "塔希生",
+   "i18n": [
+    "塔希生",
+    "Tushy Raw",
+    "Tushy Raw"
+   ],
+   "intro": "Tushy的无套生版本，专注高质量肛交无套。"
+  },
+  "RK Prime": {
+   "card": "现实国王精选",
+   "i18n": [
+    "现实国王精选",
+    "RK Prime",
+    "RK Prime"
+   ],
+   "intro": "Reality Kings旗下精选系列，风格多样。"
+  },
+  "Fake Taxi": {
+   "card": "假出租车",
+   "i18n": [
+    "假出租车",
+    "Fake Taxi",
+    "Fake Taxi"
+   ],
+   "intro": "经典英国系列，假出租车搭讪真实风格。"
+  },
+  "Adult Time": {
+   "card": "成人时间",
+   "i18n": [
+    "成人时间",
+    "Adult Time",
+    "Adult Time"
+   ],
+   "intro": "大型网络平台，旗下拥有多个精品工作室。"
+  },
+  "Elegant Angel": {
+   "card": "优雅天使",
+   "i18n": [
+    "优雅天使",
+    "Elegant Angel",
+    "Elegant Angel"
+   ],
+   "intro": "老牌美国厂牌，以高质量剧情与女优著称。"
+  },
+  "Lethal Hardcore": {
+   "card": "致命硬核",
+   "i18n": [
+    "致命硬核",
+    "Lethal Hardcore",
+    "Lethal Hardcore"
+   ],
+   "intro": "硬核风格厂牌，玩法激烈。"
+  },
+  "Anal Vids": {
+   "card": "Anal Vids",
+   "i18n": [
+    "Anal Vids",
+    "Anal Vids",
+    "Anal Vids"
+   ],
+   "intro": "专注肛交题材的系列/平台。"
+  },
+  "Public Agent": {
+   "card": "公共探员",
+   "i18n": [
+    "公共探员",
+    "Public Agent",
+    "Public Agent"
+   ],
+   "intro": "公共场合搭讪、户外真实风格系列。"
+  },
+  "Family Strokes": {
+   "card": "家庭爱抚",
+   "i18n": [
+    "家庭爱抚",
+    "Family Strokes",
+    "Family Strokes"
+   ],
+   "intro": "伪家庭、禁忌题材系列。"
+  },
+  "TeamSkeet": {
+   "card": "TeamSkeet",
+   "i18n": [
+    "TeamSkeet",
+    "TeamSkeet",
+    "TeamSkeet"
+   ],
+   "intro": "年轻女优、清新与硬核并存的大型厂牌。"
+  },
+  "Bratty Sis": {
+   "card": "顽皮姐妹",
+   "i18n": [
+    "顽皮姐妹",
+    "Bratty Sis",
+    "Bratty Sis"
+   ],
+   "intro": "伪兄妹、禁忌调戏风格系列。"
+  },
+  "Nubiles": {
+   "card": "嫩模",
+   "i18n": [
+    "嫩模",
+    "Nubiles",
+    "Nubiles"
+   ],
+   "intro": "年轻、清新、自然风格的女优系列。"
+  },
+  "SexMex": {
+   "card": "墨西哥性",
+   "i18n": [
+    "墨西哥性",
+    "SexMex",
+    "SexMex"
+   ],
+   "intro": "墨西哥出品，主打拉丁女优与家庭题材。"
+  },
+  "PornWorld": {
+   "card": "色情世界",
+   "i18n": [
+    "色情世界",
+    "PornWorld",
+    "PornWorld"
+   ],
+   "intro": "欧洲硬核、群交、公共场合风格系列。"
+  },
+  "MILFY": {
+   "card": "熟女",
+   "i18n": [
+    "熟女 / MILFY",
+    "MILFY",
+    "MILFY"
+   ],
+   "intro": "专注MILF（熟女）题材的高端系列。"
+  },
+  "Wicked": {
+   "card": "邪恶",
+   "i18n": [
+    "邪恶",
+    "Wicked",
+    "Wicked"
+   ],
+   "intro": "老牌剧情向厂牌，以故事片和女优质量著称。"
+  },
+  "Nubile Films": {
+   "card": "嫩模电影",
+   "i18n": [
+    "嫩模电影",
+    "Nubile Films",
+    "Nubile Films"
+   ],
+   "intro": "Nubiles旗下更重剧情与美感的系列。"
+  },
+  "SexArt": {
+   "card": "性艺术",
+   "i18n": [
+    "性艺术",
+    "SexArt",
+    "SexArt"
+   ],
+   "intro": "艺术向、唯美情色系列。"
+  },
+  "Watch4Beauty": {
+   "card": "赏美",
+   "i18n": [
+    "赏美",
+    "Watch4Beauty",
+    "Watch4Beauty"
+   ],
+   "intro": "唯美、自然光、艺术写真与轻度情色。"
+  },
+  "Playboy Plus": {
+   "card": "花花公子+",
+   "i18n": [
+    "花花公子+",
+    "Playboy Plus",
+    "Playboy Plus"
+   ],
+   "intro": "Playboy旗下高端写真与情色内容。"
+  },
+  "Dorcel Club": {
+   "card": "多塞尔俱乐部",
+   "i18n": [
+    "多塞尔俱乐部",
+    "Dorcel Club",
+    "Dorcel Club"
+   ],
+   "intro": "法国高端厂牌，画质与剧情均属上乘。"
+  },
+  "Digital Playground": {
+   "card": "数字乐园",
+   "i18n": [
+    "数字乐园",
+    "Digital Playground",
+    "Digital Playground"
+   ],
+   "intro": "美国老牌大厂，以大制作剧情片闻名。"
+  },
+  "BALTAN": {
+   "card": "BALTAN",
+   "i18n": [
+    "BALTAN",
+    "バルタン",
+    "BALTAN"
+   ],
+   "intro": "バルタン系レーベル。BAGR 等前缀归属此厂。"
+  },
+  "犬/妄想族": {
+   "card": "犬/妄想族",
+   "i18n": [
+    "犬/妄想族",
+    "犬/妄想族",
+    "Inu / Mousouzoku"
+   ],
+   "intro": "妄想族旗下子レーベル，风格独立，不宜笼统归为「妄想族」。"
+  },
+  "SEX Agent/妄想族": {
+   "card": "SEX Agent/妄想族",
+   "i18n": [
+    "SEX Agent/妄想族",
+    "セックスエージェント/妄想族",
+    "SEX Agent"
+   ],
+   "intro": "妄想族旗下子レーベル，独立企划风格。"
+  },
+  "ブロッコリー/妄想族": {
+   "card": "ブロッコリー/妄想族",
+   "i18n": [
+    "ブロッコリー/妄想族",
+    "ブロッコリー/妄想族",
+    "Broccoli"
+   ],
+   "intro": "妄想族旗下子レーベル，独立企划风格。"
+  },
+  "姦乱者/妄想族": {
+   "card": "姦乱者/妄想族",
+   "i18n": [
+    "姦乱者/妄想族",
+    "姦乱者/妄想族",
+    "Kanransha"
+   ],
+   "intro": "妄想族旗下子レーベル，独立企划风格。"
+  },
+  "First Star": {
+   "card": "First Star",
+   "i18n": [
+    "First Star",
+    "ファーストスター",
+    "First Star"
+   ],
+   "intro": "独立厂牌（非 SOD Create）。别名不再并入 SOD。"
+  },
+  "FC2-PPV": {
+   "card": "FC2-PPV",
+   "i18n": [
+    "FC2-PPV / 付费同人",
+    "FC2-PPV",
+    "FC2-PPV"
+   ],
+   "intro": "FC2 付费同人（PPV）配信，按作品贩卖的素人・个人撮影为主。"
   }
  },
  "version": 1

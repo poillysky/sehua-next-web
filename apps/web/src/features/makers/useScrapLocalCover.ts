@@ -37,9 +37,9 @@ function localUrl(
   let rp = false;
   let useThumb = false;
   if (posterApi) {
-    // 入库 poster 已按策略裁好；展示不再右裁
+    // 默认 poster 原样。有码列表显式 rp：横图右裁，竖图服务端不裁。
     api = posterApi;
-    rp = false;
+    rp = Boolean(opts.rp);
   } else if (thumbApi) {
     // 无 poster 才用横 thumb，服务端 rp 右裁竖幅
     api = thumbApi;
@@ -239,17 +239,17 @@ export function useScrapLocalCover(opts: ScrapLocalCoverOpts) {
   return { src, posters, onError, ensuring };
 }
 
-/** 列表 / 货架 / 厂牌墙：优先 poster；无 poster 时 thumb 右裁 */
+/** 列表 / 货架 / 厂牌墙：优先 poster。有码另传 rp 做横图右裁。 */
 export const SCRAP_POSTER_COVER_OPTS = {
   w: SCRAP_LIST_THUMB_W,
   prefer: 'poster' as const,
-  rp: true as const,
+  rp: false as const,
 };
 
 export const SCRAP_COLLAGE_COVER_OPTS = {
   w: SCRAP_COLLAGE_THUMB_W,
   prefer: 'poster' as const,
-  rp: true as const,
+  rp: false as const,
 };
 
 /** 详情主图：poster 高清 */

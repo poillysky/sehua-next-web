@@ -54,6 +54,8 @@ export function ScrapCollageCard({
   onClick,
   /** 推荐货架默认单图，显著减少首屏请求；文件夹全页可开 mosaic */
   mosaic = false,
+  /** 有码：横图右裁竖幅，竖图原样 */
+  rightCrop = false,
 }: {
   title: string;
   count?: number;
@@ -67,6 +69,7 @@ export function ScrapCollageCard({
   overlay?: boolean;
   onClick: () => void;
   mosaic?: boolean;
+  rightCrop?: boolean;
 }) {
   const { src, posters, onError } = useScrapLocalCover({
     posterApi,
@@ -75,6 +78,7 @@ export function ScrapCollageCard({
     itemId,
     maxPosters: mosaic ? 4 : 1,
     ...SCRAP_COLLAGE_COVER_OPTS,
+    rp: rightCrop,
   });
   const [gone, setGone] = useState<Record<number, boolean>>({});
   const intro = String(blurb || '').trim();

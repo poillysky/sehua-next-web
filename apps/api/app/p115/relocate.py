@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""转存先入「最近接受」，完成后移到程序指定目录。"""
+"""转存先入「最近接收」，完成后移到程序指定目录。"""
 
 from __future__ import annotations
 
@@ -155,7 +155,7 @@ def run_poll_then_relocate(job: dict[str, Any]) -> dict[str, Any]:
     if not cookie:
         return {"ok": False, "message": "无 Cookie", "moved": 0}
     if dest_cid == inbox_cid:
-        return {"ok": True, "message": "目标即接受目录，无需移动", "moved": 0}
+        return {"ok": True, "message": "目标即接收目录，无需移动", "moved": 0}
 
     ready = _wait_offline_file_ids(job)
     if not ready.get("ok"):
@@ -167,7 +167,7 @@ def run_poll_then_relocate(job: dict[str, Any]) -> dict[str, Any]:
 
     file_ids = list(ready.get("fileIds") or [])
 
-    # 云解压仍在「最近接受」内进行，解压出的同名夹一并搬走
+    # 云解压仍在「最近接收」内进行，解压出的同名夹一并搬走
     if job.get("wantExtract"):
         try:
             extract_job = {
@@ -215,7 +215,7 @@ def run_poll_then_relocate(job: dict[str, Any]) -> dict[str, Any]:
         "message": str(
             moved.get("message")
             or (
-                f"已从「最近接受」移到指定目录（{moved.get('moved') or 0}）"
+                f"已从「最近接收」移到指定目录（{moved.get('moved') or 0}）"
                 if moved.get("ok")
                 else "移动失败"
             )
@@ -234,12 +234,12 @@ def relocate_share_new_items(
     dest_cid: str,
     before_ids: set[str],
 ) -> dict[str, Any]:
-    """分享接收后：把「最近接受」里新增项移到指定目录。"""
+    """分享接收后：把「最近接收」里新增项移到指定目录。"""
     cookie_n = normalize_cookie(cookie)
     dest = (dest_cid or "0").strip() or "0"
     inbox = (inbox_cid or "0").strip() or "0"
     if dest == inbox:
-        return {"ok": True, "message": "目标即接受目录，无需移动", "moved": 0}
+        return {"ok": True, "message": "目标即接收目录，无需移动", "moved": 0}
     # 稍等目录刷新
     time.sleep(0.8)
     new_ids = _diff_new_ids(cookie_n, inbox, before_ids)
@@ -250,7 +250,7 @@ def relocate_share_new_items(
     if not new_ids:
         return {
             "ok": False,
-            "message": "分享已接收，但未在「最近接受」识别到新文件",
+            "message": "分享已接收，但未在「最近接收」识别到新文件",
             "moved": 0,
         }
     moved = p115_client.move_files(cookie_n, new_ids, dest)

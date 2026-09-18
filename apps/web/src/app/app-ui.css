@@ -20931,6 +20931,79 @@ img.soft-img[data-ready='1'] {
   min-width: 0;
 }
 
+/* 无码 / 国产 / 欧美：分区页全页横图 */
+.makers-landscape .makers-poster__frame,
+.makers-landscape .makers-poster-skel,
+.makers-landscape .makers-collage__frame,
+.makers-landscape .makers-collage-skel,
+.makers-landscape .makers-folder__frame,
+.makers-landscape .makers-folder-skel,
+.makers-landscape .makers-facet__frame,
+.makers-landscape .makers-actress__frame,
+.makers-landscape .makers-actress-skel,
+.makers-landscape .makers-actress-profile__avatar,
+.makers-landscape
+  .makers-shelf__rail.media-shelf__rail--skel
+  .makers-poster-skel {
+  aspect-ratio: 16 / 9;
+}
+
+.makers-landscape .makers-hub .makers-shelf .makers-poster,
+.makers-landscape .makers-hub .makers-shelf .makers-collage,
+.makers-landscape .makers-hub .makers-shelf .makers-folder,
+.makers-landscape .makers-hub .makers-shelf .makers-actress,
+.makers-landscape .makers-hub .makers-shelf .makers-poster.media-poster--sm,
+.makers-landscape .mkd-related .makers-shelf__rail .makers-poster {
+  width: 202px;
+  min-width: 202px;
+  flex: 0 0 auto;
+}
+
+.makers-landscape .makers-hub__wall.media-wall,
+.makers-landscape .makers-collage-grid,
+.makers-landscape .makers-folder-grid,
+.makers-landscape .makers-actress-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* 详情头图：横幅 */
+.makers-landscape .mkd-head__poster.media-detail__poster {
+  width: min(100%, 280px);
+  height: auto;
+  aspect-ratio: 16 / 9;
+}
+
+.makers-landscape .mkd-head__id {
+  height: auto;
+  min-height: 0;
+}
+
+/* 推荐页：按货架固定横图（不受顶栏分区影响）
+   需压过 `.makers-hub .makers-shelf .makers-poster.media-poster--sm` 的 112px */
+.makers-hub .makers-shelf.makers-shelf--landscape .makers-poster__frame,
+.makers-hub .makers-shelf.makers-shelf--landscape .makers-poster-skel,
+.makers-hub
+  .makers-shelf.makers-shelf--landscape
+  .makers-shelf__rail.media-shelf__rail--skel
+  .makers-poster-skel {
+  aspect-ratio: 16 / 9;
+}
+
+.makers-hub .makers-shelf.makers-shelf--landscape .makers-poster,
+.makers-hub .makers-shelf.makers-shelf--landscape .makers-poster.media-poster--sm {
+  width: 202px;
+  min-width: 202px;
+  flex: 0 0 auto;
+}
+
+.makers-hub
+  .makers-shelf.makers-shelf--landscape
+  .makers-shelf__rail.media-shelf__rail--skel
+  .makers-poster-skel {
+  width: 202px;
+  min-width: 202px;
+}
+
 .makers-poster__frame {
   /* 与 DMM/省盘 poster（约 2:3）对齐；3:4 + cover 会裁掉上下文字 */
   aspect-ratio: 2 / 3;
@@ -22371,6 +22444,7 @@ img.soft-img[data-ready='1'] {
   overflow-x: hidden;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  padding-bottom: 16px;
   opacity: 1;
   transition: opacity 0.18s ease;
 }
@@ -22385,10 +22459,6 @@ img.soft-img[data-ready='1'] {
 
 .settings-screen-root .enrich-live:not(.enrich-live--ready) .enrich-live__pane {
   opacity: 0.88;
-}
-
-.settings-screen-root .enrich-live__queue {
-  animation: enrich-live-in 0.22s ease both;
 }
 
 @keyframes enrich-live-in {
@@ -22729,8 +22799,10 @@ img.soft-img[data-ready='1'] {
   background: transparent;
   cursor: pointer;
   gap: 10px;
-  align-items: center;
+  align-items: flex-start;
   min-height: 44px;
+  padding-top: 8px;
+  padding-bottom: 8px;
 }
 
 .settings-screen-root .enrich-live__queue-row--static {
@@ -22741,6 +22813,7 @@ img.soft-img[data-ready='1'] {
 .settings-screen-root .enrich-live__queue-row .settings-nav__chev {
   flex-shrink: 0;
   opacity: 0.35;
+  margin-top: 2px;
 }
 
 .settings-screen-root .enrich-live__detail {
@@ -22766,6 +22839,24 @@ img.soft-img[data-ready='1'] {
   max-height: 360px;
   width: min(100%, 240px);
   margin-inline: auto;
+}
+
+/* 原图横图：按横幅展示，勿塞进竖框 object-fit:cover 裁切 */
+.settings-screen-root .enrich-live__cover--poster.enrich-live__cover--landscape {
+  aspect-ratio: auto;
+  width: 100%;
+  max-height: none;
+  margin-inline: 0;
+}
+
+.settings-screen-root
+  .enrich-live__cover--poster.enrich-live__cover--landscape
+  .enrich-live__cover-img {
+  width: 100%;
+  height: auto;
+  max-height: 360px;
+  object-fit: contain;
+  object-position: center;
 }
 
 .settings-screen-root .enrich-live__cover--empty {
@@ -22842,9 +22933,11 @@ img.soft-img[data-ready='1'] {
 .settings-screen-root .enrich-live__queue-main .settings-nav__desc {
   width: 100%;
   margin: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow: visible;
+  text-overflow: unset;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.35;
 }
 
 .settings-screen-root .enrich-live__queue-row--on .settings-nav__title {
@@ -22866,6 +22959,7 @@ img.soft-img[data-ready='1'] {
 .settings-screen-root .enrich-live__queue-badge {
   flex-shrink: 0;
   min-width: 44px;
+  margin-top: 1px;
   padding: 2px 8px;
   border-radius: 6px;
   font-size: 11px;
@@ -22926,6 +23020,7 @@ img.soft-img[data-ready='1'] {
 
 .settings-screen-root .enrich-live__queue-meta {
   flex-shrink: 0;
+  margin-top: 2px;
   font-size: 12px;
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
@@ -24865,6 +24960,13 @@ img.soft-img[data-ready='1'] {
   align-items: center;
   margin: 10px 0 0;
   padding-top: 4px;
+}
+
+.settings-screen-root .enrich-strategy__rs-note {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted-fg, rgba(0, 0, 0, 0.55));
 }
 
 .settings-screen-root .enrich-strategy__rs-foot .enrich-strategy__rs-reset {

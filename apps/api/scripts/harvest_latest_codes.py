@@ -21,7 +21,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument(
         "--regions",
-        default="japan_censored,japan_gravure,japan_amateur",
+        default="japan_censored,japan_amateur",
         help="comma regions",
     )
     ap.add_argument("--limit", type=int, default=0)

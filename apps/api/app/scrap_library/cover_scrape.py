@@ -67,7 +67,6 @@ COVER_QUALITY_LABELS: dict[str, str] = {
 
 COVER_CROP_HINTS: dict[str, str] = {
     "japan_censored": "优先原版竖图(pl>ps)；否则横图右裁",
-    "japan_gravure": "优先原版竖图(pl>ps)；否则横图右裁",
     "japan_amateur": "优先原版竖图；否则横图按人脸裁",
     "fc2": "优先原版竖图；否则横图按人脸裁",
     "japan_uncensored": "只要网站原版横图，跳过竖图",
@@ -77,7 +76,6 @@ COVER_CROP_HINTS: dict[str, str] = {
 
 DEFAULT_REGION_COVER_CROP: dict[str, str] = {
     "japan_censored": "right",
-    "japan_gravure": "right",
     "japan_amateur": "face",
     "fc2": "face",
     "japan_uncensored": "none",
@@ -90,7 +88,7 @@ _FACE_IDEAL_CY = 0.38
 _FACE_OFF_CX = 0.18
 _FACE_OFF_CY = 0.22
 
-_SMART_UPGRADE_REGIONS = frozenset({"japan_censored", "japan_gravure"})
+_SMART_UPGRADE_REGIONS = frozenset({"japan_censored"})
 
 
 def _canon_mode(raw: str) -> str:
@@ -187,6 +185,11 @@ def normalize_cover_settings(raw: Any, *, prev: dict[str, Any] | None = None) ->
     base_rc = base["regionCrop"]
     if not isinstance(raw_rc, dict):
         raw_rc = {}
+    # 旧写真裁剪并入有码
+    if "japan_censored" not in raw_rc and raw_rc.get("japan_gravure"):
+        raw_rc = {**raw_rc, "japan_censored": raw_rc["japan_gravure"]}
+    if "japan_censored" not in prior_rc and prior_rc.get("japan_gravure"):
+        prior_rc = {**prior_rc, "japan_censored": prior_rc["japan_gravure"]}
     for rid in REGION_ORDER:
         if migrate_v9:
             region_crop[rid] = str(base_rc.get(rid, "none"))
@@ -214,6 +217,10 @@ def cover_crop_for_region(region: str, cover_cfg: dict[str, Any] | None = None) 
     cfg = normalize_cover_settings(cover_cfg)
     rid = str(region or "").strip()
     from app.core.region_meta import REGION_META, resolve_fs_region
+
+    # 旧逻辑区并回物理 FC2
+    if rid in {"fc2_ppv", "FC2-PPV 番号"}:
+        rid = "fc2"
 
     if rid not in REGION_META:
         mapped = resolve_fs_region(rid)

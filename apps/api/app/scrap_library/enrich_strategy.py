@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
-"""刮削库元数据补全 · 七区并发策略配置。"""
+"""刮削库元数据补全 · 六区并发策略配置。"""
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import app.core.settings_store as settings_store
@@ -14,7 +15,6 @@ ENRICH_STRATEGY_KEY = "scrap.enrich.strategy"
 # 与 scrape_sources_settings.REGION_ENRICH_GROUPS 默认一致（由 regionSources 反推同步）
 _DEFAULT_REGION_GROUPS: dict[str, list[str]] = {
     "japan_censored": ["av", "uncensored", "general"],
-    "japan_gravure": ["av", "uncensored", "general"],
     "japan_amateur": ["av", "uncensored", "general"],
     "japan_uncensored": ["av", "uncensored", "general"],
     "fc2": ["fc2", "general"],
@@ -22,12 +22,58 @@ _DEFAULT_REGION_GROUPS: dict[str, list[str]] = {
     "western": ["western", "general"],
 }
 
+# 无码官网专用站：不进 regionSources UI；按番号前缀在刮削时自动插到兜底链前
+UNCENSORED_OFFICIAL_SOURCE_IDS: frozenset[str] = frozenset(
+    {
+        "heyzo",
+        "1pondo",
+        "pacopacomama",
+        "carib",
+        "10musume",
+        "kin8",
+        "h0930",
+        "h4610",
+        "c0930",
+        "tokyohot",
+        "nyoshin",
+        "heydouga",
+    }
+)
+_UNCENSORED_PREFIX_OFFICIAL: list[tuple[re.Pattern[str], str]] = [
+    # HEYDOUGA 必须在 HEYZO 前（前缀更长）
+    (re.compile(r"^HEYDOUGA\b", re.I), "heydouga"),
+    (re.compile(r"^HEYZO\b", re.I), "heyzo"),
+    (re.compile(r"^1PON(?:DO)?\b", re.I), "1pondo"),
+    (re.compile(r"^PACO(?:MA)?\b", re.I), "pacopacomama"),
+    (re.compile(r"^CARIB(?:PR)?\b", re.I), "carib"),
+    (re.compile(r"^10MU(?:SUME)?\b", re.I), "10musume"),
+    (re.compile(r"^KIN8(?:TENGOKU)?\b", re.I), "kin8"),
+    (re.compile(r"^H0930\b", re.I), "h0930"),
+    (re.compile(r"^H4610\b", re.I), "h4610"),
+    (re.compile(r"^C0930\b", re.I), "c0930"),
+    (re.compile(r"^TOKYO(?:-?HOT)?\b|^TOKYOHOT\b", re.I), "tokyohot"),
+    (re.compile(r"^NYOSHIN\b", re.I), "nyoshin"),
+]
+
+
+def uncensored_official_for_code(code: str) -> list[str]:
+    """无码番号 → 命中的官网专用源（0~1 个）。"""
+    raw = str(code or "").strip().upper().replace("_", "-")
+    if not raw:
+        return []
+    for pat, sid in _UNCENSORED_PREFIX_OFFICIAL:
+        if pat.match(raw):
+            return [sid]
+    return []
+
+
 # 全局优先级（番号类型 → 有序源）：对齐 COVER_LOGIC.md §1.2
 # 低质量源（MissAV / NJAV / FreeJavBT / 7MMTV 等）不进默认；需要时用户可手加。
 # 目录无站（hbox_jp / javdb）已跳过；fc2_hub → fd2ppv
-REGION_SOURCES_LOGIC_VERSION = 5
+# v9：无码 UI/配置只保留通用兜底；heyzo/1pondo/paco/carib/10musume 按前缀内置注入
+REGION_SOURCES_LOGIC_VERSION = 9
 _DEFAULT_REGION_SOURCES: dict[str, list[str]] = {
-    # 有码：DMM → LibreDMM → R18.dev → JavBus → Jav321 → AVBase → MGStage
+    # 有码（含原写真前缀）：DMM → LibreDMM → R18.dev → JavBus → Jav321 → AVBase → MGStage
     "japan_censored": [
         "dmm",
         "libredmm",
@@ -37,28 +83,34 @@ _DEFAULT_REGION_SOURCES: dict[str, list[str]] = {
         "avbase",
         "mgstage",
     ],
-    # 写真：DMM → LibreDMM → R18.dev → JavBus → MGStage → Jav321
-    "japan_gravure": [
-        "dmm",
-        "libredmm",
-        "r18dev",
+    # 无码：仅通用兜底（专用站按番号前缀自动挂）
+    "japan_uncensored": [
+        "avsox",
         "javbus",
-        "mgstage",
-        "jav321",
+        "airav_io",
+        "miss_av",
     ],
-    # 无码：Caribbean → JavBus → AVBase
-    "japan_uncensored": ["carib", "javbus", "avbase"],
-    # 素人：MGStage → JavBus → Caribbean → AirAV.io
-    "japan_amateur": ["mgstage", "javbus", "carib", "airav_io"],
-    # FC2 → FC2-PPV → AirAV.io
+    # 素人：矩阵实测（2026-09-18）mgstage 官方优先 → libredmm/jav321 元数据
+    # → miss_av 封面兜底 → freejavbt 女优 → avbase/iqqtv 补强；去掉 javday
+    "japan_amateur": [
+        "mgstage",
+        "libredmm",
+        "jav321",
+        "miss_av",
+        "freejavbt",
+        "avbase",
+        "iqqtv",
+    ],
+    # FC2 → FC2-PPV → AirAV.io（磁盘仍按骨架写入 FC2/FC2 与 FC2/FC2-PPV）
     "fc2": ["fc2", "fd2ppv", "airav_io"],
-    # 国产：Madouqu → Madou → 小黄书
-    "china": ["madouqu", "madou", "xiao_huang_shu"],
+    # 国产：矩阵实测（2026-09-18）madouqu 全中 → 小黄书补覆盖 → madou → miss_av 兜底
+    # hscangku 能中但 20～50s+Flare，不进默认；javday/iqqtv 命中低或错页
+    "china": ["madouqu", "xiao_huang_shu", "madou", "miss_av"],
     # 欧美
     "western": ["theporndb"],
 }
 
-# 设置页展示顺序（对齐 MDCX；写真殿后）
+# 设置页展示顺序（FC2 / FC2-PPV 共用「FC2 番号」一类，不拆开关）
 REGION_PRIORITY_UI_ORDER: list[str] = [
     "japan_censored",
     "japan_uncensored",
@@ -66,19 +118,29 @@ REGION_PRIORITY_UI_ORDER: list[str] = [
     "fc2",
     "china",
     "western",
-    "japan_gravure",
 ]
 
-# 设置页番号类型标签（与七区目录 label 可不同）
+# 设置页番号类型标签（与六区目录 label 可不同）
 REGION_PRIORITY_LABELS: dict[str, str] = {
     "japan_censored": "有码番号",
-    "japan_gravure": "写真番号",
     "japan_uncensored": "无码番号",
     "japan_amateur": "素人番号",
     "fc2": "FC2 番号",
     "china": "国产番号",
     "western": "欧美影片",
 }
+
+
+def enrich_region_ids() -> list[str]:
+    """刮削开关用的区 id（六区；FC2 含 PPV 前缀夹）。"""
+    out: list[str] = []
+    for rid in REGION_PRIORITY_UI_ORDER:
+        if rid in REGION_ORDER:
+            out.append(rid)
+    for rid in REGION_ORDER:
+        if rid not in out:
+            out.append(rid)
+    return out
 
 VALID_MODES = ("parallel_all", "adaptive_first", "adaptive_only")
 # incremental=只补缺；refresh_weak=缺口队列但强制重写弱字段；overwrite=全量覆盖
@@ -150,8 +212,8 @@ def default_strategy() -> dict[str, Any]:
             rid: list(sites) for rid, sites in _DEFAULT_REGION_SOURCES.items()
         },
         "regionSourcesLogicVersion": REGION_SOURCES_LOGIC_VERSION,
-        # 刮削库页七区开关：关则批量补齐跳过该区
-        "regionsEnabled": {rid: True for rid in REGION_ORDER},
+        # 刮削库页分区开关：关则批量补齐跳过该区（FC2 含 FC2-PPV 前缀夹）
+        "regionsEnabled": {rid: True for rid in enrich_region_ids()},
         # 增量 = 只补缺；覆盖 = 全量覆盖
         "fillMode": "incremental",
         # 女优头像：增量 = 只缺头像；覆盖 = 已有也重下
@@ -190,7 +252,7 @@ def default_strategy() -> dict[str, Any]:
             "tags": "fallback",
             "compactOutlineNewlines": True,
         },
-        # 刮削封面：画质 + 七区裁剪
+        # 刮削封面：画质 + 六区裁剪
         "cover": default_cover_settings(),
     }
 
@@ -275,8 +337,16 @@ def normalize_strategy(
     rs_in = raw.get("regionSources") if rs_key_present else prior_rs
     if not isinstance(rs_in, dict):
         rs_in = {}
+    # 旧写真区并入有码：仅当有码未显式配置时继承写真源序
+    if (
+        "japan_censored" not in rs_in
+        and isinstance(rs_in.get("japan_gravure"), list)
+        and rs_in.get("japan_gravure")
+    ):
+        rs_in = {**rs_in, "japan_censored": list(rs_in["japan_gravure"])}
+    enrich_ids = enrich_region_ids()
     region_sources: dict[str, list[str]] = {}
-    for rid in REGION_ORDER:
+    for rid in enrich_ids:
         fb = list(_DEFAULT_REGION_SOURCES.get(rid) or [])
         if rid in rs_in and isinstance(rs_in.get(rid), list):
             region_sources[rid] = _norm_region_sources(
@@ -288,6 +358,13 @@ def normalize_strategy(
             )
         else:
             region_sources[rid] = list(fb)
+    # 无码专用站不进配置链（刮削时按前缀注入）
+    if "japan_uncensored" in region_sources:
+        region_sources["japan_uncensored"] = [
+            sid
+            for sid in region_sources["japan_uncensored"]
+            if sid not in UNCENSORED_OFFICIAL_SOURCE_IDS
+        ]
 
     # 兼容旧 regionGroups：由有序源反推；若无源则回落旧分组输入
     region_in = (
@@ -298,7 +375,7 @@ def normalize_strategy(
         else {}
     )
     region_groups: dict[str, list[str]] = {}
-    for rid in REGION_ORDER:
+    for rid in enrich_ids:
         derived = _groups_from_sources(region_sources.get(rid) or [])
         if derived:
             region_groups[rid] = derived
@@ -313,7 +390,7 @@ def normalize_strategy(
             if isinstance(prior.get("regionsEnabled"), dict)
             else {}
         )
-        for rid in REGION_ORDER:
+        for rid in enrich_ids:
             if rid not in enabled_in and rid in prior_en:
                 enabled_in[rid] = prior_en[rid]
     elif isinstance(prior.get("regionsEnabled"), dict):
@@ -321,7 +398,7 @@ def normalize_strategy(
     else:
         enabled_in = {}
     regions_enabled: dict[str, bool] = {}
-    for rid in REGION_ORDER:
+    for rid in enrich_ids:
         if rid in enabled_in:
             regions_enabled[rid] = bool(enabled_in[rid])
         else:
@@ -674,8 +751,9 @@ def strategy_public(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     data = normalize_strategy(cfg) if cfg is not None else get_strategy()
     regions = []
     enabled = data.get("regionsEnabled") or {}
+    enrich_ids = enrich_region_ids()
     ui_order = [rid for rid in REGION_PRIORITY_UI_ORDER if rid in REGION_ORDER]
-    for rid in ui_order + [r for r in REGION_ORDER if r not in ui_order]:
+    for rid in ui_order + [r for r in enrich_ids if r not in ui_order]:
         meta = REGION_META.get(rid) or {}
         regions.append(
             {
@@ -713,6 +791,11 @@ def strategy_public(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
             rid: list(sites)
             for rid, sites in _DEFAULT_REGION_SOURCES.items()
         },
+        "uncensoredOfficialSources": sorted(UNCENSORED_OFFICIAL_SOURCE_IDS),
+        "uncensoredOfficialHint": (
+            "HEYZO / 1pondo / PACO / Caribbean / 10musume / KIN8 / H0930·H4610·C0930 / "
+            "Tokyo Hot / Nyoshin 按番号前缀自动启用；此处只排通用兜底站。"
+        ),
         "coverCropOptions": [
             {"id": m, "label": COVER_CROP_LABELS.get(m, m)} for m in COVER_CROP_MODES
         ],
@@ -777,7 +860,7 @@ def strategy_public(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
 def enabled_region_ids(cfg: dict[str, Any] | None = None) -> list[str]:
     data = normalize_strategy(cfg) if cfg is not None else get_strategy()
     enabled = data.get("regionsEnabled") or {}
-    return [rid for rid in REGION_ORDER if bool(enabled.get(rid, True))]
+    return [rid for rid in enrich_region_ids() if bool(enabled.get(rid, True))]
 
 
 def resolve_pool_workers(configured: int, batch_size: int) -> int:
@@ -792,7 +875,7 @@ def resolve_pool_workers(configured: int, batch_size: int) -> int:
 
 
 def region_groups_override(region_id: str | None) -> tuple[str, ...] | None:
-    """返回配置的七区分组（始终有值；通常由 regionSources 反推）。"""
+    """返回配置的分区分组（始终有值；通常由 regionSources 反推）。"""
     rid = str(region_id or "").strip()
     if not rid:
         return None
@@ -820,11 +903,11 @@ def region_sources_for(
         return []
     if not isinstance(cfg, dict) or not cfg:
         cfg = get_strategy()
-    raw = (cfg.get("regionSources") or {}).get(rid)
-    if isinstance(raw, list) and raw:
+    raw_list = (cfg.get("regionSources") or {}).get(rid)
+    if isinstance(raw_list, list) and raw_list:
         out: list[str] = []
         seen: set[str] = set()
-        for s in raw:
+        for s in raw_list:
             sid = canonicalize_id(str(s or ""))
             if sid and sid not in seen:
                 seen.add(sid)

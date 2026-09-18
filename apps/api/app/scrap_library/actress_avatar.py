@@ -1695,6 +1695,15 @@ def start_actress_avatar_job(
             raise RuntimeError("刮削库向量同步进行中，请稍后再试")
         if get_actress_optimize_status().get("running"):
             raise RuntimeError("女优元数据优化进行中，请稍后再试")
+        try:
+            from app.scrap_library import nfo_optimize as nfo_opt
+
+            if nfo_opt.get_job_status().get("running"):
+                raise RuntimeError("NFO 优化进行中，请稍后再试")
+        except RuntimeError:
+            raise
+        except Exception:  # noqa: BLE001
+            pass
         _job.update(
             {
                 "running": True,

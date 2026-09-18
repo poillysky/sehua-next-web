@@ -16,6 +16,7 @@ Actors / tags / code-titles are NOT dual-homed under data/scrape_maps.
 from __future__ import annotations
 
 import json
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -135,6 +136,19 @@ def code_titles_runtime() -> Path:
     return code_titles_seed()
 
 
+_CODE_TITLE_REGION_RE = re.compile(
+    r"^(?:有码|无码|素人|写真|FC2|国产|欧美)\s*[|｜·\-—]\s*"
+)
+
+
+def strip_code_title_region(title: str) -> str:
+    """剥掉 code-titles 上的区域代号前缀（写入 NFO 时用净标题）。"""
+    t = str(title or "").strip()
+    if not t:
+        return ""
+    return _CODE_TITLE_REGION_RE.sub("", t).strip() or t
+
+
 @lru_cache(maxsize=1)
 def load_code_titles() -> dict[str, str]:
     path = code_titles_runtime()
@@ -146,18 +160,22 @@ def load_code_titles() -> dict[str, str]:
     return {str(k).strip().upper(): str(v).strip() for k, v in raw.items() if str(k).strip() and str(v).strip()}
 
 
-def lookup_code_title(code: str) -> str:
+def lookup_code_title(code: str, *, keep_region: bool = False) -> str:
     key = str(code or "").strip().upper()
     if not key:
         return ""
     table = load_code_titles()
+    title = ""
     if key in table:
-        return table[key]
-    # 兼容无横杠 / 下划线
-    compact = key.replace("_", "-")
-    if compact in table:
-        return table[compact]
-    return ""
+        title = table[key]
+    else:
+        # 兼容无横杠 / 下划线
+        compact = key.replace("_", "-")
+        if compact in table:
+            title = table[compact]
+    if not title:
+        return ""
+    return title if keep_region else strip_code_title_region(title)
 
 
 def code_actors_seed() -> Path:

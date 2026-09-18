@@ -31,7 +31,7 @@ def trusted_by_region() -> dict[str, set[str]]:
             "av-makers.japan.json",
             {
                 "有码": "japan_censored",
-                "写真": "japan_gravure",
+                "写真": "japan_censored",
                 "无码": "japan_uncensored",
                 "素人": "japan_amateur",
                 "FC2": "fc2",
@@ -62,9 +62,8 @@ def trusted_by_region() -> dict[str, set[str]]:
         kind = row.get("kind")
         if kind == "素人" or re.match(r"^\d{2,3}[A-Z]", p):
             out["japan_amateur"].add(p)
-        elif kind == "写真":
-            out["japan_gravure"].add(p)
         else:
+            # 有码 / 原写真 一律进有码
             out["japan_censored"].add(p)
 
     # ranges: assign digit→amateur else censored (skip western/uncensored shells)
@@ -127,7 +126,7 @@ def trusted_by_region() -> dict[str, set[str]]:
         "NYOSHIN",
         "HEYDOUGA",
     }
-    out["japan_gravure"] |= {
+    out["japan_censored"] |= {
         "ENFD",
         "OAE",
         "REBD",

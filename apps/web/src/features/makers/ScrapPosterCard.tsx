@@ -8,16 +8,20 @@ import {
   SCRAP_POSTER_COVER_OPTS,
   useScrapLocalCover,
 } from './useScrapLocalCover';
+import { stripTitleCodePrefix } from './makersUi';
 
 export function ScrapPosterCard({
   item,
   onClick,
   eager = true,
+  rightCrop = false,
 }: {
   item: ScrapLibraryEmbedItem;
   onClick: () => void;
   /** iOS：Tab/Push transform 容器内 lazy 常不触发；默认 eager */
   eager?: boolean;
+  /** 有码：横图右裁竖幅，竖图原样 */
+  rightCrop?: boolean;
 }) {
   const { src, onError } = useScrapLocalCover({
     posterApi: item.posterApi,
@@ -25,13 +29,12 @@ export function ScrapPosterCard({
     coverUrl: item.coverUrl,
     itemId: item.itemId,
     ...SCRAP_POSTER_COVER_OPTS,
+    rp: rightCrop,
   });
 
   const code = String(item.code || '').trim();
   const title = String(item.title || '').trim();
-  const displayTitle = title
-    .replace(new RegExp(`^${code}\\s*`, 'i'), '')
-    .trim();
+  const displayTitle = stripTitleCodePrefix(title, code);
   const badges = (() => {
     const out: string[] = [];
     if (item.cnsub) out.push('中字');

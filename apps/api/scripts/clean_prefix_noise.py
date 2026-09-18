@@ -403,10 +403,8 @@ def main() -> None:
             del bucket[k]
     removed["japan_uncensored"] = removed.get("japan_uncensored", []) + drop
 
-    # gravure: only allow list
-    purge("japan_gravure", lambda p: p in allow_grav or p in {
-        "ENFD", "OAE", "REBD", "REBDB", "MBRAA", "MBRBA", "MBDD", "SYD", "GGSID", "BFAZ"
-    })
+    # 原写真前缀已并入有码，无需单独 purge japan_gravure
+    _ = allow_grav  # noqa: F841 — historical allow list
 
     # fc2 fixed
     doc["regions"]["fc2"]["prefixes"] = {

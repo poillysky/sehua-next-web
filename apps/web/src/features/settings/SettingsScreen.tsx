@@ -350,9 +350,11 @@ export function SettingsScreen() {
         try {
           const scrape = await withTimeout(getScrapeSources(), 12000);
           const enabled = (scrape.sources || []).filter((s) => s.enabled).length;
-          const total = (scrape.sources || []).length;
-          const text = total ? `${enabled}/${total} 源` : '未配置';
-          setEntryStatus('makers', text, enabled ? 'ok' : 'warn');
+          setEntryStatus(
+            'makers',
+            enabled ? '已就绪' : '未启用',
+            enabled ? 'ok' : 'warn',
+          );
         } catch (e) {
           try {
             const mcfg = await withTimeout(getMakersCatalog(), 8000);

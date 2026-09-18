@@ -1,6 +1,6 @@
 {
   "name": "nextweb",
-  "version": "1.2.5",
+  "version": "1.2.6",
   "private": true,
   "description": "NextWeb monorepo: web + api",
   "scripts": {

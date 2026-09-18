@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""MDCx 转入 NFO：从 tag/genre 识别女优；与本程序 <actor> 格式对齐。"""
+"""NFO 女优：只认 <actor>/actor_all，禁止 tag/genre 硬套。"""
 
 from __future__ import annotations
 
@@ -45,9 +45,24 @@ _PROGRAM = """<?xml version='1.0' encoding='utf-8'?>
 </movie>
 """
 
+_JUNK_ACTORS = """<?xml version='1.0' encoding='utf-8'?>
+<movie>
+  <num>FC2-668848</num>
+  <title>FC2-668848 test title long enough</title>
+  <plot>足够长的剧情文本用来通过缺口检查。</plot>
+  <actor><name>アナル舐め</name><type>Actor</type></actor>
+  <actor><name>玉舐め</name><type>Actor</type></actor>
+  <actor><name>无套性交</name><type>Actor</type></actor>
+  <tag>アナル舐め</tag>
+  <tag>玉舐め</tag>
+  <tag>无套性交</tag>
+  <genre>アナル舐め</genre>
+</movie>
+"""
+
 
 class MdcxNfoActorTests(unittest.TestCase):
-    def test_harvest_skips_meta_and_code_tags(self) -> None:
+    def test_no_harvest_from_tags(self) -> None:
         names = actors_from_mdcx_side_channels(
             tags=[
                 "痴女",
@@ -61,54 +76,53 @@ class MdcxNfoActorTests(unittest.TestCase):
             code="YSN-611",
             studio="NON",
         )
-        self.assertEqual(names, ["渚光希"])
+        self.assertEqual(names, [])
 
-    def test_parse_mdcx_ysn611_gets_actress(self) -> None:
+    def test_actor_all_still_works(self) -> None:
+        names = actors_from_mdcx_side_channels(
+            tags=["痴女", "渚光希"],
+            actors_all=["渚光希", "乱伦"],
+            code="YSN-611",
+            studio="NON",
+        )
+        # actor_all 原文保留（不再 junk 清洗）
+        self.assertEqual(names, ["渚光希", "乱伦"])
+
+    def test_parse_mdcx_no_actor_stays_empty(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "YSN-611.nfo"
             path.write_text(_YSN611, encoding="utf-8")
             meta = parse_nfo(path)
-        self.assertEqual(meta.get("actors"), ["渚光希"])
-        # 女优不应再留在 tag/genre 展示列表
-        self.assertNotIn("渚光希", meta.get("tags") or [])
-        self.assertNotIn("渚光希", meta.get("genres") or [])
-        # 类型词不能进女优
-        for junk in ("乱伦", "受孕", "平胸", "痴女"):
-            self.assertNotIn(junk, meta.get("actors") or [])
+        self.assertEqual(meta.get("actors") or [], [])
+        # 人名仍留在 genre（tag 与 genre 去重后可能只留一侧）
+        pool = list(meta.get("tags") or []) + list(meta.get("genres") or [])
+        self.assertIn("渚光希", pool)
 
-    def test_reject_ntr_genre_as_actress(self) -> None:
+    def test_parse_keeps_nfo_actors_as_is(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "FC2-668848.nfo"
+            path.write_text(_JUNK_ACTORS, encoding="utf-8")
+            meta = parse_nfo(path)
+        self.assertEqual(
+            meta.get("actors") or [],
+            ["アナル舐め", "玉舐め", "无套性交"],
+        )
+
+    def test_normalize_keeps_nfo_actors(self) -> None:
         from app.scrap_library.nfo import normalize_nfo_file
 
-        raw = """<?xml version='1.0' encoding='utf-8'?>
-<movie>
-  <num>FPRE-002</num>
-  <title>FPRE-002 测试标题足够长</title>
-  <studio>Fitch</studio>
-  <plot>足够长的剧情文本用来通过缺口检查。</plot>
-  <tag>出轨/NTR</tag>
-  <tag>天月あず</tag>
-  <tag>巨乳</tag>
-  <genre>口交</genre>
-  <genre>出轨/NTR</genre>
-  <genre>天月あず</genre>
-</movie>
-"""
         with tempfile.TemporaryDirectory() as td:
-            path = Path(td) / "FPRE-002.nfo"
-            path.write_text(raw, encoding="utf-8")
+            path = Path(td) / "FC2-668848.nfo"
+            path.write_text(_JUNK_ACTORS, encoding="utf-8")
             r = normalize_nfo_file(path, force=True)
-            self.assertTrue(r.get("ok") and r.get("changed"))
+            self.assertTrue(r.get("ok"))
             text = path.read_text(encoding="utf-8")
-        self.assertIn("<name>天月あず</name>", text)
-        self.assertIn("<type>Actor</type>", text)
-        self.assertNotIn("<name>出轨/NTR</name>", text)
-        self.assertIn("<genre>出轨/NTR</genre>", text)
-        self.assertIn("<tag>出轨/NTR</tag>", text)
-        self.assertIn("<genre>巨乳</genre>", text)
-        self.assertNotIn("actor_all", text)
-        self.assertIn("<![CDATA[", text)
+        self.assertIn("<name>アナル舐め</name>", text)
+        self.assertIn("<name>无套性交</name>", text)
+        self.assertIn("<tag>アナル舐め</tag>", text)
+        self.assertIn("<genre>アナル舐め</genre>", text)
 
-    def test_normalize_to_mdcx_layout(self) -> None:
+    def test_normalize_does_not_lift_tag_to_actor(self) -> None:
         from app.scrap_library.nfo import normalize_nfo_file
 
         with tempfile.TemporaryDirectory() as td:
@@ -117,19 +131,9 @@ class MdcxNfoActorTests(unittest.TestCase):
             r = normalize_nfo_file(path, force=True)
             self.assertTrue(r.get("ok") and r.get("changed"))
             text = path.read_text(encoding="utf-8")
-        self.assertIn("<actor>", text)
-        self.assertIn("<name>渚光希</name>", text)
-        self.assertIn("<type>Actor</type>", text)
+        self.assertNotIn("<name>渚光希</name>", text)
         self.assertIn("<genre>乱伦</genre>", text)
-        self.assertIn("<tag>乱伦</tag>", text)
-        self.assertIn("<genre>中出</genre>", text)
         self.assertIn("<tag>渚光希</tag>", text)
-        self.assertIn("片商: NON", text)
-        self.assertIn("<series>", text)
-        self.assertIn("https://www.javbus.com", text)
-        self.assertIn('<?xml version="1.0" encoding="UTF-8" ?>', text)
-        self.assertNotIn("actor_all", text)
-        self.assertNotIn("outlineshow", text)
 
     def test_parse_program_actor_unchanged(self) -> None:
         with tempfile.TemporaryDirectory() as td:

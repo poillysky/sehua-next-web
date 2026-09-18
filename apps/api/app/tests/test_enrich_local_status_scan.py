@@ -62,6 +62,7 @@ class LocalNfoStatusMapsTests(unittest.TestCase):
 
     def test_classify_disk_gaps(self) -> None:
         self.assertEqual(E._classify_disk_gaps([]), "done")
+        self.assertEqual(E._classify_disk_gaps(["no_plot"]), "done")
         self.assertEqual(E._classify_disk_gaps(["no_plot", "no_actress"]), "soft")
         self.assertEqual(E._classify_disk_gaps(["no_local"]), "fail")
         self.assertEqual(E._classify_disk_gaps(["thin_title", "no_plot"]), "fail")
@@ -84,7 +85,8 @@ class LocalNfoStatusMapsTests(unittest.TestCase):
                 prefix="ABP",
                 code="ABP-002",
                 title="足够长的完整标题内容",
-                plot="短",  # soft: no_plot
+                plot="足够长的简介文本，用来通过 no_plot 的长度阈值检查。",
+                actor="",  # soft: no_actress
             )
             _write_code(
                 root,
@@ -135,6 +137,14 @@ class LocalNfoStatusMapsTests(unittest.TestCase):
         self.assertEqual(out["soft"], 20)
         self.assertEqual(out["fail"], 3)
         self.assertEqual(out["pending"], 1)
+        # 库有分类时 soft 以库为准，允许从 tip 下降
+        out_soft = E._apply_local_status_totals(
+            {"pending": 1, "running": 0, "done": 100, "soft": 5, "fail": 1},
+            "japan_censored",
+        )
+        self.assertEqual(out_soft["done"], 100)
+        self.assertEqual(out_soft["soft"], 5)
+        self.assertEqual(out_soft["fail"], 3)
         E._clear_local_status_totals("japan_censored")
         out2 = E._apply_local_status_totals(
             {"pending": 1, "running": 0, "done": 2, "soft": 0, "fail": 0},
@@ -156,13 +166,23 @@ class LocalNfoStatusMapsTests(unittest.TestCase):
                 self.assertTrue(path.is_file())
                 E._LOCAL_STATUS_TOTALS.clear()  # noqa: SLF001
                 E._LOCAL_STATUS_TOTALS_LOADED = False  # noqa: SLF001
+                # 库分类全 0 → 完全采用 tip：本用例只验证落盘 / 重载往返，
+                # done=1001 只可能来自重新读回的文件。
                 out = E._apply_local_status_totals(
-                    {"pending": 0, "running": 0, "done": 500, "soft": 500, "fail": 500},
+                    {"pending": 0, "running": 0, "done": 0, "soft": 0, "fail": 0},
                     "fc2",
                 )
                 self.assertEqual(out["done"], 1001)
                 self.assertEqual(out["soft"], 2002)
                 self.assertEqual(out["fail"], 3)
+                # 库有分类时走合并规则：done/fail 取大、soft 以库为准
+                out_mix = E._apply_local_status_totals(
+                    {"pending": 0, "running": 0, "done": 500, "soft": 500, "fail": 1},
+                    "fc2",
+                )
+                self.assertEqual(out_mix["done"], 1001)
+                self.assertEqual(out_mix["soft"], 500)
+                self.assertEqual(out_mix["fail"], 3)
                 E._clear_local_status_totals("fc2")
 
 
@@ -246,7 +266,7 @@ class LocalNfoStatusMapsTests(unittest.TestCase):
                         ):
                             with mock.patch.object(
                                 E.embed_svc,
-                                "quality_incomplete_items",
+                                "list_region_code_items",
                                 return_value=shell_rows,
                             ):
                                 rows, total = E.iter_enrich_pending_items(

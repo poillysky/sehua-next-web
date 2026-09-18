@@ -61,7 +61,7 @@ def main() -> None:
     expanded = 0
     for key, prefs in groups.items():
         row = by_maker[key]
-        if row.get("kind") not in ("有码", "写真"):
+        if row.get("kind") not in ("有码",):
             continue
         old = [std_prefix(x) for x in (row.get("prefixes") or [])]
         old_set = set(old)

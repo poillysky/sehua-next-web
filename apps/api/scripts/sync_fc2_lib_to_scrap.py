@@ -1,22 +1,17 @@
 # -*- coding: utf-8 -*-
-"""把外部 FC2 库同步到刮削库（去掉制作商层，按番号一层显示）。
+"""把外部 FC2 库同步到刮削库（去掉制作商层，按前缀分目录）。
 
 源（常见 MDCx：制作商/番号）：
   E:/Project/FC2/{maker}/{FC2-xxxxx}/{FC2-xxxxx}.nfo + poster.jpg
 
-目标（本项目 scrap-library，扁平）：
-  media/scrap-library/FC2/{FC2-xxxxx}/{FC2-xxxxx}.nfo
-  media/scrap-library/FC2/{FC2-xxxxx}/poster.jpg
-
-扫描器对 FC2 识别为两层 region/code（prefix 记为 FC2）。
-
-默认只补缺失，不覆盖已有非空文件；不复制 strm/视频。
-同一番号多制作商时优先保留有 NFO+封面的目录。
+目标（与其它区一致的三层）：
+  media/scrap-library/FC2/FC2/{FC2-xxxxx}/…
+  media/scrap-library/FC2/FC2PPV/{FC2-PPV-xxxxx}/…
 
 用法：
   python -m scripts.sync_fc2_lib_to_scrap --dry-run
   python -m scripts.sync_fc2_lib_to_scrap
-  python -m scripts.sync_fc2_lib_to_scrap --flatten-only
+  python -m scripts.sync_fc2_lib_to_scrap --split-only
   python -m scripts.sync_fc2_lib_to_scrap --overwrite --limit 100
 """
 
@@ -36,6 +31,7 @@ _API_ROOT = Path(__file__).resolve().parents[1]
 if str(_API_ROOT) not in sys.path:
     sys.path.insert(0, str(_API_ROOT))
 
+from app.core.region_meta import fc2_fs_prefix, fc2_prefix_from_code, normalize_fc2_code  # noqa: E402
 from app.scrap_library.embed import get_settings, resolve_root  # noqa: E402
 
 _POSTER_CANDIDATES = (
@@ -167,6 +163,17 @@ def _write_bytes(dest: Path, data: bytes, *, dry_run: bool) -> bool:
         raise
 
 
+def _files_same_bytes(a: Path, b: Path) -> bool:
+    try:
+        if not a.is_file() or not b.is_file():
+            return False
+        if a.stat().st_size != b.stat().st_size:
+            return False
+        return a.read_bytes() == b.read_bytes()
+    except OSError:
+        return False
+
+
 def sync_one(
     *,
     src_code_dir: Path,
@@ -192,19 +199,39 @@ def sync_one(
     dest_nfo = dest_code_dir / f"{code}.nfo"
     dest_poster = dest_code_dir / "poster.jpg"
 
-    need_nfo = bool(src_nfo) and (overwrite or not _is_nonempty(dest_nfo, min_bytes=16))
-    need_poster = bool(src_poster) and (
-        overwrite or not _is_nonempty(dest_poster, min_bytes=256)
-    )
+    need_nfo = False
+    nfo_payload: bytes | None = None
+    if src_nfo is not None:
+        try:
+            nfo_payload = _ensure_num_in_nfo(src_nfo.read_bytes(), code)
+        except OSError as e:
+            out["error"] = f"read nfo: {e}"[:200]
+            return out
+        dest_ok = _is_nonempty(dest_nfo, min_bytes=16)
+        if not dest_ok:
+            need_nfo = True
+        elif overwrite:
+            try:
+                if dest_nfo.read_bytes() != nfo_payload:
+                    need_nfo = True
+            except OSError:
+                need_nfo = True
+
+    need_poster = False
+    if src_poster is not None:
+        dest_ok = _is_nonempty(dest_poster, min_bytes=256)
+        if not dest_ok:
+            need_poster = True
+        elif overwrite and not _files_same_bytes(src_poster, dest_poster):
+            need_poster = True
+
     if not need_nfo and not need_poster:
         out["skip"] = True
         return out
 
     try:
-        if need_nfo and src_nfo is not None:
-            raw = src_nfo.read_bytes()
-            raw = _ensure_num_in_nfo(raw, code)
-            _write_bytes(dest_nfo, raw, dry_run=dry_run)
+        if need_nfo and nfo_payload is not None:
+            _write_bytes(dest_nfo, nfo_payload, dry_run=dry_run)
             out["nfo"] = True
         if need_poster and src_poster is not None:
             _copy_file(src_poster, dest_poster, dry_run=dry_run)
@@ -215,20 +242,19 @@ def sync_one(
 
 
 def _normalize_code(name: str) -> str:
-    s = str(name or "").strip().upper().replace("_", "-")
-    if s.startswith("FC2PPV-"):
-        s = "FC2-PPV-" + s[7:]
-    elif s.startswith("FC2-PPV"):
-        pass
-    elif s.startswith("FC2PPV"):
-        rest = s[6:].lstrip("-")
-        s = f"FC2-PPV-{rest}" if rest else s
-    return s
+    return normalize_fc2_code(name)
 
 
 def _is_fc2_code_dir(name: str) -> bool:
     u = str(name or "").strip().upper()
     return u.startswith("FC2") and any(ch.isdigit() for ch in u)
+
+
+def _prefix_dir_name(code: str) -> str:
+    """磁盘前缀夹：FC2 或 FC2-PPV。"""
+    from app.core.region_meta import fc2_fs_prefix
+
+    return fc2_fs_prefix(code=code)
 
 
 def iter_code_dirs(src_root: Path):
@@ -256,76 +282,169 @@ def iter_code_dirs(src_root: Path):
         yield code, best[code]
 
 
-def flatten_legacy_prefix_layer(dest_region: Path, *, dry_run: bool) -> int:
-    """把旧布局 FC2/FC2/{CODE} 上移为 FC2/{CODE}。"""
-    nested = dest_region / "FC2"
-    if not nested.is_dir():
-        return 0
+def split_flat_into_prefix_dirs(dest_region: Path, *, dry_run: bool) -> dict[str, int]:
+    """把扁平 FC2/{CODE} 拆成 FC2/FC2|FC2-PPV/{CODE}。"""
+    stats = {"moved": 0, "skipped": 0, "conflicts": 0}
+    if not dest_region.is_dir():
+        return stats
     try:
-        kids = [p for p in nested.iterdir() if p.is_dir()]
+        kids = [p for p in dest_region.iterdir() if p.is_dir() and not p.name.startswith("_")]
     except OSError:
-        return 0
-    if not kids:
-        return 0
-    code_like = sum(1 for p in kids if _is_fc2_code_dir(p.name))
-    if code_like < max(1, len(kids) // 2):
-        return 0
-    moved = 0
+        return stats
+
     for src in kids:
-        dest = dest_region / src.name
-        if dest.exists():
-            if not dry_run:
-                for f in src.iterdir():
-                    if not f.is_file():
-                        continue
-                    t = dest / f.name
-                    if not t.exists():
+        name_u = src.name.strip().upper().replace("_", "-")
+        # 已是前缀夹（含旧名 FC2PPV）
+        if name_u in {"FC2", "FC2PPV", "FC2-PPV"}:
+            # 旧夹名 FC2PPV → FC2-PPV
+            if name_u == "FC2PPV":
+                dest_pref = dest_region / "FC2-PPV"
+                if dry_run:
+                    stats["moved"] += 1
+                    continue
+                if src.resolve() == dest_pref.resolve():
+                    continue
+                if dest_pref.exists():
+                    # 合并进已有 FC2-PPV
+                    for code_dir in list(src.iterdir()):
+                        if not code_dir.is_dir():
+                            continue
+                        code = _normalize_code(code_dir.name)
+                        target = dest_pref / code
+                        if target.exists():
+                            stats["conflicts"] += 1
+                            continue
                         try:
-                            shutil.move(str(f), str(t))
+                            if code_dir.name != code:
+                                tmp = code_dir.parent / code
+                                if not tmp.exists():
+                                    code_dir.rename(tmp)
+                                    code_dir = tmp
+                            code_dir.rename(target)
+                            stats["moved"] += 1
                         except OSError:
-                            pass
-                shutil.rmtree(src, ignore_errors=True)
-            moved += 1
+                            stats["conflicts"] += 1
+                    try:
+                        if src.is_dir() and not any(src.iterdir()):
+                            src.rmdir()
+                    except OSError:
+                        pass
+                else:
+                    try:
+                        src.rename(dest_pref)
+                        stats["moved"] += 1
+                    except OSError:
+                        stats["conflicts"] += 1
+            continue
+        if not _is_fc2_code_dir(src.name):
+            continue
+        code = _normalize_code(src.name)
+        pref = _prefix_dir_name(code)
+        dest = dest_region / pref / code
+        if dest.resolve() == src.resolve():
+            stats["skipped"] += 1
+            continue
+        if dest.exists():
+            # 目标已在三层：扁平残留常只剩 poster.jpg → 并入后删扁平
+            if dry_run:
+                stats["moved"] += 1
+                continue
+            merged = _absorb_flat_into_existing(src, dest)
+            if merged:
+                stats["moved"] += 1
+            else:
+                stats["conflicts"] += 1
             continue
         if dry_run:
-            moved += 1
+            stats["moved"] += 1
             continue
         try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if src.name != code:
+                tmp = src.parent / code
+                if tmp.exists() and tmp.resolve() != src.resolve():
+                    stats["conflicts"] += 1
+                    continue
+                if tmp.resolve() != src.resolve():
+                    src.rename(tmp)
+                    src = tmp
             src.rename(dest)
-            moved += 1
+            stats["moved"] += 1
         except OSError:
             try:
                 shutil.move(str(src), str(dest))
-                moved += 1
+                stats["moved"] += 1
             except OSError:
-                pass
-    if not dry_run:
+                stats["conflicts"] += 1
+    return stats
+
+
+def _absorb_flat_into_existing(src: Path, dest: Path) -> bool:
+    """把扁平残留（多半只有 poster）并进已有三层目录，然后删扁平夹。"""
+    try:
+        if not src.is_dir() or not dest.is_dir():
+            return False
+        if src.resolve() == dest.resolve():
+            return True
+        for child in list(src.iterdir()):
+            if not child.is_file():
+                continue
+            target = dest / child.name
+            if target.exists():
+                # 目标已有同名：扁平侧可丢（通常是重复 poster）
+                try:
+                    child.unlink()
+                except OSError:
+                    pass
+                continue
+            try:
+                child.rename(target)
+            except OSError:
+                try:
+                    shutil.move(str(child), str(target))
+                except OSError:
+                    return False
+        # 清空后删扁平
+        leftover = list(src.iterdir()) if src.is_dir() else []
+        if leftover:
+            # 仍有子目录等非文件 → 算冲突
+            return False
         try:
-            if nested.is_dir() and not any(nested.iterdir()):
-                nested.rmdir()
+            src.rmdir()
         except OSError:
-            pass
-    return moved
+            return False
+        return True
+    except OSError:
+        return False
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="同步外部 FC2 NFO/封面到刮削库（无制作商层）")
-    ap.add_argument("--src", default=r"E:\Project\FC2", help="外部库根（maker/CODE）")
+    ap = argparse.ArgumentParser(description="同步外部 FC2 NFO/封面到刮削库（前缀分目录）")
+    ap.add_argument("--src", default=r"E:\Project\media\FC2", help="外部库根（maker/CODE）")
     ap.add_argument("--dest-root", default="", help="刮削库根，默认 settings scrap-library")
     ap.add_argument("--region-label", default="FC2", help="目标分区目录名")
-    ap.add_argument("--overwrite", action="store_true", help="覆盖已有 NFO/封面")
+    ap.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="库内已有时：内容不同则以源为准覆盖；相同则跳过",
+    )
     ap.add_argument("--dry-run", action="store_true", help="只统计不写盘")
     ap.add_argument("--limit", type=int, default=0, help="最多处理 N 个番号（0=全部）")
     ap.add_argument("--workers", type=int, default=8, help="并行复制线程")
     ap.add_argument(
+        "--split-only",
+        action="store_true",
+        help="只把扁平 FC2/{CODE} 拆成 FC2/FC2|FC2PPV/{CODE}",
+    )
+    ap.add_argument(
         "--flatten-only",
         action="store_true",
-        help="只把旧 FC2/FC2/{CODE} 上移为 FC2/{CODE}",
+        help=argparse.SUPPRESS,  # 旧参数保留但改走 split
     )
     args = ap.parse_args()
 
     src_root = Path(args.src).expanduser().resolve()
-    if not args.flatten_only and not src_root.is_dir():
+    if not args.split_only and not args.flatten_only and not src_root.is_dir():
         print(f"源目录不存在: {src_root}")
         return 2
 
@@ -338,12 +457,17 @@ def main() -> int:
 
     print(f"src      = {src_root}")
     print(f"dest     = {dest_region}")
-    print(f"layout   = {region}/{{CODE}}  (flat, no maker/prefix)")
+    print(f"layout   = {region}/FC2|FC2PPV/{{CODE}}")
     print(f"overwrite= {bool(args.overwrite)} dry_run={bool(args.dry_run)}")
 
-    moved = flatten_legacy_prefix_layer(dest_region, dry_run=bool(args.dry_run))
-    print(f"flatten  = {moved:,} (FC2/FC2/CODE → FC2/CODE)")
-    if args.flatten_only:
+    split_stats = split_flat_into_prefix_dirs(
+        dest_region, dry_run=bool(args.dry_run)
+    )
+    print(
+        f"split    = moved={split_stats['moved']:,} "
+        f"skip={split_stats['skipped']:,} conflict={split_stats['conflicts']:,}"
+    )
+    if args.split_only or args.flatten_only:
         return 0
 
     print(f"workers  = {max(1, int(args.workers or 8))}")
@@ -351,7 +475,8 @@ def main() -> int:
     jobs: list[tuple[str, Path, Path]] = []
     lim = max(0, int(args.limit or 0))
     for code, code_dir in iter_code_dirs(src_root):
-        dest = dest_region / code
+        pref = _prefix_dir_name(code)
+        dest = dest_region / pref / code
         jobs.append((code, code_dir, dest))
         if lim and len(jobs) >= lim:
             break
@@ -373,7 +498,8 @@ def main() -> int:
             overwrite=bool(args.overwrite),
             dry_run=bool(args.dry_run),
         )
-        one["rel"] = f"{region}/{code}"
+        pref = _prefix_dir_name(code)
+        one["rel"] = f"{region}/{pref}/{code}"
         return one
 
     done = 0

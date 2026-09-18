@@ -1,4 +1,4 @@
-"""七区元数据与番号前缀规范化（供 prefix 扫库 / 搜索共用）。"""
+"""六区元数据与番号前缀规范化（供 prefix 扫库 / 搜索共用）。"""
 
 from __future__ import annotations
 
@@ -14,8 +14,17 @@ REGION_META: dict[str, dict[str, str]] = {
 _ORDER = [str(x) for x in (_REGION_DOC.get("order") or [])]
 REGION_ORDER = [x for x in _ORDER if x in REGION_META] or list(REGION_META.keys())
 
-# 仅这两区把女优名写入索引副文案；其它区只保留标题
-FORUM_ACTORS_INDEX_REGIONS = frozenset({"japan_censored", "japan_gravure"})
+# 仅日本有码把女优名写入索引副文案；其它区只保留标题
+# （原 japan_gravure / 日本写真已并入 japan_censored）
+FORUM_ACTORS_INDEX_REGIONS = frozenset({"japan_censored"})
+
+# 旧区 id / 中文标签 → 现 canonical（写真并入有码）
+_LEGACY_REGION_REDIRECT: dict[str, str] = {
+    "japan_gravure": "japan_censored",
+    "gravure": "japan_censored",
+    "写真": "japan_censored",
+    "日本写真": "japan_censored",
+}
 
 
 def std_prefix(prefix: str) -> str:
@@ -23,23 +32,43 @@ def std_prefix(prefix: str) -> str:
 
 
 def resolve_fs_region(region: str | None) -> str | None:
-    """前端 / 白名单 region → 七区 id。"""
-    key = str(region or "").strip().lower()
-    if not key:
+    """前端 / 白名单 region → 六区 id（写真已并入有码）。"""
+    raw = str(region or "").strip()
+    if not raw:
         return None
-    if key in ("japan", "gravure", "jp"):
-        return "japan_gravure"
+    key = raw.lower()
+    # 别名表（含 japan_gravure → japan_censored）
+    aliases = {
+        str(k).strip().lower(): str(v).strip()
+        for k, v in dict(_REGION_DOC.get("aliases") or {}).items()
+        if str(k).strip() and str(v).strip()
+    }
+    if key in aliases:
+        mapped = aliases[key]
+        if mapped in REGION_META:
+            return mapped
+        # aliases 里 japan → japan（粗粒度）等：再走下面
+        key = mapped.lower()
+    if raw in _LEGACY_REGION_REDIRECT:
+        return _LEGACY_REGION_REDIRECT[raw]
+    if key in _LEGACY_REGION_REDIRECT:
+        return _LEGACY_REGION_REDIRECT[key]
     if key in ("amateur", "素人"):
         return "japan_amateur"
     if key in ("fc2ppv",):
         return "fc2"
     if key in REGION_META:
         return key
+    # 中文全称
+    for rid, meta in REGION_META.items():
+        label = str(meta.get("label") or "")
+        if raw == label or key == label.casefold():
+            return rid
     return None
 
 
 def indexes_forum_actors(region: str | None) -> bool:
-    """是否索引女优（仅日本有码 / 日本写真）。"""
+    """是否索引女优（日本有码，含原写真前缀）。"""
     rid = resolve_fs_region(region)
     return bool(rid and rid in FORUM_ACTORS_INDEX_REGIONS)
 
@@ -52,6 +81,41 @@ def is_fc2_plate_maker_name(name: str) -> bool:
     return s in {"fc2", "fc2ppv", "fc2ppvfc2"} or s.startswith("fc2fc2") or bool(
         re.fullmatch(r"fc2(ppv)?", s)
     )
+
+
+def fc2_prefix_from_code(code: str) -> str:
+    """番号 → catalog 前缀键：FC2 或 FC2PPV。"""
+    u = str(code or "").strip().upper().replace("_", "-")
+    compact = re.sub(r"[\s\-]", "", u)
+    if compact.startswith("FC2PPV") or u.startswith("FC2-PPV"):
+        return "FC2PPV"
+    return "FC2"
+
+
+def fc2_fs_prefix(prefix: str = "", *, code: str = "") -> str:
+    """catalog 前缀 / 番号 → 磁盘前缀夹名：FC2 或 FC2-PPV。"""
+    p = str(prefix or "").strip().upper().replace("_", "-")
+    if not p and code:
+        p = fc2_prefix_from_code(code)
+    compact = re.sub(r"[\s\-]", "", p)
+    if compact.startswith("FC2PPV") or p in {"FC2-PPV", "FC2PPV"}:
+        return "FC2-PPV"
+    if compact == "FC2" or p == "FC2":
+        return "FC2"
+    if code:
+        return "FC2-PPV" if fc2_prefix_from_code(code) == "FC2PPV" else "FC2"
+    return p or "FC2"
+
+
+def normalize_fc2_code(code: str) -> str:
+    """统一番号写法：FC2PPV-123 → FC2-PPV-123；普通保持 FC2-{num}。"""
+    s = str(code or "").strip().upper().replace("_", "-")
+    if s.startswith("FC2PPV-"):
+        return "FC2-PPV-" + s[7:]
+    if s.startswith("FC2PPV") and not s.startswith("FC2-PPV"):
+        rest = s[6:].lstrip("-")
+        return f"FC2-PPV-{rest}" if rest else s
+    return s
 
 
 def db_region_for(fs_region: str | None) -> str | None:

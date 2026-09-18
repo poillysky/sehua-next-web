@@ -6,12 +6,18 @@ import {
 } from '@/lib/api';
 import { makerSourceLabel } from './makersUi';
 
-/** 与后端 region_meta / 库内 region 列对齐的别名 */
+/** 与后端 region_meta / 库内 region 列对齐的别名（写真并入有码） */
 const REGION_ALIAS_MAP: Record<string, string[]> = {
-  japan_censored: ['japan_censored', '日本有码', '有码'],
+  japan_censored: [
+    'japan_censored',
+    '日本有码',
+    '有码',
+    'japan_gravure',
+    '日本写真',
+    '写真',
+  ],
   japan_uncensored: ['japan_uncensored', '日本无码', '无码'],
   japan_amateur: ['japan_amateur', '日本素人', '素人'],
-  japan_gravure: ['japan_gravure', '日本写真', '写真'],
   fc2: ['fc2', 'FC2'],
   china: ['china', '国产', '国产无码'],
   western: ['western', '欧美', '欧美无码'],

@@ -189,7 +189,7 @@ def harvest_latest_via_search(
 ) -> dict[str, Any]:
     """综合站搜索前缀 → 抽番号 → 排序取最大（约 1 次请求/前缀）。
 
-    - 有码/写真：MissAV ``/search/{prefix}``
+    - 有码（含原写真前缀）：MissAV ``/search/{prefix}``
     - 素人：MGStage 搜索（MissAV 对 200GANA 等数字前缀较弱）
     """
     import re
@@ -199,7 +199,6 @@ def harvest_latest_via_search(
 
     if region_id not in {
         "japan_censored",
-        "japan_gravure",
         "japan_amateur",
         "china",
         "western",

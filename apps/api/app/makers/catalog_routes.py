@@ -43,12 +43,11 @@ SOURCES = (
     {"id": "madou", "label": "Madou"},
 )
 
-# 七区（顶栏）；列表以 JavBus 实测可用路径为主
+# 六区（顶栏）；列表以 JavBus 实测可用路径为主（原写真并入有码）
 KIND_ORDER = (
     "japan_censored",
     "japan_uncensored",
     "japan_amateur",
-    "japan_gravure",
     "fc2",
     "china",
     "western",
@@ -58,13 +57,12 @@ KIND_LABELS: dict[str, str] = {
     "japan_censored": "有码",
     "japan_uncensored": "无码",
     "japan_amateur": "素人",
-    "japan_gravure": "写真",
     "fc2": "FC2",
     "china": "国产",
     "western": "欧美",
 }
 
-# 仅保留与七区 100% 对应的官方栏目；一个站点一行
+# 仅保留与六区 100% 对应的官方栏目；一个站点一行
 KIND_SHELVES: dict[str, list[dict[str, str]]] = {
     "japan_censored": [
         {"id": "javbus", "label": "JavBus", "provider": "javbus", "list": "/"},
@@ -109,7 +107,6 @@ KIND_SHELVES: dict[str, list[dict[str, str]]] = {
             "list": "/zh/amateurjav_list/all/{page}.html",
         },
     ],
-    "japan_gravure": [],
     "fc2": [
         {
             "id": "missav",
@@ -448,7 +445,7 @@ def _tag_kind_items(
         row = dict(it)
         row["kind"] = kind
         row["provider"] = provider
-        row["source"] = kind  # 顶栏七区 id，前端当 source 用
+        row["source"] = kind  # 顶栏六区 id，前端当 source 用
         out.append(row)
     return out
 
@@ -597,7 +594,7 @@ def _kind_charts(kind: str, chart: str, page: int) -> dict[str, Any]:
 
 
 def _kind_search(kind: str, q: str, page: int) -> dict[str, Any]:
-    # 七区搜索优先 JavBus；未启用时回落空
+    # 六区搜索优先 JavBus；未启用时回落空
     if makers_settings.javbus_enabled():
         data = _javbus_search(q, page)
         items = _tag_kind_items(data.get("items") or [], kind=kind, provider="javbus")

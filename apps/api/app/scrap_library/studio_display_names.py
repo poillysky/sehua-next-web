@@ -25,6 +25,9 @@ _SEP_RE = re.compile(r"[\s\-_.·・/／\\]+")
 
 # 别名 / 常见 NFO 写法 → MAKER_I18N 主名（或下方 CARD 覆盖的稳定主名）
 STUDIO_ALIASES: dict[str, str] = studio_alias_map()
+# 厂牌墙：FC2 与 FC2-PPV 分开；磁盘夹名 FC2-PPV 对应 catalog 前缀 FC2PPV
+for _fc2_alias in ("FC2 PPV", "FC2PPV", "FC2_PPV"):
+    STUDIO_ALIASES[_fc2_alias] = "FC2-PPV"
 
 # 货架短名：优先中文或英文品牌名（避免日文假名）
 STUDIO_CARD_LABEL: dict[str, str] = studio_card_label_map()
@@ -223,6 +226,9 @@ def studio_filter_norm_keys(name: str) -> list[str]:
 # 前缀 → 厂牌主名（NFO 缺片商时按前缀归位）
 # 优先于此表；其余从 PREFIX_I18N / av-makers 推导
 PREFIX_STUDIO_MAP: dict[str, str] = prefix_studio_override_map()
+PREFIX_STUDIO_MAP["FC2PPV"] = "FC2-PPV"
+PREFIX_STUDIO_MAP["FC2-PPV"] = "FC2-PPV"
+PREFIX_STUDIO_MAP["FC2"] = "FC2"
 
 
 
@@ -279,33 +285,48 @@ def _prefix_to_maker() -> dict[str, str]:
 
 
 def _catalog_maker_key(ent: dict[str, Any]) -> str:
-    """从 catalog 前缀条目抽出可归位的厂牌主名。"""
-    for field in ("maker_en", "maker", "maker_zh", "maker_ja"):
+    """从 catalog 前缀条目抽出可归位的厂牌主名。
+
+    注意：不要优先盲信 maker_en。很多条目英文名（如 JET Eizou / Momotaro）
+    不在 makers.json 主名表里，会导致厂牌墙简介解析为空。
+    """
+    candidates: list[str] = []
+    for field in ("maker", "maker_zh", "maker_ja", "maker_en"):
         raw = str(ent.get(field) or "").strip()
         if not raw:
             continue
-        # 合成展示「A / B」取左侧主名
-        first = raw.split("/")[0].strip() if "/" in raw else raw
-        for cand in (raw, first):
-            c = str(cand or "").strip()
-            if not c:
-                continue
-            if c in MAKER_I18N or c in STUDIO_ALIASES or c in STUDIO_CARD_LABEL:
-                return STUDIO_ALIASES.get(c, c)
-            # 别名 / 展示名反查
-            ck = resolve_studio_canon_key(c)
-            if ck:
-                # 尽量回到 MAKER_I18N 主 key
-                for mk in MAKER_I18N:
-                    if studio_norm_key(mk) == ck:
-                        return mk
-                disp = resolve_studio_display(c)
-                if disp:
-                    for mk, label in STUDIO_CARD_LABEL.items():
-                        if label == disp or studio_norm_key(label) == ck:
-                            return mk
-                return c
-    return ""
+        candidates.append(raw)
+        # 「A / B」两侧都试，避免只取英文左侧
+        for part in re.split(r"[/／]", raw):
+            p = part.strip()
+            if p and p not in candidates:
+                candidates.append(p)
+
+    def _hit(c: str) -> str:
+        if c in MAKER_I18N or c in STUDIO_ALIASES or c in STUDIO_CARD_LABEL:
+            return STUDIO_ALIASES.get(c, c)
+        ck = resolve_studio_canon_key(c)
+        if not ck:
+            return ""
+        for mk in MAKER_I18N:
+            if studio_norm_key(mk) == ck:
+                return mk
+        disp = resolve_studio_display(c)
+        if disp:
+            for mk, label in STUDIO_CARD_LABEL.items():
+                if label == disp or studio_norm_key(label) == ck:
+                    return mk
+            for mk in MAKER_I18N:
+                if preferred_studio_label(mk) == disp:
+                    return mk
+        return ""
+
+    for c in candidates:
+        hit = _hit(c)
+        if hit:
+            return hit
+    # 兜底：仍无命中时退回第一条候选（保持旧行为可追踪）
+    return candidates[0] if candidates else ""
 
 
 # region_id → (catalog_mtime, prefix→maker_key)
@@ -369,9 +390,25 @@ def prefix_to_maker_for_region(region: str = "") -> dict[str, str]:
 
 
 def invalidate_region_prefix_maps() -> None:
-    """catalog 写回后可调用，丢掉 region 缓存。"""
+    """catalog / makers 写回后可调用，丢掉 region 与别名缓存。"""
+    global STUDIO_ALIASES, STUDIO_CARD_LABEL
     _region_prefix_maps.clear()
     _prefix_to_maker.cache_clear()
+    _indexes.cache_clear()
+    try:
+        from app.core.maps_paths import (
+            makers_doc,
+            studio_alias_map,
+            studio_card_label_map,
+        )
+
+        makers_doc.cache_clear()
+        STUDIO_ALIASES = studio_alias_map()
+        STUDIO_CARD_LABEL = studio_card_label_map()
+        for _fc2_alias in ("FC2 PPV", "FC2PPV", "FC2_PPV"):
+            STUDIO_ALIASES[_fc2_alias] = "FC2-PPV"
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def resolve_studio_for_prefix(prefix: str, region: str = "") -> str:
