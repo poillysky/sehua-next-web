@@ -8,6 +8,8 @@ WORKDIR /src
 COPY apps/web/package.json apps/web/package-lock.json ./
 RUN npm ci
 COPY apps/web/ ./
+# sync-maps.mjs 从 ../maps（即 /maps）复制 code-shapes / sehuatang-forum
+COPY apps/maps /maps
 ENV NEXT_TELEMETRY_DISABLED=1 \
     NEXT_PUBLIC_API_BASE=/api \
     API_INTERNAL_BASE=http://127.0.0.1:8020
