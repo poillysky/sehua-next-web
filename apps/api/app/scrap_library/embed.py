@@ -2133,8 +2133,12 @@ def _pick_local_image(
 
 
 def _scan_workers() -> int:
-    cpus = os.cpu_count() or 4
-    return max(8, min(32, cpus * 2))
+    from app.core.container_budget import io_threads, memory_class
+
+    if memory_class() == "host":
+        cpus = os.cpu_count() or 4
+        return max(8, min(32, cpus * 2))
+    return io_threads(floor=2, host_max=4)
 
 
 _POSTER_DL_WORKERS = 3
@@ -2777,6 +2781,27 @@ def _normalize_ingest_mode(mode: str | None) -> str:
     return m if m in {"full", "meta", "embed"} else "full"
 
 
+def _meta_iter_batches(
+    sql: str,
+    params: list[Any] | tuple[Any, ...] | None = None,
+    *,
+    batch_size: int = 200,
+    cursor_name: str = "meta_scan",
+):
+    """元库服务端游标分批吐行。设置里的全表任务不要 fetchall。"""
+    size = max(50, int(batch_size or 200))
+    pool = get_meta_pool()
+    with pool.connection() as conn:
+        with conn.cursor(name=cursor_name) as cur:
+            cur.itersize = size
+            cur.execute(sql, params or [])
+            while True:
+                rows = cur.fetchmany(size)
+                if not rows:
+                    break
+                yield rows
+
+
 def vectorize_db_embeddings(
     *,
     batch_size: int = 32,
@@ -2816,59 +2841,27 @@ def vectorize_db_embeddings(
 
     prog("diff", percent=8, label="筛选待向量化…", done=0, total=None)
     pool = get_meta_pool()
-    rows: list[dict[str, Any]] = []
-    with pool.connection() as conn:
-        with conn.cursor() as cur:
-            if force:
-                cur.execute(
-                    f"""
-                    SELECT item_id, source_text, dim
-                    FROM {TABLE}
-                    WHERE {_NOT_SKELETON_SQL}
-                    ORDER BY item_id
-                    """
-                )
-            else:
-                cur.execute(
-                    f"""
-                    SELECT item_id, source_text, dim
-                    FROM {TABLE}
-                    WHERE {_NOT_SKELETON_SQL}
-                      AND embedding = %s::vector
-                    ORDER BY item_id
-                    """,
-                    (zero_lit,),
-                )
-            for raw in cur.fetchall() or []:
-                if isinstance(raw, dict):
-                    rows.append(raw)
-                else:
-                    rows.append(
-                        {
-                            "item_id": raw[0],
-                            "source_text": raw[1],
-                            "dim": raw[2],
-                        }
-                    )
-    if limit is not None and int(limit) > 0:
-        rows = rows[: int(limit)]
-    if done_ids:
-        before = len(rows)
-        rows = [
-            r
-            for r in rows
-            if str(r.get("item_id") or "") not in done_ids
-        ]
-        skipped_done = before - len(rows)
-        if skipped_done:
-            _push_log(f"续跑跳过已编码 {skipped_done:,}")
-
-    total = len(rows)
+    where_sql = _NOT_SKELETON_SQL
+    count_params: list[Any] = []
+    if not force:
+        where_sql += " AND embedding = %s::vector"
+        count_params.append(zero_lit)
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"SELECT count(*)::int AS n FROM {TABLE} WHERE {where_sql}",
+            count_params,
+        )
+        counted = cur.fetchone() or {}
+        total_all = int(
+            (counted.get("n") if isinstance(counted, dict) else counted[0]) or 0
+        )
+    cap = int(limit) if limit is not None and int(limit) > 0 else 0
+    scan_total = min(total_all, cap) if cap else total_all
     _push_log(
-        f"待向量化 {total:,}"
+        f"待扫描 {scan_total:,}"
         + (" · 全量重嵌" if force else " · 仅零向量")
     )
-    if total == 0:
+    if scan_total == 0:
         prog("done", percent=100, label="无需向量化", done=0, total=0)
         return {
             "written": 0,
@@ -2882,7 +2875,7 @@ def vectorize_db_embeddings(
             "mode": "embed",
         }
 
-    prog("embed", percent=12, label=f"编码 {total}", done=0, total=total)
+    prog("embed", percent=12, label=f"编码 0/{scan_total}", done=0, total=scan_total)
     _push_log("向量模型预热…")
     encode_texts_sync(["."], query=False)
     _push_log("向量模型已预热")
@@ -2892,6 +2885,8 @@ def vectorize_db_embeddings(
     emb_dim = int(cfg["dim"])
     bs = max(1, min(64, int(batch_size)))
     written = 0
+    skipped_done = 0
+    scanned = 0
     update_sql = f"""
         UPDATE {TABLE} SET
           model = %s,
@@ -2900,8 +2895,11 @@ def vectorize_db_embeddings(
           updated_at = now()
         WHERE item_id = %s
     """
-    for i in range(0, total, bs):
-        chunk = rows[i : i + bs]
+
+    def _encode_chunk(chunk: list[dict[str, Any]]) -> None:
+        nonlocal written
+        if not chunk:
+            return
         texts = [str(r.get("source_text") or "") for r in chunk]
         vecs = encode_texts_sync(texts, query=False)
         if len(vecs) != len(chunk):
@@ -2928,21 +2926,63 @@ def vectorize_db_embeddings(
             iid = str(r.get("item_id") or "")
             if iid:
                 done_ids.add(iid)
-        pct = 12 + int(80 * written / max(1, total))
+        pct = 12 + int(80 * scanned / max(1, scan_total))
         prog(
             "embed",
             percent=min(94, pct),
-            label=f"编码 {written}/{total}",
+            label=f"编码 {written}/{scan_total}",
             done=written,
-            total=total,
+            total=scan_total,
         )
         _persist_embed_job(
             status="running",
             params={"force": bool(force), "root": cfg_root, "mode": "embed"},
             doneIds=sorted(done_ids)[-8000:],
         )
-        if written == len(chunk) or written % max(bs * 4, 1) == 0:
-            _push_log(f"编码 {written}/{total}")
+
+    select_sql = f"""
+        SELECT item_id, source_text, dim
+        FROM {TABLE}
+        WHERE {where_sql}
+        ORDER BY item_id
+    """
+    buf: list[dict[str, Any]] = []
+    for raw_batch in _meta_iter_batches(
+        select_sql,
+        count_params,
+        batch_size=200,
+        cursor_name="scrap_embed_vec",
+    ):
+        for raw in raw_batch:
+            if cap and scanned >= cap:
+                break
+            scanned += 1
+            if isinstance(raw, dict):
+                row = raw
+            else:
+                row = {
+                    "item_id": raw[0],
+                    "source_text": raw[1],
+                    "dim": raw[2],
+                }
+            iid = str(row.get("item_id") or "")
+            if iid and iid in done_ids:
+                skipped_done += 1
+                continue
+            buf.append(row)
+            if len(buf) >= bs:
+                _encode_chunk(buf)
+                buf = []
+                if written == bs or written % max(bs * 4, 1) == 0:
+                    _push_log(f"编码 {written}/{scan_total}")
+        if cap and scanned >= cap:
+            break
+    if buf:
+        _encode_chunk(buf)
+        _push_log(f"编码 {written}/{scan_total}")
+    if skipped_done:
+        _push_log(f"续跑跳过已编码 {skipped_done:,}")
+    total = scan_total
 
     try:
         ensure_hnsw()
@@ -5879,29 +5919,130 @@ def optimize_actress_metadata(
     )
     root = resolve_root(get_settings().get("root"))
     pool = get_meta_pool()
+    like = "%女优：%"
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            f"""
-            SELECT item_id, code, rel_path, source_text, model, dim, title
-            FROM {TABLE}
-            WHERE source_text LIKE %s
-            ORDER BY code
-            """,
-            ("%女优：%",),
+            f"SELECT count(*)::int AS n FROM {TABLE} WHERE source_text LIKE %s",
+            (like,),
         )
-        rows = [dict(r) for r in cur.fetchall()]
-    if limit is not None and int(limit) > 0:
-        rows = rows[: int(limit)]
-    total = len(rows)
+        counted = cur.fetchone() or {}
+        total_all = int(
+            (counted.get("n") if isinstance(counted, dict) else counted[0]) or 0
+        )
+    cap = int(limit) if limit is not None and int(limit) > 0 else 0
+    total = min(total_all, cap) if cap else total_all
     _actress_opt_log(f"待检查 {total:,} 条含女优行")
     _actress_opt_progress(
         stage="scan", percent=2, label=f"检查 {total}", done=0, total=total
     )
 
+    cfg = resolve_embed_config()
+    if not cfg.get("enabled"):
+        reembed = False
+        _actress_opt_log("嵌入未启用 · 仅更新文本")
+    bs = max(8, min(64, int(batch_size or 32)))
+    written = 0
+    reembedded = 0
+    samples: list[dict[str, Any]] = []
+
+    def _flush_actress(chunk: list[dict[str, Any]]) -> None:
+        nonlocal written, reembedded
+        if not chunk:
+            return
+        with pool.connection() as conn, conn.cursor() as cur:
+            if reembed:
+                texts = [p["source_text"] for p in chunk]
+                vecs = encode_texts_sync(texts, query=False)
+                if not vecs or len(vecs) != len(chunk):
+                    raise RuntimeError("向量编码失败")
+                for p, vec in zip(chunk, vecs):
+                    if len(vec) != int(p["dim"]):
+                        raise RuntimeError("向量维度不匹配")
+                    cur.execute(
+                        f"""
+                        UPDATE {TABLE}
+                        SET source_text = %s,
+                            content_sha = %s,
+                            embedding = %s::vector,
+                            updated_at = now()
+                        WHERE item_id = %s
+                        """,
+                        (
+                            p["source_text"],
+                            p["content_sha"],
+                            _vec_literal(vec),
+                            p["item_id"],
+                        ),
+                    )
+                    reembedded += 1
+                    written += 1
+            else:
+                for p in chunk:
+                    cur.execute(
+                        f"""
+                        UPDATE {TABLE}
+                        SET source_text = %s,
+                            content_sha = %s,
+                            updated_at = now()
+                        WHERE item_id = %s
+                        """,
+                        (p["source_text"], p["content_sha"], p["item_id"]),
+                    )
+                    written += 1
+            conn.commit()
+        for p in chunk:
+            iid = str(p.get("item_id") or "")
+            if iid:
+                done_ids.add(iid)
+        _actress_opt_progress(
+            stage="embed" if reembed else "patch",
+            percent=min(94, 45 + int(50 * written / max(1, total))),
+            label=f"写入 {written}",
+            done=written,
+            total=total,
+        )
+        _persist_actress_opt_job(
+            status="running",
+            params={
+                "reembed": bool(reembed),
+                "force": bool(force),
+                "limit": limit,
+            },
+            doneIds=sorted(done_ids)[-8000:],
+        )
+
+    def _actress_rows():
+        seen = 0
+        sql = f"""
+            SELECT item_id, code, rel_path, source_text, model, dim, title
+            FROM {TABLE}
+            WHERE source_text LIKE %s
+            ORDER BY item_id
+        """
+        for batch in _meta_iter_batches(
+            sql, (like,), batch_size=200, cursor_name="actress_opt_scan"
+        ):
+            for raw in batch:
+                if cap and seen >= cap:
+                    return
+                seen += 1
+                if isinstance(raw, dict):
+                    yield raw
+                else:
+                    yield {
+                        "item_id": raw[0],
+                        "code": raw[1],
+                        "rel_path": raw[2],
+                        "source_text": raw[3],
+                        "model": raw[4],
+                        "dim": raw[5],
+                        "title": raw[6],
+                    }
+
     actress_re = re.compile(r"^(女优：)(.+)$", re.M)
     pending: list[dict[str, Any]] = []
     unchanged = 0
-    for i, row in enumerate(rows, 1):
+    for i, row in enumerate(_actress_rows(), 1):
         iid = str(row.get("item_id") or "")
         if iid and iid in done_ids:
             unchanged += 1
@@ -5980,6 +6121,11 @@ def optimize_actress_metadata(
                 "new": " ".join(polished[:8]) if polished else "(removed)",
             }
         )
+        if len(samples) < 5:
+            samples.append(pending[-1])
+        if len(pending) >= bs:
+            _flush_actress(pending)
+            pending.clear()
         if i == 1 or i % 2000 == 0 or i == total:
             _actress_opt_progress(
                 stage="diff",
@@ -5989,15 +6135,14 @@ def optimize_actress_metadata(
                 total=total,
             )
 
-    _actress_opt_log(
-        f"需更新 {len(pending):,} · 未变 {unchanged:,}"
-    )
-    if pending[:5]:
-        for s in pending[:5]:
-            _actress_opt_log(f"例 {s.get('code')} · {s['old']} → {s['new']}")
+    if pending:
+        _flush_actress(pending)
+        pending.clear()
+    _actress_opt_log(f"需更新 {written:,} · 未变 {unchanged:,}")
+    for s in samples:
+        _actress_opt_log(f"例 {s.get('code')} · {s['old']} → {s['new']}")
 
-    written = 0
-    if not pending:
+    if written == 0:
         _actress_opt_progress(
             stage="done", percent=100, label="无需更新", done=0, total=total
         )
@@ -6009,80 +6154,6 @@ def optimize_actress_metadata(
             "reembedded": 0,
             "maps": maps_info,
         }
-
-    cfg = resolve_embed_config()
-    if not cfg.get("enabled"):
-        reembed = False
-        _actress_opt_log("嵌入未启用 · 仅更新文本")
-
-    bs = max(8, min(64, int(batch_size or 32)))
-    reembedded = 0
-    with pool.connection() as conn, conn.cursor() as cur:
-        for i in range(0, len(pending), bs):
-            chunk = pending[i : i + bs]
-            if reembed:
-                texts = [p["source_text"] for p in chunk]
-                vecs = encode_texts_sync(texts, query=False)
-                if not vecs or len(vecs) != len(chunk):
-                    raise RuntimeError("向量编码失败")
-                for p, vec in zip(chunk, vecs):
-                    if len(vec) != int(p["dim"]):
-                        raise RuntimeError("向量维度不匹配")
-                    cur.execute(
-                        f"""
-                        UPDATE {TABLE}
-                        SET source_text = %s,
-                            content_sha = %s,
-                            embedding = %s::vector,
-                            updated_at = now()
-                        WHERE item_id = %s
-                        """,
-                        (
-                            p["source_text"],
-                            p["content_sha"],
-                            _vec_literal(vec),
-                            p["item_id"],
-                        ),
-                    )
-                    reembedded += 1
-                    written += 1
-            else:
-                for p in chunk:
-                    cur.execute(
-                        f"""
-                        UPDATE {TABLE}
-                        SET source_text = %s,
-                            content_sha = %s,
-                            updated_at = now()
-                        WHERE item_id = %s
-                        """,
-                        (p["source_text"], p["content_sha"], p["item_id"]),
-                    )
-                    written += 1
-            conn.commit()
-            for p in chunk:
-                iid = str(p.get("item_id") or "")
-                if iid:
-                    done_ids.add(iid)
-            done = min(len(pending), i + len(chunk))
-            _actress_opt_progress(
-                stage="embed" if reembed else "patch",
-                percent=45 + int(50 * done / max(1, len(pending))),
-                label=f"写入 {done}/{len(pending)}",
-                done=done,
-                total=len(pending),
-            )
-            _persist_actress_opt_job(
-                status="running",
-                params={
-                    "reembed": bool(reembed),
-                    "force": bool(force),
-                    "limit": limit,
-                },
-                doneIds=sorted(done_ids)[-8000:],
-            )
-            if done == len(chunk) or done % (bs * 4) == 0:
-                _actress_opt_log(f"写入 {done}/{len(pending)}")
 
     try:
         _FACETS_CACHE.clear()

@@ -4378,8 +4378,26 @@ def _region_local_dirs(root: Path, region: str) -> list[Path]:
 _folder_gaps_cache: dict[str, tuple[tuple[Any, ...], tuple[str, list[str]]]] = {}
 _FOLDER_GAPS_CACHE_CAP = 160_000
 _folder_gaps_cache_lock = threading.Lock()
-# 清空·扫描磁盘分类并行度（I/O 密集，略高于核数）
-_LOCAL_SCAN_WORKERS = max(4, min(24, (os.cpu_count() or 8) * 2))
+
+
+def _local_scan_workers() -> int:
+    """清空·扫描分类线程。1G 容器不要按宿主机核数开到 24。"""
+    from app.core.container_budget import io_threads, memory_class
+
+    if memory_class() == "host":
+        return max(4, min(24, (os.cpu_count() or 8) * 2))
+    return io_threads(floor=2, host_max=4)
+
+
+def _folder_gaps_cache_cap() -> int:
+    from app.core.container_budget import memory_class
+
+    kind = memory_class()
+    if kind == "tight":
+        return 4_000
+    if kind == "small":
+        return 20_000
+    return _FOLDER_GAPS_CACHE_CAP
 # 队列表批量 INSERT 每语句行数（过大易超参，过小往返多）
 _QUEUE_LOG_INSERT_CHUNK = 500
 # 边扫边写：累计这么多分类行就刷一盘
@@ -4494,7 +4512,7 @@ def _local_folder_gaps(folder: Path) -> tuple[str, list[str]]:
 
     def _remember(code_u: str, gaps: list[str]) -> tuple[str, list[str]]:
         with _folder_gaps_cache_lock:
-            if len(_folder_gaps_cache) > _FOLDER_GAPS_CACHE_CAP:
+            if len(_folder_gaps_cache) > _folder_gaps_cache_cap():
                 _folder_gaps_cache.clear()
             _folder_gaps_cache[ckey] = (stamp, (code_u, list(gaps)))
         return code_u, gaps
@@ -4797,7 +4815,8 @@ def _local_nfo_gap_maps(
     if not dirs:
         return out
 
-    n_workers = max(1, min(32, int(workers or _LOCAL_SCAN_WORKERS)))
+    scan_cap = _local_scan_workers()
+    n_workers = max(1, min(scan_cap, int(workers or scan_cap)))
     total_est = 0
     if report_progress:
         try:
@@ -4827,7 +4846,11 @@ def _local_nfo_gap_maps(
     soft_cands = out.soft_cands
     fail_cands = out.fail_cands
     last_report = 0
-    inflight_limit = max(n_workers * 4, 64)
+    from app.core.container_budget import memory_class as _mem_class
+
+    inflight_limit = n_workers * 4
+    if _mem_class() == "host":
+        inflight_limit = max(inflight_limit, 64)
 
     stream_rid = _queue_log_region(stream_write_region) if stream_write_region else ""
     stream_q: queue_mod.Queue | None = None
@@ -12778,10 +12801,22 @@ def _fetch_detail(
 
     adapt_n = strat.resolve_pool_workers(adapt_cfg, len(adaptive))
     flare_n = strat.resolve_pool_workers(flare_cfg, len(flare)) if flare else 0
+    from app.core.container_budget import cap_parallel as _cap_parallel
+
     if adapt_n:
-        adapt_n = min(adapt_n, int(_SOURCE_WORKERS_MAX))
+        adapt_n = _cap_parallel(
+            min(adapt_n, int(_SOURCE_WORKERS_MAX)),
+            tight=4,
+            small=8,
+            hard=int(_SOURCE_WORKERS_MAX),
+        )
     if flare_n:
-        flare_n = min(flare_n, int(_SOURCE_WORKERS_MAX))
+        flare_n = _cap_parallel(
+            min(flare_n, int(_SOURCE_WORKERS_MAX)),
+            tight=2,
+            small=4,
+            hard=int(_SOURCE_WORKERS_MAX),
+        )
     # 对齐 mdc-ng：单番号匹配源全开并发；出站压力交给 host/global 调度，
     # 不再因 itemWorkers 把单条压成 3 路（否则墙钟≈慢源串行、越跑越像超时）。
 
@@ -12793,7 +12828,18 @@ def _fetch_detail(
         # parallel_all：该番号匹配源一起并发；adaptiveWorkers=0 则全开
         all_batch = adaptive + flare
         all_n = strat.resolve_pool_workers(adapt_cfg, len(all_batch))
-        all_n = min(all_n, int(_SOURCE_WORKERS_MAX)) if all_n else 0
+        from app.core.container_budget import cap_parallel as _cap_parallel
+
+        all_n = (
+            _cap_parallel(
+                min(all_n, int(_SOURCE_WORKERS_MAX)),
+                tight=4,
+                small=8,
+                hard=int(_SOURCE_WORKERS_MAX),
+            )
+            if all_n
+            else 0
+        )
         pools = [("all", all_batch, all_n)]
         log.info(
             "enrich %s parallel_all workers=%s/%s (cfg=%s)",
@@ -14304,7 +14350,10 @@ def _cover_job_workers_target() -> int:
         pass
     # 番号 5 → 封面 10；番号 8 → 16；再夹在 [MIN, MAX]
     want = max(iw * 2, iw + 4)
-    return max(int(_COVER_JOB_WORKERS_MIN), min(int(_COVER_JOB_WORKERS_MAX), want))
+    raw = max(int(_COVER_JOB_WORKERS_MIN), min(int(_COVER_JOB_WORKERS_MAX), want))
+    from app.core.container_budget import cap_parallel
+
+    return cap_parallel(raw, tight=2, small=4, hard=int(_COVER_JOB_WORKERS_MAX))
 
 
 def _get_cover_job_pool():
@@ -14314,8 +14363,16 @@ def _get_cover_job_pool():
 
     with _cover_job_pool_lock:
         if _cover_job_pool is None:
+            from app.core.container_budget import cap_parallel
+
+            cover_n = cap_parallel(
+                int(_COVER_JOB_WORKERS),
+                tight=2,
+                small=4,
+                hard=int(_COVER_JOB_WORKERS),
+            )
             _cover_job_pool = ThreadPoolExecutor(
-                max_workers=max(2, int(_COVER_JOB_WORKERS)),
+                max_workers=max(2, cover_n),
                 thread_name_prefix="cover-job",
             )
         return _cover_job_pool
@@ -16358,9 +16415,20 @@ def run_enrich(
         import app.scrap_library.enrich_strategy as strat
 
         cfg_w = int(strat.get_strategy().get("itemWorkers") or _ITEM_WORKERS_DEFAULT)
-        workers = max(1, min(int(_ITEM_WORKERS_MAX), cfg_w))
+        from app.core.container_budget import cap_parallel
+
+        workers = cap_parallel(
+            max(1, min(int(_ITEM_WORKERS_MAX), cfg_w)),
+            tight=2,
+            small=4,
+            hard=int(_ITEM_WORKERS_MAX),
+        )
     except Exception:  # noqa: BLE001
-        pass
+        from app.core.container_budget import cap_parallel as _cap_workers
+
+        workers = _cap_workers(
+            workers, tight=2, small=4, hard=int(_ITEM_WORKERS_MAX)
+        )
     # 出站槽必须与「同时处理的番号数」同步（第十七轮 D5）。
     # 只在本处（任务启动前、无在飞请求）应用：把 page/api 全局槽从
     # 「手工凑的 24+12」换成按 itemWorkers 推导，扩容从此只需改策略一处。
@@ -16397,7 +16465,11 @@ def run_enrich(
     # 「请求并发超出出站槽档位」只提示一次，避免每轮刷屏
     _outbound_cap_warned = False
     # 池按上限开；循环内按最新 itemWorkers 节流，改策略后下一轮投递即生效
-    pool_cap = max(workers, int(_ITEM_WORKERS_MAX))
+    pool_cap = int(workers)
+    from app.core.container_budget import memory_class as _mem_class
+
+    if _mem_class() == "host":
+        pool_cap = max(workers, int(_ITEM_WORKERS_MAX))
     pool = ThreadPoolExecutor(
         max_workers=pool_cap, thread_name_prefix="enrich-item"
     )

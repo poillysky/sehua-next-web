@@ -725,6 +725,9 @@ def download_best_cover(
             }
 
         n = max(1, min(workers, len(pool_entries)))
+        from app.core.container_budget import cap_parallel
+
+        n = cap_parallel(n, tight=2, small=3, hard=max(n, 1)) or 1
         finished = 0
         with ThreadPoolExecutor(max_workers=n, thread_name_prefix="cover-dl") as ex:
             futs = {ex.submit(_one, e): e for e in pool_entries}

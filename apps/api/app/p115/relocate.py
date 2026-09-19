@@ -154,8 +154,12 @@ def run_poll_then_relocate(job: dict[str, Any]) -> dict[str, Any]:
     dest_cid = str(job.get("destCid") or "").strip() or "0"
     if not cookie:
         return {"ok": False, "message": "无 Cookie", "moved": 0}
-    if dest_cid == inbox_cid:
-        return {"ok": True, "message": "目标即接收目录，无需移动", "moved": 0}
+    if dest_cid in {"", "0"} or dest_cid == inbox_cid:
+        return {
+            "ok": True,
+            "message": "目标未设置或就是接收目录，留在「最近接收」，不搬到根目录",
+            "moved": 0,
+        }
 
     ready = _wait_offline_file_ids(job)
     if not ready.get("ok"):
@@ -238,8 +242,12 @@ def relocate_share_new_items(
     cookie_n = normalize_cookie(cookie)
     dest = (dest_cid or "0").strip() or "0"
     inbox = (inbox_cid or "0").strip() or "0"
-    if dest == inbox:
-        return {"ok": True, "message": "目标即接收目录，无需移动", "moved": 0}
+    if dest in {"", "0"} or dest == inbox:
+        return {
+            "ok": True,
+            "message": "目标未设置或就是接收目录，留在「最近接收」",
+            "moved": 0,
+        }
     # 稍等目录刷新
     time.sleep(0.8)
     new_ids = _diff_new_ids(cookie_n, inbox, before_ids)

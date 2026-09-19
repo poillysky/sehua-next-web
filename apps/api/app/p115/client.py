@@ -369,7 +369,13 @@ def validate_p115(cookie: str, folder_cid: str = "0") -> dict[str, Any]:
     return out
 
 
-def list_folders(cookie: str, parent_cid: str = "0") -> dict[str, Any]:
+def list_folders(
+    cookie: str,
+    parent_cid: str = "0",
+    *,
+    offset: int = 0,
+    limit: int = 100,
+) -> dict[str, Any]:
     bad = require_cookie_parts(cookie)
     if bad:
         return {
@@ -387,9 +393,9 @@ def list_folders(cookie: str, parent_cid: str = "0") -> dict[str, Any]:
             "cid": cid,
             "o": "user_ptime",
             "asc": "1",
-            "offset": "0",
+            "offset": str(max(0, int(offset or 0))),
             "show_dir": "1",
-            "limit": "100",
+            "limit": str(max(1, min(1150, int(limit or 100)))),
             "type": "0",
             "format": "json",
             "star": "0",
@@ -551,34 +557,45 @@ def ensure_child_folder(
     }
 
 
-# 115 根目录系统习惯名是「最近接收」；旧版误写「最近接受」一并兼容
+# 根目录中转夹是「最近接收」。错名只复用、不再新建。
 RECEIVE_INBOX_NAME = "最近接收"
-RECEIVE_INBOX_ALIASES = (RECEIVE_INBOX_NAME, "最近接受")
+RECEIVE_INBOX_ALIASES = (
+    RECEIVE_INBOX_NAME,
+    "最近接受",
+    "我的接收",
+    "我的接受",
+)
 
 
 def ensure_receive_inbox(cookie: str) -> dict[str, Any]:
-    """115 根目录下的「最近接收」文件夹（转存落点）。
-
-    优先复用已有「最近接收」；若仅有历史错名「最近接受」则沿用，避免再建一个空目录。
-    """
-    listed = list_folders(cookie, "0")
-    if listed.get("ok"):
-        by_name: dict[str, dict[str, Any]] = {}
-        for f in listed.get("folders") or []:
+    """根目录「最近接收」。已有则复用，没有才按这个名字创建一个。"""
+    by_name: dict[str, dict[str, Any]] = {}
+    offset = 0
+    page = 100
+    for _ in range(30):
+        listed = list_folders(cookie, "0", offset=offset, limit=page)
+        if not listed.get("ok"):
+            break
+        batch = listed.get("folders") or []
+        for f in batch:
             if not isinstance(f, dict):
                 continue
             n = str(f.get("name") or "").strip()
-            if n in RECEIVE_INBOX_ALIASES and f.get("cid"):
+            if n in RECEIVE_INBOX_ALIASES and f.get("cid") and n not in by_name:
                 by_name[n] = f
-        preferred = by_name.get(RECEIVE_INBOX_NAME) or by_name.get("最近接受")
-        if preferred:
+        if RECEIVE_INBOX_NAME in by_name or len(batch) < page:
+            break
+        offset += page
+    for name in RECEIVE_INBOX_ALIASES:
+        hit = by_name.get(name)
+        if hit:
             return {
                 "ok": True,
-                "cid": str(preferred.get("cid") or ""),
-                "name": str(preferred.get("name") or RECEIVE_INBOX_NAME),
+                "cid": str(hit.get("cid") or ""),
+                "name": str(hit.get("name") or name),
                 "created": False,
             }
-    return ensure_child_folder(cookie, "0", RECEIVE_INBOX_NAME)
+    return add_folder(cookie, "0", RECEIVE_INBOX_NAME)
 
 
 def move_files(

@@ -107,6 +107,29 @@ function exclusiveRegionsEnabled(
   return out;
 }
 
+function strmStoppedHint(st: {
+  phase?: string;
+  progress?: PrefixCatalogLocalIndexProgress | null;
+  result?: unknown;
+  error?: string | null;
+}): string | null {
+  if (st.error || st.result) return null;
+  const stage = st.progress?.stage || '';
+  const stopped =
+    st.phase === 'interrupted' ||
+    stage === 'write' ||
+    stage === 'prepare' ||
+    stage === 'prune';
+  if (!stopped) return null;
+  const done = st.progress?.done;
+  const total = st.progress?.total;
+  const where =
+    done != null && total != null
+      ? ` · 已写 ${done.toLocaleString()}/${total.toLocaleString()}`
+      : '';
+  return `本地同步已中断${where}，再点一次会跳过已有文件继续`;
+}
+
 export function MakersManagePanel({
   onBack,
   onStatus,
@@ -639,6 +662,8 @@ export function MakersManagePanel({
           if (st.error) {
             setMsg(st.error);
             onStatus('本地同步失败', 'warn');
+            setStrmPhase('');
+            setStrmProgress(null);
           } else if (st.result) {
             const written = st.result.written ?? 0;
             const deleted = st.result.deleted ?? 0;
@@ -647,10 +672,19 @@ export function MakersManagePanel({
             if (deleted > 0) bits.push(`删多余 ${deleted}`);
             setMsg(`本地同步完成 · ${bits.join(' · ')}`);
             onStatus('本地同步完成', 'ok');
+            setStrmPhase('');
+            setStrmProgress(null);
+          } else {
+            const hint = strmStoppedHint(st);
+            if (hint) {
+              setMsg(hint);
+              onStatus('本地同步已中断', 'warn');
+              setStrmPhase('interrupted');
+            } else {
+              setStrmPhase('');
+              setStrmProgress(null);
+            }
           }
-          setStrmPhase('');
-          setStrmProgress(null);
-          // 保留日志，方便点「日志」回看
           return;
         }
         await new Promise<void>((resolve) => {
@@ -1663,6 +1697,14 @@ export function MakersManagePanel({
           setStrmBusy(true);
           setStrmPhase(st.phase || '同步中…');
           await pollStrmSyncUntilDone();
+        } else {
+          const hint = strmStoppedHint(st);
+          if (hint) {
+            setStrmPhase('interrupted');
+            setStrmProgress(st.progress || null);
+            setStrmLog(Array.isArray(st.log) ? st.log.slice(-40) : []);
+            setMsg(hint);
+          }
         }
       } catch {
         /* ignore */
@@ -3385,7 +3427,10 @@ export function MakersManagePanel({
                   <span className="settings-nav__desc">
                     {strmBusy
                       ? strmPhase || '同步中…'
-                      : '按六区少补多删 .strm · 只写本地文件夹，不碰向量库'}
+                      : strmPhase === 'interrupted'
+                        ? strmProgress?.label ||
+                          '已中断，再点一次会跳过已有文件继续'
+                        : '按六区少补多删 .strm · 只写本地文件夹，不碰向量库'}
                   </span>
                 </span>
                 <button
@@ -3398,7 +3443,9 @@ export function MakersManagePanel({
                     ? strmPct != null
                       ? `${Math.round(strmPct)}%`
                       : '同步中…'
-                    : '开始同步'}
+                    : strmPhase === 'interrupted'
+                      ? '继续'
+                      : '开始同步'}
                 </button>
               </div>
               {strmBusy || strmLog.length > 0 ? (

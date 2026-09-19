@@ -337,7 +337,7 @@ def _region_folder_label(region: str | None) -> str:
     key = resolve_fs_region(raw) or (raw if raw in REGION_META else "")
     if key and key in REGION_META:
         return str(REGION_META[key].get("label") or key)
-    return raw
+    return ""
 
 
 def _lookup_scrap_region(
@@ -369,8 +369,10 @@ def _resolve_makers_save_cid(
     scrap_item_id: str | None = None,
     attach_subs_code: str | None = None,
 ) -> tuple[str, str]:
-    """片商根 → 区分子目录；无区信息则退回根。"""
+    """片商根 → 区分子目录；根目录或未识别分区时不新建文件夹。"""
     root = (makers_root_cid or "0").strip() or "0"
+    if root == "0":
+        return root, ""
     rid = _lookup_scrap_region(
         scrap_item_id=scrap_item_id,
         attach_subs_code=attach_subs_code,
@@ -388,6 +390,8 @@ def _resolve_makers_save_cid(
 
 def _resolve_makers_subs_cid(cookie: str, makers_root_cid: str) -> tuple[str, str]:
     root = (makers_root_cid or "0").strip() or "0"
+    if root == "0":
+        return root, ""
     ensured = p115_client.ensure_child_folder(cookie, root, "字幕")
     if ensured.get("ok") and ensured.get("cid"):
         return str(ensured["cid"]), str(ensured.get("name") or "字幕")
@@ -411,6 +415,8 @@ def _ensure_folder_path(
 ) -> tuple[str, str]:
     """在 root 下按层级 ensure 子目录，返回最终 (cid, pathHint)。"""
     cid = (root_cid or "0").strip() or "0"
+    if cid == "0":
+        return cid, ""
     names: list[str] = []
     for part in parts:
         label = str(part or "").strip()
@@ -1370,6 +1376,7 @@ def post_p115_offline(
             result.get("ok")
             and int(result.get("added") or 0) > 0
             and use_inbox
+            and dest_cid not in {"", "0"}
             and inbox_cid != dest_cid
         ):
             p115_relocate.schedule_deferred_relocate(
@@ -1509,7 +1516,11 @@ def post_p115_share(
         save_cid = inbox_cid if use_inbox else dest_cid
 
         before_ids: set[str] = set()
-        if use_inbox and inbox_cid != dest_cid:
+        if (
+            use_inbox
+            and dest_cid not in {"", "0"}
+            and inbox_cid != dest_cid
+        ):
             before_ids = p115_relocate._snapshot_ids(cookie, inbox_cid)
 
         result = p115_share_svc.receive_115_shares(
@@ -1520,7 +1531,12 @@ def post_p115_share(
         )
 
         relocate_info = None
-        if result.get("ok") and use_inbox and inbox_cid != dest_cid:
+        if (
+            result.get("ok")
+            and use_inbox
+            and dest_cid not in {"", "0"}
+            and inbox_cid != dest_cid
+        ):
             relocate_info = p115_relocate.relocate_share_new_items(
                 cookie,
                 inbox_cid=inbox_cid,

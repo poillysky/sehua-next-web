@@ -79,6 +79,25 @@ def _persist_strm_job(**extra: Any) -> None:
         pass
 
 
+def _strm_job_partial(raw: dict[str, Any]) -> bool:
+    """上次写入没跑完：status 可能被写成阶段文案，不能只认 running。"""
+    if raw.get("result") is not None:
+        return False
+    if str(raw.get("error") or "").strip():
+        return False
+    status = str(raw.get("status") or "")
+    if status in {"done", "error", "idle"}:
+        return False
+    progress = raw.get("progress") if isinstance(raw.get("progress"), dict) else {}
+    stage = str(progress.get("stage") or "")
+    phase = str(raw.get("phase") or "")
+    if status in {"running", "interrupted", "paused"}:
+        return True
+    if stage in {"write", "prepare", "prune"}:
+        return True
+    return phase.startswith("写入") or phase.startswith("整理")
+
+
 def _hydrate_strm_job(*, force: bool = False) -> dict[str, Any]:
     global _strm_hydrated
     with _strm_hydrate_lock:
@@ -107,7 +126,7 @@ def _hydrate_strm_job(*, force: bool = False) -> dict[str, Any]:
                 _strm_sync_job["result"] = raw.get("result")
             if not _strm_sync_job.get("error") and raw.get("error"):
                 _strm_sync_job["error"] = raw.get("error")
-            if str(raw.get("status") or "") == "running":
+            if str(raw.get("status") or "") == "running" or _strm_job_partial(raw):
                 _strm_sync_job["phase"] = "interrupted"
                 prog = dict(_strm_sync_job.get("progress") or {})
                 prog["label"] = "进程中断 · 可继续（已写文件会跳过）"
@@ -115,6 +134,7 @@ def _hydrate_strm_job(*, force: bool = False) -> dict[str, Any]:
                 raw = dict(raw)
                 raw["status"] = "interrupted"
                 raw["running"] = False
+                raw["phase"] = "interrupted"
                 job_persist.save_job(job_persist.STRM_SYNC_JOB_KEY, raw)
         return raw
     except Exception:  # noqa: BLE001
@@ -604,7 +624,7 @@ def post_strm_sync(body: StrmSyncStartBody | None = None) -> dict[str, Any]:
         "interrupted",
         "running",
         "paused",
-    }
+    } or str(_strm_sync_job.get("phase") or "") == "interrupted"
 
     with _strm_sync_lock:
         if _strm_sync_job["running"]:
@@ -643,12 +663,21 @@ def post_strm_sync(body: StrmSyncStartBody | None = None) -> dict[str, Any]:
             }
             _persist_strm_job(status="done")
         except Exception as e:  # noqa: BLE001
-            _strm_sync_job["error"] = str(e)
+            _strm_sync_job["error"] = str(e) or type(e).__name__
             _strm_sync_job["phase"] = "error"
             _persist_strm_job(status="error")
         finally:
             _strm_sync_job["running"] = False
-            _persist_strm_job()
+            if _strm_sync_job.get("error"):
+                _persist_strm_job(status="error")
+            elif _strm_sync_job.get("result"):
+                _persist_strm_job(status="done")
+            else:
+                _strm_sync_job["phase"] = "interrupted"
+                prog = dict(_strm_sync_job.get("progress") or {})
+                prog["label"] = "已中断 · 可继续（已写文件会跳过）"
+                _strm_sync_job["progress"] = prog
+                _persist_strm_job(status="interrupted")
 
     threading.Thread(target=run, name="prefix-catalog-strm-sync", daemon=True).start()
     return {"ok": True, "data": {"started": True, "resumed": resumed}}

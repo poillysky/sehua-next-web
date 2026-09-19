@@ -347,11 +347,23 @@ def optimize_library_nfos(
 
     root = embed_svc.resolve_root(embed_svc.get_settings().get("root"))
     root_r = root.resolve()
-    workers = min(8, max(4, os.cpu_count() or 4))
+    from app.core.container_budget import memory_class
+
+    kind = memory_class()
+    if kind == "tight":
+        workers = 1
+    elif kind == "small":
+        workers = 2
+    else:
+        workers = min(8, max(4, os.cpu_count() or 4))
     _log(
         f"映射表 {maps_info.get('lang')} · {maps_info.get('count') or 0} 条"
         + (" · 全量" if force else " · 增量")
-        + f" · {workers} 进程"
+        + (
+            " · 同进程（容器内存紧）"
+            if kind == "tight"
+            else f" · {workers} 进程"
+        )
         + (f" · 续跑跳过 {len(done):,}" if done else "")
         + (f" · 下标 {resume_index:,}" if resume_index else "")
     )
@@ -396,14 +408,39 @@ def optimize_library_nfos(
     chunk = 512
     persist_every = 2000
     ui_every = 40
-    ctx = mp.get_context("spawn")
 
-    with ProcessPoolExecutor(
-        max_workers=workers,
-        mp_context=ctx,
-        initializer=_mp_init,
-        initargs=(bool(force), strategy),
-    ) as ex:
+    class _Done:
+        def __init__(self, value: tuple[str, bool, list[str], str | None]) -> None:
+            self._value = value
+
+        def result(self) -> tuple[str, bool, list[str], str | None]:
+            return self._value
+
+    class _InlinePool:
+        """1G 容器不再 spawn 子进程，避免再复制一份解释器和映射表。"""
+
+        def submit(self, fn, item):  # type: ignore[no-untyped-def]
+            return _Done(fn(item))
+
+        def __enter__(self) -> _InlinePool:
+            return self
+
+        def __exit__(self, *args: object) -> bool:
+            return False
+
+    if kind == "tight":
+        _mp_init(bool(force), strategy)
+        pool_cm: Any = _InlinePool()
+    else:
+        ctx = mp.get_context("spawn")
+        pool_cm = ProcessPoolExecutor(
+            max_workers=workers,
+            mp_context=ctx,
+            initializer=_mp_init,
+            initargs=(bool(force), strategy),
+        )
+
+    with pool_cm as ex:
         i = start_i
         while i < total:
             batch = nfos[i : i + chunk]
@@ -416,7 +453,8 @@ def optimize_library_nfos(
                     continue
                 items.append((rel, str(p)))
             futs = [ex.submit(_mp_optimize_one, item) for item in items]
-            for fut in as_completed(futs):
+            finished = futs if kind == "tight" else as_completed(futs)
+            for fut in finished:
                 rel, changed, applied, err = fut.result()
                 processed += 1
                 done.add(rel)

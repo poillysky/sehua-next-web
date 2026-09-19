@@ -602,7 +602,12 @@ def _process_texts_parallel(
         emit(f"{label} 0/0", stage=stage, done=0, total=0, percent=pct_lo)
         return
     emit(f"{label} 0/{n:,}", stage=stage, done=0, total=n, percent=pct_lo)
-    workers = max(4, min(12, (os.cpu_count() or 4)))
+    from app.core.container_budget import io_threads, memory_class
+
+    if memory_class() == "host":
+        workers = max(4, min(12, (os.cpu_count() or 4)))
+    else:
+        workers = io_threads(floor=2, host_max=4)
     chunk = max(2_000, min(12_000, n // (workers * 2) or n))
     chunks = [texts[i : i + chunk] for i in range(0, n, chunk)]
     done = 0

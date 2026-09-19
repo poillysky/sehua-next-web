@@ -212,8 +212,13 @@ def run_strm_sync(
 
     progress_lock = Lock()
     done_count = 0
-    # I/O 密集：多线程加速 mkdir + 写小文件（Windows/NTFS 尤其吃并行）
-    workers = max(8, min(32, (os.cpu_count() or 4) * 4))
+    # Linux 默认线程栈约 8MB。NAS 容器常限 1G，32 线程会把进程打爆，同步停在几千条且无报错。
+    from app.core.container_budget import io_threads, memory_class
+
+    if memory_class() == "host" and os.name == "nt":
+        workers = max(4, min(12, (os.cpu_count() or 4)))
+    else:
+        workers = io_threads(floor=2, host_max=8)
 
     def write_one(item: tuple[str, str, str]) -> tuple[str, str]:
         region_label, prefix, code = item
@@ -385,7 +390,9 @@ def _prune_strm_extras(
         return False
 
     if to_delete:
-        workers = max(4, min(16, (os.cpu_count() or 4)))
+        from app.core.container_budget import io_threads
+
+        workers = io_threads(floor=2, host_max=8)
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futs = [pool.submit(_rm_one, p) for p in to_delete]
             for fut in as_completed(futs):

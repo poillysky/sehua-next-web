@@ -1516,7 +1516,9 @@ def scrape_actress_avatars(
     miss = 0
     fail = 0
     miss_samples: list[str] = []
-    workers = 6
+    from app.core.container_budget import cap_parallel
+
+    workers = cap_parallel(6, tight=2, small=4, hard=6)
 
     def one(name: str) -> tuple[str, str, str]:
         if resolve_avatar_rel(name) and not force:
