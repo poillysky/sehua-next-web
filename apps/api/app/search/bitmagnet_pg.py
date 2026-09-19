@@ -72,6 +72,33 @@ def query(
             return list(cur.fetchall())
 
 
+def iter_batches(
+    sql: str,
+    params: list[Any] | tuple[Any, ...] | None = None,
+    *,
+    batch_size: int = 2000,
+    statement_timeout_ms: int = 600_000,
+):
+    """服务端游标分批吐行。全表扫描不要 query()+fetchall。"""
+    size = max(200, int(batch_size or 2000))
+    pool = get_pool()
+    with pool.connection() as conn:
+        if statement_timeout_ms > 0:
+            with conn.cursor() as setup:
+                setup.execute(
+                    "SELECT set_config('statement_timeout', %s, true)",
+                    [f"{int(statement_timeout_ms)}ms"],
+                )
+        with conn.cursor(name="bitmagnet_scan_batch") as cur:
+            cur.itersize = size
+            cur.execute(sql, params or [])
+            while True:
+                rows = cur.fetchmany(size)
+                if not rows:
+                    break
+                yield rows
+
+
 def close_pool() -> None:
     global _pool, _pool_dsn
     if _pool is not None:

@@ -54,7 +54,7 @@ services:
           memory: 512M
 
   app:
-    image: poillysky/sehua-next-web:1.2.10
+    image: poillysky/sehua-next-web:1.2.11
     container_name: sehua-next-web
     restart: always
     mem_limit: 1g

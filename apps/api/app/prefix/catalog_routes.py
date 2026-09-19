@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from typing import Any
 
@@ -15,6 +16,7 @@ import app.prefix.catalog_strm_sync as strm_sync
 from app.core.region_meta import REGION_ORDER
 
 router = APIRouter(prefix="/prefix-catalog", tags=["prefix-catalog"])
+log = logging.getLogger("prefix-catalog")
 
 _job_lock = threading.Lock()
 _job: dict[str, Any] = {
@@ -505,6 +507,7 @@ def post_local_index() -> dict[str, Any]:
                 ),
             }
         except Exception as e:  # noqa: BLE001
+            log.exception("双库扫描失败")
             _local_index_job["error"] = str(e)
             _local_index_job["phase"] = "error"
         finally:

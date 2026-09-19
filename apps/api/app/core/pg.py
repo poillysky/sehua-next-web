@@ -131,7 +131,31 @@ def query(
             return list(cur.fetchall())
 
 
-
+def iter_batches(
+    sql: str,
+    params: list[Any] | tuple[Any, ...] | None = None,
+    *,
+    batch_size: int = 2000,
+    statement_timeout_ms: int | None = None,
+):
+    """服务端游标分批吐行，避免全表 fetchall 把 API 进程撑爆。"""
+    size = max(200, int(batch_size or 2000))
+    pool = get_pool()
+    with pool.connection() as conn:
+        if statement_timeout_ms is not None and statement_timeout_ms > 0:
+            with conn.cursor() as setup:
+                setup.execute(
+                    "SELECT set_config('statement_timeout', %s, true)",
+                    [f"{int(statement_timeout_ms)}ms"],
+                )
+        with conn.cursor(name="resource_scan_batch") as cur:
+            cur.itersize = size
+            cur.execute(sql, params or [])
+            while True:
+                rows = cur.fetchmany(size)
+                if not rows:
+                    break
+                yield rows
 
 
 def close_pool() -> None:

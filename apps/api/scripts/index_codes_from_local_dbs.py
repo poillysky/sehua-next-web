@@ -501,49 +501,82 @@ def _ingest_chunk(
     return {k: {rid: set(codes) for rid, codes in regs.items()} for k, regs in bucket.items()}
 
 
-def _fetch_sehua_texts() -> list[str]:
-    rows = pg.query(
-        """
-        SELECT COALESCE(r.filename,'') AS filename,
-               COALESCE(rs.title,'') AS title
-        FROM ed2k_resources r
-        LEFT JOIN LATERAL (
-          SELECT title FROM resource_sources
-          WHERE hash = r.hash ORDER BY created_at DESC LIMIT 1
-        ) rs ON TRUE
-        """
-    )
-    out: list[str] = []
-    for row in rows:
-        fn = str(row.get("filename") or "")
-        title = str(row.get("title") or "")
-        if fn or title:
-            out.append(f"{fn}\n{title}" if title else fn)
-    return out
+_SEHUA_SQL = """
+SELECT COALESCE(r.filename,'') AS filename,
+       COALESCE(rs.title,'') AS title
+FROM ed2k_resources r
+LEFT JOIN LATERAL (
+  SELECT title FROM resource_sources
+  WHERE hash = r.hash ORDER BY created_at DESC LIMIT 1
+) rs ON TRUE
+"""
+
+# 单批进内存的行数。整表 fetchall 会把 API 进程撑死，轮询变成 500。
+_TEXT_CHUNK = 8_000
 
 
-def _fetch_bitmagnet_texts(table: str, col: str, lim: int) -> list[str]:
-    # torrents 全表 310 万+，真正进过内容解析的在 torrent_contents（约 290 万）。
-    # content 表只有元数据几万行，不当主扫描源。
+def _sehua_line(row: dict[str, Any]) -> str:
+    fn = str(row.get("filename") or "")
+    title = str(row.get("title") or "")
+    if not (fn or title):
+        return ""
+    return f"{fn}\n{title}" if title else fn
+
+
+def _iter_sehua_chunks():
+    buf: list[str] = []
+    for rows in pg.iter_batches(
+        _SEHUA_SQL, batch_size=2_000, statement_timeout_ms=1_800_000
+    ):
+        for row in rows:
+            line = _sehua_line(row)
+            if line:
+                buf.append(line)
+        while len(buf) >= _TEXT_CHUNK:
+            yield buf[:_TEXT_CHUNK]
+            del buf[:_TEXT_CHUNK]
+    if buf:
+        yield buf
+
+
+def _bitmagnet_sql(table: str, col: str, lim: int) -> str:
     if table == "torrent_contents":
-        brows = bitmagnet_pg.query(
-            f"""
+        return f"""
             SELECT COALESCE(t.name, '') AS txt
             FROM torrent_contents tc
             JOIN torrents t ON t.info_hash = tc.info_hash
             WHERE COALESCE(t.name, '') <> ''
             LIMIT {int(lim)}
-            """,
-            statement_timeout_ms=600_000,
-        )
-        return [str(row.get("txt") or "") for row in brows if row.get("txt")]
-
-    timeout_ms = 600_000 if str(table) == "torrents" else 120_000
-    brows = bitmagnet_pg.query(
-        f'SELECT COALESCE("{col}",\'\') AS txt FROM "{table}" LIMIT {int(lim)}',
-        statement_timeout_ms=timeout_ms,
+        """
+    return (
+        f'SELECT COALESCE("{col}",\'\') AS txt FROM "{table}" LIMIT {int(lim)}'
     )
-    return [str(row.get("txt") or "") for row in brows if row.get("txt")]
+
+
+def _iter_bitmagnet_chunks(table: str, col: str, lim: int):
+    timeout_ms = 600_000 if table in {"torrent_contents", "torrents"} else 120_000
+    buf: list[str] = []
+    seen = 0
+    for rows in bitmagnet_pg.iter_batches(
+        _bitmagnet_sql(table, col, lim),
+        batch_size=2_000,
+        statement_timeout_ms=timeout_ms,
+    ):
+        for row in rows:
+            if seen >= lim:
+                break
+            seen += 1
+            txt = str(row.get("txt") or "")
+            if txt:
+                buf.append(txt)
+            if len(buf) >= _TEXT_CHUNK:
+                yield buf
+                buf = []
+        else:
+            continue
+        break
+    if buf:
+        yield buf
 
 
 def _process_texts_parallel(
@@ -657,76 +690,50 @@ def scan_all(
     )
 
     emit("色花堂查询中…", stage="sehua", percent=2)
-    # Bitmagnet 大表勿与色花同抢 IO（易超时被整路跳过）
-    with ThreadPoolExecutor(max_workers=2) as io_pool:
-        sehua_fut = io_pool.submit(_fetch_sehua_texts)
-        try:
-            sehua_texts = sehua_fut.result()
-        except Exception as e:  # noqa: BLE001
-            emit(f"色花堂查询失败: {e}", stage="sehua", percent=3)
-            raise
-        sehua_n = len(sehua_texts)
-        emit(
-            f"色花堂已取 {sehua_n:,} 行 · 解析中…",
-            stage="sehua",
-            done=0,
-            total=sehua_n,
-            percent=3,
-        )
-        _process_texts_parallel(
-            sehua_texts,
-            label="色花堂",
-            stage="sehua",
-            pct_lo=3,
-            pct_hi=70,
-            want_std=want_std,
-            letter_aliases=letter_aliases,
-            long_std=long_std,
-            long_std_re=long_std_re,
-            special_re=special_re,
-            needle_to_prefs=needle_to_prefs,
-            prefix_regions=prefix_regions,
-            bucket=bucket,
-            emit=emit,
-            profiles=profiles,
-        )
-        del sehua_texts
+    sehua_n = 0
+    try:
+        for chunk in _iter_sehua_chunks():
+            sehua_n += len(chunk)
+            _process_texts_parallel(
+                chunk,
+                label="色花堂",
+                stage="sehua",
+                pct_lo=3,
+                pct_hi=min(70.0, 3 + sehua_n / 80_000),
+                want_std=want_std,
+                letter_aliases=letter_aliases,
+                long_std=long_std,
+                long_std_re=long_std_re,
+                special_re=special_re,
+                needle_to_prefs=needle_to_prefs,
+                prefix_regions=prefix_regions,
+                bucket=bucket,
+                emit=emit,
+                profiles=profiles,
+            )
+    except Exception as e:  # noqa: BLE001
+        emit(f"色花堂查询失败: {e}", stage="sehua", percent=3)
+        raise
+    emit(
+        f"色花堂已处理 {sehua_n:,} 行",
+        stage="sehua",
+        done=sehua_n,
+        total=sehua_n,
+        percent=70,
+    )
 
-        emit("Bitmagnet 扫描中…", stage="bitmagnet", percent=72)
-        bit_n = 0
-        bit_futs = {
-            io_pool.submit(_fetch_bitmagnet_texts, table, col, lim): (table, col, lim)
-            for table, col, lim in bit_sources
-        }
-        # 按完成顺序处理，谁先查完谁先解析
-        pending = dict(bit_futs)
-        src_total = len(pending)
-        finished = 0
-        while pending:
-            done_futs = [f for f in pending if f.done()]
-            if not done_futs:
-                # 等任意一个
-                for f in as_completed(pending):
-                    done_futs = [f]
-                    break
-            for fut in done_futs:
-                table, col, lim = pending.pop(fut)
-                base_pct = 72 + (finished / max(src_total, 1)) * 20
-                try:
-                    texts = fut.result()
-                except Exception as e:  # noqa: BLE001
-                    emit(
-                        f"跳过 {table}.{col}: {e}",
-                        stage="bitmagnet",
-                        percent=base_pct,
-                    )
-                    finished += 1
-                    continue
-                n = len(texts)
-                bit_n += n
-                span = 20 / max(src_total, 1)
+    emit("Bitmagnet 扫描中…", stage="bitmagnet", percent=72)
+    bit_n = 0
+    src_total = len(bit_sources)
+    finished = 0
+    for table, col, lim in bit_sources:
+        base_pct = 72 + (finished / max(src_total, 1)) * 20
+        span = 20 / max(src_total, 1)
+        try:
+            for chunk in _iter_bitmagnet_chunks(table, col, lim):
+                bit_n += len(chunk)
                 _process_texts_parallel(
-                    texts,
+                    chunk,
                     label=f"Bitmagnet {table}.{col}",
                     stage="bitmagnet",
                     pct_lo=base_pct,
@@ -742,7 +749,13 @@ def scan_all(
                     emit=emit,
                     profiles=profiles,
                 )
-                finished += 1
+        except Exception as e:  # noqa: BLE001
+            emit(
+                f"跳过 {table}.{col}: {e}",
+                stage="bitmagnet",
+                percent=base_pct,
+            )
+        finished += 1
 
     return bucket, sehua_n, bit_n
 
