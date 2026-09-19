@@ -8,7 +8,8 @@ function formatTime(d: Date) {
 
 /** 仅桌面 preview 壳显示；native/standalone 由 CSS 隐藏 */
 export function IosStatusBar() {
-  const [time, setTime] = useState(() => formatTime(new Date()));
+  // 首屏不要用 new Date()：容器常是 UTC，浏览器是本地时区，水合会报 #418
+  const [time, setTime] = useState('--:--');
 
   useEffect(() => {
     const tick = () => setTime(formatTime(new Date()));
