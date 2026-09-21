@@ -1069,8 +1069,11 @@ export function EnrichLivePanel({
   queuePageRef.current = queuePage;
   /** 切 tab / 翻页拉库期间，禁止 SSE 用工作队列重排列表 */
   const queueHydratingRef = useRef(false);
-  /** 清空·扫描进行中：角标只跟 queueScan，禁止 SSE tip / 切 tab 读库来回盖 */
+  /** 清空·扫描进行中：角标只跟 queueScan */
   const queueScanActiveRef = useRef(false);
+  /** 失败/软成功重试后，SSE 旧角标不得再抬回去，直到服务端报到不高于该值 */
+  const failCeilRef = useRef<number | null>(null);
+  const softCeilRef = useRef<number | null>(null);
   /** 成功/软成功/失败：角标上涨时防抖回读库表（按 updated_at），勿用工作队列插旧号 */
   const resultTabReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
@@ -1258,40 +1261,7 @@ export function EnrichLivePanel({
         setQueueItems(items);
       }
     }
-    // 翻页时也对齐角标总数（以库 counts 为准）
-    // 扫描中库表还在边写边变，切 tab 读到的是半成品，会把角标打得忽高忽低
-    if (
-      data.updateCounts === false &&
-      data.counts &&
-      typeof data.counts === 'object' &&
-      !queueScanActiveRef.current
-    ) {
-      const c = data.counts;
-      const pendingFromServer = Number(c.pending || 0);
-      // 服务端估算为准；仅当本地缓存略大（扫描中）时保留，避免旧虚高卡死角标
-      const cached = pendingTotalRef.current || 0;
-      let pending = pendingFromServer;
-      if (cached > 0 && pendingFromServer > 0) {
-        const ratio = cached / pendingFromServer;
-        if (ratio >= 0.85 && ratio <= 1.25) {
-          pending = Math.max(pendingFromServer, cached);
-        } else {
-          pending = pendingFromServer;
-          pendingTotalRef.current = pendingFromServer;
-          writeCachedPendingTotal(regionId, pendingFromServer);
-        }
-      } else if (pendingFromServer > 0) {
-        pendingTotalRef.current = pendingFromServer;
-        writeCachedPendingTotal(regionId, pendingFromServer);
-      }
-      setQueueCounts({
-        pending,
-        running: Number(c.running || 0),
-        done: Number(c.done || 0),
-        soft: Number(c.soft || 0),
-        fail: Number(c.fail || 0),
-      });
-    }
+    // 切 tab / 翻页只换列表。角标只由扫描进度、状态 SSE、重试结果更新。
   }
 
   async function loadQueueTab(status: LiveTab, page = queuePageRef.current) {
@@ -1437,6 +1407,8 @@ export function EnrichLivePanel({
     tabCacheRef.current = {};
     tabDbLoadedRef.current = {};
     queueScanActiveRef.current = false;
+    failCeilRef.current = null;
+    softCeilRef.current = null;
     loadSeqRef.current += 1;
     setQueueItems([]);
     setQueueCounts({ pending: 0, running: 0, done: 0, soft: 0, fail: 0 });
@@ -1622,17 +1594,36 @@ export function EnrichLivePanel({
         (!qs?.region || qs.region === regionId);
       queueScanActiveRef.current = qsHere;
       if (qsHere) {
-        // 扫描中角标只跟本轮分类进度；勿被下方 tip/库计数盖回旧全量
-        setQueueCounts((prev) => ({
-          pending:
-            qs?.pending != null
-              ? Number(qs.pending || 0)
-              : Number(prev.pending || 0),
-          running: Number(prev.running || 0),
-          done: Number(qs?.done || 0),
-          soft: Number(qs?.soft || 0),
-          fail: Number(qs?.fail || 0),
-        }));
+        failCeilRef.current = null;
+        softCeilRef.current = null;
+        // 新一轮从 0 爬；本轮内成功/软成功/失败只升不降。
+        // 未处理跟「向量总数−已分类」，不跟写入条数从 0 往上爬。
+        const reset = String(qs?.stage || '') === 'start';
+        setQueueCounts((prev) => {
+          const done = reset
+            ? Number(qs?.done || 0)
+            : Math.max(Number(prev.done || 0), Number(qs?.done || 0));
+          const soft = reset
+            ? Number(qs?.soft || 0)
+            : Math.max(Number(prev.soft || 0), Number(qs?.soft || 0));
+          const fail = reset
+            ? Number(qs?.fail || 0)
+            : Math.max(Number(prev.fail || 0), Number(qs?.fail || 0));
+          const prevP = reset ? 0 : Number(prev.pending || 0);
+          const pendIn =
+            qs?.pending != null ? Number(qs.pending || 0) : prevP;
+          let pending = pendIn;
+          if (prevP > 0 && pendIn > 0 && pendIn < prevP * 1.25) {
+            pending = Math.min(prevP, pendIn);
+          }
+          return {
+            pending,
+            running: 0,
+            done,
+            soft,
+            fail,
+          };
+        });
         // 边扫边看：仅在尚未从库表拉过该 tab 时用样例占位。
         // 点过成功/失败等 tab 后必须以库表为准，否则扫序样例（常为 AARM*）会几秒盖掉真列表。
         const want = tabRef.current;
@@ -1764,15 +1755,24 @@ export function EnrichLivePanel({
         // 队列表写全部分类行；角标与 local totals / DB 对齐。
         const preferBadge = (server: number, prev: number) =>
           server === 500 && prev > 500 ? prev : server;
+        let failN = preferBadge(Number(qc.fail || 0), Number(0));
+        let softN = preferBadge(Number(qc.soft || 0), Number(0));
+        if (failCeilRef.current != null) {
+          if (failN <= failCeilRef.current) failCeilRef.current = null;
+          else failN = failCeilRef.current;
+        }
+        if (softCeilRef.current != null) {
+          if (softN <= softCeilRef.current) softCeilRef.current = null;
+          else softN = softCeilRef.current;
+        }
         setQueueCounts((prev) => ({
           pending: pendingN,
           running: runN,
-          // 成功只升不降（防漏计）。失败/软成功必须能下降，否则「失败重试」角标被钉死。
           done: halted
             ? preferBadge(Number(qc.done || 0), Number(prev.done || 0))
             : Math.max(Number(prev.done || 0), Number(qc.done || 0)),
-          soft: preferBadge(Number(qc.soft || 0), Number(prev.soft || 0)),
-          fail: preferBadge(Number(qc.fail || 0), Number(prev.fail || 0)),
+          soft: softN,
+          fail: failN,
         }));
       }
       if (halted) {
@@ -1998,6 +1998,7 @@ export function EnrichLivePanel({
       const nextFail = Number(counts.fail || 0);
       const nextDone = Number(counts.done || 0);
       const nextSoft = Number(counts.soft || 0);
+      failCeilRef.current = nextFail;
       setQueueCounts({
         pending: nextPending,
         running: Number(counts.running || 0),
@@ -2059,6 +2060,7 @@ export function EnrichLivePanel({
       const nextFail = Number(counts.fail || 0);
       const nextDone = Number(counts.done || 0);
       const nextSoft = Number(counts.soft || 0);
+      softCeilRef.current = nextSoft;
       setQueueCounts({
         pending: nextPending,
         running: Number(counts.running || 0),

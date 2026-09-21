@@ -1754,18 +1754,11 @@ def _apply_local_status_totals(counts: dict[str, int], region: str) -> dict[str,
         out["soft"] = tip_s
         out["fail"] = tip_f
         return out
+    # done 可高于库（扫描计数先于落库）。fail/soft 以库为准，失败重试后必须能下降。
+    # 禁止把 max 写回 tip，否则旧失败数会把刚清掉的角标盖回去。
     out["done"] = max(tip_d, db_d)
-    out["fail"] = max(tip_f, db_f)
+    out["fail"] = db_f
     out["soft"] = db_s
-    # tip.soft 虚高时回写，避免 _region_library_progress 仍读旧 tip
-    if tip_s != db_s or tip_d < out["done"] or tip_f < out["fail"]:
-        _set_local_status_totals(
-            rid,
-            done=out["done"],
-            soft=db_s,
-            fail=out["fail"],
-            total=int(tip.get("total") or 0) or None,
-        )
     return out
 
 
@@ -1781,8 +1774,8 @@ def _lift_local_status_totals_from_counts(
     if not tip:
         return
     done = max(int(tip.get("done") or 0), int(counts.get("done") or 0))
-    soft = max(int(tip.get("soft") or 0), int(counts.get("soft") or 0))
-    fail = max(int(tip.get("fail") or 0), int(counts.get("fail") or 0))
+    soft = int(counts.get("soft") if "soft" in counts else tip.get("soft") or 0)
+    fail = int(counts.get("fail") if "fail" in counts else tip.get("fail") or 0)
     tot = int(tip.get("total") or 0)
     if (
         done == int(tip.get("done") or 0)
@@ -2881,6 +2874,15 @@ def retry_enrich_fails(*, region: str = "") -> dict[str, Any]:
             )
         _counts_cache.pop(rid, None)
         counts = _queue_log_status_counts(rid, fresh=True)
+        counts["fail"] = int(raw.get("fail") or 0)
+        counts["pending"] = _pending_total_estimate(
+            rid,
+            classified={
+                "done": int(counts.get("done") or 0),
+                "soft": int(counts.get("soft") or 0),
+                "fail": int(counts.get("fail") or 0),
+            },
+        )
         return {
             "ok": True,
             "reopened": 0,
@@ -2948,11 +2950,10 @@ def retry_enrich_fails(*, region: str = "") -> dict[str, Any]:
                 prog = dict(prog)
                 prog["failed"] = max(0, int(prog.get("failed") or 0) - n)
                 _enrich_job["progress"] = prog
-        # 运行中 SSE 只读内存 queueCounts，不改的话失败角标会一直停在重试前
+        # 运行中 SSE 只读内存 queueCounts。失败数写成重开后的真实剩余，不能只减一截旧角标。
         if cur_reg == rid or not cur_reg:
             qc_mem = dict(_enrich_job.get("queueCounts") or {})
             if qc_mem:
-                qc_mem["fail"] = max(0, int(qc_mem.get("fail") or 0) - n)
                 qc_mem["pending"] = int(qc_mem.get("pending") or 0) + n
                 _enrich_job["queueCounts"] = qc_mem
 
@@ -2964,12 +2965,18 @@ def retry_enrich_fails(*, region: str = "") -> dict[str, Any]:
     # 角标：失败 overlay 必须跟库内走，否则会一直钉在扫描时的全量失败数
     raw = _queue_log_status_counts_db(rid)
     tip = _LOCAL_STATUS_TOTALS.get(rid) if rid else None
+    fail_left = int(raw.get("fail") or 0)
     _set_local_status_totals(
         rid,
         done=int(raw.get("done") or (tip or {}).get("done") or 0),
         soft=int(raw.get("soft") or (tip or {}).get("soft") or 0),
-        fail=int(raw.get("fail") or 0),
+        fail=fail_left,
     )
+    with _enrich_lock:
+        qc_mem = dict(_enrich_job.get("queueCounts") or {})
+        if qc_mem:
+            qc_mem["fail"] = fail_left
+            _enrich_job["queueCounts"] = qc_mem
     _counts_cache.pop(rid, None)
 
     _push_log(f"失败重试 · {n} 条 → 未处理优先", region=rid)
@@ -2978,9 +2985,15 @@ def retry_enrich_fails(*, region: str = "") -> dict[str, Any]:
     except Exception:  # noqa: BLE001
         pass
     counts = _queue_log_status_counts(rid, fresh=True)
-    # pending 以库内为准（重开后的真实未处理）
-    counts["pending"] = int(raw.get("pending") or counts.get("pending") or 0)
-    counts["fail"] = int(raw.get("fail") or 0)
+    counts["fail"] = fail_left
+    counts["pending"] = _pending_total_estimate(
+        rid,
+        classified={
+            "done": int(counts.get("done") or 0),
+            "soft": int(counts.get("soft") or 0),
+            "fail": fail_left,
+        },
+    )
     return {
         "ok": True,
         "reopened": n,
@@ -3166,7 +3179,6 @@ def retry_enrich_softs(*, region: str = "") -> dict[str, Any]:
         if cur_reg == rid or not cur_reg:
             qc_mem = dict(_enrich_job.get("queueCounts") or {})
             if qc_mem:
-                qc_mem["soft"] = max(0, int(qc_mem.get("soft") or 0) - n)
                 qc_mem["pending"] = int(qc_mem.get("pending") or 0) + n
                 _enrich_job["queueCounts"] = qc_mem
 
@@ -3177,12 +3189,18 @@ def retry_enrich_softs(*, region: str = "") -> dict[str, Any]:
 
     raw = _queue_log_status_counts_db(rid)
     tip = _LOCAL_STATUS_TOTALS.get(rid) if rid else None
+    soft_left = int(raw.get("soft") or 0)
     _set_local_status_totals(
         rid,
         done=int(raw.get("done") or (tip or {}).get("done") or 0),
-        soft=int(raw.get("soft") or 0),
+        soft=soft_left,
         fail=int(raw.get("fail") or (tip or {}).get("fail") or 0),
     )
+    with _enrich_lock:
+        qc_mem = dict(_enrich_job.get("queueCounts") or {})
+        if qc_mem:
+            qc_mem["soft"] = soft_left
+            _enrich_job["queueCounts"] = qc_mem
     _counts_cache.pop(rid, None)
 
     _push_log(f"软成功重试 · {n} 条 → 未处理优先", region=rid)
@@ -3191,9 +3209,16 @@ def retry_enrich_softs(*, region: str = "") -> dict[str, Any]:
     except Exception:  # noqa: BLE001
         pass
     counts = _queue_log_status_counts(rid, fresh=True)
-    counts["pending"] = int(raw.get("pending") or counts.get("pending") or 0)
-    counts["soft"] = int(raw.get("soft") or 0)
+    counts["soft"] = soft_left
     counts["done"] = int(raw.get("done") or counts.get("done") or 0)
+    counts["pending"] = _pending_total_estimate(
+        rid,
+        classified={
+            "done": int(counts.get("done") or 0),
+            "soft": soft_left,
+            "fail": int(counts.get("fail") or 0),
+        },
+    )
     return {
         "ok": True,
         "reopened": n,
@@ -5523,12 +5548,12 @@ def _replace_pending_from_vector(
                 stage="pending",
                 label=(
                     f"对照向量库 · 已读 {scanned_vec:,}"
-                    f" · 未处理 {len(pending_rows):,}"
+                    f" · 未处理约 {est:,}"
                 ),
                 done=int(local_maps.done_n or 0),
                 soft=int(local_maps.soft_n or 0),
                 fail=int(local_maps.fail_n or 0),
-                pending=len(pending_rows),
+                pending=est,
                 scanned=scanned_vec,
                 total=max(int(vector_total or 0), scanned_vec),
                 notify=True,
