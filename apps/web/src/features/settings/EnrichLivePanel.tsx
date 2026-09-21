@@ -1069,6 +1069,8 @@ export function EnrichLivePanel({
   queuePageRef.current = queuePage;
   /** 切 tab / 翻页拉库期间，禁止 SSE 用工作队列重排列表 */
   const queueHydratingRef = useRef(false);
+  /** 清空·扫描进行中：角标只跟 queueScan，禁止 SSE tip / 切 tab 读库来回盖 */
+  const queueScanActiveRef = useRef(false);
   /** 成功/软成功/失败：角标上涨时防抖回读库表（按 updated_at），勿用工作队列插旧号 */
   const resultTabReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
@@ -1257,10 +1259,12 @@ export function EnrichLivePanel({
       }
     }
     // 翻页时也对齐角标总数（以库 counts 为准）
+    // 扫描中库表还在边写边变，切 tab 读到的是半成品，会把角标打得忽高忽低
     if (
       data.updateCounts === false &&
       data.counts &&
-      typeof data.counts === 'object'
+      typeof data.counts === 'object' &&
+      !queueScanActiveRef.current
     ) {
       const c = data.counts;
       const pendingFromServer = Number(c.pending || 0);
@@ -1394,12 +1398,14 @@ export function EnrichLivePanel({
   async function runQueueScan() {
     setLogsCleared(false);
     setQueueScanning(true);
+    queueScanActiveRef.current = true;
     setMsg('');
     tabCacheRef.current = {};
     tabDbLoadedRef.current = {};
     try {
       const scanned = await scanScrapLibraryEnrichQueue({ region: regionId });
       queueScanDoneRef.current = true;
+      queueScanActiveRef.current = false;
       enrichLiveBootstrapped.add(regionId);
       applyQueuePayload({ ...scanned, cacheTab: 'pending' });
       const curTab = tabRef.current;
@@ -1417,6 +1423,7 @@ export function EnrichLivePanel({
       );
       return true;
     } catch (e) {
+      queueScanActiveRef.current = false;
       setMsg(e instanceof Error ? e.message : '队列扫描失败');
       throw e;
     } finally {
@@ -1429,6 +1436,7 @@ export function EnrichLivePanel({
     pendingTotalRef.current = readCachedPendingTotal(regionId);
     tabCacheRef.current = {};
     tabDbLoadedRef.current = {};
+    queueScanActiveRef.current = false;
     loadSeqRef.current += 1;
     setQueueItems([]);
     setQueueCounts({ pending: 0, running: 0, done: 0, soft: 0, fail: 0 });
@@ -1612,10 +1620,14 @@ export function EnrichLivePanel({
       const qsHere =
         Boolean(qs?.active) &&
         (!qs?.region || qs.region === regionId);
+      queueScanActiveRef.current = qsHere;
       if (qsHere) {
-        // 进度只更新角标 / 空态文案，不打 Toast（AppMsg 会因文案变化一直弹）
+        // 扫描中角标只跟本轮分类进度；勿被下方 tip/库计数盖回旧全量
         setQueueCounts((prev) => ({
-          pending: Number(prev.pending || 0),
+          pending:
+            qs?.pending != null
+              ? Number(qs.pending || 0)
+              : Number(prev.pending || 0),
           running: Number(prev.running || 0),
           done: Number(qs?.done || 0),
           soft: Number(qs?.soft || 0),
@@ -1734,7 +1746,11 @@ export function EnrichLivePanel({
           }
         }
       }
-      if (qc && (liveHere || (halted && (regionQc || qcRegion === regionId)))) {
+      if (
+        !qsHere &&
+        qc &&
+        (liveHere || (halted && (regionQc || qcRegion === regionId)))
+      ) {
         const runN = halted ? 0 : Number(qc.running || 0);
         const statusPending =
           Number(qc.pending || 0) + (halted ? Number(qc.running || 0) : 0);
@@ -2089,6 +2105,7 @@ export function EnrichLivePanel({
   async function onClearAndScan() {
     if (clearing || queueScanning || retryingFails || retryingSofts) return;
     setClearing(true);
+    queueScanActiveRef.current = true;
     setLogsCleared(true);
     setPersistedLogs([]);
     setQueueItems([]);
@@ -2096,6 +2113,7 @@ export function EnrichLivePanel({
     setListTotals({});
     pendingTotalRef.current = 0;
     tabCacheRef.current = {};
+    tabDbLoadedRef.current = {};
     loadSeqRef.current += 1;
     enrichLiveBootstrapped.delete(regionId);
     try {

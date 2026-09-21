@@ -1790,6 +1790,7 @@ export type ScrapLibraryEnrichJobStatus = {
     done?: number;
     soft?: number;
     fail?: number;
+    pending?: number;
     /** 边扫边看：成功样例 */
     samplesDone?: ScrapLibraryEnrichQueueItem[];
     /** 边扫边看：软成功样例 */

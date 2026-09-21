@@ -1806,6 +1806,7 @@ _QUEUE_SCAN_STATE: dict[str, Any] = {
     "done": 0,
     "soft": 0,
     "fail": 0,
+    "pending": 0,
     "samplesDone": [],
     "samplesSoft": [],
     "samplesFail": [],
@@ -1870,6 +1871,7 @@ def _queue_scan_snapshot() -> dict[str, Any] | None:
             "done": int(_QUEUE_SCAN_STATE.get("done") or 0),
             "soft": int(_QUEUE_SCAN_STATE.get("soft") or 0),
             "fail": int(_QUEUE_SCAN_STATE.get("fail") or 0),
+            "pending": int(_QUEUE_SCAN_STATE.get("pending") or 0),
             "samplesDone": list(_QUEUE_SCAN_STATE.get("samplesDone") or []),
             "samplesSoft": list(_QUEUE_SCAN_STATE.get("samplesSoft") or []),
             "samplesFail": list(_QUEUE_SCAN_STATE.get("samplesFail") or []),
@@ -1886,6 +1888,7 @@ def _set_queue_scan_progress(
     done: int | None = None,
     soft: int | None = None,
     fail: int | None = None,
+    pending: int | None = None,
     active: bool = True,
     notify: bool = True,
 ) -> None:
@@ -1905,6 +1908,7 @@ def _set_queue_scan_progress(
                     "done": 0,
                     "soft": 0,
                     "fail": 0,
+                    "pending": 0,
                     "samplesDone": [],
                     "samplesSoft": [],
                     "samplesFail": [],
@@ -1928,6 +1932,8 @@ def _set_queue_scan_progress(
                 _QUEUE_SCAN_STATE["soft"] = max(0, int(soft))
             if fail is not None:
                 _QUEUE_SCAN_STATE["fail"] = max(0, int(fail))
+            if pending is not None:
+                _QUEUE_SCAN_STATE["pending"] = max(0, int(pending))
             _QUEUE_SCAN_STATE["active"] = True
             _QUEUE_SCAN_STATE["updatedAt"] = time.monotonic()
     if not notify:
@@ -3850,24 +3856,69 @@ def _queue_log_clear_pending(region: str) -> int:
     return _queue_log_prune_pending_not_in(region, set())
 
 
+# 向量库总数短缓存（扫描 force 刷新）；与 library progress 共用
+_incomplete_cache: dict[str, tuple[float, int, int]] = {}
+_INCOMPLETE_CACHE_TTL_SEC = 45.0
+
+
+def _fresh_vector_library_total(region: str, *, force: bool = False) -> int:
+    """向量库该区番号总数（轻量 COUNT）。
+
+    tip.total 会在双库扫描/骨架重建后落后；扫描与未处理角标必须以库为准。
+    默认走短缓存，扫描传 force=True 强制刷新。
+    """
+    rid = _queue_log_region(region)
+    if not rid:
+        return 0
+    now = time.time()
+    if not force:
+        hit = _incomplete_cache.get(rid)
+        if hit and now - float(hit[0]) < _INCOMPLETE_CACHE_TTL_SEC:
+            cached = int(hit[1] or 0)
+            if cached > 0:
+                return cached
+    live = 0
+    try:
+        from app.scrap_library.embed import region_library_totals_fast
+
+        live = int(region_library_totals_fast(region=rid).get("total") or 0)
+    except Exception:  # noqa: BLE001
+        live = 0
+    if live > 0:
+        prev_inc = 0
+        hit = _incomplete_cache.get(rid)
+        if hit:
+            prev_inc = int(hit[2] or 0)
+        _incomplete_cache[rid] = (now, live, prev_inc)
+        # 同步 tip.total，避免后续路径继续用旧目录量级
+        _ensure_local_status_totals_loaded()
+        tip = _LOCAL_STATUS_TOTALS.get(rid) or {}
+        if int(tip.get("total") or 0) != live:
+            _set_local_status_totals(
+                rid,
+                done=int(tip.get("done") or 0),
+                soft=int(tip.get("soft") or 0),
+                fail=int(tip.get("fail") or 0),
+                total=live,
+            )
+    return max(0, live)
+
+
 def _pending_total_estimate(
     region: str, *, classified: dict[str, int] | None = None
 ) -> int:
     """未处理角标：向量总数 − 成功/软成功/失败。
 
-    优先 tip.total（扫描落盘）；否则轻量 COUNT，不跑 quality_stats。
+    向量总数走轻量 COUNT（可缓存）；tip 仅作 COUNT 失败时回退。
     """
     rid = _queue_log_region(region)
     if not rid:
         return 0
     _ensure_local_status_totals_loaded()
     tip = _LOCAL_STATUS_TOTALS.get(rid) if rid else None
-    vector_total = int((tip or {}).get("total") or 0)
+    vector_total = _fresh_vector_library_total(rid)
     if vector_total <= 0:
-        try:
-            vector_total = int(_region_library_progress(rid).get("total") or 0)
-        except Exception:  # noqa: BLE001
-            vector_total = 0
+        vector_total = int((tip or {}).get("total") or 0)
     if classified is not None:
         done_n = int(classified.get("done") or 0)
         soft_n = int(classified.get("soft") or 0)
@@ -4833,9 +4884,7 @@ def _local_nfo_gap_maps(
     total_est = 0
     if report_progress:
         try:
-            total_est = int(
-                (_region_library_progress(rid or region) or {}).get("total") or 0
-            )
+            total_est = _fresh_vector_library_total(rid or region, force=True)
         except Exception:  # noqa: BLE001
             total_est = 0
         _set_queue_scan_progress(
@@ -4847,6 +4896,7 @@ def _local_nfo_gap_maps(
             done=0,
             soft=0,
             fail=0,
+            pending=total_est,
             notify=True,
         )
 
@@ -4912,6 +4962,13 @@ def _local_nfo_gap_maps(
                     done=out.done_n,
                     soft=out.soft_n,
                     fail=out.fail_n,
+                    pending=max(
+                        0,
+                        int(total_est or 0)
+                        - int(out.done_n or 0)
+                        - int(out.soft_n or 0)
+                        - int(out.fail_n or 0),
+                    ),
                     notify=True,
                 )
 
@@ -5308,12 +5365,8 @@ def iter_enrich_pending_items(
     local_classified = maps.skip_rels
     local_codes = maps.classified_codes
 
-    # 角标：向量库全部番号 − 本地成功/软成功/失败
-    try:
-        lib = _region_library_progress(rid or region)
-        vector_total = int(lib.get("total") or 0)
-    except Exception:  # noqa: BLE001
-        vector_total = 0
+    # 角标：每次以向量库最新 COUNT 为准，再扣本地已分类
+    vector_total = _fresh_vector_library_total(rid or region, force=True)
     classified_n = int(maps.done_n or 0) + int(maps.soft_n or 0) + int(maps.fail_n or 0)
     pending_total = max(0, vector_total - classified_n)
 
@@ -5376,6 +5429,133 @@ def iter_enrich_pending_items(
     if lim > 0:
         return samples, max(int(pending_total), len(samples))
     return samples, max(total, int(pending_total))
+
+
+def _replace_pending_from_vector(
+    *,
+    region: str,
+    local_maps: _LocalNfoMaps,
+    vector_total: int,
+    preview_cap: int = 500,
+) -> tuple[list[dict[str, Any]], int]:
+    """用最新向量库差集整表重写未处理队列（不只留样例）。
+
+    未处理 = 向量库有番号且本地未归入成功/软成功/失败。
+    边扫边报已发现条数，扫完清空旧 pending 再整批写入。
+    """
+    from app.scrap_library import embed as embed_svc
+
+    rid = _queue_log_region(region)
+    if not rid:
+        return [], 0
+    skip_rels = set(local_maps.skip_rels)
+    skip_codes = set(local_maps.classified_codes)
+    classified_n = (
+        int(local_maps.done_n or 0)
+        + int(local_maps.soft_n or 0)
+        + int(local_maps.fail_n or 0)
+    )
+    est = max(0, int(vector_total or 0) - classified_n)
+    pending_rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    vec_off = 0
+    batch_sz = 2000
+    scanned_vec = 0
+    _set_queue_scan_progress(
+        region=rid,
+        stage="pending",
+        label="对照最新向量库生成未处理…",
+        done=int(local_maps.done_n or 0),
+        soft=int(local_maps.soft_n or 0),
+        fail=int(local_maps.fail_n or 0),
+        pending=est,
+        scanned=0,
+        total=max(int(vector_total or 0), 1),
+        notify=True,
+    )
+    while True:
+        try:
+            batch = embed_svc.list_region_code_items(
+                region=rid,
+                limit=batch_sz,
+                offset=vec_off,
+                order="code",
+            )
+        except Exception as e:  # noqa: BLE001
+            log.warning("pending vector diff failed region=%s: %s", rid, e)
+            break
+        if not batch:
+            break
+        vec_off += len(batch)
+        scanned_vec += len(batch)
+        for r in batch:
+            if not isinstance(r, dict):
+                continue
+            iid = str(r.get("itemId") or "").strip()
+            rel = str(r.get("relPath") or r.get("rel_path") or iid).strip().replace(
+                "\\", "/"
+            )
+            code_u = str(r.get("code") or "").strip().upper()
+            key = iid or rel or code_u
+            if not key or key in seen:
+                continue
+            if (rel and rel in skip_rels) or (iid and iid in skip_rels):
+                continue
+            if code_u and code_u in skip_codes:
+                continue
+            seen.add(key)
+            gaps = list(r.get("gaps") or []) or list(_ENRICH_KINDS)
+            pending_rows.append(
+                {
+                    "itemId": iid or rel or code_u,
+                    "code": code_u,
+                    "gaps": gaps,
+                    "rel_path": rel or iid,
+                    "relPath": rel or iid,
+                    "region": rid,
+                    "status": "pending",
+                    "shell": bool(r.get("shell")),
+                }
+            )
+        if scanned_vec == len(batch) or scanned_vec % 4000 < batch_sz:
+            _set_queue_scan_progress(
+                region=rid,
+                stage="pending",
+                label=(
+                    f"对照向量库 · 已读 {scanned_vec:,}"
+                    f" · 未处理 {len(pending_rows):,}"
+                ),
+                done=int(local_maps.done_n or 0),
+                soft=int(local_maps.soft_n or 0),
+                fail=int(local_maps.fail_n or 0),
+                pending=len(pending_rows),
+                scanned=scanned_vec,
+                total=max(int(vector_total or 0), scanned_vec),
+                notify=True,
+            )
+        if len(batch) < batch_sz:
+            break
+
+    _queue_log_clear_pending(rid)
+    if pending_rows:
+        _queue_log_insert_many(rid, pending_rows)
+    _counts_cache.pop(rid, None)
+    n = len(pending_rows)
+    _set_queue_scan_progress(
+        region=rid,
+        stage="pending",
+        label=f"未处理已按最新向量库写入 {n:,}",
+        done=int(local_maps.done_n or 0),
+        soft=int(local_maps.soft_n or 0),
+        fail=int(local_maps.fail_n or 0),
+        pending=n,
+        scanned=scanned_vec,
+        total=max(int(vector_total or 0), scanned_vec),
+        notify=True,
+    )
+    cap = max(0, int(preview_cap or 0))
+    preview = pending_rows[:cap] if cap else pending_rows[:500]
+    return preview, n
 
 
 def _hot_prefixes_for_region(region: str, *, max_n: int = 80) -> list[str]:
@@ -5880,18 +6060,18 @@ def scan_enrich_queue(
             _set_queue_scan_progress(
                 region=rid,
                 stage="pending",
-                label="对照向量骨架生成未处理样例…",
+                label="对照最新向量库重写未处理队列…",
                 done=int(local_maps.done_n or 0),
                 soft=int(local_maps.soft_n or 0),
                 fail=int(local_maps.fail_n or 0),
                 notify=True,
             )
-            rows, pending_total = iter_enrich_pending_items(
+            vector_total = _fresh_vector_library_total(rid, force=True)
+            rows, pending_total = _replace_pending_from_vector(
                 region=rid,
-                limit=write_cap,
-                skip_item_ids=skip_done_iids,
-                skip_codes=skip_done_codes,
                 local_maps=local_maps,
+                vector_total=vector_total,
+                preview_cap=write_cap,
             )
             source = "vector_all_minus_local"
 
@@ -5932,9 +6112,11 @@ def scan_enrich_queue(
                 if local_maps is not None
                 else pending_total
             ),
+            pending=int(pending_total),
             notify=True,
         )
-        pruned = _queue_log_clear_pending(rid)
+        # 增量模式已在差集阶段整表重写 pending，这里不再清空
+        pruned = 0 if (local_maps is not None and not overwrite) else _queue_log_clear_pending(rid)
         queue_view = _ensure_queue_log_ids(rid, queue_view)
         recovered = _recover_done_from_enrich_logs(rid)
 
@@ -5947,9 +6129,7 @@ def scan_enrich_queue(
         )
         local_counts = {"done": 0, "soft": 0, "fail": 0}
         try:
-            vector_total = int(
-                (_region_library_progress(rid) or {}).get("total") or 0
-            )
+            vector_total = _fresh_vector_library_total(rid, force=True)
         except Exception:  # noqa: BLE001
             vector_total = 0
         if not overwrite and local_maps is not None and (
@@ -6744,46 +6924,24 @@ def _region_library_progress(region: str) -> dict[str, int]:
 
     未处理 = total − done − soft − fail（与扫描角标同源）。
     禁止调用 quality_stats（分项 COUNT 在有码区要数秒，会卡死设置页）。
+    total 以向量库 COUNT 为准（缓存），不再钉死旧 tip.total。
     """
     rid = _queue_log_region(region)
     if not rid:
         return {"total": 0, "incomplete": 0, "complete": 0, "percent": 0}
     _ensure_local_status_totals_loaded()
     tip = _LOCAL_STATUS_TOTALS.get(rid) or {}
-    now = time.time()
-    hit = _incomplete_cache.get(rid)
-    if hit and now - hit[0] < _INCOMPLETE_CACHE_TTL_SEC:
-        total = int(hit[1])
-    else:
+    total = _fresh_vector_library_total(rid)
+    if total <= 0:
         total = int(tip.get("total") or 0)
-        if total <= 0:
-            try:
-                from app.scrap_library.embed import region_library_totals_fast
-
-                total = int(
-                    region_library_totals_fast(region=rid).get("total") or 0
-                )
-            except Exception:  # noqa: BLE001
-                total = 0
-        if total > 0:
-            # 回写 tip.total，后续状态读 O(1)
-            if int(tip.get("total") or 0) != total:
-                _set_local_status_totals(
-                    rid,
-                    done=int(tip.get("done") or 0),
-                    soft=int(tip.get("soft") or 0),
-                    fail=int(tip.get("fail") or 0),
-                    total=total,
-                )
-                tip = _LOCAL_STATUS_TOTALS.get(rid) or tip
-        _incomplete_cache[rid] = (now, total, 0)
+    tip = _LOCAL_STATUS_TOTALS.get(rid) or tip
     done_n = int(tip.get("done") or 0)
     soft_n = int(tip.get("soft") or 0)
     fail_n = int(tip.get("fail") or 0)
     # 已刮完（含软成功）视为完成；未处理(+fail 仍算待办里的剩余用 pending 公式)
     complete = done_n + soft_n
     incomplete = max(0, total - done_n - soft_n - fail_n) if total > 0 else 0
-    # 缓存 incomplete 供同 TTL 复用
+    now = time.time()
     _incomplete_cache[rid] = (now, total, incomplete)
     pct = _enrich_percent(complete, total) if total > 0 else 0
     return {
