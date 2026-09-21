@@ -26,6 +26,33 @@ services:
     image: pgvector/pgvector:0.8.6-pg16
     container_name: sehua-next-web-postgres
     restart: always
+    # ⚠️ 2026-09-21 20:41:44 本容器重启过一次（对外 5439 在 20:38–20:41 之间
+    # refused/timeout 交替约 3 分钟，pg_postmaster_start_time() 正是 20:41:44）。
+    # 根因高度指向「临时文件写爆盘」而非断电：pg_stat_database 显示
+    # temp_files=12,948、temp_bytes≈442GB，而 work_mem 只有 4MB、
+    # 且 temp_file_limit=0（不限额）——单条排序/哈希查询就能把数据卷写满，
+    # PG 落盘失败即 PANIC 退出，restart:always 再把它拉起来，
+    # 对外表现就是「抖几分钟后自己好了」。
+    # 下面显式覆盖参数止血：提高 work_mem 减少落盘，并给单会话临时文件设上限
+    # （超限直接报错，而不是写满 NAS 卷把实例拖崩）。
+    # ⚠️ 内存上限 2G 偏紧（shared_buffers + 并发 work_mem + autovacuum）；
+    # 若 NAS 余量充足建议提到 3~4G，并单独监控数据卷剩余空间。
+    command:
+      - postgres
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - work_mem=16MB
+      - -c
+      - maintenance_work_mem=192MB
+      # 单会话临时文件上限：超限报错，不再默默写满数据卷
+      - -c
+      - temp_file_limit=16GB
+      # 崩溃前留证：记录 >=256MB 的临时文件与 >=3s 的语句
+      - -c
+      - log_temp_files=262144
+      - -c
+      - log_min_duration_statement=3000
     ports:
       - "5439:5432"
     environment:
@@ -56,7 +83,7 @@ services:
           memory: 512M
 
   scrape-worker:
-    image: poillysky/sehua-next-web:1.2.19
+    image: poillysky/sehua-next-web:1.2.20
     container_name: sehua-next-web-scrape
     restart: always
     # 刮削吞吐：4G mid 档；上限非预占，任务结束后会回落。
@@ -94,7 +121,7 @@ services:
         hard: 65535
 
   app:
-    image: poillysky/sehua-next-web:1.2.19
+    image: poillysky/sehua-next-web:1.2.20
     container_name: sehua-next-web
     restart: always
     # UI 优先：轻量上限，空闲不预占。

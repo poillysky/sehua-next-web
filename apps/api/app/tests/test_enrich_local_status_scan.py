@@ -137,14 +137,15 @@ class LocalNfoStatusMapsTests(unittest.TestCase):
         self.assertEqual(out["soft"], 20)
         self.assertEqual(out["fail"], 3)
         self.assertEqual(out["pending"], 1)
-        # 库有分类时 soft 以库为准，允许从 tip 下降
+        # 库有分类时 soft/fail 以库为准，允许从 tip 下降
+        # （v1.2.18：失败/软成功重试后角标必须按库内剩余数回落，不能被 tip 钉死）
         out_soft = E._apply_local_status_totals(
             {"pending": 1, "running": 0, "done": 100, "soft": 5, "fail": 1},
             "japan_censored",
         )
         self.assertEqual(out_soft["done"], 100)
         self.assertEqual(out_soft["soft"], 5)
-        self.assertEqual(out_soft["fail"], 3)
+        self.assertEqual(out_soft["fail"], 1)
         E._clear_local_status_totals("japan_censored")
         out2 = E._apply_local_status_totals(
             {"pending": 1, "running": 0, "done": 2, "soft": 0, "fail": 0},
@@ -175,14 +176,15 @@ class LocalNfoStatusMapsTests(unittest.TestCase):
                 self.assertEqual(out["done"], 1001)
                 self.assertEqual(out["soft"], 2002)
                 self.assertEqual(out["fail"], 3)
-                # 库有分类时走合并规则：done/fail 取大、soft 以库为准
+                # 库有分类时走合并规则：done 取大、soft/fail 以库为准
+                # （v1.2.18 起 fail 不再取大，否则重试成功后角标降不下来）
                 out_mix = E._apply_local_status_totals(
                     {"pending": 0, "running": 0, "done": 500, "soft": 500, "fail": 1},
                     "fc2",
                 )
                 self.assertEqual(out_mix["done"], 1001)
                 self.assertEqual(out_mix["soft"], 500)
-                self.assertEqual(out_mix["fail"], 3)
+                self.assertEqual(out_mix["fail"], 1)
                 E._clear_local_status_totals("fc2")
 
 
@@ -259,10 +261,12 @@ class LocalNfoStatusMapsTests(unittest.TestCase):
                     with mock.patch.object(
                         E.embed_svc, "_is_blank_cover_file", return_value=False
                     ):
+                        # v1.2.17 起未处理角标改按「向量库实时总量 − 本地已分类」重算，
+                        # 不再走 _region_library_progress（旧的 incomplete/total）。
                         with mock.patch.object(
                             E,
-                            "_region_library_progress",
-                            return_value={"incomplete": 100, "total": 100},
+                            "_fresh_vector_library_total",
+                            return_value=100,
                         ):
                             with mock.patch.object(
                                 E.embed_svc,

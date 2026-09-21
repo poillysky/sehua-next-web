@@ -291,6 +291,16 @@ def ensure_schema(*, recreate: bool = False) -> dict[str, Any]:
                   ON {TABLE} (code)
                 """
             )
+            # ⚠️ 未处理列表 / 开刮取号走 ORDER BY updated_at DESC NULLS LAST,
+            # code ASC + region = ANY(...)。无此索引时是 22.6 万行全表排序，
+            # 深 offset 直接爆掉（实测 offset=20000 → 33s）→ 未处理列表只能翻几页。
+            # 索引列序必须与 ORDER BY 完全一致（含 NULLS LAST），否则用不上。
+            cur.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS {TABLE}_region_updated
+                  ON {TABLE} (region, updated_at DESC NULLS LAST, code)
+                """
+            )
             # 维度不一致则重建（模型换维后）
             # pgvector：atttypmod 就是维数（不是 typmod-4）
             cur.execute(
@@ -352,6 +362,12 @@ def ensure_schema(*, recreate: bool = False) -> dict[str, Any]:
                     )
                     cur.execute(
                         f"CREATE INDEX IF NOT EXISTS {TABLE}_code ON {TABLE} (code)"
+                    )
+                    cur.execute(
+                        f"""
+                        CREATE INDEX IF NOT EXISTS {TABLE}_region_updated
+                          ON {TABLE} (region, updated_at DESC NULLS LAST, code)
+                        """
                     )
         conn.commit()
     try:

@@ -81,15 +81,15 @@ docker compose up -d
 不设 `SCRAPE_WORKER_URL` 时不代理，行为与拆分前一致：
 
 ```bash
-docker build -t sehua-next-web:1.2.19 .
+docker build -t sehua-next-web:1.2.20 .
 docker run -d --name sehua \
   -p 3020:3020 \
   -v "$PWD/data:/app/data" \
-  sehua-next-web:1.2.19
+  sehua-next-web:1.2.20
 ```
 
 GitHub Actions（`.github/workflows/docker-publish.yml`）在推送 `v*` 标签或手动触发时，构建并推送到 Docker Hub：
 
-`poillysky/sehua-next-web:1.2.19`
+`poillysky/sehua-next-web:1.2.20`
 
 与 sehua / Anzai 对齐：用户名默认 `poillysky`；Token 读取 `DOCKERHUB_TOKEN`（或 `DOCKERHUB_PASSWORD` / Variables / 手动 Run workflow 粘贴）。

@@ -1079,6 +1079,12 @@ export function EnrichLivePanel({
     null,
   );
   const resultTabCountRef = useRef({ soft: 0, done: 0, fail: 0 });
+  /**
+   * 角标最新值。SSE 回调是长生命周期闭包，直接读 `queueCounts` 会拿到陈旧值；
+   * 防塌陷比较（服务端读库失败时保留旧角标）必须用 ref。
+   */
+  const queueCountsRef = useRef(queueCounts);
+  queueCountsRef.current = queueCounts;
   const queuePaneRef = useRef<HTMLDivElement | null>(null);
   /** 缺口总数（可大于列表条数）；tab 切换读表时仍保留 */
   const pendingTotalRef = useRef(0);
@@ -1173,21 +1179,24 @@ export function EnrichLivePanel({
         ...(failN > 0 ? { fail: failN } : {}),
       }));
     } else {
-      // 切 tab 读表：仍同步成功/软成功/失败角标（允许 soft 下降）
+      // 切 tab 读表：仍同步成功/软成功/失败角标（允许 soft 下降，但不许塌成 0）。
+      // ⚠️ 旧实现 `soft: softN` 无条件赋值，且守卫 `softN >= 0` 恒真——
+      // 读表回包不带 soft（只返样例行数）或读库失败返 0 时，角标会从 9000+
+      // 直接塌到 0、下一帧再顶回来，这正是「切 tab 数字乱跳」的来源。
       const doneN = Number(counts.done || 0);
       const softN = Number(counts.soft || 0);
       const failN = Number(counts.fail || 0);
-      if (doneN > 0 || softN >= 0 || failN > 0) {
+      if (doneN > 0 || softN > 0 || failN > 0) {
         setQueueCounts((prev) => ({
           ...prev,
           done: doneN > 0 ? doneN : Number(prev.done || 0),
-          soft: softN,
+          soft: softN > 0 ? softN : Number(prev.soft || 0),
           fail: failN > 0 ? failN : Number(prev.fail || 0),
         }));
         setListTotals((prev) => ({
           ...prev,
           ...(doneN > 0 ? { done: doneN } : {}),
-          soft: softN,
+          ...(softN > 0 ? { soft: softN } : {}),
           ...(failN > 0 ? { fail: failN } : {}),
         }));
       }
@@ -1389,7 +1398,7 @@ export function EnrichLivePanel({
       const soft = Number(scanned.counts?.soft || scanned.localSoft || 0);
       const fail = Number(scanned.counts?.fail || scanned.localFail || 0);
       setMsg(
-        `已扫描本地 · 未处理 ${n.toLocaleString()} · 成功 ${done.toLocaleString()} · 软成功 ${soft.toLocaleString()} · 失败 ${fail.toLocaleString()}（分类全量可翻页；未处理按全量虚拟翻页）`,
+        `已扫描本地 · 未处理 ${n.toLocaleString()} · 成功 ${done.toLocaleString()} · 软成功 ${soft.toLocaleString()} · 失败 ${fail.toLocaleString()}（此处的成功/软成功/失败是「本地扫描判定」，不是抓取产出；分类全量可翻页）`,
       );
       return true;
     } catch (e) {
@@ -1753,10 +1762,21 @@ export function EnrichLivePanel({
           writeCachedPendingTotal(regionId, pendingN);
         }
         // 队列表写全部分类行；角标与 local totals / DB 对齐。
+        // 服务端通过 queueCountsOk 显式告知本次读数是否可信（false = 读库失败、
+        // counts 全是 0）。旧实现拿 `server === 500` 当哨兵，但 500 本身就是
+        // 扫描写盘上限、是合法真值 → 真值 500 会被误判成截断值而保留旧角标。
+        const countsOk = data.queueCountsOk !== false;
+        const prevCounts = queueCountsRef.current;
         const preferBadge = (server: number, prev: number) =>
-          server === 500 && prev > 500 ? prev : server;
-        let failN = preferBadge(Number(qc.fail || 0), Number(0));
-        let softN = preferBadge(Number(qc.soft || 0), Number(0));
+          !countsOk && prev > server ? prev : server;
+        let failN = preferBadge(
+          Number(qc.fail || 0),
+          Number(prevCounts.fail || 0),
+        );
+        let softN = preferBadge(
+          Number(qc.soft || 0),
+          Number(prevCounts.soft || 0),
+        );
         if (failCeilRef.current != null) {
           if (failN <= failCeilRef.current) failCeilRef.current = null;
           else failN = failCeilRef.current;
@@ -2433,6 +2453,15 @@ export function EnrichLivePanel({
     soft: Number(queueCounts.soft || 0),
     fail: Number(queueCounts.fail || 0),
   };
+  /**
+   * 角标里有多少是「真实刮削产出」。
+   * 队列日志表同时存 local_scan 的「扫描判定本地已齐」行（十万级）与真实抓取
+   * 结果（百级），角标只显示合计数会把前者当刮削成功读（实测 108,533 : 250）。
+   */
+  const scrapeRow =
+    st?.queueCountsScrape && st.queueCountsScrapeRegion === regionId
+      ? st.queueCountsScrape
+      : null;
 
   // 有进行中时默认切到「处理中」（用户点过 tab 后不再抢）；勿重置页码
   useEffect(() => {
@@ -2843,6 +2872,18 @@ export function EnrichLivePanel({
                   }
                   setTab(next);
                 }}
+                title={
+                  scrapeRow &&
+                  (t.id === 'done' || t.id === 'soft' || t.id === 'fail')
+                    ? `${t.label}：${
+                        t.id === 'done'
+                          ? Number(scrapeRow.done || 0)
+                          : t.id === 'soft'
+                            ? Number(scrapeRow.soft || 0)
+                            : Number(scrapeRow.fail || 0)
+                      } 条为真实刮削产出，其余为本地扫描判定「已齐」`
+                    : undefined
+                }
               >
                 <span className="enrich-live__tab-label">{t.label}</span>
                 <span className="enrich-live__tab-count">
@@ -2866,6 +2907,11 @@ export function EnrichLivePanel({
               {filteredQueue.length > 0
                 ? ` · 预览 ${filteredQueue.length} 条（扫完会补全）`
                 : ''}
+            </p>
+          ) : scrapeRow &&
+            (tab === 'done' || tab === 'soft' || tab === 'fail') ? (
+            <p className="enrich-live__queue-hint">
+              {`真实刮削产出：成功 ${Number(scrapeRow.done || 0).toLocaleString()} · 软成功 ${Number(scrapeRow.soft || 0).toLocaleString()} · 失败 ${Number(scrapeRow.fail || 0).toLocaleString()}（角标其余部分是本地扫描判定「已齐」，不是抓取结果）`}
             </p>
           ) : null}
           {!searchActive && tab === 'fail' && Number(tabCounts.fail || 0) > 0 ? (

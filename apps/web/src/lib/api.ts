@@ -1767,6 +1767,23 @@ export type ScrapLibraryEnrichJobStatus = {
   };
   /** 全局 queueCounts 对应的分区（防串区） */
   queueCountsRegion?: string;
+  /**
+   * 上一次读库计数是否成功。false = 读库失败（断连/超时），此时 counts 全是 0，
+   * 前端应保留旧角标而不是把数字塌成 0。取代旧的 `server === 500` 魔数哨兵。
+   */
+  queueCountsOk?: boolean;
+  /**
+   * 只统计「真实刮削产出」的行（排除 `source='local_scan'` 的扫描判定行）。
+   * 队列日志表把十万级的「扫描判定已齐」与百级的「真抓成功」混在一张表，
+   * 角标不拆开就会被误读成刮削产出。
+   */
+  queueCountsScrape?: {
+    done?: number;
+    soft?: number;
+    fail?: number;
+    total?: number;
+  };
+  queueCountsScrapeRegion?: string;
   /** 各分区独立角标 */
   regionQueueCounts?: Record<
     string,
@@ -2247,6 +2264,10 @@ export async function scanScrapLibraryEnrichQueue(body?: {
   localDone?: number;
   localSoft?: number;
   localFail?: number;
+  /** 磁盘本地 NFO 分类数（仅诊断用；角标以 counts/localDone 为准） */
+  localDiskDone?: number;
+  localDiskSoft?: number;
+  localDiskFail?: number;
 }> {
   const res = await apiFetch('/scrap-library/embed/enrich/queue-scan', {
     method: 'POST',
@@ -2279,6 +2300,9 @@ export async function scanScrapLibraryEnrichQueue(body?: {
       localDone?: number;
       localSoft?: number;
       localFail?: number;
+      localDiskDone?: number;
+      localDiskSoft?: number;
+      localDiskFail?: number;
     }>
   ).data;
 }

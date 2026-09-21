@@ -516,6 +516,15 @@ def init_db() -> None:
                 WHERE item_id <> ''
                 """
             )
+            # 「真实刮削产出」角标（排队表里排除 source='local_scan'）与
+            # done 裁剪窗口都按 region + source 过滤。缺这条索引时，
+            # 18 万行的日志表每次读角标都要整分区扫描。
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_enrich_queue_log_region_source_status
+                ON enrich_queue_log (region, source, status)
+                """
+            )
             # 有界重试提示：记录「本该更好但没拿到」的番号（封面抓不到 / 高优先源故障降级）。
             # 目的：既不每轮无脑重刮（12 万番号的固定税），也不永久放弃。
             # kind ∈ {'cover','src_down'}；giveup=True 后增量扫描不再自动入队，
