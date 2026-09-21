@@ -15,6 +15,7 @@ from pathlib import Path
 _UNLIMITED = 1 << 60
 _TIGHT = 1536 * 1024 * 1024  # ≤ 1.5 GiB
 _SMALL = 3 * 1024 * 1024 * 1024  # ≤ 3 GiB
+_MID = 5 * 1024 * 1024 * 1024  # ≤ 5 GiB（覆盖 compose 的 4g 上限）
 
 
 @lru_cache(maxsize=1)
@@ -42,7 +43,7 @@ def memory_limit_bytes() -> int | None:
 
 
 def memory_class() -> str:
-    """tight | small | host。Windows 与未限内存视为 host。"""
+    """tight | small | mid | host。Windows 与未限内存视为 host。"""
     if os.name == "nt":
         return "host"
     limit = memory_limit_bytes()
@@ -52,6 +53,8 @@ def memory_class() -> str:
         return "tight"
     if limit <= _SMALL:
         return "small"
+    if limit <= _MID:
+        return "mid"
     return "host"
 
 
@@ -62,6 +65,8 @@ def io_threads(*, floor: int = 2, host_max: int = 8) -> int:
         return 2
     if kind == "small":
         return max(2, min(4, host_max))
+    if kind == "mid":
+        return max(4, min(6, host_max))
     cpus = os.cpu_count() or 4
     return max(int(floor), min(int(host_max), cpus))
 
@@ -76,4 +81,8 @@ def cap_parallel(n: int, *, tight: int, small: int, hard: int) -> int:
         return min(capped, max(1, int(tight)))
     if kind == "small":
         return min(capped, max(1, int(small)))
+    if kind == "mid":
+        # 4G 容器：比 1G 松一档（番号并发大约到 8），不到宿主机满开。
+        mid = max(int(small), min(int(hard), max(int(small) * 2, 8)))
+        return min(capped, max(1, mid))
     return capped

@@ -56,33 +56,40 @@ npm run dev       # 3020
 
 业务默认值写在 `config/app.json` 的 `settings`，首次启动写入 Postgres；已有配置不覆盖。局域网资源库/代理、115、TMDB 等放 `config/app.local.json`（已 gitignore，勿提交）。
 
-## Docker（单镜像）
+## Docker（UI + 刮削 Worker）
 
-一个镜像同时跑 **web + api**（supervisord），对外只暴露 **3020**。健康检查探测 web / api 两端。
+同一镜像两种角色（`APP_ROLE`）：
+
+- **`app`（ui）**：Next web + 轻量 API，对外 **3020**；重接口内网代理到 worker
+- **`scrape-worker`（worker）**：仅 API，跑扫描/刮削/向量化，默认内存上限 4G
+
+`docker compose up -d` 会起 postgres + scrape-worker + app。健康检查：UI 探 web/api；Worker 只探 api。
 
 ### NAS（`/vol1/1000/Docker/sehua-next-web`）
 
 ```bash
-mkdir -p /vol1/1000/Docker/sehua-next-web/{data,config}
+mkdir -p /vol1/1000/Docker/sehua-next-web/{data,media,postgres,config}
 cd /vol1/1000/Docker/sehua-next-web
 docker compose pull
 docker compose up -d
 ```
 
-`restart: always`；数据卷为绝对路径。资源库是**独立 Postgres**，在设置页或 `app.local.json` 填局域网 DSN。
+需使用含 `APP_ROLE` / `supervisord-worker.conf` 的镜像（重新 build/push 后再 pull）。`restart: always`；数据卷为绝对路径。资源库是**独立 Postgres**，在设置页或 `app.local.json` 填局域网 DSN。
 
-### 本地
+### 本地单容器（开发）
+
+不设 `SCRAPE_WORKER_URL` 时不代理，行为与拆分前一致：
 
 ```bash
-docker build -t sehua-next-web:1.2.12 .
+docker build -t sehua-next-web:1.2.13 .
 docker run -d --name sehua \
   -p 3020:3020 \
   -v "$PWD/data:/app/data" \
-  sehua-next-web:1.2.12
+  sehua-next-web:1.2.13
 ```
 
 GitHub Actions（`.github/workflows/docker-publish.yml`）在推送 `v*` 标签或手动触发时，构建并推送到 Docker Hub：
 
-`poillysky/sehua-next-web:1.2.12`
+`poillysky/sehua-next-web:1.2.13`
 
 与 sehua / Anzai 对齐：用户名默认 `poillysky`；Token 读取 `DOCKERHUB_TOKEN`（或 `DOCKERHUB_PASSWORD` / Variables / 手动 Run workflow 粘贴）。

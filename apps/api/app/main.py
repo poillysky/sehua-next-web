@@ -47,6 +47,7 @@ from app.search.bitmagnet_pg import close_pool as close_bitmagnet_pool
 
 from app.search.resource_routes import router as resource_router
 from app.core.conn_settings_routes import router as conn_settings_router
+from app.core.scrape_worker_proxy import ScrapeWorkerProxyMiddleware
 from app.ai.settings_routes import router as ai_settings_router
 from app.ai.chat_routes import router as ai_chat_router
 from app.ai.assistant_routes import router as ai_assistant_router
@@ -157,6 +158,9 @@ def _cors_origins() -> list[str]:
 app = FastAPI(title="资源仓库 API", version="0.3.0", lifespan=lifespan)
 
 
+
+# 先挂代理（内层），再挂 CORS（外层），跨域时错误响应也带 CORS 头
+app.add_middleware(ScrapeWorkerProxyMiddleware)
 
 app.add_middleware(
 

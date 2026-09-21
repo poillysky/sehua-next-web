@@ -52,6 +52,7 @@ COPY --from=web-builder /src/.next/standalone /app/web/
 COPY --from=web-builder /src/.next/static /app/web/.next/static
 
 COPY docker/supervisord.conf /etc/supervisor/supervisord.conf
+COPY docker/supervisord-worker.conf /etc/supervisor/supervisord-worker.conf
 COPY docker/entrypoint.sh /entrypoint.sh
 COPY docker/healthcheck.sh /healthcheck.sh
 RUN chmod +x /entrypoint.sh /healthcheck.sh

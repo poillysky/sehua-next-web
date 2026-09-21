@@ -3770,6 +3770,20 @@ export async function clearP115Tasks(
   return { ...json.data, message: json.message };
 }
 
+export async function deleteP115Task(
+  infoHash: string,
+): Promise<P115TasksResult & { ok?: boolean; infoHash?: string; message?: string }> {
+  const res = await apiFetch('/settings/p115/tasks/delete', {
+    method: 'POST',
+    body: JSON.stringify({ infoHash }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  const json = (await res.json()) as Envelope<
+    P115TasksResult & { ok?: boolean; infoHash?: string; message?: string }
+  > & { message: string };
+  return { ...json.data, message: json.message };
+}
+
 export type P115QrStart = {
   uid: string;
   time: string | number;

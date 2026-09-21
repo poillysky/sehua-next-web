@@ -611,3 +611,60 @@ def clear_offline_tasks(cookie: str, mode: str = "done") -> dict[str, Any]:
             "mode": key,
             "flag": flag,
         }
+
+
+def _is_del_ok(data: Any) -> bool:
+    if not isinstance(data, dict):
+        return False
+    if data.get("state") is True or data.get("state") == 1:
+        return True
+    code = errcode_of(data)
+    if code == 0 and data.get("state") is not False:
+        return True
+    return False
+
+
+def delete_offline_task(cookie: str, info_hash: str) -> dict[str, Any]:
+    """Delete one offline task by info_hash (queue only; does not delete netdisk files)."""
+    bad = require_cookie_parts(cookie)
+    if bad:
+        return {"ok": False, "message": bad}
+    hash_s = str(info_hash or "").strip()
+    if not hash_s:
+        return {"ok": False, "message": "缺少任务 infoHash"}
+
+    sign = fetch_offline_sign(cookie)
+    if not sign.get("ok"):
+        return {
+            "ok": False,
+            "message": str(sign.get("message") or "获取离线签名失败"),
+        }
+
+    uid = extract_uid(cookie)
+    body: list[tuple[str, str]] = [
+        ("hash[0]", hash_s),
+        ("uid", uid),
+        ("sign", str(sign.get("sign") or "")),
+        ("time", str(sign.get("time") or "")),
+    ]
+    try:
+        with httpx.Client(
+            timeout=20.0, follow_redirects=True, trust_env=False
+        ) as client:
+            res = client.post(
+                "https://115.com/web/lixian/?ct=lixian&ac=task_del",
+                content=encode_form(body),
+                headers=form_headers(cookie, "https://115.com/web/lixian/"),
+            )
+            data = _read_json(res)
+    except Exception as e:
+        return {"ok": False, "message": str(e) or "删除离线任务失败"}
+
+    if _is_del_ok(data):
+        return {"ok": True, "message": "已删除任务", "infoHash": hash_s, "raw": data}
+    return {
+        "ok": False,
+        "message": human_error(data if isinstance(data, dict) else {}, "删除任务失败"),
+        "infoHash": hash_s,
+        "raw": data if isinstance(data, dict) else None,
+    }

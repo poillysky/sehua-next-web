@@ -6,7 +6,7 @@ export const P115_ATTACH_SUBS_KEY = 'nextweb:p115-attach-subs';
 export type P115AttachSubs = {
   code?: string;
   itemId?: string;
-  /** 片商分区 id 或中文标签，用于 115 区分子目录 */
+  /** 片商分区 id 或中文标签；字幕按分区分层时用来建子目录，转存目录不再使用 */
   region?: string;
 };
 

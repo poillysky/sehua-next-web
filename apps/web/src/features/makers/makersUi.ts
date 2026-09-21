@@ -163,7 +163,7 @@ export function fc2HomeSearchTerms(
   return preferPpv ? [ppv, fc2] : [fc2, ppv];
 }
 
-/** 片商详情跳仓库：双库同搜，优先展示色花堂；115 落到「片商」区分子目录 */
+/** 片商详情跳仓库：双库同搜，优先展示色花堂；115 先入最近接收再进片商指定目录 */
 export function openMakerHomeSearch(
   item: {
     code?: string | null;

@@ -12,10 +12,12 @@ import {
   LoaderCircle,
   QrCode,
   RefreshCw,
+  Trash2,
 } from 'lucide-react';
 import {
   clearP115Tasks,
   completeP115Qrcode,
+  deleteP115Task,
   getP115,
   getP115Status,
   listP115Folders,
@@ -66,7 +68,7 @@ const SAVE_SOURCES: Array<{
   { key: 'warehouse', label: '仓库', desc: '先最近接收 → 再进本目录' },
   { key: 'movie', label: '电影', desc: '影视·电影 · 先最近接收 → 再进本目录' },
   { key: 'tv', label: '电视剧', desc: '影视·剧集 · 先最近接收 → 再进本目录' },
-  { key: 'makers', label: '片商', desc: '片商 · 先最近接收 → 再进分区目录' },
+  { key: 'makers', label: '片商', desc: '片商 · 先最近接收 → 再进本目录' },
 ];
 
 function emptyTargets(): Record<P115SaveSource, P115TargetFolder> {
@@ -140,16 +142,12 @@ function formatBytes(n: number | null | undefined) {
 function formatTaskTime(ts: number | null | undefined) {
   if (ts == null || !Number.isFinite(ts) || ts <= 0) return '';
   const ms = ts < 1e12 ? ts * 1000 : ts;
-  try {
-    return new Date(ms).toLocaleString('zh-CN', {
-      month: 'numeric',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  } catch {
-    return '';
-  }
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return '';
+  const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日（${weekdays[d.getDay()]}） ${hh}:${mm}`;
 }
 
 function taskTone(status: number): 'ok' | 'warn' | 'run' | 'mute' {
@@ -250,6 +248,7 @@ export function P115Panel({
   const [tasksLoaded, setTasksLoaded] = useState(() => Boolean(cached?.tasksLoaded));
   const [taskFilter, setTaskFilter] = useState<TaskFilter>('run');
   const [clearing, setClearing] = useState<P115ClearMode | null>(null);
+  const [deletingHash, setDeletingHash] = useState<string | null>(null);
   const [qrOpen, setQrOpen] = useState(false);
   const [qrBusy, setQrBusy] = useState(false);
   const [qrSession, setQrSession] = useState<P115QrStart | null>(null);
@@ -714,7 +713,47 @@ export function P115Panel({
     }
   }
 
-  const locked = busy || browsing || clearing != null || qrBusy;
+  async function onDeleteTask(task: P115Task) {
+    const hash = String(task.infoHash || '').trim();
+    if (!hash) {
+      setMsg('该任务缺少 infoHash，无法删除');
+      return;
+    }
+    if (!window.confirm('确定删除这条云下载任务？（不会删除网盘内文件）')) {
+      return;
+    }
+    setDeletingHash(hash);
+    setMsg('');
+    try {
+      const data = await deleteP115Task(hash);
+      if (data.tasks) {
+        setTasks(data.tasks);
+        patchP115PanelCache({
+          tasks: data.tasks,
+          tasksLoaded: true,
+          tasksError: '',
+        });
+      } else {
+        setTasks((prev) => prev.filter((t) => String(t.infoHash || '') !== hash));
+        await refreshTasks({ quiet: true });
+      }
+      if (data.quota != null || data.quotaTotal != null) {
+        applyQuotaInfo({
+          quota: data.quota,
+          quotaTotal: data.quotaTotal,
+        });
+      }
+      setMsg(data.message || '已删除任务');
+      setTasksError('');
+      setTasksLoaded(true);
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : '删除失败');
+    } finally {
+      setDeletingHash(null);
+    }
+  }
+
+  const locked = busy || browsing || clearing != null || qrBusy || deletingHash != null;
   const taskCounts = {
     run: 0,
     failed: 0,
@@ -877,19 +916,6 @@ export function P115Panel({
               <li>
                 <div className="settings-nav">
                   <span className="settings-nav__icon settings-nav__icon--violet" aria-hidden>
-                    <CloudDownload size={14} strokeWidth={2.25} />
-                  </span>
-                  <span className="settings-nav__main">
-                    <span className="settings-nav__title">转存流程</span>
-                    <span className="settings-nav__desc allow-select">
-                      影视 / 片商 / 仓库：先入根目录「最近接收」，完成后再移到各自指定目录
-                    </span>
-                  </span>
-                </div>
-              </li>
-              <li>
-                <div className="settings-nav">
-                  <span className="settings-nav__icon settings-nav__icon--violet" aria-hidden>
                     <KeyRound size={14} strokeWidth={2.25} />
                   </span>
                   <span className="settings-nav__main">
@@ -942,7 +968,7 @@ export function P115Panel({
                     <span className="settings-nav__desc allow-select">
                       {subsFolder.folderName
                         ? `${folderDisplayName(subsFolder)} · CID ${subsFolder.folderCid || '0'}`
-                        : '未配置（默认片商根/字幕）'}
+                        : '未配置（须先选择目录）'}
                       {subsLayered ? ' · 按分区分层' : ' · 扁平'}
                     </span>
                   </span>
@@ -1116,7 +1142,7 @@ export function P115Panel({
                         <span className="settings-nav__desc allow-select">
                           {subsFolder.folderName
                             ? `${folderDisplayName(subsFolder)} · CID ${subsFolder.folderCid || '0'}`
-                            : '未选：默认片商根下「字幕」'}
+                            : '未配置：上传字幕前须先选择目录'}
                           <span className="p115-target-hint">
                             {' '}
                             · 仅中文 · 命名 ABC-123.srt · 多源评分选优
@@ -1483,15 +1509,16 @@ export function P115Panel({
                   const show = taskDisplay(t);
                   const timeText = formatTaskTime(t.updateTime || t.addTime);
                   const sizeText = formatBytes(t.size);
-                  const pctText =
-                    t.percent != null && t.status === 1
-                      ? `${Math.round(t.percent)}%`
-                      : null;
-                  const showBadge = taskFilterOf(t.status) !== taskFilter;
+                  const hash = String(t.infoHash || '').trim();
+                  const deleting = Boolean(hash) && deletingHash === hash;
                   return (
                     <li
-                      key={`${t.infoHash || t.name}-${idx}`}
-                      className={cn('p115-task', `p115-task--${tone}`)}
+                      key={`${hash || t.name}-${idx}`}
+                      className={cn(
+                        'p115-task',
+                        `p115-task--${tone}`,
+                        deleting && 'is-deleting',
+                      )}
                     >
                       <span className={cn('p115-task__mark', `is-${tone}`)} aria-hidden>
                         {tone === 'ok' ? (
@@ -1509,65 +1536,34 @@ export function P115Panel({
                         )}
                       </span>
                       <div className="p115-task__body">
-                        <div className="p115-task__head">
-                          <div className="p115-task__titles">
-                            <p className="p115-task__name allow-select">{show.title}</p>
-                            {show.subtitle ? (
-                              <p
-                                className="p115-task__hash allow-select"
-                                title={show.hashFull || undefined}
-                              >
-                                {show.subtitle}
-                              </p>
-                            ) : null}
-                          </div>
-                          {showBadge ? (
-                            <span className={cn('p115-task__badge', `is-${tone}`)}>
-                              {t.statusLabel}
-                            </span>
-                          ) : null}
-                        </div>
-                        {(pctText || sizeText || timeText) ? (
-                          <div className="p115-task__meta">
-                            {pctText ? (
-                              <span className="p115-task__chip is-run allow-select">
-                                {pctText}
-                              </span>
-                            ) : null}
-                            {sizeText ? (
-                              <span className="p115-task__chip allow-select">
-                                {sizeText}
-                              </span>
-                            ) : null}
-                            {timeText ? (
-                              <span className="p115-task__chip allow-select">
-                                {timeText}
-                              </span>
-                            ) : null}
-                          </div>
+                        <p className="p115-task__name allow-select">{show.title}</p>
+                        {timeText ? (
+                          <p className="p115-task__line allow-select">{timeText}</p>
                         ) : null}
-                        {t.status === 1 && t.percent != null ? (
-                          <div
-                            className="p115-quota-bar p115-quota-bar--space p115-task__bar"
-                            role="progressbar"
-                            aria-valuemin={0}
-                            aria-valuemax={100}
-                            aria-valuenow={Math.round(t.percent)}
-                            aria-label="下载进度"
-                          >
-                            <span style={{ width: `${Math.round(t.percent)}%` }} />
-                          </div>
-                        ) : null}
-                        {t.error ? (
-                          <p className="p115-task__err allow-select">{t.error}</p>
+                        {sizeText ? (
+                          <p className="p115-task__line allow-select">{sizeText}</p>
                         ) : null}
                       </div>
+                      <button
+                        type="button"
+                        className="p115-task__del"
+                        aria-label={`删除${show.title}`}
+                        title={hash ? '删除这条任务，不删网盘文件' : '缺少 infoHash，无法删除'}
+                        disabled={locked || !hash}
+                        onClick={() => void onDeleteTask(t)}
+                      >
+                        {deleting ? (
+                          <LoaderCircle size={14} strokeWidth={2.25} className="p115-spin" aria-hidden />
+                        ) : (
+                          <Trash2 size={14} strokeWidth={2.25} aria-hidden />
+                        )}
+                      </button>
                     </li>
                   );
                 })}
               </ul>
             )}
-            <AppFootnote>清理只移除云下载队列记录，不会删除已转存到网盘的文件。</AppFootnote>
+            <AppFootnote>删除和清理只移除云下载队列记录，不会删除已转存到网盘的文件。</AppFootnote>
           </div>
         ) : null}
 

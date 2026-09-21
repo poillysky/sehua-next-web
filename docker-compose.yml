@@ -1,4 +1,4 @@
-# NAS 部署 — Web+API 单镜像 + Postgres（pgvector）
+# NAS 部署 — UI(Web+API) + 刮削 Worker + Postgres（pgvector）
 #
 # 目录:
 #   /vol1/1000/Docker/sehua-next-web/
@@ -16,6 +16,8 @@
 # Postgres 对外: NAS_IP:5439（库名 nextweb）
 #
 # 片商刮削库: media/scrap-library/
+# 重活（扫描/刮削/向量化）在 scrape-worker；UI 容器优先保持流畅。
+# 需使用含 APP_ROLE / supervisord-worker 的镜像（重新 build/push 后部署）。
 
 name: sehua-next-web
 
@@ -53,13 +55,50 @@ services:
           cpus: "0.5"
           memory: 512M
 
-  app:
-    image: poillysky/sehua-next-web:1.2.12
-    container_name: sehua-next-web
+  scrape-worker:
+    image: poillysky/sehua-next-web:1.2.13
+    container_name: sehua-next-web-scrape
     restart: always
-    mem_limit: 1g
+    # 刮削吞吐：4G mid 档；上限非预占，任务结束后会回落。
+    mem_limit: 4g
+    memswap_limit: 4g
+    cpu_shares: 512
     depends_on:
       postgres:
+        condition: service_healthy
+    expose:
+      - "8020"
+    environment:
+      TZ: Asia/Shanghai
+      SNS_COOKIE_SECURE: "0"
+      SNS_META_DSN: postgresql://postgres:postgres@postgres:5432/nextweb
+      APP_ROLE: worker
+    volumes:
+      - /vol1/1000/Docker/sehua-next-web/data:/app/data
+      - /vol1/1000/Docker/sehua-next-web/media:/app/media
+      - /vol1/1000/Docker/sehua-next-web/config:/app/config
+    dns:
+      - 223.5.5.5
+      - 8.8.8.8
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+
+  app:
+    image: poillysky/sehua-next-web:1.2.13
+    container_name: sehua-next-web
+    restart: always
+    # UI 优先：轻量上限，空闲不预占。
+    mem_limit: 2g
+    memswap_limit: 2g
+    cpu_shares: 1024
+    depends_on:
+      postgres:
+        condition: service_healthy
+      scrape-worker:
         condition: service_healthy
     ports:
       - "3020:3020"
@@ -67,6 +106,8 @@ services:
       TZ: Asia/Shanghai
       SNS_COOKIE_SECURE: "0"
       SNS_META_DSN: postgresql://postgres:postgres@postgres:5432/nextweb
+      APP_ROLE: ui
+      SCRAPE_WORKER_URL: http://scrape-worker:8020
       API_INTERNAL_BASE: http://127.0.0.1:8020
       WEB_PORT: "3020"
     volumes:

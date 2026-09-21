@@ -4228,6 +4228,50 @@ textarea {
 
 
 
+.settings-screen-root .p115-console .p115-tasks {
+
+  border: 0;
+
+  border-radius: 0;
+
+  background: transparent;
+
+}
+
+
+
+.settings-screen-root .p115-console .p115-task {
+
+  border-radius: 14px;
+
+  border: 0.5px solid color-mix(in srgb, var(--hairline) 78%, transparent);
+
+  background: var(--surface-elevated, rgba(255, 255, 255, 0.94));
+
+}
+
+
+
+.dark .settings-screen-root .p115-console .p115-tasks {
+
+  background: transparent;
+
+  border-color: transparent;
+
+}
+
+
+
+.dark .settings-screen-root .p115-console .p115-task {
+
+  background: rgba(44, 44, 46, 0.92);
+
+  border-color: rgba(84, 84, 88, 0.55);
+
+}
+
+
+
 .dark .settings-screen-root .settings-nav:active {
 
   background: rgba(120, 120, 128, 0.28);
@@ -6778,17 +6822,21 @@ textarea {
 
   list-style: none;
 
+  display: flex;
+
+  flex-direction: column;
+
+  gap: 8px;
+
   margin: 0 0 4px;
 
   padding: 0;
 
-  border-radius: 14px;
+  border: 0;
 
-  border: 0.5px solid color-mix(in srgb, var(--hairline) 70%, transparent);
+  background: transparent;
 
-  background: var(--surface-elevated, rgba(255, 255, 255, 0.94));
-
-  overflow: hidden;
+  overflow: visible;
 
 }
 
@@ -6798,19 +6846,25 @@ textarea {
 
   display: flex;
 
-  align-items: flex-start;
+  align-items: center;
 
   gap: 10px;
 
-  padding: 12px 14px;
+  padding: 12px 10px 12px 12px;
+
+  border-radius: 14px;
+
+  border: 0.5px solid color-mix(in srgb, var(--hairline) 78%, transparent);
+
+  background: var(--surface-elevated, rgba(255, 255, 255, 0.94));
 
 }
 
 
 
-.p115-task + .p115-task {
+.p115-task.is-deleting {
 
-  border-top: 0.5px solid color-mix(in srgb, var(--hairline) 80%, transparent);
+  opacity: 0.62;
 
 }
 
@@ -6829,8 +6883,6 @@ textarea {
   width: 28px;
 
   height: 28px;
-
-  margin-top: 1px;
 
   border-radius: 9px;
 
@@ -6894,9 +6946,67 @@ textarea {
 
   align-items: flex-start;
 
-  justify-content: space-between;
+  gap: 8px;
 
-  gap: 10px;
+}
+
+
+
+.p115-task__del {
+
+  flex-shrink: 0;
+
+  display: inline-flex;
+
+  align-items: center;
+
+  justify-content: center;
+
+  width: 32px;
+
+  height: 32px;
+
+  padding: 0;
+
+  border: 0;
+
+  border-radius: 10px;
+
+  background: rgba(255, 59, 48, 0.08);
+
+  color: #c9342d;
+
+  cursor: pointer;
+
+  -webkit-tap-highlight-color: transparent;
+
+}
+
+
+
+.p115-task__del:active:not(:disabled) {
+
+  background: rgba(255, 59, 48, 0.16);
+
+}
+
+
+
+.p115-task__del:disabled {
+
+  opacity: 0.38;
+
+  cursor: default;
+
+}
+
+
+
+.p115-task__del:focus-visible {
+
+  outline: 2px solid color-mix(in srgb, #c9342d 55%, transparent);
+
+  outline-offset: 2px;
 
 }
 
@@ -6982,9 +7092,13 @@ textarea {
 
   margin: 0;
 
+  flex: 1;
+
+  min-width: 0;
+
   font-size: 15px;
 
-  font-weight: 600;
+  font-weight: 700;
 
   line-height: 1.32;
 
@@ -7001,6 +7115,26 @@ textarea {
   -webkit-box-orient: vertical;
 
   overflow: hidden;
+
+}
+
+
+
+.p115-task__line {
+
+  margin: 2px 0 0;
+
+  font-size: 11px;
+
+  font-weight: 400;
+
+  line-height: 1.35;
+
+  letter-spacing: -0.01em;
+
+  color: var(--mute);
+
+  font-variant-numeric: tabular-nums;
 
 }
 
@@ -7114,11 +7248,29 @@ textarea {
 
 .dark .p115-tasks-toolbar,
 
-.dark .p115-tasks-empty,
-
-.dark .p115-tasks {
+.dark .p115-tasks-empty {
 
   background: rgba(28, 28, 30, 0.86);
+
+}
+
+
+
+.dark .p115-task {
+
+  background: rgba(44, 44, 46, 0.92);
+
+  border-color: rgba(255, 255, 255, 0.08);
+
+}
+
+
+
+.dark .p115-task__del {
+
+  background: rgba(255, 69, 58, 0.16);
+
+  color: #ff6961;
 
 }
 
