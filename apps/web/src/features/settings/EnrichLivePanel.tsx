@@ -1081,6 +1081,11 @@ export function EnrichLivePanel({
   const tabCacheRef = useRef<Partial<Record<LiveTab, ScrapLibraryEnrichQueueItem[]>>>(
     {},
   );
+  /**
+   * 成功类 tab 已从库表 hydrate 过：扫描 SSE 的 samples*（按扫序多为 AARM）
+   * 不得再盖掉库表按 updated_at 的真列表。
+   */
+  const tabDbLoadedRef = useRef<Partial<Record<LiveTab, boolean>>>({});
   const loadSeqRef = useRef(0);
   const tabRef = useRef<LiveTab>(tab);
   tabRef.current = tab;
@@ -1242,6 +1247,9 @@ export function EnrichLivePanel({
       // 只缓存第 1 页；列表必须同步 setState（startTransition 会被 status 流打断）
       if (pageN <= 1) {
         tabCacheRef.current[curTab] = items;
+        if (curTab === 'done' || curTab === 'soft' || curTab === 'fail') {
+          tabDbLoadedRef.current[curTab] = true;
+        }
       }
       // 过期页响应丢弃，避免翻页后又被旧请求盖回第一页
       if (tabRef.current === curTab && pageN === queuePageRef.current) {
@@ -1295,6 +1303,9 @@ export function EnrichLivePanel({
         offset: (pageSafe - 1) * QUEUE_PAGE_SIZE,
       });
       if (seq !== loadSeqRef.current) return;
+      if (status === 'done' || status === 'soft' || status === 'fail') {
+        tabDbLoadedRef.current[status] = true;
+      }
       applyQueuePayload({
         ...data,
         cacheTab: status,
@@ -1385,6 +1396,7 @@ export function EnrichLivePanel({
     setQueueScanning(true);
     setMsg('');
     tabCacheRef.current = {};
+    tabDbLoadedRef.current = {};
     try {
       const scanned = await scanScrapLibraryEnrichQueue({ region: regionId });
       queueScanDoneRef.current = true;
@@ -1416,6 +1428,7 @@ export function EnrichLivePanel({
     queueScanDoneRef.current = false;
     pendingTotalRef.current = readCachedPendingTotal(regionId);
     tabCacheRef.current = {};
+    tabDbLoadedRef.current = {};
     loadSeqRef.current += 1;
     setQueueItems([]);
     setQueueCounts({ pending: 0, running: 0, done: 0, soft: 0, fail: 0 });
@@ -1608,22 +1621,28 @@ export function EnrichLivePanel({
           soft: Number(qs?.soft || 0),
           fail: Number(qs?.fail || 0),
         }));
-        // 边扫边看：提前展示已分类样例，不必等扫完
+        // 边扫边看：仅在尚未从库表拉过该 tab 时用样例占位。
+        // 点过成功/失败等 tab 后必须以库表为准，否则扫序样例（常为 AARM*）会几秒盖掉真列表。
         const want = tabRef.current;
-        const rawSamples =
-          want === 'done'
-            ? qs?.samplesDone
-            : want === 'soft'
-              ? qs?.samplesSoft
-              : want === 'fail'
-                ? qs?.samplesFail
-                : null;
-        if (Array.isArray(rawSamples) && rawSamples.length > 0) {
-          const items = rawSamples.map((r) => normalizeSoftSuccessRow(r));
-          tabCacheRef.current[want] = items;
-          if (!searchActiveRef.current && tabRef.current === want) {
-            // 扫描预览勿 startTransition：会被密集 status 流打断，列表会一直空
-            setQueueItems(items);
+        if (
+          (want === 'done' || want === 'soft' || want === 'fail') &&
+          !tabDbLoadedRef.current[want] &&
+          !queueHydratingRef.current &&
+          !searchActiveRef.current
+        ) {
+          const rawSamples =
+            want === 'done'
+              ? qs?.samplesDone
+              : want === 'soft'
+                ? qs?.samplesSoft
+                : qs?.samplesFail;
+          if (Array.isArray(rawSamples) && rawSamples.length > 0) {
+            const items = rawSamples.map((r) => normalizeSoftSuccessRow(r));
+            tabCacheRef.current[want] = items;
+            if (tabRef.current === want) {
+              // 扫描预览勿 startTransition：会被密集 status 流打断，列表会一直空
+              setQueueItems(items);
+            }
           }
         }
       }
@@ -2747,36 +2766,22 @@ export function EnrichLivePanel({
                   setTabTouched(true);
                   const next = t.id;
                   setQueuePage(1);
+                  // 成功类按库表时间排序：扫描/刮削中都勿用扫序样例或旧缓存
+                  // （样例多为先扫到的 AARM，会盖住 updated_at 真列表）
                   const qs = st?.queueScan;
                   const qsHere =
                     Boolean(qs?.active) &&
                     (!qs?.region || qs.region === regionId);
-                  if (qsHere) {
-                    const raw =
-                      next === 'done'
-                        ? qs?.samplesDone
-                        : next === 'soft'
-                          ? qs?.samplesSoft
-                          : next === 'fail'
-                            ? qs?.samplesFail
-                            : null;
-                    if (Array.isArray(raw) && raw.length > 0) {
-                      const items = raw.map((r) => normalizeSoftSuccessRow(r));
-                      tabCacheRef.current[next] = items;
-                      setQueueItems(items);
-                      setTab(next);
-                      return;
-                    }
-                  }
-                  // 成功类按库表时间排序：刮削中勿用旧缓存（否则 AARM 会钉在顶上）
                   const live =
                     Boolean(st?.running) &&
                     (!st?.currentRegion || st.currentRegion === regionId);
                   if (
-                    live &&
+                    (qsHere || live) &&
                     (next === 'done' || next === 'soft' || next === 'fail')
                   ) {
                     delete tabCacheRef.current[next];
+                    // 立刻禁止 SSE 扫序样例；等库表回填（勿先置 false，否则加载几秒内仍会被 AARM 盖）
+                    tabDbLoadedRef.current[next] = true;
                     setQueueItems([]);
                     setTab(next);
                     return;

@@ -215,7 +215,7 @@ def _strm_sync_log(payload: Any) -> None:
 
 def _same_progress_family(prev: str, cur: str) -> bool:
     """色花堂/Bitmagnet 计数行视为同一族，原地覆盖。"""
-    for prefix in ("色花堂 ", "Bitmagnet torrents.", "Bitmagnet content."):
+    for prefix in ("色花堂 ", "Bitmagnet "):
         if prev.startswith(prefix) and cur.startswith(prefix):
             # Bitmagnet 需同 table.col
             if prefix.startswith("Bitmagnet"):

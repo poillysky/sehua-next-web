@@ -2099,10 +2099,11 @@ export function MakersManagePanel({
         ? 0
         : null;
   const localIndexCountLabel =
-    typeof localIndexProgress?.done === 'number' &&
-    typeof localIndexProgress?.total === 'number' &&
-    localIndexProgress.total > 0
-      ? `${localIndexProgress.done.toLocaleString()} / ${localIndexProgress.total.toLocaleString()}`
+    typeof localIndexProgress?.done === 'number'
+      ? typeof localIndexProgress?.total === 'number' &&
+        localIndexProgress.total > 0
+        ? `${localIndexProgress.done.toLocaleString()} / ${localIndexProgress.total.toLocaleString()}`
+        : `${localIndexProgress.done.toLocaleString()} 行`
       : '';
   const strmPct =
     typeof strmProgress?.percent === 'number'

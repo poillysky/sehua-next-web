@@ -511,7 +511,8 @@ LEFT JOIN LATERAL (
 ) rs ON TRUE
 """
 
-# 单批进内存的行数。整表 fetchall 会把 API 进程撑死，轮询变成 500。
+# 单批进内存解析的行数（防整表 fetchall 把 API 撑死）。
+# 扫描会连续跑完所有批次；进度按累计行数上报，不再每批从 0/8000 重置。
 _TEXT_CHUNK = 8_000
 
 
@@ -596,12 +597,37 @@ def _process_texts_parallel(
     bucket: dict[str, dict[str, set[str]]],
     emit: Callable[..., None],
     profiles: dict[str, dict[str, Any]] | None = None,
+    progress_offset: int = 0,
+    progress_total: int | None = None,
 ) -> None:
     n = len(texts)
     if n == 0:
-        emit(f"{label} 0/0", stage=stage, done=0, total=0, percent=pct_lo)
+        emit(
+            f"{label} {progress_offset:,}",
+            stage=stage,
+            done=progress_offset,
+            total=progress_total,
+            percent=pct_lo,
+        )
         return
-    emit(f"{label} 0/{n:,}", stage=stage, done=0, total=n, percent=pct_lo)
+
+    def _report(local_done: int, *, percent: float) -> None:
+        global_done = progress_offset + local_done
+        # 全表总数未知时用「至少已读到本批末尾」，角标持续上涨不回跳
+        total = (
+            int(progress_total)
+            if progress_total is not None and int(progress_total) > 0
+            else max(global_done, progress_offset + n)
+        )
+        emit(
+            f"{label} {global_done:,}/{total:,}",
+            stage=stage,
+            done=global_done,
+            total=total,
+            percent=percent,
+        )
+
+    _report(0, percent=pct_lo)
     from app.core.container_budget import io_threads, memory_class
 
     if memory_class() == "host":
@@ -636,20 +662,8 @@ def _process_texts_parallel(
             if done >= n or now - last_t >= 0.6:
                 last_t = now
                 pct = pct_lo + (pct_hi - pct_lo) * (done / max(n, 1))
-                emit(
-                    f"{label} {done:,}/{n:,}",
-                    stage=stage,
-                    done=done,
-                    total=n,
-                    percent=pct,
-                )
-    emit(
-        f"{label} {n:,}/{n:,}",
-        stage=stage,
-        done=n,
-        total=n,
-        percent=pct_hi,
-    )
+                _report(done, percent=pct)
+    _report(n, percent=pct_hi)
 
 
 def scan_all(
@@ -698,13 +712,18 @@ def scan_all(
     sehua_n = 0
     try:
         for chunk in _iter_sehua_chunks():
+            # 进度按累计行数；内存仍按 _TEXT_CHUNK 分批解析，一次任务跑完整表
+            before = sehua_n
             sehua_n += len(chunk)
+            # 色花堂无事先 COUNT：进度条用已读行粗估（约 80 万行量级封顶到 70%）
+            pct_lo = min(69.0, 3.0 + before / 12_000)
+            pct_hi = min(70.0, 3.0 + sehua_n / 12_000)
             _process_texts_parallel(
                 chunk,
                 label="色花堂",
                 stage="sehua",
-                pct_lo=3,
-                pct_hi=min(70.0, 3 + sehua_n / 80_000),
+                pct_lo=pct_lo,
+                pct_hi=pct_hi,
                 want_std=want_std,
                 letter_aliases=letter_aliases,
                 long_std=long_std,
@@ -715,6 +734,8 @@ def scan_all(
                 bucket=bucket,
                 emit=emit,
                 profiles=profiles,
+                progress_offset=before,
+                progress_total=None,
             )
     except Exception as e:  # noqa: BLE001
         emit(f"色花堂查询失败: {e}", stage="sehua", percent=3)
@@ -736,13 +757,17 @@ def scan_all(
         span = 20 / max(src_total, 1)
         try:
             for chunk in _iter_bitmagnet_chunks(table, col, lim):
+                before = bit_n
                 bit_n += len(chunk)
+                # 已知上限 lim：角标一路涨到 lim，不按 8k 重置
+                frac_lo = before / max(lim, 1)
+                frac_hi = bit_n / max(lim, 1)
                 _process_texts_parallel(
                     chunk,
                     label=f"Bitmagnet {table}.{col}",
                     stage="bitmagnet",
-                    pct_lo=base_pct,
-                    pct_hi=base_pct + span,
+                    pct_lo=base_pct + span * frac_lo,
+                    pct_hi=base_pct + span * frac_hi,
                     want_std=want_std,
                     letter_aliases=letter_aliases,
                     long_std=long_std,
@@ -753,6 +778,8 @@ def scan_all(
                     bucket=bucket,
                     emit=emit,
                     profiles=profiles,
+                    progress_offset=before,
+                    progress_total=lim,
                 )
         except Exception as e:  # noqa: BLE001
             emit(
