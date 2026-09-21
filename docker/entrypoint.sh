@@ -18,14 +18,10 @@ case "$ROLE" in
     ;;
 esac
 
-if [ "$#" -eq 0 ]; then
+# Dockerfile CMD 是 supervisord -n -c <默认conf>。
+# 必须丢掉 CMD 里的 -c，否则会盖掉按 APP_ROLE 选中的配置。
+if [ "$#" -eq 0 ] || [ "$1" = "supervisord" ]; then
   exec supervisord -n -c "$CONF"
-fi
-
-# docker CMD 默认是 supervisord …；按角色改配置文件
-if [ "$1" = "supervisord" ]; then
-  shift
-  exec supervisord -n -c "$CONF" "$@"
 fi
 
 exec "$@"

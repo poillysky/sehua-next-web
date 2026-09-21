@@ -56,7 +56,7 @@ services:
           memory: 512M
 
   scrape-worker:
-    image: poillysky/sehua-next-web:1.2.13
+    image: poillysky/sehua-next-web:1.2.14
     container_name: sehua-next-web-scrape
     restart: always
     # 刮削吞吐：4G mid 档；上限非预占，任务结束后会回落。
@@ -68,6 +68,12 @@ services:
         condition: service_healthy
     expose:
       - "8020"
+    healthcheck:
+      test: ["CMD", "/healthcheck.sh"]
+      interval: 15s
+      timeout: 8s
+      retries: 8
+      start_period: 90s
     environment:
       TZ: Asia/Shanghai
       SNS_COOKIE_SECURE: "0"
@@ -88,7 +94,7 @@ services:
         hard: 65535
 
   app:
-    image: poillysky/sehua-next-web:1.2.13
+    image: poillysky/sehua-next-web:1.2.14
     container_name: sehua-next-web
     restart: always
     # UI 优先：轻量上限，空闲不预占。
