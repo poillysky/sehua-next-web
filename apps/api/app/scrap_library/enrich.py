@@ -7106,6 +7106,40 @@ def get_enrich_status(*, lite: bool = False) -> dict[str, Any]:
             ]
         pending_total = int(queue_counts.get("pending") or 0)
         monitor = enrich_mon.snapshot()
+        # 展示队列被裁过时，把监控里正在刮的番号补进抽样，处理中列表才有行
+        if not lite:
+            seen_codes = {
+                str(r.get("code") or "").strip().upper()
+                for r in queue
+                if isinstance(r, dict)
+            }
+            seen_ids = {
+                str(r.get("itemId") or "").strip()
+                for r in queue
+                if isinstance(r, dict) and str(r.get("itemId") or "").strip()
+            }
+            extra_running: list[dict[str, Any]] = []
+            for it in monitor.get("inflight") or []:
+                if not isinstance(it, dict):
+                    continue
+                code_k = str(it.get("code") or "").strip().upper()
+                iid_k = str(it.get("itemId") or "").strip()
+                if code_k and code_k in seen_codes:
+                    continue
+                if iid_k and iid_k in seen_ids:
+                    continue
+                extra_running.append(
+                    {
+                        "code": code_k,
+                        "itemId": iid_k,
+                        "status": "running",
+                        "region": str(it.get("region") or ""),
+                    }
+                )
+                if code_k:
+                    seen_codes.add(code_k)
+            if extra_running:
+                queue = extra_running + list(queue)
         stall_by_code: dict[str, str] = {}
         for it in monitor.get("inflight") or []:
             if not isinstance(it, dict):
@@ -7575,6 +7609,27 @@ def _queue_row_match_index(
     return -1
 
 
+def _cap_status_queue(rows: list[Any], *, limit: int = 120) -> list[dict[str, Any]]:
+    """展示队列上限。进行中的行优先保留，避免边扫裁窗口后占槽番号消失。"""
+    running: list[dict[str, Any]] = []
+    others: list[dict[str, Any]] = []
+    for r in rows or []:
+        if not isinstance(r, dict):
+            continue
+        if str(r.get("status") or "") == "running":
+            running.append(r)
+        else:
+            others.append(r)
+    if len(running) >= limit:
+        return running[:limit]
+    room = limit - len(running)
+    if len(others) <= room:
+        return running + others
+    head = min(40, room // 3)
+    tail = room - head
+    return running + others[:head] + others[-tail:]
+
+
 def _patch_queue_item(
     index: int,
     *,
@@ -7607,8 +7662,43 @@ def _patch_queue_item(
         queue = list(_enrich_job.get("queue") or [])
         resolved_i = _queue_row_match_index(queue, index=index, match=match)
         if resolved_i < 0:
+            # 边扫展示队列只留约 120 行，进行中的番号常被裁掉。
+            # 不补回 running，状态帧就没有占槽行，页面一直「等待番号占槽」。
+            if isinstance(match, dict) and st_in == "running":
+                base = dict(match)
+                base.update(fields)
+                base["status"] = "running"
+                code_u = str(base.get("code") or "").strip().upper()
+                iid = str(base.get("itemId") or base.get("item_id") or "").strip()
+                kept: list[dict[str, Any]] = []
+                for r in queue:
+                    if not isinstance(r, dict):
+                        continue
+                    rc = str(r.get("code") or "").strip().upper()
+                    ri = str(r.get("itemId") or r.get("item_id") or "").strip()
+                    if code_u and rc == code_u:
+                        continue
+                    if iid and ri == iid:
+                        continue
+                    kept.append(r)
+                kept.insert(0, base)
+                _enrich_job["queue"] = _cap_status_queue(kept)
+                counts = dict(_enrich_job.get("queueCounts") or {})
+                n_run = sum(
+                    1
+                    for r in _enrich_job["queue"]
+                    if isinstance(r, dict) and str(r.get("status") or "") == "running"
+                )
+                counts["running"] = max(int(counts.get("running") or 0), n_run)
+                for k in ("pending", "running", "done", "fail", "soft"):
+                    counts[k] = int(counts.get(k) or 0)
+                _enrich_job["queueCounts"] = counts
+                updated = base
+                region = str(
+                    base.get("region") or _enrich_job.get("currentRegion") or ""
+                )
             # 截断后内存里可能已没有该行：仍用 match 身份落库，避免丢终态
-            if isinstance(match, dict) and st_in in {"done", "fail", "pending"}:
+            elif isinstance(match, dict) and st_in in {"done", "fail", "pending"}:
                 base = dict(match)
                 base.update(fields)
                 updated = base
@@ -16142,9 +16232,8 @@ def run_enrich(
                         with _enrich_lock:
                             qv = list(_enrich_job.get("queue") or [])
                             qv.extend(view_batch)
-                            if len(qv) > 120:
-                                qv = qv[:40] + qv[-80:]
-                            _enrich_job["queue"] = qv
+                            # 裁展示队列时留下 status=running，避免进行中被首尾窗口挤掉
+                            _enrich_job["queue"] = _cap_status_queue(qv)
                             qc = dict(_enrich_job.get("queueCounts") or {})
                             qc["pending"] = max(
                                 int(qc.get("pending") or 0),

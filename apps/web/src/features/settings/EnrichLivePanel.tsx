@@ -2405,13 +2405,29 @@ export function EnrichLivePanel({
           ? '扫描本地分类…'
           : ''));
 
+  const monitorInflightEarly = Array.isArray(st?.monitor?.inflight)
+    ? st.monitor.inflight
+    : [];
+  const queueRunningN = (st?.queue || []).filter(
+    (r) => rowStatus(r.status) === 'running',
+  ).length;
+  const currentLive = Boolean(
+    st?.running &&
+      st.current &&
+      (String(st.current.code || '').trim() ||
+        String(st.current.itemId || '').trim()) &&
+      rowStatus(st.current.status) !== 'done' &&
+      rowStatus(st.current.status) !== 'fail',
+  );
   const inflightN = Math.max(
     Number(st?.monitor?.summary?.inflightN || 0),
-    Array.isArray(st?.monitor?.inflight) ? st.monitor.inflight.length : 0,
+    monitorInflightEarly.length,
+    queueRunningN,
+    currentLive ? 1 : 0,
   );
   const tabCounts: Record<LiveTab, number> = {
     pending: Number(queueCounts.pending || 0),
-    // 处理中 = 真实占槽（inflight）；任务未跑则为 0
+    // 处理中 = 占槽；监控空时用队列 running 行和 current 兜底
     running: st?.running ? inflightN : 0,
     done: Number(queueCounts.done || 0),
     soft: Number(queueCounts.soft || 0),
@@ -2455,7 +2471,7 @@ export function EnrichLivePanel({
     filteredQueue.length > 0 &&
     queuePageTotal > 1;
   const monitor = st?.monitor || null;
-  const monitorInflight = Array.isArray(monitor?.inflight) ? monitor.inflight : [];
+  const monitorInflight = monitorInflightEarly;
   const liveRunningPool = (() => {
     const fromStatus = (st?.queue || []).filter(
       (r) => rowStatus(r.status) === 'running',
@@ -2463,9 +2479,25 @@ export function EnrichLivePanel({
     if (fromStatus.length) return fromStatus;
     return queueItems.filter((r) => rowStatus(r.status) === 'running');
   })();
+  const currentRunningRow: EnrichMonitorInflight | null = currentLive
+    ? {
+        code: st?.current?.code,
+        itemId: st?.current?.itemId,
+        phase: 'fetch',
+        phaseLabel: '处理中',
+        elapsedMs:
+          typeof st?.current?.totalMs === 'number'
+            ? st.current.totalMs
+            : typeof st?.current?.fetchMs === 'number'
+              ? st.current.fetchMs
+              : 0,
+        sources: st?.current?.sourceTimings,
+      }
+    : null;
   const runningViewRows: EnrichMonitorInflight[] = monitorInflight.length
     ? monitorInflight
-    : liveRunningPool.map((r) => ({
+    : liveRunningPool.length
+      ? liveRunningPool.map((r) => ({
         code: r.code,
         itemId: r.itemId,
         phase: 'fetch',
@@ -2478,7 +2510,10 @@ export function EnrichLivePanel({
               : 0,
         sources: r.sourceTimings,
         stall: r.stallLabel ? { label: r.stallLabel } : null,
-      }));
+      }))
+      : currentRunningRow
+        ? [currentRunningRow]
+        : [];
   const hasRunningRows = runningViewRows.length > 0;
 
   const selectedRow =
