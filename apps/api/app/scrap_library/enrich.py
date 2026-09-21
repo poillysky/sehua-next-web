@@ -2942,6 +2942,13 @@ def retry_enrich_fails(*, region: str = "") -> dict[str, Any]:
                 prog = dict(prog)
                 prog["failed"] = max(0, int(prog.get("failed") or 0) - n)
                 _enrich_job["progress"] = prog
+        # 运行中 SSE 只读内存 queueCounts，不改的话失败角标会一直停在重试前
+        if cur_reg == rid or not cur_reg:
+            qc_mem = dict(_enrich_job.get("queueCounts") or {})
+            if qc_mem:
+                qc_mem["fail"] = max(0, int(qc_mem.get("fail") or 0) - n)
+                qc_mem["pending"] = int(qc_mem.get("pending") or 0) + n
+                _enrich_job["queueCounts"] = qc_mem
 
     try:
         _persist_enrich_runtime()
@@ -3150,6 +3157,12 @@ def retry_enrich_softs(*, region: str = "") -> dict[str, Any]:
                 prog = dict(prog)
                 prog["ok"] = max(0, int(prog.get("ok") or 0) - n)
                 _enrich_job["progress"] = prog
+        if cur_reg == rid or not cur_reg:
+            qc_mem = dict(_enrich_job.get("queueCounts") or {})
+            if qc_mem:
+                qc_mem["soft"] = max(0, int(qc_mem.get("soft") or 0) - n)
+                qc_mem["pending"] = int(qc_mem.get("pending") or 0) + n
+                _enrich_job["queueCounts"] = qc_mem
 
     try:
         _persist_enrich_runtime()

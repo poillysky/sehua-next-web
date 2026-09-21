@@ -1751,16 +1751,12 @@ export function EnrichLivePanel({
         setQueueCounts((prev) => ({
           pending: pendingN,
           running: runN,
-          // 空闲以服务端为准（软成功升档后 soft 必须能下降）；运行中仍取大防漏计
+          // 成功只升不降（防漏计）。失败/软成功必须能下降，否则「失败重试」角标被钉死。
           done: halted
             ? preferBadge(Number(qc.done || 0), Number(prev.done || 0))
             : Math.max(Number(prev.done || 0), Number(qc.done || 0)),
-          soft: halted
-            ? preferBadge(Number(qc.soft || 0), Number(prev.soft || 0))
-            : Math.max(Number(prev.soft || 0), Number(qc.soft || 0)),
-          fail: halted
-            ? preferBadge(Number(qc.fail || 0), Number(prev.fail || 0))
-            : Math.max(Number(prev.fail || 0), Number(qc.fail || 0)),
+          soft: preferBadge(Number(qc.soft || 0), Number(prev.soft || 0)),
+          fail: preferBadge(Number(qc.fail || 0), Number(prev.fail || 0)),
         }));
       }
       if (halted) {
