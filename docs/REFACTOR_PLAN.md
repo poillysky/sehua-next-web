@@ -321,12 +321,13 @@ src/
 | 重复函数清理 | 全库 AST 扫描 **11 组 / 24 处 → 1 组 / 2 处**（余下是测试脚手架 `hold`，属惯用重复）。清单见下方第 2 项 | 别名同一性 **17 项** + 纯函数行为差分 **100 例** + 函数体逐字比对 **8 项** 全过 |
 | 回归基线 | `1 failed / 284 passed`（失败集合自始至终未变多） | 每次改动后全量 pytest |
 | **`embed.py` 拆分** | **6,391 → 2,659 行**；抽出 5 个兄弟模块（`embed_catalog` 1,517 / `embed_facets` 1,214 / `embed_poster` 588 / `embed_actress_opt` 513 / `embed_recommend` 156）。原文件末尾再导出全部 95 个被搬名字 → `embed.NAME` 调用与 `patch.object` 零改动 | 静态：逐定义 AST 等价 **196 项**全等（还原限定符后与原实现逐节点一致）· 名字解析完备性（6 模块）· API 面守恒 196 名 · 运行期 `app.main` 导入 · 全量回归 `1 failed/284 passed` |
+| **`enrich.py` 拆分** | **18,060 → 6,647 行**；抽出 **11 个兄弟模块**（`enrich_queue` 2,201 / `enrich_detail` 2,067 / `enrich_scan` 1,551 / `enrich_merge` 1,471 / `enrich_text` 1,386 / `enrich_status` 1,104 / `enrich_retry` 742 / `enrich_history` 572 / `enrich_cover` 461 / `enrich_checkpoint` 223 / `enrich_sidecar` 153）。父模块末尾再导出 257 个被搬名字（`KEEP 150 / moved 257`） | 静态：V1 顶层名守恒 407 · V2 逐定义 AST 等价 **407 项** · V3 再导出 257 == 被搬集合 · **多重集比对 409 条零丢失零重复**（含 HEAD 里那 2 个重复定义的常量）· R1 `app.main` 导入 · R2 名字解析完备性（12 模块） · R3 API 面 407 名全可取到 · 全量回归 `1 failed/284 passed` |
 
 ### 未完成项与原因
 
-**1. `embed.py` 拆分 —— ✅ 已完成（2026-09-22 第二轮）。`enrich.py` 拆分 —— 待做。**
+**1. 巨型文件拆分 —— ✅ 全部完成（`embed.py` 第二轮；`enrich.py` 第三轮）。**
 
-`embed.py` 已完成，方法可复制。关键结论（**这些是拆分前必须先知道的事实**）：
+关键结论（**这些是拆分前必须先知道的事实**）：
 
 1. **两个模块的引用图都是 DAG**（`enrich.py` 407 个顶层定义 / 0 个二环 / 0 个三环；
    `embed.py` 196 个 / 0 / 0）→ 分层拆分可行，不存在「必须循环导入」的硬约束。
@@ -338,16 +339,33 @@ src/
    * 打补丁名 + `global` 重绑定名 → **留在父模块**，搬走代码引用它们时写成 `_parent.NAME`
      （运行期属性查找 → 补丁生效）；
    * 其余名字 → 普通 `from ... import NAME`（import 期快照即可）。
-4. **`enrich.py` 的代价比 `embed.py` 大得多**：`_queue_log_region` 有 **82** 处调用、
-   `_push_log` **79** 处、其余 8 个补丁名共 ~30 处 → 约 **191 处需改写**（embed 仅 93 处）。
-   这些都在热路径上，改写会引入属性查找 → **动 `enrich.py` 前必须先用 `_diag_*` 测基线，
-   改完再测一次**，确认没有把 21 轮优化掉的性能重新加回来。
+4. **`enrich.py` 的重绑定清单 = 12 个函数**（`_hydrate_enrich_runtime` / `notify_enrich_watchers` /
+   `_get_cover_job_pool` / `_cover_job_slot` / `_ensure_local_status_totals_loaded` /
+   `start_enrich_job` / `_set_queue_scan_progress` / `retry_enrich_fails` / `retry_enrich_softs` /
+   `_maybe_prune_done_logs` / `_sample_queue_for_status` / `bump_strategy_epoch`）——
+   它们 `global` 重绑定 11 个模块状态，**必须留在父模块**（否则重绑定落到子模块局部变量，
+   父模块状态永不更新）。这条由 `_feasibility.py` + `grep '^\s*global '` 双向确认。
+5. **拆分时新增的一条硬教训（`enrich.py` 才踩到）：`import` 期求值的位置不止「顶层赋值」。**
+   函数**默认参数值**与**装饰器**、类的**基类/关键字/类体**同样在定义时求值。
+   实测：`_QUEUE_SAMPLE_LIMIT` 只被 `_sample_queue_for_status` 的默认参数引用，
+   被搬走后父模块 import 期直接 `NameError`。生成器的 G2 闸门因此从
+   「只查顶层赋值」扩到上述全部位置，并迭代到不动点（`_write_enrich_log_batch`、
+   `_QUEUE_SAMPLE_LIMIT` 两个名字被自动回拉）。
+6. **源码文本层面的结构性测试会被布局变更打红**：
+   `test_direct_api_slot.py::CallSiteWiringTests::test_one_uses_both_judgements` 用 AST
+   读 `scrap_library/enrich.py` 找 `_one()` 里的 `_give_up_kind` / `_refine_kind_with_meter`
+   调用。`_one` 随 `_fetch_detail` 搬进 `enrich_detail.py`、调用点变成 `_enrich.NAME` 后该测试变红。
+   **处理方式**：把它的定位器改成 glob（`scrap_library/enrich*.py`）+ 取属性调用末段名 ——
+   保留断言牙齿（已用反证验证：破坏调用点 → 立刻转红），但不与文件布局耦合。
+   该测试的语义正确性另有 V2「407 项 AST 等价」独立背书。
 
 工具（可复用，均在 `_gap_reports/`）：`_dep_analyze.py`（顶层定义依赖图）·
 `_scc_analyze.py`（SCC/可分离度）· `_feasibility.py`（无环性 + global 重绑定盘点）·
-`_patch_cost.py`（补丁目标调用点计数）· `_gen_split_full.py`（**代码生成器**，含 3 道安全闸门：
-G1 遮蔽检查 / G2 顶层赋值引用回拉 / G3 无遗留；从 `git HEAD` 读源 → 幂等）·
-`_verify_split.py`（逐定义 AST 等价）· `_verify_split_runtime.py`（名字解析完备性 + API 面守恒）。
+`_patch_cost.py`（补丁目标调用点计数）· `_gen_split_full.py`（**代码生成器**，`--target embed|enrich`，
+含 3 道安全闸门：G1 遮蔽检查 / G2 import 期求值引用回拉（含默认参数·装饰器·类体）/ G3 无遗留；
+从 `git HEAD` 读源 → 幂等）· `_e_multiset.py`（**顶层定义多重集比对：零丢失零重复**）·
+`_e_dup_names.py`（家族跨文件重名）· 技能 `module-split-verify` 的
+`verify_split.py`（V1 名守恒 / V2 逐定义 AST 等价 / V3 再导出集合 / R1 导入 / R2 名字解析 / R3 API 面）。
 
 **2. 孪生家族 —— ✅ 已完成（含额外发现的 10 组重复函数）。**
 

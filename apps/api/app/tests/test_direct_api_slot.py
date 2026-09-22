@@ -233,6 +233,10 @@ class CallSiteWiringTests(unittest.TestCase):
 
     改动前请想清楚：把 `_one()` 里的判据换回内联字面量、或把某条直连路径的
     `api_slot()` 摘掉，都会在这里红。
+
+    注意：`path` 是 **glob**（按 enrich 家族整体搜索），且调用名取末段 ——
+    模块拆分（如 `enrich.py` → `enrich_detail.py`、调用点写成 `_enrich.NAME`）
+    不应让本测试误红；被钉住的是「有没有调用这个判据」，不是它写在哪个文件。
     """
 
     @staticmethod
@@ -241,17 +245,24 @@ class CallSiteWiringTests(unittest.TestCase):
         from pathlib import Path
 
         root = Path(__file__).resolve().parents[1]
-        tree = ast.parse((root / path).read_text(encoding="utf-8"))
         out: set[str] = set()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef) and node.name == func_name:
-                for sub in ast.walk(node):
-                    if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name):
-                        out.add(sub.func.id)
+        for f in sorted(root.glob(path)):
+            tree = ast.parse(f.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef) and node.name == func_name:
+                    for sub in ast.walk(node):
+                        if not isinstance(sub, ast.Call):
+                            continue
+                        fn = sub.func
+                        if isinstance(fn, ast.Name):
+                            out.add(fn.id)
+                        elif isinstance(fn, ast.Attribute):
+                            # 拆分后调用点形如 `_enrich.NAME` → 取末段名字
+                            out.add(fn.attr)
         return out
 
     def test_one_uses_both_judgements(self) -> None:
-        calls = self._calls_in("scrap_library/enrich.py", "_one")
+        calls = self._calls_in("scrap_library/enrich*.py", "_one")
         self.assertIn("_give_up_kind", calls, "放弃分类必须走纯函数（别内联回去）")
         self.assertIn("_refine_kind_with_meter", calls, "假 miss 修正没接线")
 
