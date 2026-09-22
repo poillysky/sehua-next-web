@@ -320,16 +320,34 @@ src/
 | 孪生家族去重 | `scrape_details` 官方站家族：JSON 三站（10musume/1pondo/pacopacomama）共用 `scrape_official_json_detail`，HTML 五站（heydouga/heyzo/kin8/nyoshin/tokyohot）共用 `official_base`/`fetch_official_html`/`official_code`；`p115` extract↔relocate 共用新 `p115/polling.py`；两个 `*_embed_svc` 收敛为声明式 `EmbedSpec` + `EmbedIngestJob`（新 `search/embed_ingest_base.py`） | 差分测试 **2,096 例**（JSON 1,566 / HTML 480 / embed 14 / p115 21）零不一致 + 落库 SQL 字节比对 |
 | 重复函数清理 | 全库 AST 扫描 **11 组 / 24 处 → 1 组 / 2 处**（余下是测试脚手架 `hold`，属惯用重复）。清单见下方第 2 项 | 别名同一性 **17 项** + 纯函数行为差分 **100 例** + 函数体逐字比对 **8 项** 全过 |
 | 回归基线 | `1 failed / 284 passed`（失败集合自始至终未变多） | 每次改动后全量 pytest |
+| **`embed.py` 拆分** | **6,391 → 2,659 行**；抽出 5 个兄弟模块（`embed_catalog` 1,517 / `embed_facets` 1,214 / `embed_poster` 588 / `embed_actress_opt` 513 / `embed_recommend` 156）。原文件末尾再导出全部 95 个被搬名字 → `embed.NAME` 调用与 `patch.object` 零改动 | 静态：逐定义 AST 等价 **196 项**全等（还原限定符后与原实现逐节点一致）· 名字解析完备性（6 模块）· API 面守恒 196 名 · 运行期 `app.main` 导入 · 全量回归 `1 failed/284 passed` |
 
 ### 未完成项与原因
 
-**1. `enrich.py`(16,844 行) / `embed.py`(5,850 行) 拆分 —— 本轮未做。**
+**1. `embed.py` 拆分 —— ✅ 已完成（2026-09-22 第二轮）。`enrich.py` 拆分 —— 待做。**
 
-原因：这两个文件内部高度耦合（281 个顶层定义共用 `_enrich_job` 等模块级可变状态），
-盲目按职责切分会立刻产生**循环导入**与 `NameError`。安全做法需要先做一轮
-**顶层定义的依赖分析**（每个定义引用了哪些模块级名字），据此找出可分离的簇，
-再按「共享状态模块 → 叶子模块 → 上层模块」自底向上搬迁。这属于独立一轮的工作量，
-且必须在**刮削管线空闲**时进行（改 `app/*.py` 会触发 dev_server 硬重启）。
+`embed.py` 已完成，方法可复制。关键结论（**这些是拆分前必须先知道的事实**）：
+
+1. **两个模块的引用图都是 DAG**（`enrich.py` 407 个顶层定义 / 0 个二环 / 0 个三环；
+   `embed.py` 196 个 / 0 / 0）→ 分层拆分可行，不存在「必须循环导入」的硬约束。
+2. **模块里零副作用顶层语句**（除 docstring，全是 def / 常量赋值 / import）
+   → 纯声明式，搬移无执行顺序风险。
+3. **真正的硬约束是测试打补丁**。测试用 `patch.object(enrich, "_queue_log_update_row")`
+   这类写法按名字打补丁，共 **15 个目标**。被搬走的名字若被调用方以「局部绑定」持有，
+   补丁会**静默失效**（假通过）或直接失败。因此规则是：
+   * 打补丁名 + `global` 重绑定名 → **留在父模块**，搬走代码引用它们时写成 `_parent.NAME`
+     （运行期属性查找 → 补丁生效）；
+   * 其余名字 → 普通 `from ... import NAME`（import 期快照即可）。
+4. **`enrich.py` 的代价比 `embed.py` 大得多**：`_queue_log_region` 有 **82** 处调用、
+   `_push_log` **79** 处、其余 8 个补丁名共 ~30 处 → 约 **191 处需改写**（embed 仅 93 处）。
+   这些都在热路径上，改写会引入属性查找 → **动 `enrich.py` 前必须先用 `_diag_*` 测基线，
+   改完再测一次**，确认没有把 21 轮优化掉的性能重新加回来。
+
+工具（可复用，均在 `_gap_reports/`）：`_dep_analyze.py`（顶层定义依赖图）·
+`_scc_analyze.py`（SCC/可分离度）· `_feasibility.py`（无环性 + global 重绑定盘点）·
+`_patch_cost.py`（补丁目标调用点计数）· `_gen_split_full.py`（**代码生成器**，含 3 道安全闸门：
+G1 遮蔽检查 / G2 顶层赋值引用回拉 / G3 无遗留；从 `git HEAD` 读源 → 幂等）·
+`_verify_split.py`（逐定义 AST 等价）· `_verify_split_runtime.py`（名字解析完备性 + API 面守恒）。
 
 **2. 孪生家族 —— ✅ 已完成（含额外发现的 10 组重复函数）。**
 
