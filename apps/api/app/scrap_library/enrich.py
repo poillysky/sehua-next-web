@@ -57,8 +57,12 @@ _SOURCE_WORKERS_MAX = 64
 # 内存里只留最近 N 条结果摘要，避免万级刮削拖垮 GC
 _RESULTS_MEM_CAP = 80
 # done 日志保留条数；跑中定期裁剪，减轻 COUNT/UPDATE 热路径
+# 仅裁「真实刮削」done；扫描分类行 source=scan/local_scan 永不裁
 _QUEUE_LOG_DONE_KEEP = 4000
 _QUEUE_LOG_PRUNE_EVERY = 40
+_SCAN_QUEUE_SOURCES = frozenset({"local_scan", "scan"})
+_SQL_NOT_SCAN_SOURCE = "COALESCE(source, '') NOT IN ('local_scan', 'scan')"
+_SQL_IS_SCAN_SOURCE = "COALESCE(source, '') IN ('local_scan', 'scan')"
 
 _cover_job_pool: Any = None
 _cover_job_pool_lock = threading.Lock()
@@ -1744,41 +1748,27 @@ def _clear_local_status_totals(region: str = "") -> None:
 
 
 def _apply_local_status_totals(counts: dict[str, int], region: str) -> dict[str, int]:
-    """扫描 tip 与库内计数合并。
-
-    - 库分类全 0：用 tip（避免空库盖掉扫描角标）
-    - 库有分类：done 取大（扫描计数先于落库）；soft/fail **以库为准**
-      （软成功升完整成功、失败重试成功后必须能下降，禁止 tip.soft=1898 /
-      旧 tip.fail 把库内真值永久钉死）
-    """
-    _ensure_local_status_totals_loaded()
+    """队列表为唯一真相；tip 仅在库全空时兜底（扫描写入前）。"""
     rid = _queue_log_region(region)
-    tip = _LOCAL_STATUS_TOTALS.get(rid) if rid else None
+    out = dict(counts)
     db_d = int(counts.get("done") or 0)
     db_s = int(counts.get("soft") or 0)
     db_f = int(counts.get("fail") or 0)
-    db_sum = db_d + db_s + db_f
-    out = dict(counts)
-    if not tip:
-        # 热重载后 tip 空但库有数 → 立刻回种，避免 pending 角标按「全未处理」算
-        if rid and db_sum > 0:
+    db_p = int(counts.get("pending") or 0)
+    db_sum = db_d + db_s + db_f + db_p
+    if db_sum > 0:
+        if rid:
             _set_local_status_totals(
                 rid, done=db_d, soft=db_s, fail=db_f, total=None
             )
         return out
-    tip_d = int(tip.get("done") or 0)
-    tip_s = int(tip.get("soft") or 0)
-    tip_f = int(tip.get("fail") or 0)
-    if db_sum <= 0:
-        out["done"] = tip_d
-        out["soft"] = tip_s
-        out["fail"] = tip_f
+    _ensure_local_status_totals_loaded()
+    tip = _LOCAL_STATUS_TOTALS.get(rid) if rid else None
+    if not tip:
         return out
-    # done 可高于库（扫描计数先于落库）。fail/soft 以库为准，失败重试后必须能下降。
-    # 禁止把 max 写回 tip，否则旧失败数会把刚清掉的角标盖回去。
-    out["done"] = max(tip_d, db_d)
-    out["fail"] = db_f
-    out["soft"] = db_s
+    out["done"] = int(tip.get("done") or 0)
+    out["soft"] = int(tip.get("soft") or 0)
+    out["fail"] = int(tip.get("fail") or 0)
     return out
 
 
@@ -1848,7 +1838,7 @@ def _queue_scan_preview_item(
         "rel_path": rel,
         "relPath": rel,
         "region": rid,
-        "source": "local_scan",
+        "source": "scan",
     }
     if kind == "done":
         item["status"] = "done"
@@ -2049,12 +2039,11 @@ def _queue_log_status_counts_db(region: str) -> dict[str, int]:
 
 
 def _queue_log_scrape_counts_db(region: str) -> dict[str, int]:
-    """只统计「真实刮削产出」的行：排除 source='local_scan' 的扫描判定行。
+    """只统计「真实刮削产出」的行：排除扫描判定行（source=scan/local_scan）。
 
     队列日志表把两类语义混在一张表里：
-      - `local_scan`：扫描判定「本地 NFO 已齐 / 缺字段」，十万级
+      - scan/local_scan：扫描判定「本地 NFO 已齐 / 缺字段」，十万级
       - 真实刮削：enrich 实际抓取并写盘的结果，百级
-    角标不拆开，用户就会把「扫描分类」误读成「刮削成功」（实测 108,533 : 250）。
     """
     rid = _queue_log_region(region)
     out = {"done": 0, "soft": 0, "fail": 0, "total": 0}
@@ -2080,7 +2069,7 @@ def _queue_log_scrape_counts_db(region: str) -> dict[str, int]:
                   COUNT(*) AS n
                 FROM enrich_queue_log
                 WHERE region=?
-                  AND COALESCE(source, '') <> 'local_scan'
+                  AND {_SQL_NOT_SCAN_SOURCE}
                 GROUP BY 1
                 """,
                 (rid,),
@@ -2560,7 +2549,7 @@ def _backfill_queue_item_detail(item: dict[str, Any], *, region: str) -> dict[st
         and not has_src_fields
         and not has_timings
         and str(item.get("source") or "").strip()
-        in {"", "local_scan", "log_recover", "recover"}
+        in {"", "local_scan", "scan", "log_recover", "recover"}
     ):
         # 本地扫描空壳字段（全「无」）用 NFO 覆盖
         item["fields"] = hydrated["fields"]
@@ -2734,11 +2723,87 @@ def _queue_log_update_row(row: dict[str, Any], *, region: str = "") -> int:
                     (*params[1:], target_id),
                 )
                 if int(getattr(cur_upd, "rowcount", 0) or 0) <= 0:
-                    # ⚠️ 目标行已不存在：扫描会删掉全部 local_scan 行后重写、
-                    # 裁剪窗口也会删旧 done。旧实现 UPDATE 打空 0 行后仍
-                    # `return target_id`，于是日志打印 "persist ... status=done"
-                    # 而列表里永远查不到这个番号（假成功）。
-                    # 回退为 INSERT 重建该行，保证「日志成功」== 「列表可见」。
+                    # ⚠️ 目标行已不存在，两种成因都要处理：
+                    #   1) 扫描删掉全部 local_scan 行后重写、裁剪窗口删旧 done
+                    #      → 旧实现 UPDATE 打空 0 行后仍 `return target_id`，
+                    #        日志打印 "persist ... status=done" 而列表里永远
+                    #        查不到这个番号（假成功）；
+                    #   2) 内存里的 logId 已过期（暂停恢复的 checkpoint、同番号
+                    #      被重复入队后其 pending 行被 prune 删掉）→ 之前「打空就
+                    #      INSERT」的兜底会把**一次刮削的多次落库**放大成多行
+                    #      （实测同一番号 3 行、payload 完全相同、id 连续）。
+                    # 所以先按 (region, code) 重查一次改 UPDATE；确实没有才 INSERT，
+                    # 保证「一个番号在日志里最多一行」。
+                    retry_id = 0
+                    if rid and code_u:
+                        found2 = conn.execute(
+                            """
+                            SELECT id FROM enrich_queue_log
+                            WHERE region=? AND code=?
+                            ORDER BY
+                              CASE status
+                                WHEN 'running' THEN 0
+                                WHEN 'pending' THEN 1
+                                WHEN 'done' THEN 2
+                                ELSE 3
+                              END,
+                              id DESC
+                            LIMIT 1
+                            """,
+                            (rid, code_u),
+                        ).fetchone()
+                        if found2:
+                            retry_id = int(
+                                found2["id"]
+                                if isinstance(found2, dict)
+                                else found2[0]
+                            )
+                    if retry_id > 0 and retry_id != target_id:
+                        # 与上面同一条守卫：目标行已是 done 且带 fields 时，
+                        # 不接受 pending/running 空包把它降级清空。
+                        st_new2 = str(row.get("status") or "").strip().lower()
+                        base2 = _queue_log_read_payload(conn, retry_id)
+                        if st_new2 in {"pending", "running"} and base2.get("fields"):
+                            ex2 = conn.execute(
+                                "SELECT status FROM enrich_queue_log WHERE id=?",
+                                (retry_id,),
+                            ).fetchone()
+                            st_old2 = str(
+                                (
+                                    ex2.get("status")
+                                    if isinstance(ex2, dict)
+                                    else (ex2[0] if ex2 else "")
+                                )
+                                or ""
+                            ).strip().lower()
+                            if st_old2 == "done":
+                                return retry_id
+                        params = _queue_log_insert_params(
+                            rid,
+                            row,
+                            payload_base=base2,
+                        )
+                        cur_re = conn.execute(
+                            """
+                            UPDATE enrich_queue_log
+                            SET item_id=?, code=?, status=?, gaps_json=?, error=?,
+                                source=?, fetch_ms=?, detail_title=?, payload_json=?,
+                                updated_at=NOW()
+                            WHERE id=?
+                            """,
+                            (*params[1:], retry_id),
+                        )
+                        if int(getattr(cur_re, "rowcount", 0) or 0) > 0:
+                            log.info(
+                                "enrich queue log row id=%s missing; "
+                                "rebound to id=%s code=%s region=%s",
+                                target_id,
+                                retry_id,
+                                code_u,
+                                rid,
+                            )
+                            conn.commit()
+                            return retry_id
                     log.info(
                         "enrich queue log row id=%s missing (rowcount=0); "
                         "reinsert code=%s region=%s",
@@ -3000,14 +3065,7 @@ def retry_enrich_fails(*, region: str = "") -> dict[str, Any]:
         _counts_cache.pop(rid, None)
         counts = _queue_log_status_counts(rid, fresh=True)
         counts["fail"] = int(raw.get("fail") or 0)
-        counts["pending"] = _pending_total_estimate(
-            rid,
-            classified={
-                "done": int(counts.get("done") or 0),
-                "soft": int(counts.get("soft") or 0),
-                "fail": int(counts.get("fail") or 0),
-            },
-        )
+        # pending 以队列表为准，不用向量估算覆盖
         return {
             "ok": True,
             "reopened": 0,
@@ -3111,14 +3169,6 @@ def retry_enrich_fails(*, region: str = "") -> dict[str, Any]:
         pass
     counts = _queue_log_status_counts(rid, fresh=True)
     counts["fail"] = fail_left
-    counts["pending"] = _pending_total_estimate(
-        rid,
-        classified={
-            "done": int(counts.get("done") or 0),
-            "soft": int(counts.get("soft") or 0),
-            "fail": fail_left,
-        },
-    )
     return {
         "ok": True,
         "reopened": n,
@@ -3336,14 +3386,6 @@ def retry_enrich_softs(*, region: str = "") -> dict[str, Any]:
     counts = _queue_log_status_counts(rid, fresh=True)
     counts["soft"] = soft_left
     counts["done"] = int(raw.get("done") or counts.get("done") or 0)
-    counts["pending"] = _pending_total_estimate(
-        rid,
-        classified={
-            "done": int(counts.get("done") or 0),
-            "soft": soft_left,
-            "fail": int(counts.get("fail") or 0),
-        },
-    )
     return {
         "ok": True,
         "reopened": n,
@@ -3775,7 +3817,7 @@ def _queue_log_prune_open_if_done(
 
 
 def _queue_log_prune_done_keep(region: str, keep: int = _QUEUE_LOG_DONE_KEEP) -> int:
-    """只保留最近 keep 条「刮削完成」done，不删 local_scan 全量分类行。"""
+    """只保留最近 keep 条「刮削完成」done，不删扫描分类行（scan/local_scan）。"""
     rid = _queue_log_region(region)
     keep_n = max(500, int(keep or _QUEUE_LOG_DONE_KEEP))
     if not rid:
@@ -3785,12 +3827,12 @@ def _queue_log_prune_done_keep(region: str, keep: int = _QUEUE_LOG_DONE_KEEP) ->
 
         init_db()
         with connect() as conn:
-            # 仅裁剪非本地扫描写入的 done（刮削实时结果）
+            # 仅裁剪非扫描写入的 done（刮削实时结果）
             row_n = conn.execute(
-                """
+                f"""
                 SELECT COUNT(*) AS n FROM enrich_queue_log
                 WHERE region=? AND status='done'
-                  AND COALESCE(source, '') <> 'local_scan'
+                  AND {_SQL_NOT_SCAN_SOURCE}
                 """,
                 (rid,),
             ).fetchone()
@@ -3801,10 +3843,10 @@ def _queue_log_prune_done_keep(region: str, keep: int = _QUEUE_LOG_DONE_KEEP) ->
             if total <= keep_n:
                 return 0
             keep_rows = conn.execute(
-                """
+                f"""
                 SELECT id FROM enrich_queue_log
                 WHERE region=? AND status='done'
-                  AND COALESCE(source, '') <> 'local_scan'
+                  AND {_SQL_NOT_SCAN_SOURCE}
                 ORDER BY updated_at DESC NULLS LAST, id DESC
                 LIMIT ?
                 """,
@@ -3822,7 +3864,7 @@ def _queue_log_prune_done_keep(region: str, keep: int = _QUEUE_LOG_DONE_KEEP) ->
                 f"""
                 DELETE FROM enrich_queue_log
                 WHERE region=? AND status='done'
-                  AND COALESCE(source, '') <> 'local_scan'
+                  AND {_SQL_NOT_SCAN_SOURCE}
                   AND id NOT IN ({ph})
                 """,
                 (rid, *keep_ids),
@@ -4082,31 +4124,81 @@ def _pending_total_estimate(
 
 
 def _clamp_pending_badge(counts: dict[str, int], region: str) -> dict[str, int]:
-    """未处理角标禁止被库内样例/虚高补写抬高：以向量−已分类为准。"""
-    rid = _queue_log_region(region)
-    out = dict(counts)
-    if not rid:
-        return out
-    est = _pending_total_estimate(rid, classified=out)
-    db_p = int(out.get("pending") or 0)
-    if est > 0:
-        out["pending"] = est
-    elif db_p > 0:
-        # 无向量总数时，仍限制明显虚高（大于已分类总和）
-        classified_n = (
-            int(out.get("done") or 0)
-            + int(out.get("soft") or 0)
-            + int(out.get("fail") or 0)
-        )
-        if classified_n > 0 and db_p > classified_n:
-            out["pending"] = 0
-    return out
+    """未处理角标 = 队列表 pending 行数（不再用向量估算覆盖）。"""
+    return dict(counts)
 
 
 # 已分类 skip 缓存（翻页复用，避免每次读 10 万行）
 _classified_skip_cache: dict[str, tuple[float, set[str], set[str]]] = {}
 _CLASSIFIED_SKIP_TTL_SEC = 120.0
 _pending_backfill_done: set[str] = set()
+
+# 本地 NFO 分类结果缓存（本进程）。
+#
+# ⚠️ 背景：开刮必须先知道「本地已分类」，这份信息只能靠扫磁盘（有码区 10.9 万
+# 个目录，实测本机 247s，NAS 走卷映射更久）。旧实现每次开刮都同步重扫且**全程
+# 不上报进度**，界面在 4 分钟里恒显示「队列 0 · 处理中 0」→ 用户判定「启动不了」。
+# 这里缓存住结果，第二次开刮（暂停后续跑、改策略重开）直接命中，秒开。
+# TTL 不宜过长：刮削过程中会不断写入新 NFO，映射过旧会把已完成的番号重复入队。
+# 只缓存 skip_rels / classified_codes 与三态计数，不留 cands/samples（省内存）。
+_local_nfo_maps_cache: dict[str, tuple[float, set[str], set[str], int, int, int]] = {}
+_LOCAL_NFO_MAPS_TTL_SEC = 900.0
+_LOCAL_NFO_MAPS_CACHE_MAX = 2
+
+
+class _CachedLocalMapsMarker:
+    """本地 NFO 分类缓存命中时的轻量载体。
+
+    ⚠️ 不能复用 _LocalNfoMaps：它的 skip_rels / classified_codes 是**只读
+    property**（由 complete_rels/soft_rels/hard 推导），__slots__ 里也没有这两个
+    名字，直接赋值会 AttributeError。缓存里存的本来就是推导后的集合，用这个
+    载体直接带出来即可。
+    """
+
+    __slots__ = ("skip_rels", "classified_codes", "done_n", "soft_n", "fail_n")
+
+    def __init__(
+        self,
+        skip_rels: set[str],
+        classified_codes: set[str],
+        done_n: int,
+        soft_n: int,
+        fail_n: int,
+    ) -> None:
+        self.skip_rels = skip_rels
+        self.classified_codes = classified_codes
+        self.done_n = done_n
+        self.soft_n = soft_n
+        self.fail_n = fail_n
+
+
+def _local_nfo_maps_cache_get(
+    region: str,
+) -> tuple[set[str], set[str], int, int, int] | None:
+    hit = _local_nfo_maps_cache.get(region)
+    if not hit:
+        return None
+    if time.monotonic() - float(hit[0]) >= _LOCAL_NFO_MAPS_TTL_SEC:
+        _local_nfo_maps_cache.pop(region, None)
+        return None
+    return set(hit[1]), set(hit[2]), int(hit[3]), int(hit[4]), int(hit[5])
+
+
+def _local_nfo_maps_cache_put(region: str, maps: Any) -> None:
+    try:
+        if len(_local_nfo_maps_cache) >= _LOCAL_NFO_MAPS_CACHE_MAX:
+            oldest = min(_local_nfo_maps_cache.items(), key=lambda kv: kv[1][0])[0]
+            _local_nfo_maps_cache.pop(oldest, None)
+        _local_nfo_maps_cache[region] = (
+            time.monotonic(),
+            set(getattr(maps, "skip_rels", ()) or ()),
+            set(getattr(maps, "classified_codes", ()) or ()),
+            int(getattr(maps, "done_n", 0) or 0),
+            int(getattr(maps, "soft_n", 0) or 0),
+            int(getattr(maps, "fail_n", 0) or 0),
+        )
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _queue_log_classified_skip_keys(
@@ -4167,11 +4259,7 @@ def _invalidate_classified_skip_cache(region: str = "") -> None:
 def _pending_page_from_vector(
     region: str, *, offset: int = 0, limit: int = 100
 ) -> list[dict[str, Any]]:
-    """未处理翻页：读队列表 pending（updated_at 倒序）。
-
-    禁止对向量库做「updated_at + NOT EXISTS 已分类」全表扫描——会拖死 API。
-    队列表为空时回退向量 code ASC 分批排除（有索引）。
-    """
+    """未处理翻页：队列表 pending 为唯一真相（扫描已整表写入）。"""
     from app.core.db import connect, init_db
     from app.scrap_library import embed as embed_svc
 
@@ -4219,12 +4307,7 @@ def _pending_page_from_vector(
             if not it.get("gaps"):
                 it["gaps"] = list(_ENRICH_KINDS)
             out.append(it)
-        # ⚠️ 仅当队列表确实有 pending 行时才用它。旧实现写作
-        # 「if out or off > 0: return out」—— off>0 时无条件返回空，
-        # 导致「该分区队列表无 pending 行 → 第 1 页走回退有数据、
-        # 第 2 页起直接返回空」的翻页断裂。off 的跳过由下面
-        # 回退分支的 skipped<off 处理。
-        if out:
+        if out or off == 0:
             return out
     except Exception as e:  # noqa: BLE001
         log.warning("pending page from queue_log failed region=%s: %s", rid, e)
@@ -4318,29 +4401,16 @@ def _pending_page_from_vector(
 
 
 def _queue_log_trim_inflated_pending(region: str) -> int:
-    """库内 pending 远高于估算时清掉（多半是旧全量补写），列表改走虚拟翻页。"""
-    rid = _queue_log_region(region)
-    if not rid:
-        return 0
-    raw = _queue_log_status_counts_db(rid)
-    db_n = int(raw.get("pending") or 0)
-    est = _pending_total_estimate(rid)
-    if est <= 0 or db_n <= max(int(est * 1.15), est + 200):
-        return 0
-    n = _queue_log_clear_pending(rid)
-    _counts_cache.pop(rid, None)
-    log.info(
-        "trim inflated pending region=%s db=%s est=%s cleared=%s",
-        rid,
-        db_n,
-        est,
-        n,
-    )
-    return n
+    """已废弃：队列表 pending 为唯一真相，禁止按估算清库。
+
+    旧逻辑在 db_pending > estimate*1.15 时清空 pending，会把扫描刚写入的
+    真实未处理（如 24708）误判为虚高删光 → 界面「暂无未处理项」。
+    """
+    return 0
 
 
 def _queue_log_clear_local_scan_status(region: str) -> int:
-    """删掉 local_scan 写入的成功/失败行，便于全量重写分类列表。"""
+    """删掉扫描写入的成功/失败行，便于全量重写分类列表。"""
     rid = _queue_log_region(region)
     if not rid:
         return 0
@@ -4350,9 +4420,9 @@ def _queue_log_clear_local_scan_status(region: str) -> int:
         init_db()
         with connect() as conn:
             cur = conn.execute(
-                """
+                f"""
                 DELETE FROM enrich_queue_log
-                WHERE region=? AND source='local_scan'
+                WHERE region=? AND {_SQL_IS_SCAN_SOURCE}
                   AND status IN ('done', 'fail')
                 """,
                 (rid,),
@@ -4855,8 +4925,14 @@ def _local_status_item(
     kind: str,
     root: Path | None = None,
     merge_sidecar: bool = True,
+    enrich_detail: bool = True,
 ) -> dict[str, Any]:
-    """本地分类 → 可入库队列行。"""
+    """本地分类 → 可入库队列行。
+
+    enrich_detail=False：扫描全量写入用，只写状态/番号，不读盘 NFO
+    （10 万+ 行时读盘会卡在「写入分类队列 · 4,000/109,xxx」数十分钟）。
+    详情页仍走 _backfill_queue_item_detail 按需补全。
+    """
     code_u = str(code or "").strip().upper()
     rid = str(region or "").strip()
     item: dict[str, Any] = {
@@ -4867,7 +4943,7 @@ def _local_status_item(
         "rel_path": rel,
         "relPath": rel,
         "region": rid,
-        "source": "local_scan",
+        "source": "scan",
     }
     if kind == "done":
         item["status"] = "done"
@@ -4886,6 +4962,8 @@ def _local_status_item(
         item["status"] = "fail"
         item["partialOk"] = False
         item["error"] = f"仍缺:{' · '.join(labels)}" if labels else "仍缺:封面"
+    if not enrich_detail:
+        return item
     if not merge_sidecar:
         # 仍附上本地 NFO 字段，避免详情「标题/封面 · 无」
         try:
@@ -5089,6 +5167,7 @@ def _local_nfo_gap_maps(
                     kind=kind,
                     root=root,
                     merge_sidecar=False,
+                    enrich_detail=False,
                 )
             )
         if rows:
@@ -5413,15 +5492,8 @@ def _queue_log_insert_local_status_samples(
     ]
     total_rows = sum(len(xs) for _, xs in jobs)
     written = 0
-    batch = 1000
-
-    base_root = root
-    if base_root is None:
-        try:
-            settings = embed_svc.get_settings()
-            base_root = embed_svc.resolve_root(settings.get("root")).resolve()
-        except Exception:  # noqa: BLE001
-            base_root = None
+    batch = 2000
+    last_progress_at = 0.0
 
     def _as_item(kind: str, raw: Any) -> dict[str, Any] | None:
         if isinstance(raw, dict):
@@ -5431,14 +5503,16 @@ def _queue_log_insert_local_status_samples(
         rel = str(raw[0] or "")
         code_u = str(raw[1] or "")
         gaps = list(raw[2] if len(raw) > 2 else [])
+        # 全量扫描写入禁止读盘：否则 10 万行会卡在进度条不动
         return _local_status_item(
             rel=rel,
             code=code_u,
             gaps=gaps,
             region=rid,
             kind=kind,
-            root=base_root,
+            root=None,
             merge_sidecar=False,
+            enrich_detail=False,
         )
 
     try:
@@ -5453,11 +5527,13 @@ def _queue_log_insert_local_status_samples(
                 if rows:
                     _queue_log_insert_many(rid, rows)
                 written += len(rows)
-                if total_rows >= 2000 and (
-                    written == len(rows)
-                    or written % 2000 < batch
+                now = time.monotonic()
+                if total_rows > 0 and (
+                    written <= batch
                     or written >= total_rows
+                    or now - last_progress_at >= 0.4
                 ):
+                    last_progress_at = now
                     _set_queue_scan_progress(
                         region=rid,
                         stage="write",
@@ -5581,12 +5657,74 @@ def iter_enrich_pending_items(
     return samples, max(total, int(pending_total))
 
 
+def _rebuild_region_queue_from_scan(
+    *,
+    region: str,
+    local_maps: _LocalNfoMaps,
+    vector_total: int,
+) -> dict[str, int]:
+    """扫描完成后原子重建本区队列表：清空 → 本地分类 → 向量差集 pending。"""
+    rid = _queue_log_region(region)
+    empty = {"pending": 0, "running": 0, "done": 0, "soft": 0, "fail": 0}
+    if not rid:
+        return empty
+    _clear_queue_log(region=rid)
+    _invalidate_classified_skip_cache(rid)
+    _counts_cache.pop(rid, None)
+    _demoted_false_dones.discard(rid)
+    _pending_backfill_done.discard(rid)
+
+    _set_queue_scan_progress(
+        region=rid,
+        stage="write",
+        label="写入成功 / 软成功 / 失败…",
+        done=int(local_maps.done_n or 0),
+        soft=int(local_maps.soft_n or 0),
+        fail=int(local_maps.fail_n or 0),
+        scanned=0,
+        total=max(
+            int(local_maps.done_n or 0)
+            + int(local_maps.soft_n or 0)
+            + int(local_maps.fail_n or 0),
+            1,
+        ),
+        notify=True,
+    )
+    _queue_log_insert_local_status_samples(rid, local_maps, write_cap=0)
+    _replace_pending_from_vector(
+        region=rid,
+        local_maps=local_maps,
+        vector_total=vector_total,
+        clear_pending=False,
+    )
+    _recover_done_from_enrich_logs(rid)
+    db_counts, db_ok = _queue_log_status_counts_db_ex(rid)
+    _invalidate_classified_skip_cache(rid)
+    if db_ok:
+        _set_local_status_totals(
+            rid,
+            done=int(db_counts.get("done") or 0),
+            soft=int(db_counts.get("soft") or 0),
+            fail=int(db_counts.get("fail") or 0),
+            total=int(vector_total or 0) or None,
+        )
+        return dict(db_counts)
+    return {
+        "pending": 0,
+        "running": 0,
+        "done": int(local_maps.done_n or 0),
+        "soft": int(local_maps.soft_n or 0),
+        "fail": int(local_maps.fail_n or 0),
+    }
+
+
 def _replace_pending_from_vector(
     *,
     region: str,
     local_maps: _LocalNfoMaps,
     vector_total: int,
     preview_cap: int = 500,
+    clear_pending: bool = True,
 ) -> tuple[list[dict[str, Any]], int]:
     """用最新向量库差集整表重写未处理队列（不只留样例）。
 
@@ -5686,7 +5824,8 @@ def _replace_pending_from_vector(
         if len(batch) < batch_sz:
             break
 
-    _queue_log_clear_pending(rid)
+    if clear_pending:
+        _queue_log_clear_pending(rid)
     if pending_rows:
         _queue_log_insert_many(rid, pending_rows)
     _counts_cache.pop(rid, None)
@@ -5798,20 +5937,99 @@ def iter_enrich_pending_batches(
         nonlocal local_maps, local_classified, local_codes
         if local_maps is not None:
             return
-        maps = _local_nfo_gap_maps(region=rid or region)
+        cache_key = rid or region
+        cached = _local_nfo_maps_cache_get(cache_key)
+        if cached is not None:
+            skip_set, code_set, d_n, s_n, f_n = cached
+            marker = _CachedLocalMapsMarker(skip_set, code_set, d_n, s_n, f_n)
+            local_maps = marker
+            local_classified = skip_set
+            local_codes = code_set
+            _push_log(
+                f"本地 NFO 分类 · 命中缓存 {len(skip_set):,} 条（免扫盘）",
+                region=cache_key,
+            )
+            return
+        # ⚠️ 这里是「开刮后到出队首条」之间最耗时的一步：有码区要读 10.9 万
+        # 个本地目录、实测 4 分钟。旧实现既不开进度上报、也不写任何日志，
+        # 界面在这几分钟里恒显示「队列 0 · 处理中 0」，看起来就是「启动不了」。
+        # 现在：① 先明确告知正在干什么、大概多久；② 打开 report_progress 让磁盘
+        # 扫描进度能通过 queueScan 上报；③ 扫完打一条含耗时的就绪日志。
+        _t_map = time.monotonic()
+        _push_log(
+            "本地 NFO 分类 · 开始扫描（首次约 2~5 分钟，期间不产生队列；"
+            "可在总览看到磁盘扫描进度）",
+            region=cache_key,
+        )
+        _set_progress(
+            stage="disk",
+            label="扫描本地 NFO 分类…（首次约 2~5 分钟）",
+            done=0,
+            total=0,
+        )
+        try:
+            maps = _local_nfo_gap_maps(region=cache_key, report_progress=True)
+        except TypeError:
+            maps = _local_nfo_gap_maps(region=cache_key)
         local_maps = maps
         local_classified = maps.skip_rels
         local_codes = maps.classified_codes
+        _local_nfo_maps_cache_put(cache_key, maps)
+        _push_log(
+            f"本地 NFO 分类 · 就绪 {len(local_classified):,} 条"
+            f"（成功 {int(getattr(maps, 'done_n', 0) or 0):,} · "
+            f"软成功 {int(getattr(maps, 'soft_n', 0) or 0):,} · "
+            f"失败 {int(getattr(maps, 'fail_n', 0) or 0):,}）"
+            f" · 用时 {time.monotonic() - _t_map:.1f}s",
+            region=cache_key,
+        )
 
     # 「封面已放弃」的番号不再自动入队（否则每轮重抓全部源，且永远清不掉）；
     # 只抑制**仅剩封面缺口**的行 —— 同时缺剧情/女优的仍要重试。
     cover_giveup = _cover_giveup_codes(rid or region)
-    # 上一轮因「高优先源不可用」而降级取值的番号：优先补抓（有界，见 _note_retry_hints）
+    # 源故障补抓：能进队列表的抬到未处理队首（与列表同序）；
+    # 本地已齐、不在 pending 里的仍要显式补出，否则永远没人回头修。
     src_retry = [
         h
         for h in _retry_hint_load(rid or region, _RETRY_KIND_SRC_DOWN)
         if not h.get("giveup") and str(h.get("code") or "").strip()
     ]
+    src_retry_orphan: list[dict[str, Any]] = []
+    if src_retry and (rid or region):
+        try:
+            from app.core.db import connect, init_db
+
+            init_db()
+            bumped = 0
+            with connect() as conn:
+                for h in src_retry:
+                    code_u = str(h.get("code") or "").strip().upper()
+                    if not code_u:
+                        continue
+                    cur = conn.execute(
+                        """
+                        UPDATE enrich_queue_log
+                        SET updated_at=NOW()
+                        WHERE region=? AND status='pending' AND UPPER(code)=?
+                        """,
+                        (rid or region, code_u),
+                    )
+                    n = int(getattr(cur, "rowcount", 0) or 0)
+                    if n > 0:
+                        bumped += n
+                    else:
+                        src_retry_orphan.append(h)
+                conn.commit()
+            if bumped:
+                _push_log(
+                    f"源故障补抓 · {bumped} 条已抬到未处理队首",
+                    region=rid or region,
+                )
+        except Exception as e:  # noqa: BLE001
+            log.debug("bump src_retry pending failed: %s", e)
+            src_retry_orphan = list(src_retry)
+    elif src_retry:
+        src_retry_orphan = list(src_retry)
     seen: set[str] = set()
     emitted = 0
 
@@ -5830,15 +6048,14 @@ def iter_enrich_pending_batches(
             return False
         return True
 
-    # 0) 源故障补抓：这些番号本地 NFO 是齐的，不会出现在下面任何来源里，
-    #    必须显式补出来，否则「降级取值」就永远没人回头修。
-    if src_retry:
+    # 0) 仅补「不在 pending 里」的源故障番号（本地已齐），仍放队首
+    if src_retry_orphan:
         _push_log(
-            f"源故障补抓 · {len(src_retry)} 个番号优先重跑（上一轮高优先源不可用）",
+            f"源故障补抓 · {len(src_retry_orphan)} 个本地已齐番号优先重跑",
             region=rid or region,
         )
         head: list[dict[str, Any]] = []
-        for h in src_retry:
+        for h in src_retry_orphan:
             item_h = _src_retry_item(h, region=rid or region)
             if item_h is None:
                 continue
@@ -5889,32 +6106,76 @@ def iter_enrich_pending_batches(
             "shell": bool(r.get("shell")),
         }
 
-    # 0b) 先吃队列表已有 pending（扫描/中断/失败·软成功重试），最新变更优先
+    # 0b) 先吃队列表已有 pending（扫描/中断/失败·软成功重试），与列表同序
+    #     ORDER BY updated_at DESC, id DESC。用 keyset 翻页，避免 OFFSET 在
+    #     边刮边改 status 时跳号/乱序。
+    #
+    # 一表五态：扫描已写满 pending 后，开刮只改 status，禁止再扫盘/骨架
+    # （否则「点刮削」又卡在「扫描本地 · 2万/12万」数分钟）。
+    had_db_pending = False
+    try:
+        had_db_pending = (
+            int((_queue_log_status_counts_db(rid or region) or {}).get("pending") or 0)
+            > 0
+        )
+    except Exception:  # noqa: BLE001
+        had_db_pending = False
+    emitted_from_log = 0
     try:
         from app.core.db import connect, init_db
 
         init_db()
-        log_off = 0
+        cursor_updated: Any = None
+        cursor_id: int | None = None
         with connect() as conn:
             while True:
                 if _halt_kind():
                     return
-                rows = conn.execute(
-                    """
-                    SELECT id, item_id, code, status, gaps_json, error, source,
-                           fetch_ms, detail_title, payload_json
-                    FROM enrich_queue_log
-                    WHERE region=? AND status='pending'
-                    ORDER BY updated_at DESC NULLS LAST, id DESC
-                    LIMIT ? OFFSET ?
-                    """,
-                    (rid or region, bs, log_off),
-                ).fetchall()
+                if cursor_id is None:
+                    rows = conn.execute(
+                        """
+                        SELECT id, item_id, code, status, gaps_json, error, source,
+                               fetch_ms, detail_title, payload_json, updated_at
+                        FROM enrich_queue_log
+                        WHERE region=? AND status='pending'
+                        ORDER BY updated_at DESC NULLS LAST, id DESC
+                        LIMIT ?
+                        """,
+                        (rid or region, bs),
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        """
+                        SELECT id, item_id, code, status, gaps_json, error, source,
+                               fetch_ms, detail_title, payload_json, updated_at
+                        FROM enrich_queue_log
+                        WHERE region=? AND status='pending'
+                          AND (
+                            updated_at < ?
+                            OR (updated_at = ? AND id < ?)
+                          )
+                        ORDER BY updated_at DESC NULLS LAST, id DESC
+                        LIMIT ?
+                        """,
+                        (
+                            rid or region,
+                            cursor_updated,
+                            cursor_updated,
+                            cursor_id,
+                            bs,
+                        ),
+                    ).fetchall()
                 batch_rows = list(rows or [])
                 if not batch_rows:
                     break
-                log_off += len(batch_rows)
                 log_batch: list[dict[str, Any]] = []
+                last_raw = batch_rows[-1]
+                if isinstance(last_raw, dict):
+                    cursor_id = int(last_raw.get("id") or 0) or None
+                    cursor_updated = last_raw.get("updated_at")
+                else:
+                    cursor_id = int(last_raw[0] or 0) or None
+                    cursor_updated = last_raw[10] if len(last_raw) > 10 else None
                 for r in batch_rows:
                     if isinstance(r, dict):
                         it = _queue_log_row_to_item(r)
@@ -5951,6 +6212,7 @@ def iter_enrich_pending_batches(
                         packed["logId"] = it.get("logId")
                     log_batch.append(packed)
                     emitted += 1
+                    emitted_from_log += 1
                     if cap > 0 and emitted >= cap:
                         break
                 if log_batch:
@@ -5962,11 +6224,15 @@ def iter_enrich_pending_batches(
     except Exception as e:  # noqa: BLE001
         log.warning("iter pending from queue_log failed: %s", e)
 
+    if had_db_pending or emitted_from_log > 0:
+        # 队列表已有未处理：开刮只消费 pending，不再扫本地 / 骨架 / 向量
+        return
+
     # 骨架/向量切片需要 done-keys；开刮线程可能还在加载——最多等几秒，不永久堵死
     if defer_skip_until is not None and not defer_skip_until.is_set():
         defer_skip_until.wait(timeout=15.0)
 
-    # 后续骨架/向量切片才需要本地已分类映射
+    # 后续骨架/向量切片才需要本地已分类映射（仅队列表无 pending 时的兜底）
     _ensure_local_maps()
 
     # 本地已分类路径占位，避免队列表残留 pending 与骨架重复吐出
@@ -6199,31 +6465,36 @@ def scan_enrich_queue(
             source = "local_nfo_overwrite"
         else:
             write_cap = fetch_lim if fetch_lim > 0 else _SCAN_WRITE
-            # 全量准确：先清旧 local_scan 分类行，扫盘时边分类边入库
-            _queue_log_clear_local_scan_status(rid)
+            # ⚠️ 禁止在扫盘**前**清 local_scan 分类行（原实现如此 + 边扫边写）。
+            # 扫盘要数分钟，期间任何中断（切页 / 暂停 / 进程重启）都会先把该区
+            # 全部分类行删掉、只写回一小部分：实测 japan_censored 因此从 10.8 万
+            # 行掉到 4,799 行，tip 被留在瞬时值 done=2，后果是
+            #   ① 角标「未处理」虚高到 12.9 万（见 _region_library_progress）；
+            #   ② 之后每次开刮都失去库侧分类，只能重跑全盘分类数分钟。
+            # 改为「先扫盘、再原子替换」：扫盘阶段只读磁盘、不碰库；扫完统一
+            # clear + 全量写入（见下方 stream_written 分支），中断窗口由分钟级
+            # 缩到写入的十几秒。代价是失去「边扫边写」的并行度，但换来的是
+            # 中断不再毁数据——这个取舍是刻意的。
             local_maps = _local_nfo_gap_maps(
                 region=rid,
                 sample_cap=write_cap,
                 report_progress=True,
-                stream_write_region=rid,
             )
-            _set_queue_scan_progress(
-                region=rid,
-                stage="pending",
-                label="对照最新向量库重写未处理队列…",
-                done=int(local_maps.done_n or 0),
-                soft=int(local_maps.soft_n or 0),
-                fail=int(local_maps.fail_n or 0),
-                notify=True,
-            )
+            _local_nfo_maps_cache_put(rid, local_maps)
             vector_total = _fresh_vector_library_total(rid, force=True)
-            rows, pending_total = _replace_pending_from_vector(
+            db_counts = _rebuild_region_queue_from_scan(
                 region=rid,
                 local_maps=local_maps,
                 vector_total=vector_total,
-                preview_cap=write_cap,
             )
+            pending_total = int(db_counts.get("pending") or 0)
+            rows = _pending_page_from_vector(rid, offset=0, limit=write_cap)
             source = "vector_all_minus_local"
+            local_counts = {
+                "done": int(db_counts.get("done") or 0),
+                "soft": int(db_counts.get("soft") or 0),
+                "fail": int(db_counts.get("fail") or 0),
+            }
 
         seen_q: set[str] = set()
         queue_view: list[dict[str, Any]] = []
@@ -6247,120 +6518,46 @@ def scan_enrich_queue(
                 item["relPath"] = rel
             queue_view.append(item)
 
-        pending_total = max(int(pending_total or 0), len(queue_view))
+        if overwrite:
+            pending_total = len(seen)
 
-        _set_queue_scan_progress(
-            region=rid,
-            stage="write",
-            label=(
-                "分类已边扫边写，收尾…"
-                if local_maps is not None and local_maps.stream_written
-                else "写入分类队列（全量可翻页）…"
-            ),
-            scanned=int(
-                (local_maps.done_n + local_maps.soft_n + local_maps.fail_n)
-                if local_maps is not None
-                else pending_total
-            ),
-            pending=int(pending_total),
-            notify=True,
-        )
-        # 增量模式已在差集阶段整表重写 pending，这里不再清空
-        pruned = 0 if (local_maps is not None and not overwrite) else _queue_log_clear_pending(rid)
-        queue_view = _ensure_queue_log_ids(rid, queue_view)
-        recovered = _recover_done_from_enrich_logs(rid)
-
-        # 成功/软成功/失败：优先用边扫边写结果；失败时再全量补写
-        existing = _queue_log_status_counts(rid, fresh=True)
-        status_n = (
-            int(existing.get("done") or 0)
-            + int(existing.get("soft") or 0)
-            + int(existing.get("fail") or 0)
-        )
-        local_counts = {"done": 0, "soft": 0, "fail": 0}
-        try:
-            vector_total = _fresh_vector_library_total(rid, force=True)
-        except Exception:  # noqa: BLE001
-            vector_total = 0
-        if not overwrite and local_maps is not None and (
-            local_maps.done_n or local_maps.soft_n or local_maps.fail_n
-        ):
-            local_counts = {
-                "done": int(local_maps.done_n or 0),
-                "soft": int(local_maps.soft_n or 0),
-                "fail": int(local_maps.fail_n or 0),
-            }
-            local_status = (
-                local_counts["done"] + local_counts["soft"] + local_counts["fail"]
-            )
-            if local_maps.stream_written and status_n >= max(1, int(local_status * 0.9)):
-                # 边扫边写已覆盖绝大部分行
-                pass
-            else:
-                # 未流式写入或写入不完整 → 清后全量补写
-                _queue_log_clear_local_scan_status(rid)
-                local_counts = _queue_log_insert_local_status_samples(
-                    rid, local_maps, write_cap=0
-                )
-            # ⚠️ local_counts 是「磁盘本地 NFO 分类数」，可能远小于库内已写入的
-            # 分类行数（实测磁盘 2 / 库 done=108,726）。done 取大，避免把角标写
-            # 小成「磁盘数」；soft/fail 仍以本次扫描为准（扫描是分类权威）。
+        if overwrite:
+            _clear_queue_log(region=rid)
+            _invalidate_classified_skip_cache(rid)
+            _counts_cache.pop(rid, None)
+            pruned = 0
+            queue_view = _ensure_queue_log_ids(rid, queue_view)
+            recovered = _recover_done_from_enrich_logs(rid)
+            local_counts = {"done": 0, "soft": 0, "fail": 0}
+            if queue_view:
+                _queue_log_insert_many(rid, queue_view)
+            try:
+                vector_total = _fresh_vector_library_total(rid, force=True)
+            except Exception:  # noqa: BLE001
+                vector_total = 0
             _set_local_status_totals(
                 rid,
-                done=max(int(local_counts["done"]), int(existing.get("done") or 0)),
-                soft=local_counts["soft"],
-                fail=local_counts["fail"],
+                done=0,
+                soft=0,
+                fail=0,
                 total=vector_total,
             )
-        elif status_n <= 0 and not overwrite:
-            if local_maps is None:
-                local_maps = _local_nfo_gap_maps(
-                    region=rid,
-                    sample_cap=_QUEUE_SCAN_SAMPLE_CAP,
-                    report_progress=True,
-                    stream_write_region=rid,
-                )
-            if local_maps is not None and not local_maps.stream_written:
-                local_counts = _queue_log_insert_local_status_samples(
-                    rid, local_maps, write_cap=0
-                )
-            elif local_maps is not None:
-                local_counts = {
-                    "done": int(local_maps.done_n or 0),
-                    "soft": int(local_maps.soft_n or 0),
-                    "fail": int(local_maps.fail_n or 0),
-                }
-            # 同前：done 取「磁盘分类数」与「库内行数」的较大值，防角标被写小。
-            _set_local_status_totals(
-                rid,
-                done=max(int(local_counts["done"]), int(existing.get("done") or 0)),
-                soft=local_counts["soft"],
-                fail=local_counts["fail"],
-                total=vector_total,
-            )
+        else:
+            pruned = 0
+            queue_view = _ensure_queue_log_ids(rid, queue_view)
+            recovered = 0
 
         out = load_queue_log(region=rid, status="pending", limit=200)
         listed = len(queue_view)
-        # ⚠️ 角标必须与「成功 / 软成功 / 失败」列表的实际行数同源 = 库内行数。
-        # local_counts 是**写入前统计的磁盘本地 NFO 分类数**（见
-        # _queue_log_insert_local_status_samples 的返回值），实测磁盘 109,368
-        # vs 库 done 102,183 —— 旧实现直接回 local_counts，扫描一结束角标就与
-        # 列表差好几千，切 tab 看起来就是「数字乱跳」。
-        # 扫描已把分类行全量写入（stream/write 阶段），故这里直接回读库；
-        # 只有库读失败时才退回本地数（宁可显示磁盘数，也好过显示 0）。
         counts = dict(out.get("counts") or {})
-        counts["pending"] = int(pending_total)
         db_counts, db_ok = _queue_log_status_counts_db_ex(rid)
         if db_ok:
-            _invalidate_classified_skip_cache(rid)
-            for _k in ("done", "soft", "fail"):
-                counts[_k] = int(db_counts.get(_k) or 0)
-        elif local_counts["done"] or local_counts["soft"] or local_counts["fail"]:
-            counts["done"] = int(local_counts["done"])
-            counts["soft"] = int(local_counts["soft"])
-            counts["fail"] = int(local_counts["fail"])
-        else:
-            counts = _apply_local_status_totals(counts, rid)
+            counts = dict(db_counts)
+        elif local_counts.get("done") or local_counts.get("soft") or local_counts.get("fail"):
+            counts["done"] = int(local_counts.get("done") or 0)
+            counts["soft"] = int(local_counts.get("soft") or 0)
+            counts["fail"] = int(local_counts.get("fail") or 0)
+            counts["pending"] = int(pending_total)
         out["counts"] = counts
         out["ok"] = True
         out["scanned"] = True
@@ -6619,21 +6816,7 @@ def load_queue_log(
     # 纠偏只在「扫描 / 开刮」入口同步跑；列表读路径绝不触发（后台 demote
     # 也会占满磁盘/连接池，把设置页其它接口拖死）。
 
-    # 未处理：虚高全量补写在后台清掉；列表立即虚拟翻页
-    if st == "pending" and not code_q and not bool(_QUEUE_SCAN_STATE.get("active")):
-        try:
-            raw_p = _queue_log_status_counts_db(rid)
-            db_p = int(raw_p.get("pending") or 0)
-            est_p = _pending_total_estimate(rid)
-            if est_p > 0 and db_p > max(int(est_p * 1.15), est_p + 200):
-                threading.Thread(
-                    target=_queue_log_trim_inflated_pending,
-                    args=(rid,),
-                    name=f"trim-pending-{rid}",
-                    daemon=True,
-                ).start()
-        except Exception as e:  # noqa: BLE001
-            log.debug("schedule trim inflated pending skipped: %s", e)
+    # 读路径不做 prune；pending 以队列表为准。
 
     def _rows_to_items(rows_l: list[Any]) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
@@ -6770,9 +6953,7 @@ def load_queue_log(
                 # 成功/软成功/失败：按最近更新时间（刚刮完的在最上）
                 # 未处理：虚拟翻页（向量 − 已分类），total 用估算全量
                 if st == "pending":
-                    est = _pending_total_estimate(rid)
-                    # 翻页总数/角标都以估算为准，不被库内虚高 pending 抬高
-                    total = est if est > 0 else int(db_counts.get("pending") or 0)
+                    total = int(db_counts.get("pending") or 0)
                     counts["pending"] = total
                     items = _pending_page_from_vector(
                         rid, offset=off, limit=lim
@@ -6802,6 +6983,11 @@ def load_queue_log(
                         params,
                     ).fetchall()
                     items = _rows_to_items(list(fetched or []))
+                    # 扫描轻量写入无 fields：列表仍可翻页，点开/本页按需从 NFO 补全
+                    for i, it in enumerate(items):
+                        fields = it.get("fields") if isinstance(it, dict) else None
+                        if not (isinstance(fields, list) and fields):
+                            items[i] = _backfill_queue_item_detail(it, region=rid)
             else:
                 total = sum(int(db_counts.get(k) or 0) for k in db_counts)
     except Exception as e:  # noqa: BLE001
@@ -7091,6 +7277,12 @@ _incomplete_cache: dict[str, tuple[float, int, int]] = {}
 _INCOMPLETE_CACHE_TTL_SEC = 45.0
 
 
+# 库内三态计数的只读备忘（供 _region_library_progress 纠正陈旧 tip；3s 足够短，
+# 不影响「刚处理完就刷新」的观感，又能挡住状态接口的高频轮询）
+_lib_progress_counts_cache: dict[str, tuple[float, dict[str, int]]] = {}
+_LIB_PROGRESS_COUNTS_TTL_SEC = 3.0
+
+
 def _region_library_progress(region: str) -> dict[str, int]:
     """库内进度（状态热路径）：轻量 total + tip 已分类。
 
@@ -7110,6 +7302,24 @@ def _region_library_progress(region: str) -> dict[str, int]:
     done_n = int(tip.get("done") or 0)
     soft_n = int(tip.get("soft") or 0)
     fail_n = int(tip.get("fail") or 0)
+    # ⚠️ tip 是缓存，可能被「先删后写」的扫描中断留在瞬时低值：实测 japan_censored
+    # tip.done=2 而磁盘实际已分类 10.2 万 → 未处理被算成 129,250（虚高 6 倍），
+    # 连带开刮时的「预估未处理」也失真。这里用**纯只读**的库内计数取大纠正。
+    # 必须用 _queue_log_status_counts_db：另一条 _queue_log_status_counts 会经
+    # _lift_local_status_totals_from_counts 写盘，属于状态热路径禁用的磁盘写。
+    # 加 3s 备忘，避免每次状态轮询都做一次 GROUP BY。
+    try:
+        _memo = _lib_progress_counts_cache.get(rid)
+        _now_m = time.monotonic()
+        if not _memo or _now_m - float(_memo[0]) >= _LIB_PROGRESS_COUNTS_TTL_SEC:
+            _memo = (_now_m, _queue_log_status_counts_db(rid))
+            _lib_progress_counts_cache[rid] = _memo
+        dbc = _memo[1] or {}
+        done_n = max(done_n, int(dbc.get("done") or 0))
+        soft_n = max(soft_n, int(dbc.get("soft") or 0))
+        fail_n = max(fail_n, int(dbc.get("fail") or 0))
+    except Exception as e:  # noqa: BLE001
+        log.debug("region library progress db merge failed region=%s: %s", rid, e)
     # 已刮完（含软成功）视为完成；未处理(+fail 仍算待办里的剩余用 pending 公式)
     complete = done_n + soft_n
     incomplete = max(0, total - done_n - soft_n - fail_n) if total > 0 else 0
@@ -7345,6 +7555,12 @@ def get_enrich_status(*, lite: bool = False) -> dict[str, Any]:
     cur_rid = _queue_log_region(str(status.get("currentRegion") or ""))
     if cur_rid:
         count_regions.append(cur_rid)
+    # 开刮瞬间 currentRegion 可能仍为空；用本轮 regionLogs 键补分区，避免角标区缺失
+    if status.get("running") and not count_regions:
+        for rid in (status.get("regionLogs") or {}):
+            key = _queue_log_region(str(rid or ""))
+            if key and key not in count_regions:
+                count_regions.append(key)
     if not status.get("running"):
         for rid in (status.get("checkpoints") or {}):
             key = _queue_log_region(str(rid or ""))
@@ -7388,21 +7604,24 @@ def get_enrich_status(*, lite: bool = False) -> dict[str, Any]:
             status["progress"] = _progress_from_queue_counts(
                 ui_counts, base=base_prog
             )
-            # 仅用 tip 内存，禁止 region_library_progress / DB
-            _ensure_local_status_totals_loaded()
             library: dict[str, Any] = {}
             region_queue_counts: dict[str, dict[str, int]] = {}
             cur_rid_mem = _queue_log_region(str(status.get("currentRegion") or ""))
             for rid_counts in count_regions:
-                tip = _LOCAL_STATUS_TOTALS.get(rid_counts) or {}
-                total = int(tip.get("total") or 0)
-                done_n = int(tip.get("done") or 0)
-                soft_n = int(tip.get("soft") or 0)
-                fail_n = int(tip.get("fail") or 0)
-                complete = done_n + soft_n
-                incomplete = (
-                    max(0, total - done_n - soft_n - fail_n) if total else 0
+                dbc = _queue_log_status_counts(rid_counts)
+                lib = _region_library_progress(rid_counts)
+                total = int(lib.get("total") or 0)
+                done_n = int(dbc.get("done") or 0)
+                soft_n = int(dbc.get("soft") or 0)
+                fail_n = int(dbc.get("fail") or 0)
+                pending_n = int(dbc.get("pending") or 0)
+                run_n = (
+                    inflight_n
+                    if rid_counts == cur_rid_mem
+                    else int(dbc.get("running") or 0)
                 )
+                complete = done_n + soft_n
+                incomplete = pending_n + run_n
                 library[rid_counts] = {
                     "total": total,
                     "incomplete": incomplete,
@@ -7411,22 +7630,13 @@ def get_enrich_status(*, lite: bool = False) -> dict[str, Any]:
                     if total > 0
                     else 0,
                 }
-                if rid_counts == cur_rid_mem:
-                    region_queue_counts[rid_counts] = {
-                        "pending": int(ui_counts.get("pending") or 0),
-                        "running": inflight_n,
-                        "done": int(ui_counts.get("done") or 0),
-                        "soft": int(ui_counts.get("soft") or 0),
-                        "fail": int(ui_counts.get("fail") or 0),
-                    }
-                else:
-                    region_queue_counts[rid_counts] = {
-                        "pending": incomplete,
-                        "running": 0,
-                        "done": done_n,
-                        "soft": soft_n,
-                        "fail": fail_n,
-                    }
+                region_queue_counts[rid_counts] = {
+                    "pending": pending_n,
+                    "running": run_n,
+                    "done": done_n,
+                    "soft": soft_n,
+                    "fail": fail_n,
+                }
             if library:
                 status["library"] = library
             status["regionQueueCounts"] = region_queue_counts
@@ -7538,72 +7748,31 @@ def get_enrich_status(*, lite: bool = False) -> dict[str, Any]:
             run_n_global = int(ui_counts.get("running") or 0)
             for rid_counts in count_regions:
                 dbc = _queue_log_status_counts(rid_counts)
-                tip = _LOCAL_STATUS_TOTALS.get(rid_counts)
                 lib = _region_library_progress(rid_counts)
-                total = int(lib.get("total") or 0)
-                if tip:
-                    # ⚠️ 角标必须与「成功 / 软成功 / 失败」列表的实际行数同源：
-                    # 列表 total 取库内行数（db_counts），角标若取 tip（磁盘本地
-                    # NFO 分类数），二者一旦脱节（实测 tip=2 / 库 done=102,183 /
-                    # 磁盘含 NFO=109,368），界面就会出现「角标 2 条、列表 10 万条」。
-                    # dbc 已由 _apply_local_status_totals 完成 tip↔库 合并
-                    # （done 取大、soft/fail 以库为准），tip 只用于 total 兜底。
-                    done_n = int(dbc.get("done") or 0)
-                    soft_n = int(dbc.get("soft") or 0)
-                    fail_n = int(dbc.get("fail") or 0)
-                    tip_total = int(tip.get("total") or 0)
-                    if tip_total > total:
-                        total = tip_total
-                    classified = done_n + soft_n + fail_n
-                    pending_n = max(0, total - classified) if total > 0 else 0
-                    run_n = (
-                        run_n_global
-                        if rid_counts
-                        == _queue_log_region(str(status.get("currentRegion") or ""))
-                        else 0
-                    )
-                    region_queue_counts[rid_counts] = {
-                        "pending": pending_n,
-                        "running": run_n,
-                        "done": done_n,
-                        "soft": soft_n,
-                        "fail": fail_n,
-                    }
-                    complete = done_n + soft_n
-                    incomplete = pending_n + run_n
-                    library[rid_counts] = {
-                        "total": total,
-                        "incomplete": incomplete,
-                        "complete": complete,
-                        "percent": int(round(100.0 * complete / max(total, 1)))
-                        if total > 0
-                        else 0,
-                    }
-                else:
-                    pending_n = int(dbc.get("pending") or 0)
-                    run_n = int(dbc.get("running") or 0)
-                    done_n = int(dbc.get("done") or 0)
-                    soft_n = int(dbc.get("soft") or 0)
-                    fail_n = int(dbc.get("fail") or 0)
-                    if (
-                        rid_counts
-                        == _queue_log_region(str(status.get("currentRegion") or ""))
-                        and status.get("running")
-                    ):
-                        run_n = run_n_global
-                    region_queue_counts[rid_counts] = {
-                        "pending": pending_n,
-                        "running": run_n,
-                        "done": done_n,
-                        "soft": soft_n,
-                        "fail": fail_n,
-                    }
-                    library[rid_counts] = {
-                        "total": int(lib.get("total") or 0),
-                        "incomplete": int(lib.get("incomplete") or 0),
-                        "complete": int(lib.get("complete") or 0),
-                        "percent": int(lib.get("percent") or 0),
-                    }
+                pending_n = int(dbc.get("pending") or 0)
+                run_n = int(dbc.get("running") or 0)
+                done_n = int(dbc.get("done") or 0)
+                soft_n = int(dbc.get("soft") or 0)
+                fail_n = int(dbc.get("fail") or 0)
+                if (
+                    rid_counts
+                    == _queue_log_region(str(status.get("currentRegion") or ""))
+                    and status.get("running")
+                ):
+                    run_n = run_n_global
+                region_queue_counts[rid_counts] = {
+                    "pending": pending_n,
+                    "running": run_n,
+                    "done": done_n,
+                    "soft": soft_n,
+                    "fail": fail_n,
+                }
+                library[rid_counts] = {
+                    "total": int(lib.get("total") or 0),
+                    "incomplete": int(lib.get("incomplete") or 0),
+                    "complete": int(lib.get("complete") or 0),
+                    "percent": int(lib.get("percent") or 0),
+                }
             if library:
                 status["library"] = library
             status["regionQueueCounts"] = region_queue_counts
@@ -7949,7 +8118,10 @@ def _patch_queue_item(
         # 预览不落库，但内存态照改 —— UI 仍要看到「本行将被补齐」
         if persist:
             lid = _queue_log_update_row(updated, region=region)
-            if lid and not _queue_log_int_id(updated) and resolved_i >= 0:
+            # ⚠️ 不只是「本来没有 lid」时要回写：内存 lid 已过期（行被 prune /
+            # 扫描重写删掉）时，落库会改到别的行或新建行，内存必须跟着换，
+            # 否则同一次刮削的后续落库继续用旧 lid → 日志里同一个番号出现多行。
+            if lid and resolved_i >= 0 and int(lid) != _queue_log_int_id(updated):
                 with _enrich_lock:
                     queue = list(_enrich_job.get("queue") or [])
                     if 0 <= resolved_i < len(queue):
@@ -14218,7 +14390,7 @@ def _merge_enrich_sidecar_into_item(
 
     src = str(item.get("source") or "").strip()
     side_src = str(data.get("source") or "").strip()
-    if side_src and (not src or src in {"local_scan", "log_recover", "recover"}):
+    if side_src and (not src or src in {"local_scan", "scan", "log_recover", "recover"}):
         item["source"] = side_src
 
     if not str(item.get("detailTitle") or "").strip():
@@ -16441,10 +16613,16 @@ def run_enrich(
             with queue_cv:
                 if not queue:
                     queue_cv.wait(timeout=2.0)
-            _push_log(
-                f"刮削已启动 · 队列 {len(queue)}（扫描继续）",
-                region=region,
-            )
+            if queue:
+                _push_log(
+                    f"刮削已启动 · 队列 {len(queue)}（只消费未处理队列表，不再扫盘）",
+                    region=region,
+                )
+            else:
+                _push_log(
+                    "刮削已启动 · 等待未处理入队…",
+                    region=region,
+                )
 
     # 历史脏数据清理改后台：同步跑会挡 worker 占槽（处理中一直 0）
     if not dry_run:
@@ -16676,7 +16854,11 @@ def run_enrich(
                         name=f"prune-open2-{code_u or 'x'}",
                         daemon=True,
                     ).start()
-                if new_lid and not halted and not _queue_log_int_id(persist):
+                if (
+                    new_lid
+                    and not halted
+                    and int(new_lid) != _queue_log_int_id(persist)
+                ):
                     with _enrich_lock:
                         q = list(_enrich_job.get("queue") or [])
                         if 0 <= i < len(q):
@@ -17706,6 +17888,17 @@ def start_enrich_job(
             else:
                 region_logs[rid] = []
         keep_log = bool(resume_map)
+        # 开刮时内存 queueCounts 若清零，运行中 SSE 会把成功/软成功/失败角标刷成 0。
+        badge_seed = _empty_queue_counts()
+        badge_rid = next((r for r in region_list if r), "")
+        if badge_rid:
+            try:
+                badge_seed = _apply_local_status_totals(
+                    _queue_log_status_counts(badge_rid, fresh=True),
+                    badge_rid,
+                )
+            except Exception as e:  # noqa: BLE001
+                log.debug("enrich start badge seed failed region=%s: %s", badge_rid, e)
         _enrich_job.update(
             {
                 "running": True,
@@ -17721,15 +17914,16 @@ def start_enrich_job(
                 },
                 "log": list(_enrich_job.get("log") or [])[-40:] if keep_log else [],
                 "regionLogs": region_logs,
-                "currentRegion": "",
+                "currentRegion": badge_rid,
                 "cancel": False,
                 "halt": None,
                 "queue": seed_queue,
                 "queueCounts": {
                     "pending": len(seed_queue),
                     "running": 0,
-                    "done": 0,
-                    "fail": 0,
+                    "done": int(badge_seed.get("done") or 0),
+                    "soft": int(badge_seed.get("soft") or 0),
+                    "fail": int(badge_seed.get("fail") or 0),
                 },
                 "current": None,
                 "result": None,

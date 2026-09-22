@@ -358,9 +358,9 @@ function queueRowDesc(row: ScrapLibraryEnrichQueueItem): string {
       if (completeness === '字段齐全') return '字段齐全 · 封面齐全';
       return completeness;
     }
-    // local_scan 无 fields/标题时勿展示 source 字面量
+    // 扫描写入（scan / local_scan）无 fields/标题时勿展示 source 字面量
     const srcRaw = String(row.source || '').trim();
-    if (!srcRaw || srcRaw === 'local_scan') {
+    if (!srcRaw || srcRaw === 'local_scan' || srcRaw === 'scan') {
       return '字段齐全 · 封面齐全';
     }
     const title = String(row.detailTitle || '').trim();
@@ -766,7 +766,11 @@ function EnrichItemDetail({
                       ? `未同步 · ${detail.vectorError}`
                       : detail.status === 'running'
                         ? '同步中…'
-                        : '未同步'}
+                        : ['local_scan', 'scan'].includes(
+                              String(detail.source || '').trim(),
+                            )
+                          ? '本地扫描分类'
+                          : '未同步'}
                 {!detail.vectorSkipped && vectorMs != null
                   ? ` · ${vectorMs}ms`
                   : ''}
@@ -889,7 +893,9 @@ function EnrichItemDetail({
           <li>
             <div className="settings-kv">
               <span className="settings-nav__desc">
-                {String(detail.source || '').trim() === 'local_scan'
+                {['local_scan', 'scan'].includes(
+                  String(detail.source || '').trim(),
+                )
                   ? '本地扫描分类，无各站刮削耗时；重刮后会写入番号目录 SONE-999.log'
                   : '暂无源耗时（刮削后写入番号目录 {番号}.log，清空·扫描可回读）'}
               </span>
@@ -952,7 +958,13 @@ function fieldsFromSourceText(src: string): ScrapLibraryEnrichFieldRow[] {
 
 function displayHitSource(source?: string): string {
   const s = String(source || '').trim();
-  if (!s || s === 'log_recover' || s === 'recover' || s === 'local_scan') {
+  if (
+    !s ||
+    s === 'log_recover' ||
+    s === 'recover' ||
+    s === 'local_scan' ||
+    s === 'scan'
+  ) {
     return '';
   }
   return s;
@@ -1071,9 +1083,17 @@ export function EnrichLivePanel({
   const queueHydratingRef = useRef(false);
   /** 清空·扫描进行中：角标只跟 queueScan */
   const queueScanActiveRef = useRef(false);
-  /** 失败/软成功重试后，SSE 旧角标不得再抬回去，直到服务端报到不高于该值 */
-  const failCeilRef = useRef<number | null>(null);
-  const softCeilRef = useRef<number | null>(null);
+  /**
+   * 失败/软成功重试后，SSE 旧角标不得再抬回去，直到服务端报到不高于该值。
+   * ⚠️ 必须带 TTL：重试后服务端真值往往就是 0（失败/软成功全被转走），
+   * 而「服务端报 ≤ 上限才解除」这个条件在真值 0 时永远不成立 ——
+   * 于是重试过一次的分区，失败/软成功角标被**永久钉死在 0**，
+   * 后面新产生的失败也显示不出来。TTL 到期即失效，回归「只压住重试瞬间的
+   * 陈旧 SSE 帧」这个本意。
+   */
+  const CEIL_TTL_MS = 30_000;
+  const failCeilRef = useRef<{ v: number; until: number } | null>(null);
+  const softCeilRef = useRef<{ v: number; until: number } | null>(null);
   /** 成功/软成功/失败：角标上涨时防抖回读库表（按 updated_at），勿用工作队列插旧号 */
   const resultTabReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
@@ -1156,26 +1176,27 @@ export function EnrichLivePanel({
         st?.halt === 'stop' ||
         st?.phase === 'paused' ||
         st?.phase === 'stopped';
-      setQueueCounts({
-        pending: noMid
-          ? pending + Number(counts.running || 0)
-          : pending,
-        running: noMid ? 0 : Number(counts.running || 0),
-        done: Number(
-          data.localDone ?? counts.done ?? 0,
-        ),
-        soft: Number(data.localSoft ?? counts.soft ?? 0),
-        fail: Number(data.localFail ?? counts.fail ?? 0),
-      });
-      // 扫描全量分类写入后，列表可翻页总数与角标对齐（含未处理）
+      // ⚠️ 这里用的是 `data.local* ?? counts.* ?? 0`：一旦回包既没有 local*
+      // 也没有该项（例如只带 pending 的扫描/引导回包），就会把成功/软成功/失败
+      // 三个角标**一次性刷成 0**，而列表里照样有记录 —— 用户看到的就是
+      // 「进日志页角标全是 0，下面列表却有数据」。与切 tab 分支同款守卫：
+      // 只有拿到非 0 才覆盖，否则保留上一帧值（切区时 1427 行已重置为 0）。
       const doneN = Number(data.localDone ?? counts.done ?? 0);
       const softN = Number(data.localSoft ?? counts.soft ?? 0);
       const failN = Number(data.localFail ?? counts.fail ?? 0);
+      setQueueCounts((prev) => ({
+        pending: noMid ? pending + Number(counts.running || 0) : pending,
+        running: noMid ? 0 : Number(counts.running || 0),
+        done: doneN > 0 ? doneN : Number(prev.done || 0),
+        soft: softN > 0 ? softN : Number(prev.soft || 0),
+        fail: failN > 0 ? failN : Number(prev.fail || 0),
+      }));
+      // 扫描全量分类写入后，列表可翻页总数与角标对齐（含未处理）
       setListTotals((prev) => ({
         ...prev,
         ...(pending > 0 ? { pending } : {}),
         ...(doneN > 0 ? { done: doneN } : {}),
-        soft: softN,
+        ...(softN > 0 ? { soft: softN } : {}),
         ...(failN > 0 ? { fail: failN } : {}),
       }));
     } else {
@@ -1605,34 +1626,7 @@ export function EnrichLivePanel({
       if (qsHere) {
         failCeilRef.current = null;
         softCeilRef.current = null;
-        // 新一轮从 0 爬；本轮内成功/软成功/失败只升不降。
-        // 未处理跟「向量总数−已分类」，不跟写入条数从 0 往上爬。
-        const reset = String(qs?.stage || '') === 'start';
-        setQueueCounts((prev) => {
-          const done = reset
-            ? Number(qs?.done || 0)
-            : Math.max(Number(prev.done || 0), Number(qs?.done || 0));
-          const soft = reset
-            ? Number(qs?.soft || 0)
-            : Math.max(Number(prev.soft || 0), Number(qs?.soft || 0));
-          const fail = reset
-            ? Number(qs?.fail || 0)
-            : Math.max(Number(prev.fail || 0), Number(qs?.fail || 0));
-          const prevP = reset ? 0 : Number(prev.pending || 0);
-          const pendIn =
-            qs?.pending != null ? Number(qs.pending || 0) : prevP;
-          let pending = pendIn;
-          if (prevP > 0 && pendIn > 0 && pendIn < prevP * 1.25) {
-            pending = Math.min(prevP, pendIn);
-          }
-          return {
-            pending,
-            running: 0,
-            done,
-            soft,
-            fail,
-          };
-        });
+        // 扫描进度只更新进度条/样例；角标等扫描完成回包后从队列表读取。
         // 边扫边看：仅在尚未从库表拉过该 tab 时用样例占位。
         // 点过成功/失败等 tab 后必须以库表为准，否则扫序样例（常为 AARM*）会几秒盖掉真列表。
         const want = tabRef.current;
@@ -1777,13 +1771,18 @@ export function EnrichLivePanel({
           Number(qc.soft || 0),
           Number(prevCounts.soft || 0),
         );
-        if (failCeilRef.current != null) {
-          if (failN <= failCeilRef.current) failCeilRef.current = null;
-          else failN = failCeilRef.current;
+        // 上限只压住「重试瞬间服务端还在报旧值」这几十毫秒，过期即失效；
+        // 否则真值 0 会把角标永久钉在 0（见 CEIL_TTL_MS 注释）
+        const ceilNow = Date.now();
+        if (failCeilRef.current) {
+          if (failCeilRef.current.until <= ceilNow) failCeilRef.current = null;
+          else if (failN <= failCeilRef.current.v) failCeilRef.current = null;
+          else failN = failCeilRef.current.v;
         }
-        if (softCeilRef.current != null) {
-          if (softN <= softCeilRef.current) softCeilRef.current = null;
-          else softN = softCeilRef.current;
+        if (softCeilRef.current) {
+          if (softCeilRef.current.until <= ceilNow) softCeilRef.current = null;
+          else if (softN <= softCeilRef.current.v) softCeilRef.current = null;
+          else softN = softCeilRef.current.v;
         }
         setQueueCounts((prev) => ({
           pending: pendingN,
@@ -1791,8 +1790,12 @@ export function EnrichLivePanel({
           done: halted
             ? preferBadge(Number(qc.done || 0), Number(prev.done || 0))
             : Math.max(Number(prev.done || 0), Number(qc.done || 0)),
-          soft: softN,
-          fail: failN,
+          soft: halted
+            ? softN
+            : Math.max(Number(prev.soft || 0), Number(qc.soft || 0)),
+          fail: halted
+            ? failN
+            : Math.max(Number(prev.fail || 0), Number(qc.fail || 0)),
         }));
       }
       if (halted) {
@@ -2018,7 +2021,7 @@ export function EnrichLivePanel({
       const nextFail = Number(counts.fail || 0);
       const nextDone = Number(counts.done || 0);
       const nextSoft = Number(counts.soft || 0);
-      failCeilRef.current = nextFail;
+      failCeilRef.current = { v: nextFail, until: Date.now() + CEIL_TTL_MS };
       setQueueCounts({
         pending: nextPending,
         running: Number(counts.running || 0),
@@ -2080,7 +2083,7 @@ export function EnrichLivePanel({
       const nextFail = Number(counts.fail || 0);
       const nextDone = Number(counts.done || 0);
       const nextSoft = Number(counts.soft || 0);
-      softCeilRef.current = nextSoft;
+      softCeilRef.current = { v: nextSoft, until: Date.now() + CEIL_TTL_MS };
       setQueueCounts({
         pending: nextPending,
         running: Number(counts.running || 0),
@@ -2453,15 +2456,6 @@ export function EnrichLivePanel({
     soft: Number(queueCounts.soft || 0),
     fail: Number(queueCounts.fail || 0),
   };
-  /**
-   * 角标里有多少是「真实刮削产出」。
-   * 队列日志表同时存 local_scan 的「扫描判定本地已齐」行（十万级）与真实抓取
-   * 结果（百级），角标只显示合计数会把前者当刮削成功读（实测 108,533 : 250）。
-   */
-  const scrapeRow =
-    st?.queueCountsScrape && st.queueCountsScrapeRegion === regionId
-      ? st.queueCountsScrape
-      : null;
 
   // 有进行中时默认切到「处理中」（用户点过 tab 后不再抢）；勿重置页码
   useEffect(() => {
@@ -2628,11 +2622,11 @@ export function EnrichLivePanel({
     let alive = true;
     void (async () => {
       try {
-        // 再拉一次队列表该条（服务端会对空壳做 NFO 回填）
+        // 按番号拉一条：服务端会对空壳做 NFO 回填（比整页 limit=80 更稳）
         const page = await getScrapLibraryEnrichQueueLog({
           region: regionId,
-          status: stt,
-          limit: 80,
+          code: code || undefined,
+          limit: 8,
         });
         if (!alive) return;
         const hitQ =
@@ -2643,25 +2637,41 @@ export function EnrichLivePanel({
                 String(it.code || '').toUpperCase() === code.toUpperCase()),
           ) || null;
         if (hitQ && (hitQ.fields || []).length > 0) {
+          const merged = {
+            ...selectedRow,
+            ...hitQ,
+            fields: hitQ.fields,
+            sourceTimings: hitQ.sourceTimings || selectedRow.sourceTimings,
+            detailTitle: hitQ.detailTitle || selectedRow.detailTitle,
+            posterDownloaded:
+              typeof hitQ.posterDownloaded === 'boolean'
+                ? hitQ.posterDownloaded
+                : selectedRow.posterDownloaded,
+            vectorSynced:
+              typeof hitQ.vectorSynced === 'boolean'
+                ? hitQ.vectorSynced
+                : selectedRow.vectorSynced,
+          };
           setQueueItems((prev) =>
             prev.map((r) =>
-              rowKey(r) === rowKey(selectedRow)
-                ? {
-                    ...r,
-                    ...hitQ,
-                    fields: hitQ.fields,
-                    sourceTimings: hitQ.sourceTimings || r.sourceTimings,
-                    detailTitle: hitQ.detailTitle || r.detailTitle,
-                    source: displayHitSource(hitQ.source) || r.source,
-                    posterDownloaded:
-                      typeof hitQ.posterDownloaded === 'boolean'
-                        ? hitQ.posterDownloaded
-                        : r.posterDownloaded,
-                  }
-                : r,
+              rowKey(r) === rowKey(selectedRow) ? { ...r, ...merged } : r,
             ),
           );
-          // NFO 回填的字段已够展示；站点源/源耗时需当次刮削落库
+          setDbDetail({
+            code: merged.code || code,
+            itemId: merged.itemId || iid,
+            detailTitle: merged.detailTitle || '',
+            status: merged.status,
+            fields: merged.fields,
+            posterDownloaded: merged.posterDownloaded,
+            vectorSynced: merged.vectorSynced,
+            vectorSkipped: merged.vectorSkipped,
+            // 保留 scan 供向量文案判断；命中源展示仍走 displayHitSource
+            source: merged.source || selectedRow.source,
+            sourceTimings: merged.sourceTimings,
+            gaps: merged.gaps,
+            error: merged.error,
+          });
           return;
         }
 
@@ -2872,18 +2882,6 @@ export function EnrichLivePanel({
                   }
                   setTab(next);
                 }}
-                title={
-                  scrapeRow &&
-                  (t.id === 'done' || t.id === 'soft' || t.id === 'fail')
-                    ? `${t.label}：${
-                        t.id === 'done'
-                          ? Number(scrapeRow.done || 0)
-                          : t.id === 'soft'
-                            ? Number(scrapeRow.soft || 0)
-                            : Number(scrapeRow.fail || 0)
-                      } 条为真实刮削产出，其余为本地扫描判定「已齐」`
-                    : undefined
-                }
               >
                 <span className="enrich-live__tab-label">{t.label}</span>
                 <span className="enrich-live__tab-count">
@@ -2907,11 +2905,6 @@ export function EnrichLivePanel({
               {filteredQueue.length > 0
                 ? ` · 预览 ${filteredQueue.length} 条（扫完会补全）`
                 : ''}
-            </p>
-          ) : scrapeRow &&
-            (tab === 'done' || tab === 'soft' || tab === 'fail') ? (
-            <p className="enrich-live__queue-hint">
-              {`真实刮削产出：成功 ${Number(scrapeRow.done || 0).toLocaleString()} · 软成功 ${Number(scrapeRow.soft || 0).toLocaleString()} · 失败 ${Number(scrapeRow.fail || 0).toLocaleString()}（角标其余部分是本地扫描判定「已齐」，不是抓取结果）`}
             </p>
           ) : null}
           {!searchActive && tab === 'fail' && Number(tabCounts.fail || 0) > 0 ? (

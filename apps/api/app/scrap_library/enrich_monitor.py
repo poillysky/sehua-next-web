@@ -472,11 +472,13 @@ def snapshot() -> dict[str, Any]:
                     "phaseElapsedMs": nxt["phaseElapsedMs"],
                     "sources": nxt.get("sources") or [],
                     "stall": nxt.get("stall"),
+                    "startedAt": float(nxt.get("startedAt") or 0),
                 }
             )
             inflight_raw[key] = {**cur, **nxt}
         _state["inflight"] = inflight_raw
-        items.sort(key=lambda x: -int(x.get("elapsedMs") or 0))
+        # 与开刮取号顺序一致（先入队先显示），不要按耗时把慢源顶到最前
+        items.sort(key=lambda x: float(x.get("startedAt") or 0))
         samples = [
             int(x) for x in (_state.get("fetchMsSamples") or []) if int(x) > 0
         ]
