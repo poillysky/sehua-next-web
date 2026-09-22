@@ -461,10 +461,15 @@ export function buildEnrichLiveActions(d: EnrichLiveActionDeps) {
         fields: resultFields.length ? resultFields : selectedRow.fields,
         gapsAfter: Array.isArray(result.gapsAfter)
           ? result.gapsAfter
-          : selectedRow.gapsAfter,
+          : Array.isArray(
+                (selectedRow as ScrapLibraryEnrichQueueItem).gapsAfter,
+              )
+            ? (selectedRow as ScrapLibraryEnrichQueueItem).gapsAfter
+            : undefined,
         vectorSynced: Boolean(data.item) && !Boolean(result.vectorSkipped),
         vectorSkipped: Boolean(result.vectorSkipped),
       };
+      const selKey = rowKey(selectedRow as ScrapLibraryEnrichQueueItem);
       const wasSt = rowStatus(selectedRow.status);
       const was: LiveTab =
         wasSt === 'done'
@@ -491,11 +496,11 @@ export function buildEnrichLiveActions(d: EnrichLiveActionDeps) {
         // 立即从当前列表拿掉，切到成功/软成功队列
         if (tabRef.current !== now) {
           setQueueItems((prev) =>
-            prev.filter((r) => rowKey(r) !== selectedKey),
+            prev.filter((r) => rowKey(r) !== selKey),
           );
         } else {
           setQueueItems((prev) =>
-            prev.map((r) => (rowKey(r) === selectedKey ? nextRow : r)),
+            prev.map((r) => (rowKey(r) === selKey ? nextRow : r)),
           );
         }
         setTabTouched(true);
@@ -504,7 +509,7 @@ export function buildEnrichLiveActions(d: EnrichLiveActionDeps) {
         await loadQueueTab(now, 1);
         // 若库回填稍慢，确保成功列表里立刻能看到本条
         setQueueItems((prev) => {
-          const key = selectedKey;
+          const key = selKey;
           const hit = prev.some(
             (r) =>
               rowKey(r) === key ||
@@ -523,7 +528,7 @@ export function buildEnrichLiveActions(d: EnrichLiveActionDeps) {
         tabCacheRef.current.done = undefined;
       } else {
         setQueueItems((prev) =>
-          prev.map((r) => (rowKey(r) === selectedKey ? nextRow : r)),
+          prev.map((r) => (rowKey(r) === selKey ? nextRow : r)),
         );
         if (tabRef.current !== 'fail') {
           setTabTouched(true);

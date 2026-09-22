@@ -160,6 +160,7 @@ export function useEnrichLivePanel({
     setSelectedKey,
     setDbDetail,
     setQueueItems,
+    queueItems,
     setQueueCounts,
     setListTotals,
     setQueuePage,

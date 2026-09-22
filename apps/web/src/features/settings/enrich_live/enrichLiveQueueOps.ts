@@ -43,6 +43,8 @@ export type EnrichLiveQueueOpsDeps = {
   setSelectedKey: Dispatch<SetStateAction<string | null>>;
   setDbDetail: Dispatch<SetStateAction<ScrapLibraryEnrichCurrent | null>>;
   setQueueItems: Dispatch<SetStateAction<ScrapLibraryEnrichQueueItem[]>>;
+  /** 当前列表（番号搜索本地预览） */
+  queueItems: ScrapLibraryEnrichQueueItem[];
   setQueueCounts: Dispatch<
     SetStateAction<{
       pending: number;
@@ -92,6 +94,7 @@ export function buildEnrichLiveQueueOps(d: EnrichLiveQueueOpsDeps) {
     setSelectedKey,
     setDbDetail,
     setQueueItems,
+    queueItems,
     setQueueCounts,
     setListTotals,
     setQueuePage,

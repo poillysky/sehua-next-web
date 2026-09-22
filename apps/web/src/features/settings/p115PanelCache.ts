@@ -6,6 +6,7 @@ import type {
   P115Task,
   P115SaveSource,
 } from '@/lib/api';
+import { P115_MAKER_REGION_SOURCES } from '@/lib/api';
 
 export type P115PanelTab = 'overview' | 'config' | 'tasks';
 
@@ -58,12 +59,15 @@ export function clearP115PanelCache(): void {
 }
 
 export function emptyP115Targets(): Record<P115SaveSource, P115TargetFolder> {
-  return {
+  const base = {
     warehouse: { folderCid: '0', folderName: '' },
     movie: { folderCid: '0', folderName: '' },
     tv: { folderCid: '0', folderName: '' },
-    makers: { folderCid: '0', folderName: '' },
-  };
+  } as Record<P115SaveSource, P115TargetFolder>;
+  for (const key of P115_MAKER_REGION_SOURCES) {
+    base[key] = { folderCid: '0', folderName: '' };
+  }
+  return base;
 }
 
 export function emptyP115SubsFolder(): P115TargetFolder {
