@@ -47,7 +47,7 @@ export type SearchResult = {
 };
 
 export type SortType = 'default' | 'size' | 'count' | 'date';
-export type MatchMode = 'smart' | 'exact' | 'fuzzy';
+export type MatchMode = 'exact' | 'fuzzy';
 export type FilterTime =
   | 'all'
   | 'gt-1day'

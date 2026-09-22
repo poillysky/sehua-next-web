@@ -84,37 +84,33 @@ def is_fc2_plate_maker_name(name: str) -> bool:
 
 
 def fc2_prefix_from_code(code: str) -> str:
-    """番号 → catalog 前缀键：FC2 或 FC2PPV。"""
-    u = str(code or "").strip().upper().replace("_", "-")
-    compact = re.sub(r"[\s\-]", "", u)
-    if compact.startswith("FC2PPV") or u.startswith("FC2-PPV"):
-        return "FC2PPV"
+    """番号 → catalog 前缀键：一律 FC2（旧 FC2PPV 写入也归并）。"""
+    _ = code
     return "FC2"
 
 
 def fc2_fs_prefix(prefix: str = "", *, code: str = "") -> str:
-    """catalog 前缀 / 番号 → 磁盘前缀夹名：FC2 或 FC2-PPV。"""
+    """catalog 前缀 / 番号 → 磁盘前缀夹名：一律 FC2。
+
+    旧夹 ``FC2-PPV`` / ``FC2PPV`` 仅作读路径兼容，写入不再产出。
+    """
     p = str(prefix or "").strip().upper().replace("_", "-")
     if not p and code:
-        p = fc2_prefix_from_code(code)
+        p = "FC2"
     compact = re.sub(r"[\s\-]", "", p)
-    if compact.startswith("FC2PPV") or p in {"FC2-PPV", "FC2PPV"}:
-        return "FC2-PPV"
-    if compact == "FC2" or p == "FC2":
+    if compact.startswith("FC2") or (
+        code and re.search(r"FC2", str(code or ""), re.I)
+    ):
         return "FC2"
-    if code:
-        return "FC2-PPV" if fc2_prefix_from_code(code) == "FC2PPV" else "FC2"
     return p or "FC2"
 
 
 def normalize_fc2_code(code: str) -> str:
-    """统一番号写法：FC2PPV-123 → FC2-PPV-123；普通保持 FC2-{num}。"""
+    """统一番号写法：一律 ``FC2-{num}``（含旧 FC2-PPV / FC2PPV）。"""
     s = str(code or "").strip().upper().replace("_", "-")
-    if s.startswith("FC2PPV-"):
-        return "FC2-PPV-" + s[7:]
-    if s.startswith("FC2PPV") and not s.startswith("FC2-PPV"):
-        rest = s[6:].lstrip("-")
-        return f"FC2-PPV-{rest}" if rest else s
+    m = re.search(r"FC2(?:-?PPV)?-?(\d+)", s, re.I)
+    if m:
+        return f"FC2-{m.group(1)}"
     return s
 
 

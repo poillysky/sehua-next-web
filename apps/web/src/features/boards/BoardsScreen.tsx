@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Search, X } from 'lucide-react';
 import {
   SEHUATANG_FORUM,
@@ -13,6 +13,7 @@ import type { ResourceItem } from '@/types/resource';
 import { AppPush } from '@/components/ui/AppPush';
 import { ResourceCard } from '@/features/home/ResourceCard';
 import { ResourceDetailBody } from '@/features/home/ResourceDetailBody';
+import { blurFocusedDescendant } from '@/lib/blurFocus';
 
 type BoardView = {
   kind: 'board';
@@ -80,6 +81,18 @@ export function BoardsScreen({ onClose }: { onClose?: () => void } = {}) {
   const [listHint, setListHint] = useState('');
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const listKeyRef = useRef('');
+  const hubRef = useRef<HTMLDivElement | null>(null);
+  const listCoverRef = useRef<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    if (view.kind === 'hub') return;
+    blurFocusedDescendant(hubRef.current);
+  }, [view.kind]);
+
+  useLayoutEffect(() => {
+    if (detailHash == null) return;
+    blurFocusedDescendant(listCoverRef.current);
+  }, [detailHash]);
 
   function resetToHub() {
     setView({ kind: 'hub' });
@@ -306,7 +319,7 @@ export function BoardsScreen({ onClose }: { onClose?: () => void } = {}) {
           }}
           skipEnterAnimation={embedded}
         >
-          <div aria-hidden={detailHash != null}>
+          <div ref={listCoverRef} aria-hidden={detailHash != null || undefined}>
             <div className="sht-list-search">
               <div className="home-search__control home-search__control--compact">
                 <label className="home-search__label">
@@ -441,7 +454,11 @@ export function BoardsScreen({ onClose }: { onClose?: () => void } = {}) {
 
   return (
     <div className="app-stack-root">
-      <div className="app-hub" aria-hidden={view.kind !== 'hub'}>
+      <div
+        ref={hubRef}
+        className="app-hub"
+        aria-hidden={view.kind !== 'hub' || undefined}
+      >
         {hubBody}
       </div>
       {pushes}

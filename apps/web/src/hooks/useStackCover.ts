@@ -9,6 +9,12 @@ import {
   watchScrollMemory,
 } from '@/lib/scrollMemory';
 import { cn } from '@/lib/utils';
+import { blurFocusedDescendant } from '@/lib/blurFocus';
+
+/** 盖住下层前移走焦点，避免 aria-hidden 祖先下仍有 focused 后代的控制台警告 */
+function blurIfInside(root: HTMLElement | null) {
+  blurFocusedDescendant(root);
+}
 
 /**
  * Hub / 下层页面被 AppPush 盖住时：
@@ -65,6 +71,12 @@ export function useStackCover(
       };
     }
   }, [covered, restoreScrollOnBack, scrollKey]);
+
+  // 盖住瞬间 blur 内部焦点（须在 aria-hidden / inert 生效同帧）
+  useLayoutEffect(() => {
+    if (!covered) return;
+    blurIfInside(rootRef.current);
+  }, [covered]);
 
   return {
     ref: rootRef,

@@ -21,6 +21,7 @@ import { useTabNavigation } from '@/shell';
 import { useStackCover } from '@/hooks/useStackCover';
 import {
   isFc2DirectStudio,
+  isFc2FoldersDirectItems,
   MAKER_ACTRESS_SORT_OPTS,
   MAKER_FACET_SORT_OPTS,
   MAKER_PREFIX_SORT_OPTS,
@@ -179,6 +180,7 @@ export function useMakersScreen() {
       : facetSort;
   const isItemSortView =
     libraryView === 'movies' ||
+    (libraryView === 'folders' && isFc2FoldersDirectItems(hubTab)) ||
     stack.kind === 'folderPrefix' ||
     stack.kind === 'facet' ||
     (stack.kind === 'folderStudio' && isFc2DirectStudio(stack.studio)) ||

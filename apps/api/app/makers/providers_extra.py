@@ -446,10 +446,10 @@ def _missav_slug_to_code(slug: str) -> str | None:
     if not s:
         return None
     s = _MISSAV_SUFFIX_RE.sub("", s)
-    # sone-001 → SONE-001；fc2-ppv-1234567 → FC2-PPV-1234567
+    # sone-001 → SONE-001；fc2-ppv-1234567 → FC2-1234567
     if re.match(r"^fc2[-_]?ppv[-_]?\d+", s, re.I):
         digits = re.sub(r"\D", "", s)
-        return f"FC2-PPV-{digits}" if digits else None
+        return f"FC2-{digits}" if digits else None
     m = re.match(r"^([a-z]+)[-_]?(\d+)$", s, re.I)
     if m:
         return f"{m.group(1).upper()}-{m.group(2)}"

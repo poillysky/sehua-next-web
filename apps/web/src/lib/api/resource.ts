@@ -63,7 +63,7 @@ export async function fetchSearch(opts: {
   q.set('sortType', opts.sortType ?? 'default');
   q.set('filterTime', opts.filterTime ?? 'all');
   q.set('filterSize', opts.filterSize ?? 'all');
-  q.set('matchMode', opts.matchMode ?? 'smart');
+  q.set('matchMode', opts.matchMode ?? 'exact');
   q.set('withTotalCount', opts.withTotalCount === false ? '0' : '1');
   if (opts.countOnly) q.set('countOnly', '1');
   const preferOn = Boolean(opts.preferChinese || opts.preferCrack);

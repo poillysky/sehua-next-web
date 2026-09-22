@@ -854,7 +854,7 @@ def _shell_rel_path(region_label: str, prefix: str, code: str) -> str:
     label = str(region_label or "").strip()
     code_u = str(code or "").strip()
     pref = str(prefix or "").strip()
-    # 六区统一：区/前缀/番号；FC2 磁盘夹为 FC2 与 FC2-PPV
+    # 六区统一：区/前缀/番号；FC2 磁盘夹一律 FC2/FC2/FC2-*
     if label.casefold() in {"fc2", "fc2ppv"} or label.upper() == "FC2":
         from app.core.region_meta import fc2_fs_prefix, normalize_fc2_code
 
@@ -1468,7 +1468,7 @@ def _canonical_folder_prefix(prefix: str) -> str:
 
 
 def _fc2_rel_path_aliases(parts: list[str]) -> list[list[str]]:
-    """FC2 扁平/旧夹名 → 现行三层路径候选。"""
+    """FC2 扁平/旧夹名 → 现行 ``FC2/FC2/FC2-{num}`` 及读兼容候选。"""
     if len(parts) < 3:
         return []
     try:
@@ -1477,18 +1477,37 @@ def _fc2_rel_path_aliases(parts: list[str]) -> list[list[str]]:
         return []
     if i + 1 >= len(parts):
         return []
+    from app.core.region_meta import normalize_fc2_code
+
     out: list[list[str]] = []
     nxt = str(parts[i + 1] or "")
-    nxt_u = nxt.upper()
-    # 旧前缀夹 FC2PPV → FC2-PPV
-    if nxt_u in {"FC2PPV", "FC2_PPV"}:
-        out.append([*parts[: i + 1], "FC2-PPV", *parts[i + 2 :]])
-    # 扁平 FC2/{CODE}/… → FC2/FC2/{CODE}/… 或 FC2/FC2-PPV/{CODE}/…
-    elif nxt_u not in {"FC2", "FC2-PPV", "FC2PPV"} and nxt_u.startswith("FC2"):
-        from app.core.region_meta import fc2_fs_prefix
+    nxt_u = nxt.upper().replace("_", "-")
+    head = parts[: i + 1]
 
-        pref = fc2_fs_prefix(code=nxt)
-        out.append([*parts[: i + 1], pref, *parts[i + 1 :]])
+    def _push(pref: str, code: str, rest: list[str]) -> None:
+        out.append([*head, pref, code, *rest])
+
+    # 三层：前缀夹 + 番号 → 优先现行，再试旧夹/旧番号名
+    if nxt_u in {"FC2", "FC2-PPV", "FC2PPV"} and i + 2 < len(parts):
+        raw_code = str(parts[i + 2] or "")
+        code = normalize_fc2_code(raw_code)
+        rest = list(parts[i + 3 :])
+        _push("FC2", code, rest)
+        if raw_code.upper() != code:
+            _push("FC2", raw_code, rest)
+        _push("FC2-PPV", code, rest)
+        _push("FC2-PPV", raw_code, rest)
+        _push("FC2PPV", raw_code, rest)
+        return out
+    # 扁平 FC2/{CODE}/… → FC2/FC2/{FC2-num}/…
+    if nxt_u.startswith("FC2"):
+        code = normalize_fc2_code(nxt)
+        rest = list(parts[i + 2 :])
+        _push("FC2", code, rest)
+        _push("FC2-PPV", code, rest)
+        if nxt.upper() != code:
+            _push("FC2", nxt, rest)
+            _push("FC2-PPV", nxt, rest)
     return out
 
 

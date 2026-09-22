@@ -4,6 +4,7 @@ import {
   linkKindOf,
 } from "@/lib/detailResource";
 import { readP115AttachSubs } from "@/lib/p115AttachSubs";
+import { resolveP115SaveSource } from "@/lib/p115Source";
 
 export type P115SaveResult = {
   ok: boolean;
@@ -14,6 +15,9 @@ export type P115SaveResult = {
   shareCount?: number;
   offlineCount?: number;
   subsUploaded?: number;
+  destName?: string;
+  destCid?: string;
+  source?: P115SaveSource;
 };
 
 type Envelope = {
@@ -82,14 +86,15 @@ export async function runP115Save(opts: {
   urls: string[];
   password?: string | null;
   titleHint?: string;
-  /** 入口：仓库 / 影视 / 片商 → 对应保存目录 */
+  /** 入口：仓库 / 影视 / 片商六区 → 对应保存目录 */
   source?: P115SaveSource;
 }): Promise<P115SaveResult> {
   const urls = Array.from(
     new Set((opts.urls || []).map((u) => u.trim()).filter(Boolean)),
   );
   const password = (opts.password || "").trim();
-  const source = opts.source || 'warehouse';
+  // 点击时再解析：session 丢失时用片商 attach.region 兜底
+  const source = resolveP115SaveSource(opts.source);
   const attach = readP115AttachSubs();
   const attachPayload =
     attach && (attach.code || attach.itemId || attach.region)

@@ -1,9 +1,11 @@
 import type {
   P115Config,
+  P115MakerRegionSource,
   P115SaveSource,
   P115TargetFolder,
   P115Task,
 } from '@/lib/api';
+import { P115_MAKER_REGION_SOURCES } from '@/lib/api';
 import type { P115PanelTab } from '../p115PanelCache';
 
 export type Tab = P115PanelTab;
@@ -15,6 +17,44 @@ export const TABS: Array<{ key: Tab; label: string }> = [
   { key: 'tasks', label: '任务' },
 ];
 
+/** 片商六区转存目录（与刮削库分区对齐） */
+export const MAKER_SAVE_SOURCES: Array<{
+  key: P115MakerRegionSource;
+  label: string;
+  desc: string;
+}> = [
+  {
+    key: 'japan_censored',
+    label: '日本有码',
+    desc: '片商·有码 · 先最近接收 → 再进本目录',
+  },
+  {
+    key: 'japan_uncensored',
+    label: '日本无码',
+    desc: '片商·无码 · 先最近接收 → 再进本目录',
+  },
+  {
+    key: 'japan_amateur',
+    label: '素人',
+    desc: '片商·素人 · 先最近接收 → 再进本目录',
+  },
+  {
+    key: 'fc2',
+    label: 'FC2',
+    desc: '片商·FC2 · 先最近接收 → 再进本目录',
+  },
+  {
+    key: 'china',
+    label: '国产',
+    desc: '片商·国产 · 先最近接收 → 再进本目录',
+  },
+  {
+    key: 'western',
+    label: '欧美',
+    desc: '片商·欧美 · 先最近接收 → 再进本目录',
+  },
+];
+
 export const SAVE_SOURCES: Array<{
   key: P115SaveSource;
   label: string;
@@ -23,15 +63,35 @@ export const SAVE_SOURCES: Array<{
   { key: 'warehouse', label: '仓库', desc: '先最近接收 → 再进本目录' },
   { key: 'movie', label: '电影', desc: '影视·电影 · 先最近接收 → 再进本目录' },
   { key: 'tv', label: '电视剧', desc: '影视·剧集 · 先最近接收 → 再进本目录' },
-  { key: 'makers', label: '片商', desc: '片商 · 先最近接收 → 再进本目录' },
+  ...MAKER_SAVE_SOURCES,
 ];
 
 export function emptyTargets(): Record<P115SaveSource, P115TargetFolder> {
-  return {
+  const base = {
     warehouse: { folderCid: '0', folderName: '' },
     movie: { folderCid: '0', folderName: '' },
     tv: { folderCid: '0', folderName: '' },
-    makers: { folderCid: '0', folderName: '' },
+  } as Record<P115SaveSource, P115TargetFolder>;
+  for (const key of P115_MAKER_REGION_SOURCES) {
+    base[key] = { folderCid: '0', folderName: '' };
+  }
+  return base;
+}
+
+function folderFrom(
+  t: P115TargetFolder | undefined,
+  fallbackCid: string,
+  fallbackName: string,
+): P115TargetFolder {
+  if (t?.folderCid != null || t?.folderName != null) {
+    return {
+      folderCid: String(t.folderCid || fallbackCid || '0') || '0',
+      folderName: String(t.folderName || ''),
+    };
+  }
+  return {
+    folderCid: fallbackCid,
+    folderName: fallbackName,
   };
 }
 
@@ -42,23 +102,27 @@ export function normalizeTargets(
   const legacyCid = String(data?.folderCid || '0') || '0';
   const legacyName = String(data?.folderName || '');
   const legacyMedia = data?.targets?.media as P115TargetFolder | undefined;
+  const legacyMakers = data?.targets?.makers as P115TargetFolder | undefined;
+
   for (const row of SAVE_SOURCES) {
     const t = data?.targets?.[row.key];
     if (t?.folderCid != null || t?.folderName != null) {
-      base[row.key] = {
-        folderCid: String(t.folderCid || legacyCid || '0') || '0',
-        folderName: String(t.folderName || ''),
-      };
+      base[row.key] = folderFrom(t, legacyCid, legacyName);
       continue;
     }
     if (
       (row.key === 'movie' || row.key === 'tv') &&
       (legacyMedia?.folderCid != null || legacyMedia?.folderName != null)
     ) {
-      base[row.key] = {
-        folderCid: String(legacyMedia.folderCid || legacyCid || '0') || '0',
-        folderName: String(legacyMedia.folderName || ''),
-      };
+      base[row.key] = folderFrom(legacyMedia, legacyCid, legacyName);
+      continue;
+    }
+    if (
+      P115_MAKER_REGION_SOURCES.includes(row.key as P115MakerRegionSource) &&
+      (legacyMakers?.folderCid != null || legacyMakers?.folderName != null)
+    ) {
+      // 旧单一「片商」目录 → 六区共用，直到用户分别改
+      base[row.key] = folderFrom(legacyMakers, legacyCid, legacyName);
       continue;
     }
     base[row.key] = {

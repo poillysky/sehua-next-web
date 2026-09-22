@@ -348,7 +348,7 @@ def rebuild_empty() -> dict[str, Any]:
 def scrap_library_prefix_counts(*, force: bool = False) -> dict[str, int]:
     """刮削库磁盘上「实际有番号夹」的前缀数（按六区 id）。
 
-    六区统一区/前缀/番号；FC2 为 FC2/FC2 与 FC2/FC2-PPV。结果短缓存。
+    六区统一区/前缀/番号；FC2 现行 ``FC2/FC2/FC2-*``（扫描仍认旧 FC2-PPV）。结果短缓存。
     """
     import time
 

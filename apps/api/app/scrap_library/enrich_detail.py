@@ -2040,22 +2040,37 @@ def _resolve_enrich_folder(
 
     if not code_u:
         return None
-    # FC2：前缀夹是 FC2 / FC2-PPV，不能用 split('-',1)（会把 FC2-PPV-x 拆成 FC2）
+    # FC2：前缀夹一律 FC2；读路径仍兼容旧 FC2-PPV / FC2PPV / 旧番号名
     rid_n = str(rid or region or "").strip().casefold()
     if rid_n in {"fc2", "fc2ppv"} or code_u.startswith("FC2"):
         from app.core.region_meta import fc2_fs_prefix, normalize_fc2_code
 
         code_n = normalize_fc2_code(code_u)
         pref = fc2_fs_prefix(code=code_n)
+        # 旧落盘可能仍是 FC2-PPV-{num}
+        old_ppv = ""
+        m = re.search(r"(\d+)$", code_n)
+        if m:
+            old_ppv = f"FC2-PPV-{m.group(1)}"
         for base in _enrich_scan._region_local_dirs(root, rid or region):
-            for cand in (
+            cands = [
                 base / pref / code_n,
+                base / "FC2" / code_n,
                 base / "FC2-PPV" / code_n,
                 base / "FC2PPV" / code_n,
-                base / "FC2" / code_n,
                 base / code_n,
                 base / code_u,
-            ):
+            ]
+            if old_ppv:
+                cands.extend(
+                    [
+                        base / "FC2" / old_ppv,
+                        base / "FC2-PPV" / old_ppv,
+                        base / "FC2PPV" / old_ppv,
+                        base / old_ppv,
+                    ]
+                )
+            for cand in cands:
                 hit = _ok_dir(cand)
                 if hit:
                     return hit

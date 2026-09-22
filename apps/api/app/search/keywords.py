@@ -68,7 +68,7 @@ def split_chinese_bigrams(text: str) -> list[dict[str, Any]]:
 
 
 def extract_keywords(
-    keyword: str, match_mode: str = "smart"
+    keyword: str, match_mode: str = "exact"
 ) -> list[dict[str, Any]]:
     alias_terms = split_alias_query_terms(keyword)
     if len(alias_terms) > 1:

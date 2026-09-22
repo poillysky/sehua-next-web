@@ -10,6 +10,7 @@ import type {
 } from '@/lib/api';
 import {
   isCensoredRightCropRegion,
+  isFc2FoldersDirectItems,
   isMakerLandscapeRegion,
   makerSourceLabel,
   MAKER_KIND_TABS,
@@ -75,7 +76,9 @@ function viewMetaLabel(
     case 'recommended':
       return loading ? '推荐 · 加载中…' : '推荐 · 各区最新';
     case 'folders':
-      return `${base} · ${total} 个厂牌`;
+      return isFc2FoldersDirectItems(hubTab)
+        ? `${base} · 共 ${total} 项`
+        : `${base} · ${total} 个厂牌`;
     case 'genres':
       return `${base} · ${total} 个标签`;
     case 'tags':
@@ -320,6 +323,20 @@ export function MakersHub({
       );
     }
     if (libraryView === 'folders') {
+      if (isFc2FoldersDirectItems(hubTab)) {
+        return (
+          <>
+            <MakersItemWall
+              items={items}
+              empty={`「${makerSourceLabel(hubTab)}」刮削库暂无番号文件夹`}
+              loading={loading}
+              region={hubTab}
+              onOpenItem={openItem}
+            />
+            {hubPager}
+          </>
+        );
+      }
       if (loading) {
         return (
           <div className="makers-collage-grid makers-collage-grid--skel" aria-hidden>

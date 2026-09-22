@@ -3,7 +3,7 @@ import type { ScrapLibraryEmbedItem } from '@/lib/api';
 export type DrillStack =
   | { kind: 'hub' }
   | { kind: 'search' }
-  /** 文件夹：厂牌 → 前缀 → 番号 */
+  /** 文件夹：厂牌 → 前缀 → 番号；FC2 区 hub 直接番号墙 */
   | { kind: 'folderStudio'; studio: string }
   | { kind: 'folderPrefix'; studio: string; prefix: string }
   | {

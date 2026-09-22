@@ -13,6 +13,7 @@ import {
   type ScrapLibraryEmbedRecommend,
 } from '@/lib/api';
 import type { MakerFacetSortId, MakerLibraryView, MakerSortId } from './makersUi';
+import { isFc2FoldersDirectItems } from './makersUi';
 import {
   ensureScrapFavoritesLoaded,
   listScrapFavorites,
@@ -239,7 +240,10 @@ export function useMakersLoaders(d: MakersLoadersDeps) {
       setFacets([]);
       const offset = (pageNum - 1) * MAKERS_PAGE_SIZE;
       try {
-        if (libraryView === 'movies') {
+        if (
+          libraryView === 'movies' ||
+          (libraryView === 'folders' && isFc2FoldersDirectItems(hubTab))
+        ) {
           const page = await listScrapLibraryEmbedItems({
             region: hubTab,
             sort: itemSort,

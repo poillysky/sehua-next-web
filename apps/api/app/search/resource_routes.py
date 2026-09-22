@@ -172,7 +172,7 @@ def search(
     sortType: str = Query("default"),
     filterTime: str = Query("all"),
     filterSize: str = Query("all"),
-    matchMode: str = Query("smart"),
+    matchMode: str = Query("exact"),
     withTotalCount: str = Query("1"),
     countOnly: str = Query("0"),
     jp: str = Query("0"),

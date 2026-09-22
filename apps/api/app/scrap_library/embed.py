@@ -996,7 +996,7 @@ def _fetch_cover_bytes(
 
 
 def canonical_fc2_scrap_rel(rel: str) -> str:
-    """扁平 FC2/{CODE}、旧夹 FC2PPV → 现行 FC2/FC2|FC2-PPV/{CODE}。
+    """扁平 FC2/{CODE}、旧夹 FC2PPV/FC2-PPV → 现行 ``FC2/FC2/FC2-{num}``。
 
     非 FC2 路径原样返回。写入封面/NFO 前必须走这里，避免根目录再冒出扁平残留。
     """
@@ -1015,18 +1015,13 @@ def canonical_fc2_scrap_rel(rel: str) -> str:
         return text
     nxt = str(parts[1] or "")
     nxt_u = nxt.upper().replace("_", "-")
-    # 旧前缀夹名
-    if nxt_u in {"FC2PPV", "FC2_PPV"}:
-        parts[1] = "FC2-PPV"
+    # 旧前缀夹名 / 已是三层 → 统一 FC2/FC2/{FC2-num}
+    if nxt_u in {"FC2", "FC2-PPV", "FC2PPV", "FC2_PPV"}:
         if len(parts) >= 3:
             parts[2] = normalize_fc2_code(parts[2])
-        return "/".join(parts)
-    # 已是现行三层
-    if nxt_u in {"FC2", "FC2-PPV"}:
-        if len(parts) >= 3:
-            parts[2] = normalize_fc2_code(parts[2])
-            # 前缀夹与番号不一致时按番号纠正
             parts[1] = fc2_fs_prefix(code=parts[2])
+        else:
+            parts[1] = "FC2"
         return "/".join(parts)
     # 扁平 FC2/{CODE}/…
     if nxt_u.startswith("FC2"):

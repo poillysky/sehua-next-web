@@ -17,7 +17,32 @@ import type {
   SortType,
 } from '@/types/resource';
 
-export type P115SaveSource = 'warehouse' | 'movie' | 'tv' | 'makers';
+export type P115MakerRegionSource =
+  | 'japan_censored'
+  | 'japan_uncensored'
+  | 'japan_amateur'
+  | 'fc2'
+  | 'china'
+  | 'western';
+
+/** 115 转存入口：仓库 / 影视 + 片商六区（旧 `makers` 仅作兼容别名） */
+export type P115SaveSource =
+  | 'warehouse'
+  | 'movie'
+  | 'tv'
+  | P115MakerRegionSource;
+
+/** @deprecated 已拆为六区；读配置时仍可映射到各区 */
+export type P115LegacySaveSource = 'makers' | 'media';
+
+export const P115_MAKER_REGION_SOURCES: P115MakerRegionSource[] = [
+  'japan_censored',
+  'japan_uncensored',
+  'japan_amateur',
+  'fc2',
+  'china',
+  'western',
+];
 
 export type P115TargetFolder = {
   folderCid: string;
@@ -29,7 +54,9 @@ export type P115Config = {
   folderCid: string;
   folderName: string;
   label: string;
-  targets?: Partial<Record<P115SaveSource | 'media', P115TargetFolder>>;
+  targets?: Partial<
+    Record<P115SaveSource | P115LegacySaveSource, P115TargetFolder>
+  >;
   /** 字幕根目录（可浏览选择）；未配则片商根下自动用「字幕」 */
   subsFolder?: P115TargetFolder;
   /** 字幕分层：根/日本有码/ABC-123.srt */
@@ -77,7 +104,9 @@ export async function putP115(body: {
   folderCid?: string;
   folderName?: string;
   label?: string;
-  targets?: Partial<Record<P115SaveSource | 'media', P115TargetFolder>>;
+  targets?: Partial<
+    Record<P115SaveSource | P115LegacySaveSource, P115TargetFolder>
+  >;
   subsFolder?: P115TargetFolder;
   subsLayered?: boolean;
   validate?: boolean;

@@ -239,10 +239,26 @@ class P115QrCompleteBody(BaseModel):
     save: bool = True
 
 
-P115_SOURCES = ("warehouse", "movie", "tv", "makers")
+P115_MAKER_REGION_SOURCES = (
+    "japan_censored",
+    "japan_uncensored",
+    "japan_amateur",
+    "fc2",
+    "china",
+    "western",
+)
 
-# 先入「最近接收」、再移到指定目录（影视 movie/tv + 片商 makers；仓库一并）
-P115_INBOX_RELOCATE_SOURCES = frozenset({"warehouse", "movie", "tv", "makers", "media"})
+P115_SOURCES = (
+    "warehouse",
+    "movie",
+    "tv",
+    *P115_MAKER_REGION_SOURCES,
+)
+
+# 先入「最近接收」、再移到指定目录（影视 + 片商六区；仓库一并）
+P115_INBOX_RELOCATE_SOURCES = frozenset(
+    {"warehouse", "movie", "tv", "makers", "media", *P115_MAKER_REGION_SOURCES}
+)
 
 
 def _use_receive_inbox(source: str | None) -> bool:
@@ -270,9 +286,10 @@ def _target_usable(item: Any) -> bool:
 
 
 def _p115_targets(raw: dict[str, Any] | None) -> dict[str, dict[str, str]]:
-    """Per-entry save dirs: warehouse / movie / tv / makers.
+    """Per-entry save dirs: warehouse / movie / tv / 片商六区.
 
     Legacy ``folder_*`` → warehouse. Legacy ``targets.media`` → movie & tv.
+    Legacy ``targets.makers`` → 六区共用（直至分别配置）。
     """
     legacy_cid = str((raw or {}).get("folder_cid") or (raw or {}).get("folderCid") or "0").strip() or "0"
     legacy_name = str((raw or {}).get("folder_name") or (raw or {}).get("folderName") or "").strip()
@@ -281,6 +298,11 @@ def _p115_targets(raw: dict[str, Any] | None) -> dict[str, dict[str, str]]:
     legacy_media = (
         _normalize_target_folder(src.get("media"))
         if isinstance(src, dict) and _target_usable(src.get("media"))
+        else None
+    )
+    legacy_makers = (
+        _normalize_target_folder(src.get("makers"))
+        if isinstance(src, dict) and _target_usable(src.get("makers"))
         else None
     )
     out: dict[str, dict[str, str]] = {}
@@ -292,9 +314,41 @@ def _p115_targets(raw: dict[str, Any] | None) -> dict[str, dict[str, str]]:
             out[key] = warehouse_fallback
         elif key in ("movie", "tv") and legacy_media is not None:
             out[key] = dict(legacy_media)
+        elif key in P115_MAKER_REGION_SOURCES and legacy_makers is not None:
+            out[key] = dict(legacy_makers)
         else:
             out[key] = dict(warehouse_fallback)
     return out
+
+
+def _maker_source_from_region(region: str | None) -> str | None:
+    """region / 中文标签 → 片商六区 source；无法识别则 None。"""
+    from app.core.region_meta import resolve_fs_region
+
+    rid = str(region or "").strip()
+    if not rid:
+        return None
+    mapped = (resolve_fs_region(rid) or rid).strip().lower()
+    if mapped in P115_MAKER_REGION_SOURCES:
+        return mapped
+    label = _region_folder_label(rid)
+    for mid in P115_MAKER_REGION_SOURCES:
+        if label and _region_folder_label(mid) == label:
+            return mid
+    low = rid.casefold()
+    if "fc2" in low:
+        return "fc2"
+    if "素人" in rid or "amateur" in low:
+        return "japan_amateur"
+    if "国产" in rid or low in {"china", "domestic"}:
+        return "china"
+    if "欧美" in rid or low in {"western", "europe"}:
+        return "western"
+    if "有码" in rid:
+        return "japan_censored"
+    if "无码" in rid:
+        return "japan_uncensored"
+    return None
 
 
 def _resolve_p115_folder(
@@ -302,8 +356,12 @@ def _resolve_p115_folder(
     *,
     source: str | None = None,
     folder_cid: str | None = None,
+    region: str | None = None,
 ) -> tuple[str, str]:
-    """Return (cid, name). Explicit folder_cid wins; else targets[source]."""
+    """Return (cid, name). Explicit folder_cid wins; else targets[source].
+
+    片商跳转后若前端 source 丢失为 warehouse，仍可用 region 映射到六区目录。
+    """
     targets = _p115_targets(raw)
     if folder_cid is not None and str(folder_cid).strip() != "":
         cid = str(folder_cid).strip() or "0"
@@ -312,9 +370,18 @@ def _resolve_p115_folder(
                 return cid, t["folderName"]
         return cid, ""
     key = (source or "warehouse").strip().lower()
-    # legacy alias
+    # legacy aliases
     if key == "media":
         key = "movie"
+    if key == "makers":
+        key = "japan_censored"
+    # source 未带分区时，用 region / 中文标签兜底
+    if key == "warehouse" or key not in P115_SOURCES:
+        mapped = _maker_source_from_region(
+            region or _lookup_scrap_region(region=region)
+        )
+        if mapped:
+            key = mapped
     if key not in P115_SOURCES:
         key = "warehouse"
     t = targets[key]
@@ -1327,11 +1394,12 @@ def post_p115_offline(
         if not urls:
             raise HTTPException(status_code=400, detail="没有可转存的磁力/ED2K 链接")
 
-        # 最终目录：影视→movie/tv；片商→配置的指定目录（不按分区再分一层）
+        # 最终目录：影视→movie/tv；片商六区→对应配置目录（source 丢失时用 region 兜底）
         dest_cid, dest_name = _resolve_p115_folder(
             prev,
             source=body.source,
             folder_cid=body.folder_cid,
+            region=body.region,
         )
 
         # 影视 / 片商 / 仓库：先入根目录「最近接收」
@@ -1468,6 +1536,7 @@ def post_p115_share(
             prev,
             source=body.source,
             folder_cid=body.folder_cid,
+            region=body.region,
         )
 
         # 影视 / 片商 / 仓库：先入「最近接收」再转移

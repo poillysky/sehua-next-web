@@ -375,7 +375,7 @@ async def run_sehua_keyword(args: dict[str, Any]) -> dict[str, Any]:
             p=1,
             ps=limit,
             sort_type="default",
-            match_mode="smart",
+            match_mode="exact",
             with_total_count=True,
             region=region,
         )

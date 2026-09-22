@@ -12,7 +12,7 @@ import {
 } from '@/lib/detailResource';
 import { runP115Save } from '@/lib/p115SaveClient';
 import type { P115SaveSource } from '@/lib/api';
-import { readSaveSource } from '@/lib/p115Source';
+import { P115_SOURCE_LABEL, resolveP115SaveSource } from '@/lib/p115Source';
 import { useTabNavigation } from '@/shell';
 
 type ItemPick = Pick<
@@ -27,20 +27,6 @@ type ItemPick = Pick<
   | 'link_kind'
 >;
 
-/**
- * 该按钮只渲染在仓库详情（Resource/BitmagnetDetailBody，均处于仓库 Tab，
- * activeTab 恒为 '/'）。因此"落点目录"由「当前继承来源」决定：
- *  - override（显式传入，极少用）> session 继承的 movie/tv/makers > warehouse。
- * P115SaveButton 不会出现在 /media、/makers Tab，故无需按 tab 映射来源。
- */
-function resolveSaveSource(
-  override?: P115SaveSource,
-): P115SaveSource {
-  if (override) return override;
-  // session 里可能为 movie/tv/makers（影视/片商跳转写入），否则落到仓库目录
-  return readSaveSource('warehouse');
-}
-
 export function P115SaveButton({
   item,
   compact = false,
@@ -50,7 +36,7 @@ export function P115SaveButton({
   item: ItemPick;
   compact?: boolean;
   onToast?: (msg: string) => void;
-  /** 覆盖入口目录；默认读影视跳转上下文或当前主 Tab */
+  /** 覆盖入口目录；默认读影视/片商跳转上下文 */
   source?: P115SaveSource;
 }) {
   const tabCtx = useTabNavigation();
@@ -67,7 +53,6 @@ export function P115SaveButton({
     : offlineUrls.some((u) => isArchiveDownloadLink(u));
   const wantExtract = !isShareOnly && (Boolean(password) || isArchive);
   const kind = normalizeLinkKind(item.link_kind || linkKindOf(urls[0]));
-  const saveSource = resolveSaveSource(source);
 
   if (!urls.length) return null;
 
@@ -75,6 +60,8 @@ export function P115SaveButton({
     if (loading) return;
     setLoading(true);
     try {
+      // 点击时解析，避免渲染时 session 尚未写入 / 已被清掉
+      const saveSource = resolveP115SaveSource(source);
       const result = await runP115Save({
         urls,
         password,
@@ -88,13 +75,17 @@ export function P115SaveButton({
         }
         return;
       }
+      const destHint =
+        saveSource !== 'warehouse'
+          ? ` → ${P115_SOURCE_LABEL[saveSource]}`
+          : '';
       const tip = wantExtract
         ? result.extractScheduled
-          ? '已转存，云解压已安排'
-          : result.message || '已转存'
+          ? `已转存${destHint}，云解压已安排`
+          : result.message || `已转存${destHint}`
         : kind === '115share'
-          ? '115 分享已接收'
-          : '已加入离线下载';
+          ? `115 分享已接收${destHint}`
+          : `已加入离线下载${destHint}`;
       onToast?.(tip);
     } catch (e) {
       onToast?.(e instanceof Error ? e.message : '转存失败');

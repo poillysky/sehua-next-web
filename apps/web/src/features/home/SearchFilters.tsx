@@ -34,7 +34,6 @@ const SORT_LABEL: Record<(typeof SEARCH_PARAMS.sortType)[number], string> = {
   count: "文件数",
 };
 const MATCH_LABEL: Record<(typeof SEARCH_PARAMS.matchMode)[number], string> = {
-  smart: "智能",
   exact: "精确",
   fuzzy: "模糊",
 };

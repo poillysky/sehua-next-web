@@ -22,13 +22,13 @@ export const SEARCH_PARAMS = {
     "gt1gb-lt5gb",
     "gt5gb",
   ] as const,
-  matchMode: ["smart", "exact", "fuzzy"] as const,
+  matchMode: ["exact", "fuzzy"] as const,
 };
 
 export const DEFAULT_SORT_TYPE: SortType = "default";
 export const DEFAULT_FILTER_TIME: FilterTime = "all";
 export const DEFAULT_FILTER_SIZE: FilterSize = "all";
-export const DEFAULT_MATCH_MODE: MatchMode = "smart";
+export const DEFAULT_MATCH_MODE: MatchMode = "exact";
 export const SEARCH_PAGE_SIZE = 10;
 /**
  * 「最新」浏览每页条数（分页渲染，避免一次挂太多卡卡死滚动）。
@@ -54,6 +54,8 @@ export function normalizeSortType(v?: string | null): SortType {
 }
 
 export function normalizeMatchMode(v?: string | null): MatchMode {
+  // 旧「智能」并入精确
+  if (v === "smart") return "exact";
   if (v && (SEARCH_PARAMS.matchMode as readonly string[]).includes(v)) {
     return v as MatchMode;
   }

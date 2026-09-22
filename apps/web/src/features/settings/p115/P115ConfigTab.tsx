@@ -162,7 +162,45 @@ export function P115ConfigTab({ p }: { p: P115PanelState }) {
         <section className="p115-console__block">
           <p className="settings-group-label">按入口保存目录</p>
           <ul className="settings-group">
-            {SAVE_SOURCES.map((src) => {
+            {SAVE_SOURCES.filter(
+              (s) =>
+                s.key === 'warehouse' || s.key === 'movie' || s.key === 'tv',
+            ).map((src) => {
+              const t = targets[src.key];
+              return (
+                <li key={src.key}>
+                  <div className="settings-nav">
+                    <span className="settings-nav__icon settings-nav__icon--orange" aria-hidden>
+                      <FolderOpen size={14} strokeWidth={2.25} />
+                    </span>
+                    <span className="settings-nav__main">
+                      <span className="settings-nav__title">{src.label}</span>
+                      <span className="settings-nav__desc allow-select">
+                        {folderDisplayName(t)} · CID {t.folderCid || '0'}
+                        <span className="p115-target-hint"> · {src.desc}</span>
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      className="settings-inline-action"
+                      disabled={locked}
+                      onClick={() => void browseFolders(src.key, t.folderCid || '0')}
+                    >
+                      浏览
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+          <p className="settings-group-label" style={{ marginTop: 16 }}>
+            片商分区
+          </p>
+          <ul className="settings-group">
+            {SAVE_SOURCES.filter(
+              (s) =>
+                s.key !== 'warehouse' && s.key !== 'movie' && s.key !== 'tv',
+            ).map((src) => {
               const t = targets[src.key];
               return (
                 <li key={src.key}>

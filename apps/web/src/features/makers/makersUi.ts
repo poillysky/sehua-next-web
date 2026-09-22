@@ -3,6 +3,7 @@ import { SEARCH_KEYWORD_LENGTH_MIN } from '@/config/search';
 import type { TabRoute } from '@/shell';
 import { openHomeSearch } from '@/features/media/mediaUi';
 import { writeP115AttachSubs } from '@/lib/p115AttachSubs';
+import { p115SourceFromRegion } from '@/lib/p115Source';
 
 /** 六区顶栏（库 / 分区；原写真并入有码） */
 export const MAKER_KIND_TABS: Array<{
@@ -52,6 +53,13 @@ export function isFc2DirectStudio(studio: string): boolean {
     .toUpperCase()
     .replace(/[\s_-]/g, '');
   return n === 'FC2' || n === 'FC2PPV';
+}
+
+/** FC2 区「文件夹」：不展示厂牌卡，hub 直接番号墙 */
+export function isFc2FoldersDirectItems(
+  hubTab: MakerCatalogSourceId | string | null | undefined,
+): boolean {
+  return String(hubTab || '').trim().toLowerCase() === 'fc2';
 }
 
 /** Emby 库内二级菜单 */
@@ -191,7 +199,7 @@ export function openMakerHomeSearch(
   });
   return openHomeSearch(names, scrollToTab, {
     source: 'sehua',
-    p115Source: 'makers',
+    p115Source: p115SourceFromRegion(region),
   });
 }
 

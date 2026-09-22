@@ -46,9 +46,9 @@ def fold_code(s: str) -> str:
 
 
 def parse_fc2_id(code: str) -> tuple[str, str] | None:
-    """`FC2-PPV-1234567` / `FC2-1234567` → `("1234567", "FC2-PPV-1234567")`。
+    """`FC2-PPV-1234567` / `FC2-1234567` → `("1234567", "FC2-1234567")`。
 
-    fc2 / fd2ppv 两个详情源共用：番号形态一致，展示名统一带 `FC2-PPV-` 前缀。
+    fc2 / fd2ppv 两个详情源共用：番号形态一致，展示/落盘统一 ``FC2-{id}``。
     """
     m = re.search(r"FC2[-_]?PPV[-_]?(\d+)", code, re.I) or re.search(
         r"FC2[-_]?(\d+)", code, re.I
@@ -56,7 +56,7 @@ def parse_fc2_id(code: str) -> tuple[str, str] | None:
     if not m:
         return None
     fid = m.group(1)
-    return fid, f"FC2-PPV-{fid}"
+    return fid, f"FC2-{fid}"
 
 
 def _code_bucket(folded: str) -> tuple[str, int, str] | None:

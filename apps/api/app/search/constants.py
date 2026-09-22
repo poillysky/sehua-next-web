@@ -15,13 +15,13 @@ SEARCH_PARAMS = {
         "gt1gb-lt5gb",
         "gt5gb",
     ),
-    "matchMode": ("smart", "exact", "fuzzy"),
+    "matchMode": ("exact", "fuzzy"),
 }
 
 DEFAULT_SORT_TYPE = "date"
 DEFAULT_FILTER_TIME = "all"
 DEFAULT_FILTER_SIZE = "all"
-DEFAULT_MATCH_MODE = "smart"
+DEFAULT_MATCH_MODE = "exact"
 
 SEARCH_KEYWORD_LENGTH_MIN = 2
 SEARCH_KEYWORD_LENGTH_MAX = 160
@@ -71,6 +71,9 @@ def escape_ilike(value: str) -> str:
 
 def normalize_match_mode(value: str | None) -> str:
     v = (value or "").strip().lower()
+    # 旧「智能」并入精确
+    if v == "smart":
+        return "exact"
     if v in SEARCH_PARAMS["matchMode"]:
         return v
     return DEFAULT_MATCH_MODE

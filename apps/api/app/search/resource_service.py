@@ -645,7 +645,7 @@ def search_resources(
     sort_type: str = "default",
     filter_time: str = "all",
     filter_size: str = "all",
-    match_mode: str = "smart",
+    match_mode: str = "exact",
     with_total_count: bool = True,
     count_only: bool = False,
     prefer_chinese: bool = False,

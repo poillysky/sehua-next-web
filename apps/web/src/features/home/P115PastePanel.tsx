@@ -13,7 +13,7 @@ import { AppMsg } from '@/components/ui/AppMsg';
 import { getP115, type P115Config, type P115SaveSource } from '@/lib/api';
 import { extractPasteLinks, extractPastePassword } from '@/lib/p115Paste';
 import { runP115Save } from '@/lib/p115SaveClient';
-import { readInheritedSaveSource, P115_SOURCE_LABEL } from '@/lib/p115Source';
+import { readInheritedSaveSource, P115_SOURCE_LABEL, P115_SOURCE_ORDER } from '@/lib/p115Source';
 import { isArchiveDownloadLink, linkKindOf } from '@/lib/detailResource';
 import { useTabNavigation } from '@/shell';
 
@@ -23,13 +23,9 @@ type FolderHint = {
   folderName: string;
 };
 
-/** 四个可存目录来源（粘贴面板允许手动选落点，默认继承影视/片商跳转上下文） */
-const PASTE_SOURCES: Array<{ id: P115SaveSource; label: string }> = [
-  { id: 'warehouse', label: '仓库' },
-  { id: 'movie', label: '电影' },
-  { id: 'tv', label: '电视剧' },
-  { id: 'makers', label: '片商' },
-];
+/** 可存目录来源（仓库 / 影视 / 片商六区） */
+const PASTE_SOURCES: Array<{ id: P115SaveSource; label: string }> =
+  P115_SOURCE_ORDER.map((id) => ({ id, label: P115_SOURCE_LABEL[id] }));
 
 /** 从 115 配置里取某来源的目录（warehouse 兼容顶层旧字段） */
 function folderFor(
@@ -62,7 +58,7 @@ export function P115PastePanel({ onBack }: { onBack: () => void }) {
   const [loading, setLoading] = useState(false);
   const [folder, setFolder] = useState<FolderHint | null>(null);
   const [msg, setMsg] = useState('');
-  // 落点来源：默认继承影视(movie/tv)/片商(makers)跳转上下文（惰性初始化，SSR 安全）；
+  // 落点来源：默认继承影视(movie/tv)/片商六区跳转上下文（惰性初始化，SSR 安全）；
   // 否则回退仓库。避免从影视/片商"在资源库搜索"跳转而来时补粘磁力误存仓库。
   const [source, setSource] = useState<P115SaveSource>(
     () => readInheritedSaveSource() ?? 'warehouse',

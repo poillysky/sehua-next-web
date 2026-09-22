@@ -1,12 +1,12 @@
 'use client';
 
-/** 片商详情 → 仓库转存时，附带上传该番号本地字幕 */
+/** 片商详情 → 仓库转存时，附带上传该番号本地字幕，并保留分区供转存选目录 */
 export const P115_ATTACH_SUBS_KEY = 'nextweb:p115-attach-subs';
 
 export type P115AttachSubs = {
   code?: string;
   itemId?: string;
-  /** 片商分区 id 或中文标签；字幕按分区分层时用来建子目录，转存目录不再使用 */
+  /** 片商分区 id 或中文标签；用于字幕分层，并在 session 丢失时兜底转存目录 */
   region?: string;
 };
 

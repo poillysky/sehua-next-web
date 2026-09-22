@@ -533,9 +533,9 @@ def _sample_prefix_disk_posters(
             continue
         if rid == "fc2" or str(name).upper() == "FC2":
             bases.append(region_dir / fc2_fs_prefix(pref))
-            # 兼容旧夹名
-            if fc2_fs_prefix(pref) == "FC2-PPV":
-                bases.append(region_dir / "FC2PPV")
+            # 读兼容旧夹名
+            bases.append(region_dir / "FC2-PPV")
+            bases.append(region_dir / "FC2PPV")
         else:
             bases.append(region_dir / pref)
 

@@ -276,7 +276,7 @@ async def ai_chat_search(
             p=1,
             ps=6,
             sort_type="default",
-            match_mode="smart",
+            match_mode="exact",
             with_total_count=True,
         )
         resources = data.get("resources") or []

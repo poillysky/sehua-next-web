@@ -1,7 +1,13 @@
-import type { MediaCategoryId, MediaItem, MediaSourceId } from '@/lib/api';
+import type {
+  MediaCategoryId,
+  MediaItem,
+  MediaSourceId,
+  P115MakerRegionSource,
+} from '@/lib/api';
+import { P115_MAKER_REGION_SOURCES } from '@/lib/api';
 import { SEARCH_KEYWORD_LENGTH_MIN } from '@/config/search';
 import type { TabRoute } from '@/shell';
-import { writeSaveSource } from '@/lib/p115Source';
+import { clearSaveSource, writeSaveSource } from '@/lib/p115Source';
 
 export const MEDIA_CATEGORY_MARK: Record<MediaCategoryId, string> = {
   movie: '影',
@@ -137,8 +143,8 @@ export function openHomeSearch(
   scrollToTab?: (tab: TabRoute) => void,
   opts?: {
     source?: 'sehua' | 'bitmagnet';
-    /** 115 转存目录：电影 / 电视剧 / 片商 */
-    p115Source?: 'movie' | 'tv' | 'makers';
+    /** 115 转存目录：电影 / 电视剧 / 片商六区 */
+    p115Source?: 'movie' | 'tv' | P115MakerRegionSource;
   },
 ): boolean {
   const list = Array.isArray(names) ? names : [names];
@@ -156,9 +162,13 @@ export function openHomeSearch(
     if (
       opts?.p115Source === 'movie' ||
       opts?.p115Source === 'tv' ||
-      opts?.p115Source === 'makers'
+      (opts?.p115Source &&
+        (P115_MAKER_REGION_SOURCES as string[]).includes(opts.p115Source))
     ) {
       writeSaveSource(opts.p115Source);
+    } else {
+      // 非片商/影视入口：清掉上次片商分区，避免误入六区
+      clearSaveSource();
     }
     window.dispatchEvent(new Event('nextweb:home-search'));
   } catch {

@@ -106,7 +106,7 @@ def _local_nfo_maps_cache_put(region: str, maps: Any) -> None:
 def _region_local_dirs(root: Path, region: str) -> list[Path]:
     """刮削库根下该分区的本地目录（日本有码 / japan_censored …）。
 
-    FC2 区一次扫整区：其下 FC2 / FC2-PPV 前缀夹均进队；落盘路径仍按骨架分夹。
+    FC2 区一次扫整区：其下旧 FC2 / FC2-PPV 前缀夹均进队；新落盘一律 FC2/FC2/FC2-*。
     """
     from app.scrap_library.embed import _region_match_values
 

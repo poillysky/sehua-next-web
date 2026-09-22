@@ -155,7 +155,15 @@ export function P115Overview({ p }: { p: P115PanelState }) {
             </button>
           </div>
         </li>
-        {SAVE_SOURCES.map((src) => {
+      </ul>
+
+      <p className="settings-group-label" style={{ marginTop: 12 }}>
+        转存目录
+      </p>
+      <ul className="settings-group">
+        {SAVE_SOURCES.filter((s) =>
+          s.key === 'warehouse' || s.key === 'movie' || s.key === 'tv',
+        ).map((src) => {
           const t = targets[src.key];
           return (
             <li key={src.key}>
@@ -180,6 +188,46 @@ export function P115Overview({ p }: { p: P115PanelState }) {
             </li>
           );
         })}
+      </ul>
+
+      <p className="settings-group-label" style={{ marginTop: 12 }}>
+        片商分区
+      </p>
+      <ul className="settings-group">
+        {SAVE_SOURCES.filter(
+          (s) =>
+            s.key !== 'warehouse' && s.key !== 'movie' && s.key !== 'tv',
+        ).map((src) => {
+          const t = targets[src.key];
+          return (
+            <li key={src.key}>
+              <div className="settings-nav">
+                <span className="settings-nav__icon settings-nav__icon--orange" aria-hidden>
+                  <FolderOpen size={14} strokeWidth={2.25} />
+                </span>
+                <span className="settings-nav__main">
+                  <span className="settings-nav__title">{src.label}</span>
+                  <span className="settings-nav__desc allow-select">
+                    {folderDisplayName(t)} · CID {t.folderCid || '0'}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  className="settings-inline-action"
+                  onClick={() => setTab('config')}
+                >
+                  更改
+                </button>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+
+      <p className="settings-group-label" style={{ marginTop: 12 }}>
+        字幕
+      </p>
+      <ul className="settings-group">
         <li>
           <div className="settings-nav">
             <span className="settings-nav__icon settings-nav__icon--violet" aria-hidden>
