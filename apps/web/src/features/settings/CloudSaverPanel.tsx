@@ -11,13 +11,18 @@ import { Switch } from '@/components/ui/switch';
 import { AppPush } from '@/components/ui/AppPush';
 import { AppMsg } from '@/components/ui/AppMsg';
 import { cn } from '@/lib/utils';
+import {
+  testResultText,
+  usePanelAction,
+  type StatusReporter,
+} from '@/hooks/usePanelAction';
 
 export function CloudSaverPanel({
   onBack,
   onStatus,
 }: {
   onBack: () => void;
-  onStatus: (text: string, tone: 'ok' | 'warn' | 'mute') => void;
+  onStatus: StatusReporter;
 }) {
   const [enabled, setEnabled] = useState(true);
   const [baseUrl, setBaseUrl] = useState('http://192.168.2.38:8008');
@@ -25,9 +30,8 @@ export function CloudSaverPanel({
   const [password, setPassword] = useState('');
   const [hasPassword, setHasPassword] = useState(false);
   const [timeoutSec, setTimeoutSec] = useState('60');
-  const [msg, setMsg] = useState('');
-  const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
+  const { msg, setMsg, busy, run } = usePanelAction();
 
   function hubStatus(on: boolean, user: string, pwdOk: boolean) {
     if (on && user && pwdOk) return { text: '已登录配置', tone: 'ok' as const };
@@ -61,31 +65,28 @@ export function CloudSaverPanel({
   }, []);
 
   async function onTest() {
-    setBusy(true);
-    setMsg('');
-    try {
-      // 先保存当前表单再测，避免测到旧配置（密码留空则沿用已存）
-      await putCloudSaverSettings({
-        enabled,
-        baseUrl: baseUrl.trim(),
-        username: username.trim(),
-        password: password,
-        timeoutSec: Number(timeoutSec) || 60,
-        note: '',
-      });
-      if (password.trim()) {
-        setHasPassword(true);
-        setPassword('');
-      }
-      const r = await testCloudSaver();
-      setMsg(r.message || (r.ok ? '登录成功' : '登录失败'));
-      onStatus(r.ok ? '已连通' : '连接失败', r.ok ? 'ok' : 'warn');
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : '测试失败');
-      onStatus('连接失败', 'warn');
-    } finally {
-      setBusy(false);
-    }
+    await run(
+      '测试失败',
+      async () => {
+        // 先保存当前表单再测，避免测到旧配置（密码留空则沿用已存）
+        await putCloudSaverSettings({
+          enabled,
+          baseUrl: baseUrl.trim(),
+          username: username.trim(),
+          password: password,
+          timeoutSec: Number(timeoutSec) || 60,
+          note: '',
+        });
+        if (password.trim()) {
+          setHasPassword(true);
+          setPassword('');
+        }
+        const r = await testCloudSaver();
+        setMsg(testResultText(r, '登录成功', '登录失败'));
+        onStatus(r.ok ? '已连通' : '连接失败', r.ok ? 'ok' : 'warn');
+      },
+      () => onStatus('连接失败', 'warn'),
+    );
   }
 
   async function onSave() {
@@ -103,9 +104,7 @@ export function CloudSaverPanel({
       setMsg('请填写密码');
       return;
     }
-    setBusy(true);
-    setMsg('');
-    try {
+    await run('保存失败', async () => {
       const next = await putCloudSaverSettings({
         enabled,
         baseUrl: url,
@@ -127,11 +126,7 @@ export function CloudSaverPanel({
       );
       onStatus(st.text, st.tone);
       setMsg('已保存');
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : '保存失败');
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   return (

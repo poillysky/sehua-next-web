@@ -13,6 +13,11 @@ import { AppPush } from '@/components/ui/AppPush';
 import { AppMsg } from '@/components/ui/AppMsg';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
+import {
+  errorText,
+  usePanelAction,
+  type StatusReporter,
+} from '@/hooks/usePanelAction';
 
 function cloneStrategy(s: ScrapEnrichStrategy): ScrapEnrichStrategy {
   const fill =
@@ -231,12 +236,10 @@ export function EnrichStrategyPanel({
   onSaved,
 }: {
   onBack: () => void;
-  onStatus: (text: string, tone: 'ok' | 'warn' | 'mute') => void;
+  onStatus: StatusReporter;
   onSaved?: (cfg: ScrapEnrichStrategy) => void;
 }) {
   const [cfg, setCfg] = useState<ScrapEnrichStrategy | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState('');
   const [section, setSection] = useState<SectionId | null>(null);
   const [adaptiveWorkersText, setAdaptiveWorkersText] = useState('');
   const [itemWorkersText, setItemWorkersText] = useState('');
@@ -250,6 +253,7 @@ export function EnrichStrategyPanel({
   const [autoSaving, setAutoSaving] = useState(false);
   const persistTimerRef = useRef<number | null>(null);
   const pendingPersistRef = useRef<ScrapEnrichStrategy | null>(null);
+  const { msg, setMsg, busy, run } = usePanelAction();
 
   useEffect(() => {
     if (!rsOpen && !fpOpen) return;
@@ -578,24 +582,20 @@ export function EnrichStrategyPanel({
       perSourceTimeoutSec,
       fieldPriorityHideEmpty: fpHideEmpty,
     };
-    setBusy(true);
-    setMsg('');
-    try {
-      const saved = await putScrapEnrichStrategy(payload);
-      const next = cloneStrategy(saved);
-      setCfg(next);
-      setFpHideEmpty(Boolean(next.fieldPriorityHideEmpty));
-      syncNumDrafts(next);
-      onSaved?.(next);
-      onStatus('刮削策略已保存', 'ok');
-      setMsg('已保存');
-    } catch (e) {
-      const text = e instanceof Error ? e.message : '保存失败';
-      setMsg(text);
-      onStatus(text, 'warn');
-    } finally {
-      setBusy(false);
-    }
+    await run(
+      '保存失败',
+      async () => {
+        const saved = await putScrapEnrichStrategy(payload);
+        const next = cloneStrategy(saved);
+        setCfg(next);
+        setFpHideEmpty(Boolean(next.fieldPriorityHideEmpty));
+        syncNumDrafts(next);
+        onSaved?.(next);
+        onStatus('刮削策略已保存', 'ok');
+        setMsg('已保存');
+      },
+      (e) => onStatus(errorText(e, '保存失败'), 'warn'),
+    );
   }
 
   async function onRecompressPosters(dryRun: boolean) {

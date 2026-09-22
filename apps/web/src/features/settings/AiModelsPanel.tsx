@@ -30,6 +30,11 @@ import { Switch } from '@/components/ui/switch';
 import { AppPush } from '@/components/ui/AppPush';
 import { AppFootnote, AppMsg } from '@/components/ui/AppMsg';
 import { cn } from '@/lib/utils';
+import {
+  testResultText,
+  usePanelAction,
+  type StatusReporter,
+} from '@/hooks/usePanelAction';
 import { ChatPresetsSection } from './ChatPresetsSection';
 
 const LLM_BASE_DEFAULT = 'https://api.openai.com/v1';
@@ -173,7 +178,7 @@ export function AiModelsPanel({
   onStatus,
 }: {
   onBack: () => void;
-  onStatus: (text: string, tone: 'ok' | 'warn' | 'mute') => void;
+  onStatus: StatusReporter;
 }) {
   const [tab, setTab] = useState<AiTab>('llm');
   const [presets, setPresets] = useState<AiPresets | null>(null);
@@ -238,8 +243,8 @@ export function AiModelsPanel({
   const [skillGroups, setSkillGroups] = useState<AiAssistantSkillGroup[]>(DEFAULT_SKILL_GROUPS);
   const [toolMeta, setToolMeta] = useState<AiAssistantToolMeta[]>(DEFAULT_TOOL_META);
 
-  const [msg, setMsg] = useState('');
-  const [busy, setBusy] = useState(false);
+  // onConnect*/onDownload* 的 catch 落到各自的 hint 变量而非 msg，故保留 setBusy 手动管理
+  const { msg, setMsg, busy, setBusy, run } = usePanelAction();
 
   function publish(llm: AiLlmConfig, embed: AiEmbedConfig) {
     const text = hubStatus(llm, embed);
@@ -470,69 +475,45 @@ export function AiModelsPanel({
   }
 
   async function onTestLlm() {
-    setBusy(true);
-    setMsg('');
-    try {
+    await run('测试失败', async () => {
       const r = await testAiLlm(llmBody());
-      setMsg(r.message || (r.ok ? '聊天模型正常' : '失败'));
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : '测试失败');
-    } finally {
-      setBusy(false);
-    }
+      setMsg(testResultText(r, '聊天模型正常', '失败'));
+    });
   }
 
   async function onSaveLlm() {
-    setBusy(true);
-    setMsg('');
-    try {
+    await run('保存失败', async () => {
       const next = await putAiLlm(llmBody());
       applyLlm(next);
       setLlmApiKey('');
       const embed = await getAiEmbed();
       publish(next, embed);
       setMsg('聊天模型已保存');
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : '保存失败');
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   async function onTestEmbed() {
-    setBusy(true);
-    setMsg('');
-    try {
+    await run('测试失败', async () => {
       const r = await testAiEmbed(embedBody());
       const dim = r.dim;
       if (typeof dim === 'number' && dim > 0 && String(dim) !== embedDim) {
         setEmbedDim(String(dim));
         setMsg(`${r.message || '测试成功'} · 维度已改为 ${dim}`);
       } else {
-        setMsg(r.message || (r.ok ? '向量模型正常' : '失败'));
+        setMsg(testResultText(r, '向量模型正常', '失败'));
       }
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : '测试失败');
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   async function onSaveEmbed() {
-    setBusy(true);
-    setMsg('');
-    try {
+    await run('保存失败', async () => {
       const next = await putAiEmbed(embedBody());
       applyEmbed(next);
       setEmbedApiKey('');
       const llm = await getAiLlm();
       publish(llm, next);
       setMsg('向量模型已保存');
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : '保存失败');
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   function setToolEnabled(id: string, on: boolean) {
@@ -563,9 +544,7 @@ export function AiModelsPanel({
   }
 
   async function onSaveXiaohua() {
-    setBusy(true);
-    setMsg('');
-    try {
+    await run('保存失败', async () => {
       const webToolOn = assistantTools.web_search !== false;
       await putAiWebSearch({
         enabled: webEnabled && webToolOn,
@@ -580,11 +559,7 @@ export function AiModelsPanel({
       setWebShowKey(web.provider === 'searxng' ? false : !web.configured || Boolean(web.fromEnv));
       setWebApiKey('');
       setMsg('小花设置已保存');
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : '保存失败');
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   const chatSources = presets?.chatSources || [];

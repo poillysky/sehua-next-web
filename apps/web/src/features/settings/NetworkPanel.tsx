@@ -12,6 +12,11 @@ import { Switch } from '@/components/ui/switch';
 import { AppPush } from '@/components/ui/AppPush';
 import { AppMsg } from '@/components/ui/AppMsg';
 import { cn } from '@/lib/utils';
+import {
+  testResultText,
+  usePanelAction,
+  type StatusReporter,
+} from '@/hooks/usePanelAction';
 
 function toProxyHostPort(raw: string): string {
   const s = raw.trim();
@@ -55,7 +60,7 @@ export function NetworkPanel({
   onStatus,
 }: {
   onBack: () => void;
-  onStatus: (text: string, tone: 'ok' | 'warn' | 'mute') => void;
+  onStatus: StatusReporter;
 }) {
   const [host, setHost] = useState('');
   const [port, setPort] = useState('');
@@ -65,9 +70,8 @@ export function NetworkPanel({
   const [flarePort, setFlarePort] = useState('8191');
   const [flareEnabled, setFlareEnabled] = useState(false);
   const [flareEffective, setFlareEffective] = useState('');
-  const [msg, setMsg] = useState('');
-  const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
+  const { msg, setMsg, busy, withBusy, run } = usePanelAction();
 
   function hubStatus(d: NetworkConfig) {
     const proxyOn = Boolean(d.proxyEnabled) && Boolean(d.proxyUrl);
@@ -128,9 +132,7 @@ export function NetworkPanel({
     flareSolverrEnabled?: boolean;
     flareSolverrUrl?: string;
   }) {
-    setBusy(true);
-    setMsg('');
-    try {
+    return withBusy(async () => {
       const next = await putNetwork({
         proxyUrl: partial.proxyUrl ?? proxyValue(),
         proxyEnabled: partial.proxyEnabled ?? enabled,
@@ -139,9 +141,7 @@ export function NetworkPanel({
       });
       applyPublic(next);
       return next;
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   async function onToggle(next: boolean) {
@@ -149,12 +149,10 @@ export function NetworkPanel({
       setMsg('请先填写主机和端口');
       return;
     }
-    try {
+    await run('保存失败', async () => {
       const saved = await persist({ proxyEnabled: next });
       setMsg(saved.configured ? '已启用代理' : '已关闭代理');
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : '保存失败');
-    }
+    });
   }
 
   async function onToggleFlare(next: boolean) {
@@ -162,45 +160,31 @@ export function NetworkPanel({
       setMsg('请先填写 FlareSolverr 主机和端口');
       return;
     }
-    try {
+    await run('保存失败', async () => {
       const saved = await persist({
         flareSolverrEnabled: next,
         flareSolverrUrl: flareValue(),
       });
       setMsg(saved.flareSolverrConfigured ? '已启用过盾' : '已关闭过盾');
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : '保存失败');
-    }
+    });
   }
 
   async function onTest() {
-    setBusy(true);
-    setMsg('');
-    try {
+    await run('代理测试失败', async () => {
       const r = await testNetwork({ proxyUrl: proxyValue() });
-      setMsg(r.message || (r.ok ? '代理正常' : '代理失败'));
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : '代理测试失败');
-    } finally {
-      setBusy(false);
-    }
+      setMsg(testResultText(r, '代理正常', '代理失败'));
+    });
   }
 
   async function onTestFlare() {
-    setBusy(true);
-    setMsg('');
-    try {
+    await run('FlareSolverr 测试失败', async () => {
       const r = await testFlareSolverr({ flareSolverrUrl: flareValue() });
-      setMsg(r.message || (r.ok ? 'FlareSolverr 正常' : 'FlareSolverr 失败'));
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : 'FlareSolverr 测试失败');
-    } finally {
-      setBusy(false);
-    }
+      setMsg(testResultText(r, 'FlareSolverr 正常', 'FlareSolverr 失败'));
+    });
   }
 
   async function onSave() {
-    try {
+    await run('保存失败', async () => {
       const url = proxyValue();
       const flare = flareValue();
       const saved = await persist({
@@ -215,9 +199,7 @@ export function NetworkPanel({
       if (saved.flareSolverrConfigured) bits.push('过盾已启用');
       else if (flare) bits.push('过盾已保存未启用');
       setMsg(bits.length ? bits.join(' · ') : '已清空');
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : '保存失败');
-    }
+    });
   }
 
   const active = enabled && Boolean(proxyValue());

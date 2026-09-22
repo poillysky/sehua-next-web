@@ -11,20 +11,24 @@ import { Switch } from '@/components/ui/switch';
 import { AppPush } from '@/components/ui/AppPush';
 import { AppMsg } from '@/components/ui/AppMsg';
 import { cn } from '@/lib/utils';
+import {
+  testResultText,
+  usePanelAction,
+  type StatusReporter,
+} from '@/hooks/usePanelAction';
 
 export function PansouPanel({
   onBack,
   onStatus,
 }: {
   onBack: () => void;
-  onStatus: (text: string, tone: 'ok' | 'warn' | 'mute') => void;
+  onStatus: StatusReporter;
 }) {
   const [enabled, setEnabled] = useState(true);
   const [baseUrl, setBaseUrl] = useState('http://192.168.2.38:8188');
   const [timeoutSec, setTimeoutSec] = useState('60');
-  const [msg, setMsg] = useState('');
-  const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
+  const { msg, setMsg, busy, run } = usePanelAction();
 
   function hubStatus(on: boolean, url: string) {
     if (on && url.trim()) return { text: '已启用', tone: 'ok' as const };
@@ -52,18 +56,15 @@ export function PansouPanel({
   }, []);
 
   async function onTest() {
-    setBusy(true);
-    setMsg('');
-    try {
-      const r = await testPansou();
-      setMsg(r.message || (r.ok ? '连接成功' : '连接失败'));
-      onStatus(r.ok ? '已连通' : '连接失败', r.ok ? 'ok' : 'warn');
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : '测试失败');
-      onStatus('连接失败', 'warn');
-    } finally {
-      setBusy(false);
-    }
+    await run(
+      '测试失败',
+      async () => {
+        const r = await testPansou();
+        setMsg(testResultText(r, '连接成功', '连接失败'));
+        onStatus(r.ok ? '已连通' : '连接失败', r.ok ? 'ok' : 'warn');
+      },
+      () => onStatus('连接失败', 'warn'),
+    );
   }
 
   async function onSave() {
@@ -73,9 +74,7 @@ export function PansouPanel({
       return;
     }
     const sec = Number(timeoutSec);
-    setBusy(true);
-    setMsg('');
-    try {
+    await run('保存失败', async () => {
       const next = await putPansouSettings({
         enabled,
         baseUrl: url,
@@ -88,11 +87,7 @@ export function PansouPanel({
       const st = hubStatus(next.enabled !== false, next.baseUrl || '');
       onStatus(st.text, st.tone);
       setMsg('已保存');
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : '保存失败');
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   return (

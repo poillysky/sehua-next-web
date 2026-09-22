@@ -6,21 +6,25 @@ import { getTmdb, putTmdb, testTmdb } from '@/lib/api';
 import { AppPush } from '@/components/ui/AppPush';
 import { AppMsg } from '@/components/ui/AppMsg';
 import { cn } from '@/lib/utils';
+import {
+  testResultText,
+  usePanelAction,
+  type StatusReporter,
+} from '@/hooks/usePanelAction';
 
 export function TmdbPanel({
   onBack,
   onStatus,
 }: {
   onBack: () => void;
-  onStatus: (text: string, tone: 'ok' | 'warn' | 'mute') => void;
+  onStatus: StatusReporter;
 }) {
   const [apiKey, setApiKey] = useState('');
   const [hint, setHint] = useState('');
   const [configured, setConfigured] = useState(false);
   const [fromEnv, setFromEnv] = useState(false);
   const [showEdit, setShowEdit] = useState(true);
-  const [msg, setMsg] = useState('');
-  const [busy, setBusy] = useState(false);
+  const { msg, setMsg, busy, run } = usePanelAction();
 
   function applyStatus(nextConfigured: boolean, nextFromEnv: boolean) {
     setConfigured(nextConfigured);
@@ -47,16 +51,10 @@ export function TmdbPanel({
   }, []);
 
   async function onTest() {
-    setBusy(true);
-    setMsg('');
-    try {
+    await run('测试失败', async () => {
       const r = await testTmdb({ apiKey: apiKey.trim() });
-      setMsg(r.message || (r.ok ? '测试成功' : '失败'));
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : '测试失败');
-    } finally {
-      setBusy(false);
-    }
+      setMsg(testResultText(r, '测试成功', '失败'));
+    });
   }
 
   async function onSave() {
@@ -65,9 +63,7 @@ export function TmdbPanel({
       setMsg('请填写 API Key');
       return;
     }
-    setBusy(true);
-    setMsg('');
-    try {
+    await run('保存失败', async () => {
       const next = await putTmdb({ apiKey: key });
       setHint(next.apiKeyHint || '');
       setApiKey('');
@@ -84,11 +80,7 @@ export function TmdbPanel({
               : '未修改原有 Key'
             : '未配置',
       );
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : '保存失败');
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   const statusLabel =

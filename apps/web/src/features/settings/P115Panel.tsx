@@ -50,6 +50,11 @@ import {
   setP115PanelCache,
   type P115PanelTab,
 } from './p115PanelCache';
+import {
+  testResultText,
+  usePanelAction,
+  type StatusReporter,
+} from '@/hooks/usePanelAction';
 
 type Tab = P115PanelTab;
 type BrowseTarget = P115SaveSource | 'subs';
@@ -204,7 +209,7 @@ export function P115Panel({
   onStatus,
 }: {
   onBack: () => void;
-  onStatus: (text: string, tone: 'ok' | 'warn' | 'mute') => void;
+  onStatus: StatusReporter;
 }) {
   const cached = getP115PanelCache();
   const [tab, setTab] = useState<Tab>(() => cached?.tab ?? 'config');
@@ -240,8 +245,7 @@ export function P115Panel({
   const [browsing, setBrowsing] = useState(false);
   const [folderPath, setFolderPath] = useState<P115FolderItem[]>([]);
   const [folders, setFolders] = useState<P115FolderItem[]>([]);
-  const [msg, setMsg] = useState('');
-  const [busy, setBusy] = useState(false);
+  const { msg, setMsg, busy, run } = usePanelAction();
   const [tasks, setTasks] = useState<P115Task[]>(() => cached?.tasks ?? []);
   const [tasksLoading, setTasksLoading] = useState(false);
   const [tasksError, setTasksError] = useState(() => cached?.tasksError ?? '');
@@ -464,9 +468,7 @@ export function P115Panel({
       setMsg('请填写 Assrt Token（assrt.net 用户面板）');
       return;
     }
-    setBusy(true);
-    setMsg('');
-    try {
+    await run('保存失败', async () => {
       const next = await putSubtitleSettings({ assrtToken: key });
       setAssrtHint(next.assrtTokenHint || '');
       setAssrtToken('');
@@ -480,24 +482,14 @@ export function P115Panel({
             ? 'Assrt Token 已保存'
             : '已保存',
       );
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : '保存失败');
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   async function onTestAssrt() {
-    setBusy(true);
-    setMsg('');
-    try {
+    await run('测试失败', async () => {
       const r = await testAssrtToken({ assrtToken: assrtToken.trim() });
-      setMsg(r.message || (r.ok ? '测试成功' : '失败'));
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : '测试失败');
-    } finally {
-      setBusy(false);
-    }
+      setMsg(testResultText(r, '测试成功', '失败'));
+    });
   }
 
   useEffect(() => {
@@ -624,9 +616,7 @@ export function P115Panel({
   }
 
   async function onTest() {
-    setBusy(true);
-    setMsg('');
-    try {
+    await run('验证失败', async () => {
       const warehouse = targets.warehouse;
       const r = await validateP115({
         cookie: cookie.trim() || undefined,
@@ -649,17 +639,11 @@ export function P115Panel({
           .join(' · '),
       );
       if (r.ok) onStatus('已就绪', 'ok');
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : '验证失败');
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   async function onSave() {
-    setBusy(true);
-    setMsg('');
-    try {
+    await run('保存失败', async () => {
       const next = await putP115({
         cookie: cookie.trim() || undefined,
         targets,
@@ -675,11 +659,7 @@ export function P115Panel({
       );
       setTab('overview');
       void refreshStatus();
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : '保存失败');
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   async function onClear(mode: P115ClearMode) {

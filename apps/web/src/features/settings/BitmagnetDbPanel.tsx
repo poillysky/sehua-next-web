@@ -21,6 +21,10 @@ import { AppFootnote, AppMsg } from '@/components/ui/AppMsg';
 import { cn } from '@/lib/utils';
 import { DbDataBackupSection } from './DbDataBackupSection';
 import { DbEmbedSection } from './DbEmbedSection';
+import {
+  usePanelAction,
+  type StatusReporter,
+} from '@/hooks/usePanelAction';
 
 type DsnParts = {
   host: string;
@@ -75,7 +79,7 @@ export function BitmagnetDbPanel({
   onStatus,
 }: {
   onBack: () => void;
-  onStatus: (text: string, tone: 'ok' | 'warn' | 'mute') => void;
+  onStatus: StatusReporter;
 }) {
   const { isAdmin } = useAuth();
   const savedPassword = useRef('');
@@ -88,9 +92,8 @@ export function BitmagnetDbPanel({
   const [note, setNote] = useState('');
   const [hasPassword, setHasPassword] = useState(false);
   const [connected, setConnected] = useState<boolean | null>(false);
-  const [msg, setMsg] = useState('');
-  const [busy, setBusy] = useState(false);
   const [backupBusy, setBackupBusy] = useState(false);
+  const { msg, setMsg, busy, run } = usePanelAction();
 
   useEffect(() => {
     let cancelled = false;
@@ -150,19 +153,16 @@ export function BitmagnetDbPanel({
       setMsg('请填写主机');
       return;
     }
-    setBusy(true);
-    setMsg('');
-    try {
-      const r = await testBitmagnetDb(resolveDsn());
-      setConnected(r.ok);
-      setMsg(r.ok ? '连接成功' : `失败：${r.message}`);
-      onStatus(r.ok ? '已连接' : '连接失败', r.ok ? 'ok' : 'warn');
-    } catch (e) {
-      setConnected(false);
-      setMsg(e instanceof Error ? e.message : '测试失败');
-    } finally {
-      setBusy(false);
-    }
+    await run(
+      '测试失败',
+      async () => {
+        const r = await testBitmagnetDb(resolveDsn());
+        setConnected(r.ok);
+        setMsg(r.ok ? '连接成功' : `失败：${r.message}`);
+        onStatus(r.ok ? '已连接' : '连接失败', r.ok ? 'ok' : 'warn');
+      },
+      () => setConnected(false),
+    );
   }
 
   async function onSave() {
@@ -174,9 +174,7 @@ export function BitmagnetDbPanel({
       setMsg('请填写主机');
       return;
     }
-    setBusy(true);
-    setMsg('');
-    try {
+    await run('保存失败', async () => {
       const dsn = resolveDsn();
       await putBitmagnetDb({ enabled, dsn, note });
       const savedPwd =
@@ -199,11 +197,7 @@ export function BitmagnetDbPanel({
         setConnected(false);
         onStatus(dsn ? '未启用' : '未配置', 'warn');
       }
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : '保存失败');
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   function fillDefaults() {
