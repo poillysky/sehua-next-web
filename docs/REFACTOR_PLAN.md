@@ -17,7 +17,7 @@
 | Phase 2 后端去重 | 🟡 部分 | **已完成 6 组**：连接池（`pg`↔`bitmagnet_pg`）、`_cache_get`、`_abs`、`_build_fanza_trailer`、`_madou_std`=`std_code`、`_normalize_proxy_url`、p115 的 `_is_clear_ok`=`_is_del_ok`。**剩余孪生家族**见 §八 |
 | Phase 3 `main.py` 瘦身 | ✅ 完成 | **738 → 160 行**；14 个重复端点收敛为参数化 router 工厂 |
 | Phase 4 拆 `enrich.py` / `embed.py` | ⬜ 待做 | 见 §八「未完成项与原因」 |
-| Phase 5 前端 | 🟡 部分 | **5A ✅**：`lib/api.ts` 4,805 行 → `lib/api/` 19 个域模块（最大 727 行）；5B/5C 待做 |
+| Phase 5 前端 | 🟡 大部分 | **5A ✅**：`lib/api.ts` 4,805 行 → `lib/api/` 19 个域模块（最大 728 行）；**5B ✅**：`usePanelAction` 消掉 onSave×8/onTest×7（+AiModels 5 处），PostgresDbPanel 合并 DB 孪生面板（净删约 330 行）；**5C ✅**：EnrichStrategyPanel 2,154→162+8 分片（token 级等价证明）。**待做**：MakersManagePanel(3,736)/EnrichLivePanel(3,236) 同法拆分 |
 | Phase 6 性能专项 | ⬜ 待做 | 需先测量再动手（沿用 `_diag_*`） |
 
 ### ⚠️ 基线不是全绿（改动前就如此，非本次引入）
@@ -384,8 +384,11 @@ src/
 | `_normalize_base`×2 | `search/pansou_client.py` |
 | `scrap_library/enrich.py::_cache_get` | 2 行转发壳（**有意保留**：需绑定各自模块的缓存 dict） |
 
-**3. 前端 5B/5C —— 本轮未做**：8 个面板的 `onSave`×8 / `onTest`×7 / `hubStatus`×4 抽 hook；
-3 个超大 Panel（3,736 / 3,236 / 2,154 行）按「容器管数据 / 组件管渲染」拆分。
+**3. 前端 5B/5C —— ✅ 已完成（2026-09-22 第二轮）**：
+- `hooks/usePanelAction.ts`：统一 msg/busy 生命周期 + `errorText`/`testResultText`，迁移 9 个面板（消 onSave×8 / onTest×7 / AiModels 同类 5 处）；catch 副作用经 `onError` 回调原样保留。
+- `PostgresDbPanel.tsx` 基座：ResourceDb/BitmagnetDb 孪生合并，差异收敛进 `PostgresDbSpec`，净删约 330 行。
+- `EnrichStrategyPanel` 拆分：容器 162 + `useEnrichStrategyForm`(579) + 6 分片 + `shared.tsx`；等价性用 TS AST 切片生成器保证（分片体/hook 语句块/顶层声明/容器 JSX 与 git HEAD 逐 token 一致，13/13 PASS + 反证）。
+- **待做**：MakersManagePanel(3,736)/EnrichLivePanel(3,236) 同法拆分（生成器 `_gap_reports/_es_split_gen.mjs` 可改造复用）。
 
 **4. Phase 6 性能专项 —— 未做**：需先跑 `_diag_*` 取基线，不凭感觉优化。
 
