@@ -9,6 +9,7 @@ from urllib.parse import parse_qs, urlencode
 import httpx
 
 from app.p115.client import (
+    _read_json,
     encode_form,
     extract_uid,
     form_headers,
@@ -21,14 +22,6 @@ SHARE_URL_RE = re.compile(
     r"(?:https?://)?(?:www\.)?(115cdn\.com|115\.com)/s/([A-Za-z0-9]+)(?:\?([^\s#]*))?",
     re.I,
 )
-
-
-def _read_json(res: httpx.Response) -> Any:
-    try:
-        return res.json()
-    except Exception:
-        text = (res.text or "")[:240]
-        return {"state": False, "error": text or f"HTTP {res.status_code}"}
 
 
 def is_115_share_link(link: str | None) -> bool:

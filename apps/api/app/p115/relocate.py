@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import logging
-import secrets
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
@@ -14,6 +13,16 @@ import httpx
 import app.p115.client as p115_client
 import app.p115.extract as p115_extract
 from app.p115.client import normalize_cookie
+from app.p115.polling import (
+    POLL_INTERVAL_S,
+    is_task_done,
+    is_task_failed,
+    match_tasks_by_hashes,
+    progress_note,
+    submit_deferred,
+    task_phases,
+    timeout_message,
+)
 
 log = logging.getLogger("p115-relocate")
 
@@ -23,7 +32,6 @@ _relocate_pool = ThreadPoolExecutor(
 )
 
 # 离线完成可能较慢，比纯解压轮询更久
-POLL_INTERVAL_S = 3.0
 POLL_MAX_S = 90.0
 
 
@@ -37,7 +45,7 @@ def _file_ids_from_tasks(
     for t in tasks:
         if not isinstance(t, dict):
             continue
-        if not p115_extract._is_task_done(t):
+        if not is_task_done(t):
             continue
         hash_ = str(t.get("info_hash") or t.get("infoHash") or "").lower()
         if want and hash_ and hash_ not in want:
@@ -72,54 +80,24 @@ def _wait_offline_file_ids(job: dict[str, Any]) -> dict[str, Any]:
                 continue
 
             if hashes:
-                matched = [
-                    t
-                    for t in tasks
-                    if isinstance(t, dict)
-                    and str(t.get("info_hash") or t.get("infoHash") or "").lower()
-                    in hashes
-                ]
+                matched = match_tasks_by_hashes(tasks, hashes)
                 if matched:
-                    if all(p115_extract._is_task_failed(t) for t in matched):
+                    phases = task_phases(matched)
+                    if phases["all_failed"]:
                         return {"ok": False, "message": "离线任务全部失败", "fileIds": []}
-                    all_terminal = all(
-                        p115_extract._is_task_done(t)
-                        or p115_extract._is_task_failed(t)
-                        for t in matched
-                    )
-                    any_done = any(p115_extract._is_task_done(t) for t in matched)
-                    if any_done and all_terminal:
+                    if phases["any_done"] and phases["all_terminal"]:
                         ids = _file_ids_from_tasks(matched, hashes)
                         if ids:
                             return {"ok": True, "fileIds": ids, "message": "转存完成"}
                         last_note = "任务完成但未拿到 file_id，继续等待…"
                     else:
-                        downloading = next(
-                            (
-                                t
-                                for t in matched
-                                if not p115_extract._is_task_done(t)
-                                and not p115_extract._is_task_failed(t)
-                            ),
-                            None,
-                        )
-                        pct = 0.0
-                        if isinstance(downloading, dict):
-                            try:
-                                pct = float(
-                                    downloading.get("percentDone")
-                                    or downloading.get("percent_done")
-                                    or 0
-                                )
-                            except (TypeError, ValueError):
-                                pct = 0.0
-                        last_note = f"转存中 {int(pct)}%" if pct else "转存中 …"
+                        last_note = progress_note(phases["pct"])
 
             time.sleep(POLL_INTERVAL_S)
 
     return {
         "ok": False,
-        "message": f"等待转存超时（{int(POLL_MAX_S)} 秒）：{last_note}",
+        "message": timeout_message(POLL_MAX_S, last_note),
         "fileIds": [],
     }
 
@@ -271,21 +249,9 @@ def relocate_share_new_items(
 
 
 def schedule_deferred_relocate(job: dict[str, Any]) -> dict[str, str]:
-    job_id = f"{int(time.time() * 1000)}_{secrets.token_hex(3)}"
-
-    def runner() -> None:
-        try:
-            result = run_poll_then_relocate(job)
-            log.info(
-                "%s %s %s",
-                job_id,
-                "ok" if result.get("ok") else "fail",
-                result.get("message"),
-            )
-        except Exception:
-            log.exception("%s fail", job_id)
-
-    _relocate_pool.submit(runner)
+    job_id = submit_deferred(
+        _relocate_pool, log=log, job=job, runner=run_poll_then_relocate
+    )
     log.info(
         "scheduled poll-then-relocate %s hashes=%s inbox=%s dest=%s",
         job_id,

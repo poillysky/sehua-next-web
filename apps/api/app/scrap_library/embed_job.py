@@ -14,21 +14,8 @@ import argparse
 import sys
 
 import app.scrap_library.embed as svc
-
-
-def _configure_stdio() -> None:
-    for stream in (sys.stdout, sys.stderr):
-        try:
-            stream.reconfigure(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
-
-
-def _safe_print(msg: str) -> None:
-    try:
-        print(msg)
-    except UnicodeEncodeError:
-        sys.stdout.buffer.write((msg + "\n").encode("utf-8", errors="replace"))
+from app.core.cli_io import configure_stdio as _configure_stdio
+from app.core.cli_io import safe_print as _safe_print
 
 
 def main(argv: list[str] | None = None) -> None:

@@ -46,13 +46,6 @@ def _key(source: str, code: str) -> str:
     return f"{str(source or '').strip().lower()}:{str(code or '').strip().upper()}"
 
 
-def _quarantine_damaged(path: Path) -> None:
-    try:
-        path.replace(path.with_name(f"{path.stem}.corrupt-{int(time.time())}.json"))
-    except OSError:
-        pass
-
-
 def _load_disk() -> None:
     global _loaded
     _loaded = True

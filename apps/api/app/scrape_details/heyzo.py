@@ -3,6 +3,8 @@
 
 番号：`HEYZO-2034` / `heyzo 2034` → moviepages/`2034`。
 封面优先 `thumbnail.jpg` / `player_thumbnail.jpg`（横图，不裁）。
+
+抓取与「未找到」判定见 `common.fetch_official_html`。
 """
 
 from __future__ import annotations
@@ -13,10 +15,12 @@ from typing import Any
 from .common import (
     abs_url,
     clean_title,
-    fetch_html,
+    fetch_official_html,
     is_junk_cover_url,
     is_junk_title,
     make_detail,
+    official_base,
+    official_code,
     pick_og_image,
     pick_og_title,
     soup,
@@ -36,11 +40,6 @@ def parse_heyzo_movie_key(code: str) -> str | None:
     if not m:
         return None
     return str(int(m.group(1)))  # 去前导零，官网路径无补零
-
-
-def heyzo_detail_url(base: str, key: str) -> str:
-    b = str(base or DEFAULT_BASE).rstrip("/")
-    return f"{b}/moviepages/{key}/index.html"
 
 
 def _movie_info_map(html: str) -> dict[str, str]:
@@ -121,25 +120,16 @@ def scrape_detail(
     if not key:
         raise RuntimeError("番号格式无效")
 
-    base = (base_url or DEFAULT_BASE).rstrip("/") or DEFAULT_BASE
     # 目录若误配其它站，仍打官网
-    if "heyzo.com" not in base.lower():
-        base = DEFAULT_BASE
-    detail_url = heyzo_detail_url(base, key)
-
-    try:
-        html = fetch_html(
-            detail_url, referer=f"{base}/", cookie=cookie or None, source_id=_SRC
-        )
-    except Exception as e:
-        raise RuntimeError(f"请求失败: {e}") from e
-
-    if not html or len(html) < 4000:
-        raise RuntimeError("未找到")
-    if re.search(r"<title[^>]*>\s*404\b", html, re.I):
-        raise RuntimeError("未找到")
-    if f"/moviepages/{key}/" not in html and f"/contents/" not in html:
-        raise RuntimeError("未找到")
+    base = official_base(base_url, DEFAULT_BASE, require_domains=("heyzo.com",))
+    detail_url = f"{base}/moviepages/{key}/index.html"
+    html = fetch_official_html(
+        detail_url,
+        base=base,
+        source_id=_SRC,
+        cookie=cookie or None,
+        must_contain=(f"/moviepages/{key}/", "/contents/"),
+    )
 
     info = _movie_info_map(html)
     h1 = soup(html).select_one("h1")
@@ -178,9 +168,7 @@ def scrape_detail(
         raise RuntimeError("未找到")
 
     year = premiered[:4] if premiered and re.match(r"^\d{4}", premiered) else None
-    code_u = str(code or "").strip().upper() or f"HEYZO-{key}"
-    if not code_u.startswith("HEYZO"):
-        code_u = f"HEYZO-{key}"
+    code_u = official_code(code, prefix="HEYZO", fallback=f"HEYZO-{key}")
 
     extra: dict[str, Any] = {
         "series": series or None,

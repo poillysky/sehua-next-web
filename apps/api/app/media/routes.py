@@ -16,6 +16,7 @@ import app.core.settings_store as settings_store
 import app.media.bangumi_anilist as anime_src
 from app.core.ttl_cache import cache_get as _cache_get_ttl
 from app.core.ttl_cache import enforce_max, prune_by_expiry
+from app.core.year_utils import year_prefix as _year_from
 
 log = logging.getLogger(__name__)
 
@@ -89,13 +90,6 @@ def _cache_set(key: str, payload: Any, ttl: float = _CACHE_TTL_S) -> None:
     prune_by_expiry(_cache)
     _cache[key] = (time.time() + ttl, payload)
     enforce_max(_cache, _CACHE_MAX)
-
-
-def _year_from(date_s: str | None) -> str | None:
-    s = str(date_s or "").strip()
-    if len(s) >= 4 and s[:4].isdigit():
-        return s[:4]
-    return None
 
 
 def _sort_media_items_by_year(items: list[dict[str, Any]]) -> list[dict[str, Any]]:

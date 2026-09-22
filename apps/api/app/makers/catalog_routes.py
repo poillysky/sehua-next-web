@@ -19,6 +19,7 @@ import app.core.site_mirror as site_mirror
 from app.core.outbound_http import fetch_page, looks_blocked_html
 from app.core.ttl_cache import cache_get as _cache_get_ttl
 from app.core.ttl_cache import enforce_max, prune_by_expiry
+from app.core.year_utils import year_search as _year_from
 from app.makers.urls import join_url as _abs
 
 log = logging.getLogger(__name__)
@@ -312,12 +313,6 @@ def _fetch_html(url: str, *, referer: str | None = None, fast: bool = False) -> 
 
 # _abs 已由文件顶部的 `from app.makers.urls import join_url as _abs` 直接绑定
 # （原与 makers/providers_extra.py 各写一份逐字节相同的实现，已收敛）
-
-
-def _year_from(s: str | None) -> str | None:
-    t = str(s or "").strip()
-    m = re.search(r"(20\d{2}|19\d{2})", t)
-    return m.group(1) if m else None
 
 
 # —— JavBus ——

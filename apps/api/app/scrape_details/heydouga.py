@@ -3,6 +3,8 @@
 
 番号：`HEYDOUGA-4030-001` / `heydouga_4030_001`
 → moviepages/`{mc}/{fn}`；封面 `contents/{mc}/{fn}/player_thumb.webp`（横图）。
+
+抓取与「未找到」判定见 `common.fetch_official_html`。
 """
 
 from __future__ import annotations
@@ -13,10 +15,12 @@ from typing import Any
 
 from .common import (
     clean_title,
-    fetch_html,
+    fetch_official_html,
     is_junk_cover_url,
     is_junk_title,
     make_detail,
+    official_base,
+    official_code,
     pick_og_image,
     pick_og_title,
     soup,
@@ -44,11 +48,6 @@ def parse_heydouga_movie_key(code: str) -> tuple[str, str] | None:
     fn_raw = m.group(2)
     fn = fn_raw if len(fn_raw) >= 3 else fn_raw.zfill(3)
     return mc, fn
-
-
-def heydouga_detail_url(base: str, mc: str, fn: str) -> str:
-    b = str(base or DEFAULT_BASE).rstrip("/")
-    return f"{b}/moviepages/{mc}/{fn}/index.html"
 
 
 def _label_value(doc: Any, label: str) -> str:
@@ -118,24 +117,15 @@ def scrape_detail(
         raise RuntimeError("番号格式无效")
     mc, fn = parsed
 
-    base = (base_url or DEFAULT_BASE).rstrip("/") or DEFAULT_BASE
-    if "heydouga.com" not in base.lower():
-        base = DEFAULT_BASE
-    detail_url = heydouga_detail_url(base, mc, fn)
-
-    try:
-        html = fetch_html(
-            detail_url, referer=f"{base}/", cookie=cookie or None, source_id=_SRC
-        )
-    except Exception as e:
-        raise RuntimeError(f"请求失败: {e}") from e
-
-    if not html or len(html) < 4000:
-        raise RuntimeError("未找到")
-    if re.search(r"<title[^>]*>\s*404\b", html, re.I):
-        raise RuntimeError("未找到")
-    if f"/moviepages/{mc}/{fn}/" not in html and f"/contents/{mc}/{fn}/" not in html:
-        raise RuntimeError("未找到")
+    base = official_base(base_url, DEFAULT_BASE, require_domains=("heydouga.com",))
+    detail_url = f"{base}/moviepages/{mc}/{fn}/index.html"
+    html = fetch_official_html(
+        detail_url,
+        base=base,
+        source_id=_SRC,
+        cookie=cookie or None,
+        must_contain=(f"/moviepages/{mc}/{fn}/", f"/contents/{mc}/{fn}/"),
+    )
 
     doc = soup(html)
     actors = _parse_actors(doc)
@@ -174,9 +164,12 @@ def scrape_detail(
         raise RuntimeError("未找到")
 
     year = premiered[:4] if premiered else None
-    code_u = str(code or "").strip().upper().replace("_", "-")
-    if not code_u.startswith("HEYDOUGA"):
-        code_u = f"HEYDOUGA-{mc}-{fn}"
+    code_u = official_code(
+        code,
+        prefix="HEYDOUGA",
+        fallback=f"HEYDOUGA-{mc}-{fn}",
+        underscore_to_dash=True,
+    )
 
     extra: dict[str, Any] = {
         "website": detail_url,

@@ -11,6 +11,7 @@ from bs4 import BeautifulSoup
 
 import app.makers.settings as makers_settings
 import app.core.site_mirror as site_mirror
+from app.core.year_utils import year_search as _year_from
 from app.makers.urls import join_url as _abs
 
 log = logging.getLogger(__name__)
@@ -25,11 +26,6 @@ def _origin(raw: str) -> str:
 
 # _abs 已由文件顶部的 `from app.makers.urls import join_url as _abs` 直接绑定
 # （原与 makers/catalog_routes.py 各写一份逐字节相同的实现，已收敛）
-
-
-def _year_from(s: str | None) -> str | None:
-    m = re.search(r"(20\d{2}|19\d{2})", str(s or ""))
-    return m.group(1) if m else None
 
 
 def _item(

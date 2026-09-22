@@ -10,6 +10,8 @@ from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
+from app.core.year_utils import year_search as year_from
+
 DetailDict = dict[str, Any]
 
 # 线程本地「同一份 html 只解析一次」缓存。
@@ -41,6 +43,20 @@ def code_key(s: str) -> str:
 def fold_code(s: str) -> str:
     """对齐 MDCX/Amane：去掉 - _ . 空白后大写，供 URL/番号精确匹配。"""
     return re.sub(r"[-_.\s]", "", str(s or "")).upper()
+
+
+def parse_fc2_id(code: str) -> tuple[str, str] | None:
+    """`FC2-PPV-1234567` / `FC2-1234567` → `("1234567", "FC2-PPV-1234567")`。
+
+    fc2 / fd2ppv 两个详情源共用：番号形态一致，展示名统一带 `FC2-PPV-` 前缀。
+    """
+    m = re.search(r"FC2[-_]?PPV[-_]?(\d+)", code, re.I) or re.search(
+        r"FC2[-_]?(\d+)", code, re.I
+    )
+    if not m:
+        return None
+    fid = m.group(1)
+    return fid, f"FC2-PPV-{fid}"
 
 
 def _code_bucket(folded: str) -> tuple[str, int, str] | None:
@@ -260,11 +276,6 @@ def pick_og_title(html: str) -> str:
         re.I,
     )
     return strip_tags(m.group(1)) if m else ""
-
-
-def year_from(s: str | None) -> str | None:
-    m = re.search(r"(20\d{2}|19\d{2})", str(s or ""))
-    return m.group(1) if m else None
 
 
 def soup(html: str) -> BeautifulSoup:
@@ -651,3 +662,227 @@ def origin_of(base: str) -> str:
     except Exception:
         pass
     return str(base or "").rstrip("/")
+
+
+# ---------------------------------------------------------------------------
+# 无码官网详情族 —— 共享契约
+# ---------------------------------------------------------------------------
+# 这一族曾经由「逐字复制的 scrape_detail」组成，两个子群：
+#   · JSON 接口群：tenmusume(10musume) / onespondo(1pondo) / pacopacomama
+#     —— 三站同走 `dyn/phpauto/movie_details`，字段完全一致。
+#   · 官网 HTML 群：heydouga / heyzo / kin8 / nyoshin / tokyohot
+#     —— 各自选择器不同，但「抓取 + 未找到判定」完全一致。
+#
+# 「目录 base 误配就回落官网」「空结果判未找到」「番号前缀归一」这些契约只要有
+# 一处被单独修改就会静默漂移（一个源判未找到、别的源不判），因此在这里收敛成
+# 唯一实现；各源只声明自己的差异。
+
+_JSON_API_PATH = "/dyn/phpauto/movie_details/movie_id/{key}.json"
+
+
+def as_str_list(val: Any) -> list[str]:
+    """JSON 字段 → 去空白字符串列表（标量包成单元素表，空值给空表）。"""
+    if isinstance(val, list):
+        return [str(x).strip() for x in val if str(x or "").strip()]
+    s = str(val or "").strip()
+    return [s] if s else []
+
+
+def official_base(
+    base_url: str,
+    default_base: str,
+    *,
+    require_domains: tuple[str, ...] = (),
+) -> str:
+    """目录里配的 base 若指向别的站，回落官网。
+
+    `require_domains` 为空表示不做守卫（10musume）；否则任一词命中即认可
+    （tokyohot 需要 `tokyo-hot` / `tokyohot` 两个写法）。
+    """
+    base = (base_url or default_base).rstrip("/") or default_base
+    if require_domains and not any(d in base.lower() for d in require_domains):
+        return default_base
+    return base
+
+
+def official_code(
+    code: str,
+    *,
+    prefix: str,
+    fallback: str,
+    underscore_to_dash: bool = False,
+) -> str:
+    """番号归一：调用方番号带不上本站前缀时用 `fallback` 兜底。
+
+    `code` 一律先 upper —— 原实现里 `re.match(r"^X", s, re.I)` 与
+    `s.startswith("X")` 在大写串上等价，故这里只保留 `startswith`。
+    """
+    s = str(code or "").strip().upper()
+    if underscore_to_dash:
+        s = s.replace("_", "-")
+    return s if s and s.startswith(prefix.upper()) else fallback
+
+
+def fetch_official_html(
+    url: str,
+    *,
+    base: str,
+    source_id: str,
+    cookie: str | None = None,
+    min_len: int = 4000,
+    must_contain: tuple[str, ...] = (),
+    check_404_title: bool = True,
+    age_gate: tuple[str, str] | None = None,
+) -> str:
+    """官网详情页统一抓取 + 统一的「未找到」判定（顺序与原实现逐字一致）。
+
+    ① 抓取异常 → ``请求失败: …``
+    ② 空 / 短于 `min_len` → 未找到
+    ③ `check_404_title` 且命中 ``<title>404`` → 未找到
+    ④ `age_gate=(门词, 页面标记)`：门词出现在前 4000 字符、且页面不含该标记
+       → 未找到（tokyohot 的年龄确认页）
+    ⑤ `must_contain` 非空且一个标记都没出现 → 未找到
+    """
+    try:
+        html = fetch_html(url, referer=f"{base}/", cookie=cookie, source_id=source_id)
+    except Exception as e:
+        raise RuntimeError(f"请求失败: {e}") from e
+    if not html or len(html) < min_len:
+        raise RuntimeError("未找到")
+    if check_404_title and re.search(r"<title[^>]*>\s*404\b", html, re.I):
+        raise RuntimeError("未找到")
+    if age_gate and age_gate[0] in html[:4000] and age_gate[1] not in html:
+        raise RuntimeError("未找到")
+    if must_contain and not any(m in html for m in must_contain):
+        raise RuntimeError("未找到")
+    return html
+
+
+def scrape_official_json_detail(
+    code: str,
+    *,
+    source: str,
+    movie_key: str,
+    default_base: str,
+    studio: str,
+    detail_path: str,
+    cover_path: str,
+    code_prefix: str,
+    base_url: str = "",
+    cookie: str = "",
+    require_domains: tuple[str, ...] = (),
+    year_from_premiered: bool = False,
+    with_title_en: bool = False,
+    with_rating: bool = False,
+) -> DetailDict:
+    """10musume / 1pondo / pacopacomama 共用的官网 JSON 详情实现。
+
+    三站 `dyn/phpauto/movie_details` 字段一致，差异只有：域名守卫词、
+    详情页 / 封面兜底路径模板（含 ``{key}``）、番号前缀，以及三个开关：
+
+    - `year_from_premiered`：`Year` 缺失时回落 `Release` 前 4 位（1pondo / paco）
+    - `with_title_en`：extra 带 `titleEn`（10musume）
+    - `with_rating`：解析 `AvgRating` 写评分（10musume）
+    """
+    base = official_base(base_url, default_base, require_domains=require_domains)
+    api_url = f"{base}{_JSON_API_PATH.format(key=movie_key)}"
+    detail_url = f"{base}{detail_path.format(key=movie_key)}"
+
+    try:
+        data = fetch_json(
+            api_url, cookie=cookie or None, source_id=source, referer=f"{base}/"
+        )
+    except Exception as e:
+        raise RuntimeError(f"请求失败: {e}") from e
+    if not isinstance(data, dict) or not data:
+        raise RuntimeError("未找到")
+
+    movie_id = str(data.get("MovieID") or "").strip().replace("-", "_")
+    if movie_id and movie_id != movie_key:
+        raise RuntimeError("未找到")
+
+    title = str(data.get("Title") or data.get("TitleEn") or "").strip()
+    if is_junk_title(title):
+        title = ""
+    actors = as_str_list(data.get("ActressesJa")) or as_str_list(data.get("Actor"))
+    if not actors:
+        actors = as_str_list(data.get("ActressesEn"))
+    tags = as_str_list(data.get("UCNAME")) or as_str_list(data.get("UCNAMEEn"))
+    overview = str(data.get("Desc") or data.get("DescEn") or "").strip()
+    premiered = str(data.get("Release") or "").strip()[:10] or None
+    year = str(data.get("Year") or "").strip() or None
+    if not year and year_from_premiered and premiered:
+        year = premiered[:4]
+    series = str(data.get("Series") or data.get("SeriesEn") or "").strip()
+
+    runtime: int | None = None
+    try:
+        sec = float(data.get("Duration") or 0)
+        if sec > 0:
+            runtime = max(1, round(sec / 60))
+    except (TypeError, ValueError):
+        runtime = None
+
+    cover = (
+        str(
+            data.get("ThumbHigh")
+            or data.get("ThumbUltra")
+            or data.get("ThumbMed")
+            or ""
+        ).strip()
+        or None
+    )
+    if cover and is_junk_cover_url(cover):
+        cover = None
+    if not cover:
+        cover = f"{base}{cover_path.format(key=movie_key)}"
+
+    gallery = as_str_list(data.get("Gallery"))
+    extras = [u for u in gallery if u.startswith(("http://", "https://"))][:30]
+    if not title and not cover and not actors:
+        raise RuntimeError("未找到")
+
+    code_u = official_code(
+        code,
+        prefix=code_prefix,
+        fallback=f"{code_prefix}-{movie_key.replace('_', '-')}",
+    )
+
+    extra: dict[str, Any] = {
+        "series": series or None,
+        "website": detail_url,
+        "mosaic": "无码",
+        "runtime": runtime,
+        "extrafanartUrls": extras or None,
+        "originalPlot": overview or None,
+    }
+    if with_title_en:
+        extra["titleEn"] = str(data.get("TitleEn") or "").strip() or None
+    if with_rating:
+        try:
+            rating = float(data.get("AvgRating") or 0)
+            if 0 < rating <= 5:
+                extra.update(
+                    {
+                        "ratingValue": rating,
+                        "ratingMax": 5,
+                        "ratingSource": source,
+                        "score": rating,
+                    }
+                )
+        except (TypeError, ValueError):
+            pass
+
+    return make_detail(
+        source=source,
+        code=code_u,
+        title=title or None,
+        poster=cover,
+        studio=studio,
+        actors=actors,
+        tags=tags,
+        overview=overview or None,
+        date=premiered,
+        year=year,
+        extra=extra,
+    )

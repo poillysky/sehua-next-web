@@ -3,6 +3,8 @@
 
 番号：`KIN8-3500` / `kin8tengoku-3500` → moviepages/`3500`。
 封面：`/{id}/pht/1.jpg`（横图）。
+
+抓取与「未找到」判定见 `common.fetch_official_html`。
 """
 
 from __future__ import annotations
@@ -13,10 +15,12 @@ from typing import Any
 from .common import (
     abs_url,
     clean_title,
-    fetch_html,
+    fetch_official_html,
     is_junk_cover_url,
     is_junk_title,
     make_detail,
+    official_base,
+    official_code,
     pick_og_image,
     pick_og_title,
     soup,
@@ -36,11 +40,6 @@ def parse_kin8_movie_key(code: str) -> str | None:
     if not m:
         return None
     return str(int(m.group(1)))
-
-
-def kin8_detail_url(base: str, key: str) -> str:
-    b = str(base or DEFAULT_BASE).rstrip("/")
-    return f"{b}/moviepages/{key}/index.html"
 
 
 def parse_kin8_actors(html: str) -> list[str]:
@@ -100,24 +99,15 @@ def scrape_detail(
     if not key:
         raise RuntimeError("番号格式无效")
 
-    base = (base_url or DEFAULT_BASE).rstrip("/") or DEFAULT_BASE
-    if "kin8tengoku" not in base.lower():
-        base = DEFAULT_BASE
-    detail_url = kin8_detail_url(base, key)
-
-    try:
-        html = fetch_html(
-            detail_url, referer=f"{base}/", cookie=cookie or None, source_id=_SRC
-        )
-    except Exception as e:
-        raise RuntimeError(f"请求失败: {e}") from e
-
-    if not html or len(html) < 4000:
-        raise RuntimeError("未找到")
-    if re.search(r"<title[^>]*>\s*404\b", html, re.I):
-        raise RuntimeError("未找到")
-    if f"/moviepages/{key}/" not in html and f"/{key}/pht/" not in html:
-        raise RuntimeError("未找到")
+    base = official_base(base_url, DEFAULT_BASE, require_domains=("kin8tengoku",))
+    detail_url = f"{base}/moviepages/{key}/index.html"
+    html = fetch_official_html(
+        detail_url,
+        base=base,
+        source_id=_SRC,
+        cookie=cookie or None,
+        must_contain=(f"/moviepages/{key}/", f"/{key}/pht/"),
+    )
 
     raw_title = pick_og_title(html) or ""
     raw_title = re.split(r"\s*\|\s*", raw_title, maxsplit=1)[0].strip()
@@ -148,9 +138,7 @@ def scrape_detail(
     if not title and not cover and not actors:
         raise RuntimeError("未找到")
 
-    code_u = str(code or "").strip().upper() or f"KIN8-{key}"
-    if not code_u.startswith("KIN8"):
-        code_u = f"KIN8-{key}"
+    code_u = official_code(code, prefix="KIN8", fallback=f"KIN8-{key}")
 
     extra: dict[str, Any] = {
         "website": detail_url,

@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 import httpx
 
 import app.core.settings_store as settings_store
-from app.search.pansou_client import cloud_label
+from app.search.pansou_client import _normalize_base, cloud_label
 
 log = logging.getLogger("app.cloudsaver")
 
@@ -25,15 +25,6 @@ _AMP_RE = re.compile(r"&amp;", re.I)
 
 class CloudSaverError(Exception):
     pass
-
-
-def _normalize_base(url: str) -> str:
-    s = str(url or "").strip().rstrip("/")
-    if not s:
-        return ""
-    if "://" not in s:
-        s = f"http://{s}"
-    return s.rstrip("/")
 
 
 def get_config(*, include_secrets: bool = False) -> dict[str, Any]:

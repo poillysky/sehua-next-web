@@ -1625,6 +1625,25 @@ def quality_stats(*, region: str = "") -> dict[str, Any]:
     }
 
 
+def _dedup_appender(out: list[dict[str, Any]], seen: set[str]):
+    """返回「按 `itemId` 去重后追加到 `out`」的写入闭包。
+
+    `quality_items` / `quality_incomplete_items` / `enrich_all_items` 的拼装逻辑
+    完全一致，只有 `out` / `seen` 是各自的局部状态 —— 故共用这一个工厂
+    （原为三份逐字相同的嵌套 `_take`）。
+    """
+
+    def append(rows: list[dict[str, Any]]) -> None:
+        for r in rows:
+            iid = str(r.get("itemId") or "")
+            if not iid or iid in seen:
+                continue
+            seen.add(iid)
+            out.append(r)
+
+    return append
+
+
 def quality_items(
     *,
     region: str = "",
@@ -1649,13 +1668,7 @@ def quality_items(
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
 
-    def _take(rows: list[dict[str, Any]]) -> None:
-        for r in rows:
-            iid = str(r.get("itemId") or "")
-            if not iid or iid in seen:
-                continue
-            seen.add(iid)
-            out.append(r)
+    _take = _dedup_appender(out, seen)
 
     _take(
         list_catalog_shell_items(
@@ -1726,13 +1739,7 @@ def quality_incomplete_items(
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
 
-    def _take(rows: list[dict[str, Any]]) -> None:
-        for r in rows:
-            iid = str(r.get("itemId") or "")
-            if not iid or iid in seen:
-                continue
-            seen.add(iid)
-            out.append(r)
+    _take = _dedup_appender(out, seen)
 
     _take(
         list_catalog_shell_items(
@@ -1803,13 +1810,7 @@ def enrich_all_items(
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
 
-    def _take(rows: list[dict[str, Any]]) -> None:
-        for r in rows:
-            iid = str(r.get("itemId") or "")
-            if not iid or iid in seen:
-                continue
-            seen.add(iid)
-            out.append(r)
+    _take = _dedup_appender(out, seen)
 
     _take(
         list_catalog_shell_items(

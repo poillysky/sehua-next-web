@@ -60,3 +60,16 @@ def atomic_write_bytes(path: Path, data: bytes) -> None:
 def atomic_write_text(path: Path, text: str) -> None:
     """原子写文本（UTF-8）。"""
     atomic_write_bytes(Path(path), str(text).encode("utf-8"))
+
+
+def quarantine_damaged(path: Path) -> None:
+    """把损坏文件另存留证（**不删**），失败也不影响主流程。
+
+    与原子写同一动机：坏档必须留证，否则「为什么坏」无从追溯；而直接复用
+    原文件名又可能把坏内容当成新基线。改名 `.corrupt-<ts>.json` 后主流程
+    重建即可（`site_mirror` / `detail_path_cache` 共用，故文案后缀固定 json）。
+    """
+    try:
+        path.replace(path.with_name(f"{path.stem}.corrupt-{int(time.time())}.json"))
+    except OSError:
+        pass

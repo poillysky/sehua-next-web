@@ -21,6 +21,8 @@ from app.ai.config import resolve_embed_config
 from app.ai.embed import encode_texts_sync
 from app.search.sehua_embed import row_embed_payload
 import app.search.sehua_resource_embed_svc as svc
+from app.core.cli_io import configure_stdio as _configure_stdio
+from app.core.cli_io import safe_print as _safe_print
 
 DEFAULT_LIMIT = 50
 FETCH_SQL = """
@@ -60,21 +62,6 @@ JOIN ed2k_resources r ON r.hash = e.hash
 ORDER BY e.embedding <=> %s::vector
 LIMIT %s
 """
-
-
-def _configure_stdio() -> None:
-    for stream in (sys.stdout, sys.stderr):
-        try:
-            stream.reconfigure(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
-
-
-def _safe_print(msg: str) -> None:
-    try:
-        print(msg)
-    except UnicodeEncodeError:
-        sys.stdout.buffer.write((msg + "\n").encode("utf-8", errors="replace"))
 
 
 def _resolve_dsn(cli_dsn: str | None) -> str:

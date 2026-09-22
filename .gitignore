@@ -106,6 +106,8 @@ apps/web/next-env.d.ts
 # scratch / bench 临时产物（性能探针的本地输出）
 .tmp_*
 .tmp_posters/
+# 重构诊断产物（差分/探针脚本与报告；本机无删除权限，故只忽略不清理）
+_gap_reports/
 
 # 归档区：待人工确认后整体删除，不参与构建
 _archive/

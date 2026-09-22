@@ -13,6 +13,7 @@ from .common import (
     is_junk_cover_url,
     is_junk_title,
     make_detail,
+    parse_fc2_id as _parse_fc2_id,
     pick_og_image,
     pick_og_title,
     soup,
@@ -26,14 +27,6 @@ PREMIERED_RE = re.compile(
     re.I,
 )
 NOT_FOUND_RE = re.compile(r"未找到您要找的商品|お探しの商品は見つかりません|販売を終了", re.I)
-
-
-def _parse_fc2_id(code: str) -> tuple[str, str] | None:
-    m = re.search(r"FC2[-_]?PPV[-_]?(\d+)", code, re.I) or re.search(r"FC2[-_]?(\d+)", code, re.I)
-    if not m:
-        return None
-    fid = m.group(1)
-    return fid, f"FC2-PPV-{fid}"
 
 
 def _pick_twitter_image(html: str) -> str | None:

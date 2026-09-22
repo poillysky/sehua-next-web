@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import re
-import secrets
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
@@ -12,7 +11,17 @@ from urllib.parse import urlencode
 
 import httpx
 
-from app.p115.client import encode_form, form_headers, headers, human_error, normalize_cookie
+from app.p115.client import _read_json, encode_form, form_headers, headers, human_error, normalize_cookie
+from app.p115.polling import (
+    POLL_INTERVAL_S,
+    is_task_done,
+    is_task_failed,
+    match_tasks_by_hashes,
+    progress_note,
+    submit_deferred,
+    task_phases,
+    timeout_message,
+)
 
 log = logging.getLogger("p115-extract")
 
@@ -22,49 +31,17 @@ _extract_pool = ThreadPoolExecutor(
     thread_name_prefix="p115-extract",
 )
 
-POLL_INTERVAL_S = 3.0
 POLL_MAX_S = 30.0
 ARCHIVE_RE = re.compile(r"\.(zip|rar|7z)$", re.I)
-
-
-def _read_json(res: httpx.Response) -> Any:
-    try:
-        return res.json()
-    except Exception:
-        text = (res.text or "")[:240]
-        return {"state": False, "error": text or f"HTTP {res.status_code}"}
 
 
 def _is_archive_name(name: str) -> bool:
     return bool(ARCHIVE_RE.search(name or ""))
 
 
-def _is_task_done(t: Any) -> bool:
-    if not isinstance(t, dict):
-        return False
-    try:
-        status = int(t.get("status", -99))
-    except (TypeError, ValueError):
-        status = -99
-    if status == 2 or t.get("status") == "2":
-        return True
-    for key in ("percentDone", "percent_done"):
-        try:
-            if float(t.get(key) or 0) >= 100:
-                return True
-        except (TypeError, ValueError):
-            continue
-    return False
-
-
-def _is_task_failed(t: Any) -> bool:
-    if not isinstance(t, dict):
-        return False
-    try:
-        status = int(t.get("status") or 0)
-    except (TypeError, ValueError):
-        status = 0
-    return status < 0
+# 兼容旧名：relocate 与既有脚本按 `p115_extract._is_task_done` 取用
+_is_task_done = is_task_done
+_is_task_failed = is_task_failed
 
 
 def _same_name_folder_label(archive_name: str, title_hint: str | None = None) -> str:
@@ -241,24 +218,13 @@ def _wait_until_transfer_ready(
             continue
 
         if hashes:
-            matched = [
-                t
-                for t in tasks
-                if isinstance(t, dict)
-                and str(t.get("info_hash") or t.get("infoHash") or "").lower()
-                in hashes
-            ]
+            matched = match_tasks_by_hashes(tasks, hashes)
             if matched:
-                failed = [t for t in matched if _is_task_failed(t)]
-                if len(failed) == len(matched):
+                phases = task_phases(matched)
+                if phases["all_failed"]:
                     return {"ok": False, "message": "离线任务全部失败，无法解压"}
 
-                all_terminal = all(
-                    _is_task_done(t) or _is_task_failed(t) for t in matched
-                )
-                any_done = any(_is_task_done(t) for t in matched)
-
-                if any_done and all_terminal:
+                if phases["any_done"] and phases["all_terminal"]:
                     from_tasks = _pick_codes_from_tasks(tasks, hashes)
                     if from_tasks:
                         log.info(
@@ -268,26 +234,8 @@ def _wait_until_transfer_ready(
                         )
                         return {"ok": True, "targets": from_tasks}
 
-                if not all_terminal:
-                    downloading = next(
-                        (
-                            t
-                            for t in matched
-                            if not _is_task_done(t) and not _is_task_failed(t)
-                        ),
-                        None,
-                    )
-                    pct = 0.0
-                    if isinstance(downloading, dict):
-                        try:
-                            pct = float(
-                                downloading.get("percentDone")
-                                or downloading.get("percent_done")
-                                or 0
-                            )
-                        except (TypeError, ValueError):
-                            pct = 0.0
-                    last_note = f"转存中 {int(pct)}%" if pct else "转存中 …"
+                if not phases["all_terminal"]:
+                    last_note = progress_note(phases["pct"])
 
         try:
             rows = _list_folder_files_once(client, cookie, folder_cid)
@@ -300,17 +248,9 @@ def _wait_until_transfer_ready(
                     )
                     return {"ok": True, "targets": from_folder}
 
-                matched = [
-                    t
-                    for t in tasks
-                    if isinstance(t, dict)
-                    and str(t.get("info_hash") or t.get("infoHash") or "").lower()
-                    in hashes
-                ]
-                all_done_or_missing = (not matched) or all(
-                    _is_task_done(t) or _is_task_failed(t) for t in matched
-                )
-                if all_done_or_missing and any(_is_task_done(t) for t in matched):
+                matched = match_tasks_by_hashes(tasks, hashes)
+                phases = task_phases(matched)
+                if phases["all_terminal"] and phases["any_done"]:
                     log.info(
                         "transfer ready via folder+tasks archives=%s",
                         [t["name"] for t in from_folder],
@@ -323,7 +263,7 @@ def _wait_until_transfer_ready(
 
     return {
         "ok": False,
-        "message": f"等待转存超时（{int(POLL_MAX_S)} 秒）：{last_note}",
+        "message": timeout_message(POLL_MAX_S, last_note),
     }
 
 
@@ -520,22 +460,11 @@ def run_poll_then_extract(job: dict[str, Any]) -> dict[str, Any]:
 
 
 def schedule_deferred_extract(job: dict[str, Any]) -> dict[str, str]:
-    job_id = f"{int(time.time() * 1000)}_{secrets.token_hex(3)}"
-
-    def runner() -> None:
-        try:
-            result = run_poll_then_extract(job)
-            log.info(
-                "%s %s %s",
-                job_id,
-                "ok" if result.get("ok") else "fail",
-                result.get("message"),
-            )
-        except Exception:
-            log.exception("%s fail", job_id)
-
-    _extract_pool.submit(runner)
-    log.info(        "scheduled poll-then-extract %s hashes=%s folderCid=%s",
+    job_id = submit_deferred(
+        _extract_pool, log=log, job=job, runner=run_poll_then_extract
+    )
+    log.info(
+        "scheduled poll-then-extract %s hashes=%s folderCid=%s",
         job_id,
         len(job.get("infoHashes") or []),
         job.get("folderCid"),

@@ -10,6 +10,8 @@ import httpx
 
 from app.p115.client import (
     SOFT_OK_ERRCODES,
+    _as_int,
+    _read_json,
     encode_form,
     errcode_of,
     extract_uid,
@@ -38,14 +40,6 @@ _STATUS_LABEL: dict[int, str] = {
     1: "下载中",
     2: "完成",
 }
-
-
-def _read_json(res: httpx.Response) -> Any:
-    try:
-        return res.json()
-    except Exception:
-        text = (res.text or "")[:240]
-        return {"state": False, "error": text or f"HTTP {res.status_code}"}
 
 
 def collect_info_hashes(raw: Any) -> list[str]:
@@ -382,15 +376,6 @@ def add_offline_tasks(
         "failed": failed,
         "infoHashes": hashes,
     }
-
-
-def _as_int(value: Any) -> int | None:
-    if value is None or value is False:
-        return None
-    try:
-        return int(float(str(value).strip()))
-    except (TypeError, ValueError):
-        return None
 
 
 def _as_float(value: Any) -> float | None:

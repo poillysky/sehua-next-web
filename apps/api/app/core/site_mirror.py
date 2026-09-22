@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from app.core.atomic_io import quarantine_damaged as _quarantine_damaged
 from app.core.db import data_dir
 
 log = logging.getLogger(__name__)
@@ -148,14 +149,6 @@ def _salvage_json(text: str) -> Any:
         return value
     except Exception:
         return None
-
-
-def _quarantine_damaged(path: Path) -> None:
-    """把损坏文件另存留证（不删），失败也不影响主流程。"""
-    try:
-        path.replace(path.with_name(f"{path.stem}.corrupt-{int(time.time())}.json"))
-    except OSError:
-        pass
 
 
 def _load_disk() -> None:

@@ -317,6 +317,8 @@ src/
 | 连接池合并 | `core/pg_pool.py::DbPool`；`core/pg.py` / `search/bitmagnet_pg.py` 变薄封装 | 25 项行为断言（超时、游标名、池参数、重建、异常类型）全过 |
 | 重复实现消除 | `_cache_get`×2、`_abs`×2、`_build_fanza_trailer`×2、`_madou_std`×2=`std_code`、`_normalize_proxy_url`×2、`_is_clear_ok`=`_is_del_ok` | 参考实现差分测试 **103 例**全一致 |
 | 前端 api.ts | **4,805 行 → `lib/api/` 19 模块 + barrel**；`lib/api.ts` 保留为重导出壳（调用方零改动） | `tsc --noEmit` **0 错误** |
+| 孪生家族去重 | `scrape_details` 官方站家族：JSON 三站（10musume/1pondo/pacopacomama）共用 `scrape_official_json_detail`，HTML 五站（heydouga/heyzo/kin8/nyoshin/tokyohot）共用 `official_base`/`fetch_official_html`/`official_code`；`p115` extract↔relocate 共用新 `p115/polling.py`；两个 `*_embed_svc` 收敛为声明式 `EmbedSpec` + `EmbedIngestJob`（新 `search/embed_ingest_base.py`） | 差分测试 **2,096 例**（JSON 1,566 / HTML 480 / embed 14 / p115 21）零不一致 + 落库 SQL 字节比对 |
+| 重复函数清理 | 全库 AST 扫描 **11 组 / 24 处 → 1 组 / 2 处**（余下是测试脚手架 `hold`，属惯用重复）。清单见下方第 2 项 | 别名同一性 **17 项** + 纯函数行为差分 **100 例** + 函数体逐字比对 **8 项** 全过 |
 | 回归基线 | `1 failed / 284 passed`（失败集合自始至终未变多） | 每次改动后全量 pytest |
 
 ### 未完成项与原因
@@ -329,15 +331,21 @@ src/
 再按「共享状态模块 → 叶子模块 → 上层模块」自底向上搬迁。这属于独立一轮的工作量，
 且必须在**刮削管线空闲**时进行（改 `app/*.py` 会触发 dev_server 硬重启）。
 
-**2. 剩余孪生家族 —— 本轮未做。**
+**2. 孪生家族 —— ✅ 已完成（含额外发现的 10 组重复函数）。**
 
-| 孪生家族 | 备注 |
+| 重复项 | 收敛去处 |
 |---|---|
-| `scrape_details/onespondo.py` ↔ `pacopacomama.py` | 30+ 组相同块，基本是复制品 |
-| `heydouga` / `heyzo` / `kin8` / `nyoshin` / `tokyohot` | 5 文件共享同一段逻辑 |
-| `search/bitmagnet_embed_svc.py` ↔ `sehua_resource_embed_svc.py` | 同构向量化服务（`get_job_status` / `request_stop` 等） |
-| `p115/extract.py` ↔ `relocate.py` | 公共块 |
-| `media/bangumi_anilist.py` ↔ `media/routes.py` | 公共块 |
+| 官方站 JSON 三站 / HTML 五站 | `scrape_details/common.py` 的 `scrape_official_json_detail` / `official_base`+`fetch_official_html`+`official_code` |
+| `p115/extract.py` ↔ `relocate.py` | 新 `p115/polling.py`（`_is_task_done` 等以别名保留，调用点零改动） |
+| `bitmagnet_embed_svc` ↔ `sehua_resource_embed_svc` | 新 `search/embed_ingest_base.py`（`EmbedSpec` 声明差异，历史差异逐条保留） |
+| `_read_json`×3 / `_as_int`×2 | `p115/client.py` |
+| `_quarantine_damaged`×2 | `core/atomic_io.py`（`detail_path_cache` 那份是**死代码**，已删） |
+| `_year_from`×5（**两套口径**：ISO 前缀 vs 全文搜索） | 新 `core/year_utils.py`（`year_prefix` / `year_search`，**刻意不合一**） |
+| `_configure_stdio` / `_safe_print`×2 | 新 `core/cli_io.py` |
+| `_fold`×4（`enrich.py` 嵌套） | `enrich.py` 模块级 `_fold`（1 处） |
+| `_take`×3（`embed.py` 嵌套闭包） | `embed.py` 的 `_dedup_appender(out, seen)` 工厂（调用点零改动） |
+| `_parse_fc2_id`×2 | `scrape_details/common.py` |
+| `_normalize_base`×2 | `search/pansou_client.py` |
 | `scrap_library/enrich.py::_cache_get` | 2 行转发壳（**有意保留**：需绑定各自模块的缓存 dict） |
 
 **3. 前端 5B/5C —— 本轮未做**：8 个面板的 `onSave`×8 / `onTest`×7 / `hubStatus`×4 抽 hook；

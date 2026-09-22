@@ -10,6 +10,8 @@ from typing import Any
 import httpx
 from fastapi import HTTPException
 
+from app.core.year_utils import year_prefix as _year_from
+
 log = logging.getLogger(__name__)
 
 _BGM_UA = "sehua-next-web/1.0 (media hub; contact: local-dev)"
@@ -38,13 +40,6 @@ ANILIST_CHARTS = (
     "upcoming",
     "movies",
 )
-
-
-def _year_from(date_s: str | None) -> str | None:
-    s = str(date_s or "").strip()
-    if len(s) >= 4 and s[:4].isdigit():
-        return s[:4]
-    return None
 
 
 def _norm_item(

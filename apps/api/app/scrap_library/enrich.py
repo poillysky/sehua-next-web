@@ -1002,6 +1002,22 @@ def _fold_tag_variant(tag: str) -> str:
         return tag
 
 
+def _fold(s: str) -> str:
+    """`_fold_variant` + `casefold()`；映射表不可用时退化为普通 `casefold()`。
+
+    女优名 / 标题片段的**同形比较**专用（`_title_actress_mismatch_penalty`、
+    `_overview_foreign_actress_penalty`、锚点切换）。与 `_fold_tag_variant`
+    的区别：那个失败时返回**原串**（标签展示用），本函数保证返回值一定
+    可安全比较。原为四份逐字相同的嵌套实现，已收敛到这里。
+    """
+    try:
+        from app.scrape.metadata_optimize import _fold_variant
+
+        return _fold_variant(s).casefold()
+    except Exception:  # noqa: BLE001
+        return str(s or "").casefold()
+
+
 def _clean_tags(tags: list[str] | None, *, fold: bool = True) -> list[str]:
     """清洗标签：去空/超长/垃圾词/按字形去重。
 
@@ -10944,19 +10960,12 @@ def _title_actress_mismatch_penalty(
         from app.scrape.metadata_optimize import (
             _actor_maps,
             _actor_should_drop,
-            _fold_variant,
             _lookup_actor_hit,
             _map_actor_entry,
             mapping_language_from_settings,
         )
     except Exception:  # noqa: BLE001
         return 0
-
-    def _fold(s: str) -> str:
-        try:
-            return _fold_variant(s).casefold()
-        except Exception:  # noqa: BLE001
-            return str(s or "").casefold()
 
     table = _actor_maps(mapping_language_from_settings())
     allowed: set[str] = set()
@@ -11284,19 +11293,12 @@ def _overview_foreign_actress_penalty(
         from app.scrape.metadata_optimize import (
             _actor_maps,
             _actor_should_drop,
-            _fold_variant,
             _lookup_actor_hit,
             _map_actor_entry,
             mapping_language_from_settings,
         )
     except Exception:  # noqa: BLE001
         return 0
-
-    def _fold(s: str) -> str:
-        try:
-            return _fold_variant(s).casefold()
-        except Exception:  # noqa: BLE001
-            return str(s or "").casefold()
 
     table = _actor_maps(mapping_language_from_settings())
     allowed: set[str] = set()
@@ -11841,15 +11843,9 @@ def _identity_gate_details(
         _top = max(_clusters, key=lambda c: len({m[0] for m in c}))
         _top_n = len({m[0] for m in _top})
         _seed_n = len({m[0] for m in _seed_cl}) if _seed_cl else 0
-        try:
-            from app.scrape.metadata_optimize import _fold_variant as _fold
-        except Exception:  # noqa: BLE001
-            def _fold(x: str) -> str:  # type: ignore[misc]
-                return str(x or "")
-
         _acts_by_sid = {
             _sid: {
-                _fold(str(a).strip()).casefold()
+                _fold(str(a).strip())
                 for a in (_d.get("actors") or [])
                 if str(a or "").strip()
             }
@@ -11959,13 +11955,6 @@ def _identity_gate_details(
         if not ok:
             # 标题机翻/意译与日文官名不兼容，但女优与锚点簇有交集 → 同片，保留
             # （OERO/DOJN：miss_av 长中文题被拒后剧情一并清空）
-            try:
-                from app.scrape.metadata_optimize import _fold_variant as _fold
-            except Exception:  # noqa: BLE001
-
-                def _fold(x: str) -> str:  # type: ignore[misc]
-                    return str(x or "")
-
             def _act_keys(names: list[Any] | None) -> set[str]:
                 out: set[str] = set()
                 for a in names or []:
@@ -11975,12 +11964,12 @@ def _identity_gate_details(
                     # miss_av「さつきさん 27歳…」只取首段
                     head = re.split(r"[\s　(/（]", s, maxsplit=1)[0].strip() or s
                     for piece in (s, head):
-                        out.add(_fold(piece).casefold())
+                        out.add(_fold(piece))
                         _d2, kid = _actress_disp_id(piece)
                         if kid:
                             out.add(kid.casefold())
                         if _d2:
-                            out.add(_fold(_d2).casefold())
+                            out.add(_fold(_d2))
                 return out
 
             src_acts = _act_keys(list(d.get("actors") or []))

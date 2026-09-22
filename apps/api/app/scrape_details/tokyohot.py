@@ -3,6 +3,9 @@
 
 番号：`TOKYOHOT-N1234` / `TOKYO-HOT-n1234` / `n1234` / `k1454`
 → `https://my.tokyo-hot.com/product/{id}/?lang=ja`
+
+本站有年龄确认门（需 Cookie 带 `age=yes`）；抓取与「未找到」判定见
+`common.fetch_official_html`（`age_gate` 参数即对应这道门）。
 """
 
 from __future__ import annotations
@@ -13,10 +16,12 @@ from typing import Any
 from .common import (
     abs_url,
     clean_title,
-    fetch_html,
+    fetch_official_html,
     is_junk_cover_url,
     is_junk_title,
     make_detail,
+    official_base,
+    official_code,
     soup,
     strip_tags,
 )
@@ -39,11 +44,6 @@ def parse_tokyohot_movie_key(code: str) -> str | None:
         return None
     letter = (m.group(1) or "N").lower()
     return f"{letter}{int(m.group(2))}"
-
-
-def tokyohot_detail_url(base: str, key: str) -> str:
-    b = str(base or DEFAULT_BASE).rstrip("/")
-    return f"{b}/product/{key}/?lang=ja"
 
 
 def _info_map(html: str) -> dict[str, str]:
@@ -123,27 +123,21 @@ def scrape_detail(
     if not key:
         raise RuntimeError("番号格式无效")
 
-    base = (base_url or DEFAULT_BASE).rstrip("/") or DEFAULT_BASE
-    if "tokyo-hot" not in base.lower() and "tokyohot" not in base.lower():
-        base = DEFAULT_BASE
-    detail_url = tokyohot_detail_url(base, key)
-
-    try:
-        html = fetch_html(
-            detail_url,
-            referer=f"{base}/",
-            cookie=cookie or "age=yes; age_check=1",
-            source_id=_SRC,
-        )
-    except Exception as e:
-        raise RuntimeError(f"请求失败: {e}") from e
-
-    if not html or len(html) < 8000:
-        raise RuntimeError("未找到")
-    if "年齢確認" in (html[:4000] if html else "") and "infowrapper" not in html:
-        raise RuntimeError("未找到")
-    if f"/product/{key}" not in html and f"/media/{key}/" not in html:
-        raise RuntimeError("未找到")
+    base = official_base(
+        base_url, DEFAULT_BASE, require_domains=("tokyo-hot", "tokyohot")
+    )
+    detail_url = f"{base}/product/{key}/?lang=ja"
+    html = fetch_official_html(
+        detail_url,
+        base=base,
+        source_id=_SRC,
+        cookie=cookie or "age=yes; age_check=1",
+        min_len=8000,
+        # 本站用年龄门而非 <title>404 判未找到
+        check_404_title=False,
+        age_gate=("年齢確認", "infowrapper"),
+        must_contain=(f"/product/{key}", f"/media/{key}/"),
+    )
 
     doc = soup(html)
     h2 = doc.select_one("#main .contents h2") or doc.select_one(".contents h2")
@@ -185,9 +179,7 @@ def scrape_detail(
         raise RuntimeError("未找到")
 
     year = premiered[:4] if premiered else None
-    code_u = str(code or "").strip().upper() or f"TOKYOHOT-{number.upper()}"
-    if not re.match(r"^TOKYO", code_u, re.I):
-        code_u = f"TOKYOHOT-{number.upper()}"
+    code_u = official_code(code, prefix="TOKYO", fallback=f"TOKYOHOT-{number.upper()}")
 
     extra: dict[str, Any] = {
         "series": series,

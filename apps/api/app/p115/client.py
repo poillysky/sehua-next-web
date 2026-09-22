@@ -140,6 +140,19 @@ def _as_int(value: Any) -> int | None:
         return None
 
 
+def _read_json(res: httpx.Response) -> Any:
+    """响应转 JSON；非 JSON 时退化为 `{"state": False, "error": ...}`。
+
+    115 的接口在 Cookie 失效/风控时会直接返回 HTML，上层统一按 `state=False`
+    读 `error` 文案，所以这里不抛异常（`extract` / `offline` / `share` 共用）。
+    """
+    try:
+        return res.json()
+    except Exception:
+        text = (res.text or "")[:240]
+        return {"state": False, "error": text or f"HTTP {res.status_code}"}
+
+
 def fetch_offline_sign(cookie: str) -> dict[str, Any]:
     try:
         with httpx.Client(

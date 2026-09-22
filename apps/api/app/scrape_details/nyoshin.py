@@ -3,6 +3,8 @@
 
 番号：`NYOSHIN-2500` / `NYOSHIN-n2500` / `n2500`
 → moviepages/`n2500`；封面 `contents/{digits}/thum2.jpg`
+
+抓取与「未找到」判定见 `common.fetch_official_html`。
 """
 
 from __future__ import annotations
@@ -12,10 +14,12 @@ from typing import Any
 
 from .common import (
     clean_title,
-    fetch_html,
+    fetch_official_html,
     is_junk_cover_url,
     is_junk_title,
     make_detail,
+    official_base,
+    official_code,
     pick_og_image,
     pick_og_title,
     soup,
@@ -38,11 +42,6 @@ def parse_nyoshin_movie_key(code: str) -> str | None:
     return f"n{int(m.group(1))}"
 
 
-def nyoshin_detail_url(base: str, key: str) -> str:
-    b = str(base or DEFAULT_BASE).rstrip("/")
-    return f"{b}/moviepages/{key}/index.html"
-
-
 def _parse_jp_date(text: str) -> str | None:
     m = re.search(r"(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日", text or "")
     if not m:
@@ -59,24 +58,15 @@ def scrape_detail(
         raise RuntimeError("番号格式无效")
     digits = key[1:]  # contents/{digits}/
 
-    base = (base_url or DEFAULT_BASE).rstrip("/") or DEFAULT_BASE
-    if "nyoshin" not in base.lower():
-        base = DEFAULT_BASE
-    detail_url = nyoshin_detail_url(base, key)
-
-    try:
-        html = fetch_html(
-            detail_url, referer=f"{base}/", cookie=cookie or None, source_id=_SRC
-        )
-    except Exception as e:
-        raise RuntimeError(f"请求失败: {e}") from e
-
-    if not html or len(html) < 4000:
-        raise RuntimeError("未找到")
-    if re.search(r"<title[^>]*>\s*404\b", html, re.I):
-        raise RuntimeError("未找到")
-    if f"/moviepages/{key}/" not in html and f"/contents/{digits}/" not in html:
-        raise RuntimeError("未找到")
+    base = official_base(base_url, DEFAULT_BASE, require_domains=("nyoshin",))
+    detail_url = f"{base}/moviepages/{key}/index.html"
+    html = fetch_official_html(
+        detail_url,
+        base=base,
+        source_id=_SRC,
+        cookie=cookie or None,
+        must_contain=(f"/moviepages/{key}/", f"/contents/{digits}/"),
+    )
 
     doc = soup(html)
     title_el = doc.select_one("[class*='MovieHeader_title__']")
@@ -121,9 +111,7 @@ def scrape_detail(
         raise RuntimeError("未找到")
 
     year = premiered[:4] if premiered else None
-    code_u = str(code or "").strip().upper() or f"NYOSHIN-{digits}"
-    if not code_u.startswith("NYOSHIN"):
-        code_u = f"NYOSHIN-{digits}"
+    code_u = official_code(code, prefix="NYOSHIN", fallback=f"NYOSHIN-{digits}")
 
     extra: dict[str, Any] = {
         "website": detail_url,
