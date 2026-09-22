@@ -517,7 +517,8 @@ def list_offline_tasks(cookie: str, page: int = 1) -> dict[str, Any]:
     }
 
 
-def _is_clear_ok(data: Any) -> bool:
+def _is_task_ok(data: Any) -> bool:
+    """115 任务类接口的通用成功判定（清理 / 删除共用，原两份实现逐字节相同）。"""
     if not isinstance(data, dict):
         return False
     if data.get("state") is True or data.get("state") == 1:
@@ -526,6 +527,10 @@ def _is_clear_ok(data: Any) -> bool:
     if code == 0 and data.get("state") is not False:
         return True
     return False
+
+
+# 历史名保留：清理与删除共用同一判定
+_is_clear_ok = _is_task_ok
 
 
 def _clear_via_lixian(
@@ -613,15 +618,8 @@ def clear_offline_tasks(cookie: str, mode: str = "done") -> dict[str, Any]:
         }
 
 
-def _is_del_ok(data: Any) -> bool:
-    if not isinstance(data, dict):
-        return False
-    if data.get("state") is True or data.get("state") == 1:
-        return True
-    code = errcode_of(data)
-    if code == 0 and data.get("state") is not False:
-        return True
-    return False
+# 历史名保留：与 _is_clear_ok 共用同一判定
+_is_del_ok = _is_task_ok
 
 
 def delete_offline_task(cookie: str, info_hash: str) -> dict[str, Any]:

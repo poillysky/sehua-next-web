@@ -11,11 +11,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "apps" / "api"))
 
-from app import bitmagnet_pg  # noqa: E402
-from app import pg  # noqa: E402
-from app import prefix_catalog_store as store  # noqa: E402
-from app import prefix_maker_names as names  # noqa: E402
-from app import prefix_ranges as pr  # noqa: E402
+from app.search import bitmagnet_pg  # noqa: E402
+from app.core import pg  # noqa: E402
+from app.prefix import catalog_store as store  # noqa: E402
+from app.prefix import maker_names as names  # noqa: E402
+from app.prefix import ranges as pr  # noqa: E402
 from app.search.av import (  # noqa: E402
     _clamp_std_code_digits,
     code_sort_key,

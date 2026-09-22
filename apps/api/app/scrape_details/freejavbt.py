@@ -9,6 +9,7 @@ from urllib.parse import quote
 
 from .common import (
     abs_url,
+    build_fanza_trailer,
     clean_title,
     fetch_html,
     is_junk_cover_url,
@@ -19,6 +20,7 @@ from .common import (
     std_code,
     strip_tags,
     soup,
+    with_https,
 )
 
 DEFAULT_BASE = "https://www.freejavbt.com"
@@ -61,28 +63,9 @@ def _uniq(names: list[str]) -> list[str]:
     return out
 
 
-def _with_https(url: str) -> str:
-    s = str(url or "").strip().replace("\\/", "/")
-    if not s:
-        return ""
-    if s.startswith("//"):
-        return f"https:{s}"
-    return s
-
-
-def _build_fanza_trailer(sample: str) -> str:
-    raw = _with_https(sample)
-    if not raw:
-        return ""
-    if re.search(r"\.mp4(?:[?#].*)?$", raw, re.I):
-        return raw
-    trailer = re.sub(r"hlsvideo", "litevideo", raw, flags=re.I)
-    if re.search(r"/pv/", trailer, re.I) and re.search(r"playlist\.m3u8", trailer, re.I):
-        return ""
-    m = re.search(r"/([^/]+)/playlist\.m3u8", trailer, re.I)
-    if m:
-        return re.sub(r"playlist\.m3u8", f"{m.group(1)}_sm_w.mp4", trailer, flags=re.I)
-    return ""
+# _with_https / _build_fanza_trailer 的唯一实现已收敛到 .common（保留旧名，调用点零改动）
+_with_https = with_https
+_build_fanza_trailer = build_fanza_trailer
 
 
 def _pick_best_trailer(candidates: list[str]) -> str | None:

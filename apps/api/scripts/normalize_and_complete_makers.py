@@ -19,8 +19,8 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "apps" / "api"))
 
-from app import prefix_catalog_store as store  # noqa: E402
-from app import prefix_maker_names as maker_names  # noqa: E402
+from app.prefix import catalog_store as store  # noqa: E402
+from app.prefix import maker_names as maker_names  # noqa: E402
 from app.core.region_meta import std_prefix  # noqa: E402
 
 AV_MAKERS = ROOT / "apps" / "maps" / "makers" / "av-makers.japan.json"

@@ -23,9 +23,9 @@ from urllib.parse import urljoin
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "apps" / "api"))
 
-from app import outbound_http as o  # noqa: E402
-from app import prefix_catalog_store as store  # noqa: E402
-from app import scrape_sources_settings as sources  # noqa: E402
+from app.core import outbound_http as o  # noqa: E402
+from app.prefix import catalog_store as store  # noqa: E402
+from app.scrape import sources_settings as sources  # noqa: E402
 from app.core.region_meta import REGION_META, REGION_ORDER, std_prefix  # noqa: E402
 
 SEED = ROOT / "apps" / "maps" / "prefixes" / "catalog.seed.json"

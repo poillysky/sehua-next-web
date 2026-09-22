@@ -24,10 +24,10 @@ from typing import Any, Callable
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "apps" / "api"))
 
-from app import bitmagnet_pg  # noqa: E402
-from app import pg  # noqa: E402
-from app import prefix_catalog_store as store  # noqa: E402
-from app import prefix_ranges as pr  # noqa: E402
+from app.search import bitmagnet_pg  # noqa: E402
+from app.core import pg  # noqa: E402
+from app.prefix import catalog_store as store  # noqa: E402
+from app.prefix import ranges as pr  # noqa: E402
 from app.prefix.code_read import resolve_code_read  # noqa: E402
 from app.core.region_meta import REGION_ORDER, std_prefix  # noqa: E402
 from app.search.av import is_western_studio_prefix  # noqa: E402
@@ -36,7 +36,7 @@ from app.search.av import (  # noqa: E402
     extract_maker_codes,
     resolve_maker_shape,
 )
-from app import search_av as _search_av  # noqa: E402
+from app.search import av as _search_av  # noqa: E402
 
 
 REPORT = ROOT / "data" / "debug" / "prefix-codes-from-local-dbs.json"
@@ -798,10 +798,10 @@ def run_local_db_index(on_progress: Callable[[Any], None] | None = None) -> dict
     global resolve_code_read, _search_av, store, pr, code_sort_key, extract_maker_codes, resolve_maker_shape
     import importlib
 
-    from app import prefix_catalog_store as _store_mod
-    from app import prefix_code_read as _pcr_mod
-    from app import prefix_ranges as _pr_mod
-    from app import search_av as _sav_mod
+    from app.prefix import catalog_store as _store_mod
+    from app.prefix import code_read as _pcr_mod
+    from app.prefix import ranges as _pr_mod
+    from app.search import av as _sav_mod
 
     _pcr_mod = importlib.reload(_pcr_mod)
     _sav_mod = importlib.reload(_sav_mod)

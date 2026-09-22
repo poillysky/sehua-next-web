@@ -17,7 +17,9 @@ import app.makers.settings as makers_settings
 import app.makers.providers_extra as makers_extra
 import app.core.site_mirror as site_mirror
 from app.core.outbound_http import fetch_page, looks_blocked_html
+from app.core.ttl_cache import cache_get as _cache_get_ttl
 from app.core.ttl_cache import enforce_max, prune_by_expiry
+from app.makers.urls import join_url as _abs
 
 log = logging.getLogger(__name__)
 
@@ -158,14 +160,7 @@ def _wrap(data: Any, message: str = "ok", status: int = 200) -> dict[str, Any]:
 
 
 def _cache_get(key: str) -> Any | None:
-    hit = _cache.get(key)
-    if not hit:
-        return None
-    exp, payload = hit
-    if time.time() > exp:
-        _cache.pop(key, None)
-        return None
-    return payload
+    return _cache_get_ttl(_cache, key)
 
 
 def _cache_set(key: str, payload: Any, ttl: float = _CACHE_TTL) -> None:
@@ -315,16 +310,8 @@ def _fetch_html(url: str, *, referer: str | None = None, fast: bool = False) -> 
     return text
 
 
-def _abs(base: str, href: str | None) -> str | None:
-    if not href:
-        return None
-    href = href.strip()
-    if href.startswith("//"):
-        return f"https:{href}"
-    try:
-        return urljoin(base if base.endswith("/") else base + "/", href)
-    except Exception:
-        return None
+# _abs 已由文件顶部的 `from app.makers.urls import join_url as _abs` 直接绑定
+# （原与 makers/providers_extra.py 各写一份逐字节相同的实现，已收敛）
 
 
 def _year_from(s: str | None) -> str | None:

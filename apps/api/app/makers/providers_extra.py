@@ -11,6 +11,7 @@ from bs4 import BeautifulSoup
 
 import app.makers.settings as makers_settings
 import app.core.site_mirror as site_mirror
+from app.makers.urls import join_url as _abs
 
 log = logging.getLogger(__name__)
 
@@ -22,16 +23,8 @@ def _origin(raw: str) -> str:
     return site_mirror.origin(raw)
 
 
-def _abs(base: str, href: str | None) -> str | None:
-    if not href:
-        return None
-    href = href.strip()
-    if href.startswith("//"):
-        return f"https:{href}"
-    try:
-        return urljoin(base if base.endswith("/") else base + "/", href)
-    except Exception:
-        return None
+# _abs 已由文件顶部的 `from app.makers.urls import join_url as _abs` 直接绑定
+# （原与 makers/catalog_routes.py 各写一份逐字节相同的实现，已收敛）
 
 
 def _year_from(s: str | None) -> str | None:

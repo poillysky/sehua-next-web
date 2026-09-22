@@ -14,6 +14,7 @@ from .common import (
     is_junk_title,
     make_detail,
     soup,
+    std_code,
     strip_tags,
 )
 from app.core import detail_path_cache
@@ -31,15 +32,8 @@ GENRE_WORDS = {
 }
 
 
-def _madou_std(raw: str) -> str:
-    s = str(raw or "").strip().upper().replace("_", "-")
-    if not s:
-        return ""
-    if "-" not in s:
-        m = re.match(r"^([A-Z]{1,12})(\d{2,}[A-Z0-9-]*)$", s)
-        if m:
-            return f"{m.group(1)}-{m.group(2)}"
-    return s
+# 与 madouqu._madou_std / common.std_code 逐字节相同，收敛为同一实现（保留旧名）
+_madou_std = std_code
 
 
 def _madou_compact(code: str) -> str:

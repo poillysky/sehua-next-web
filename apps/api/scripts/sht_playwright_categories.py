@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT / "apps" / "api"))
 
 from playwright.sync_api import sync_playwright  # noqa: E402
 
-from app import outbound_http as o  # noqa: E402
+from app.core import outbound_http as o  # noqa: E402
 
 OUT = ROOT / "data" / "debug"
 URL = "https://www.sehuatang.net/portal.php?mod=index&mobile=2"

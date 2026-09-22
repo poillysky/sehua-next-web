@@ -143,7 +143,7 @@ def main() -> int:
     args = parser.parse_args()
 
     from app.core.db import init_db
-    from app import scrap_enrich_strategy as strat
+    from app.scrap_library import enrich_strategy as strat
 
     init_db()
     include_flare = bool(strat.get_strategy().get("includeFlare", True))

@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException, Query
 from app.translate.routes import get_tmdb_api_key
 import app.core.settings_store as settings_store
 import app.media.bangumi_anilist as anime_src
+from app.core.ttl_cache import cache_get as _cache_get_ttl
 from app.core.ttl_cache import enforce_max, prune_by_expiry
 
 log = logging.getLogger(__name__)
@@ -81,14 +82,7 @@ def _wrap(data: Any, message: str = "ok", status: int = 200) -> dict[str, Any]:
 
 
 def _cache_get(key: str) -> Any | None:
-    hit = _cache.get(key)
-    if not hit:
-        return None
-    exp, payload = hit
-    if time.time() > exp:
-        _cache.pop(key, None)
-        return None
-    return payload
+    return _cache_get_ttl(_cache, key)
 
 
 def _cache_set(key: str, payload: Any, ttl: float = _CACHE_TTL_S) -> None:

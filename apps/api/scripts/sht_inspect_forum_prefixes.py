@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT / "apps" / "api"))
 
 from bs4 import BeautifulSoup
 
-from app import outbound_http as o
+from app.core import outbound_http as o
 
 OUT = ROOT / "data" / "debug"
 LIVE = OUT / "sht_forum_types_live.json"

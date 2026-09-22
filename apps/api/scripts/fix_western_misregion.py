@@ -13,8 +13,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "apps" / "api"))
 
-from app import prefix_catalog_store as store  # noqa: E402
-from app import scrap_library_embed as scrap  # noqa: E402
+from app.prefix import catalog_store as store  # noqa: E402
+from app.scrap_library import embed as scrap  # noqa: E402
 from app.core.db import get_meta_pool  # noqa: E402
 from app.core.region_meta import REGION_ORDER  # noqa: E402
 from app.search.av import WESTERN_STUDIO_PREFIXES, is_western_studio_prefix  # noqa: E402

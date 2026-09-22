@@ -10,9 +10,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "apps" / "api"))
 
-from app import bitmagnet_pg  # noqa: E402
-from app import pg  # noqa: E402
-from app import prefix_catalog_store as store  # noqa: E402
+from app.search import bitmagnet_pg  # noqa: E402
+from app.core import pg  # noqa: E402
+from app.prefix import catalog_store as store  # noqa: E402
 
 # 前缀 → 额外搜词
 ALIASES: dict[str, list[str]] = {

@@ -1,16 +1,18 @@
-"""Postgres pool for Bitmagnet DB (separate DSN from resource_db)."""
+"""Postgres pool for Bitmagnet DB (separate DSN from resource_db).
+
+连接池实现已收敛到 ``app.core.pg_pool.DbPool``；本模块保留**Bitmagnet 库**这一个实例
+以及全部历史对外符号（``get_pool`` / ``query`` / ``iter_batches`` / ``close_pool`` /
+``is_configured`` / ``_load_dsn`` / ``BitmagnetDbUnavailable``），调用方无需改动。
+"""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Iterator
 
-from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 import app.core.settings_store as settings_store
-
-_pool: ConnectionPool | None = None
-_pool_dsn: str | None = None
+from app.core.pg_pool import DbPool
 
 # 默认查询超时（毫秒）：bitmagnet 仅 name B-tree 索引，缺 pg_trgm 时子串检索可能全表扫
 _DEFAULT_STATEMENT_TIMEOUT_MS = 20_000
@@ -22,33 +24,25 @@ class BitmagnetDbUnavailable(Exception):
         self.message = message
 
 
+_IMPL = DbPool(
+    setting_key=settings_store.BITMAGNET_DB_KEY,
+    unavailable_cls=BitmagnetDbUnavailable,
+    dsn_required_message="请先在设置中启用并填写 Bitmagnet 库 DSN",
+    min_size=1,
+    max_size=8,
+    pool_timeout=None,
+    default_query_timeout_ms=_DEFAULT_STATEMENT_TIMEOUT_MS,
+    default_iter_timeout_ms=600_000,
+    cursor_name="bitmagnet_scan_batch",
+)
+
+
 def _load_dsn() -> str:
-    raw = settings_store.get_setting(settings_store.BITMAGNET_DB_KEY) or {}
-    enabled = bool(raw.get("enabled"))
-    dsn = str(raw.get("dsn") or "").strip()
-    if not enabled or not dsn:
-        raise BitmagnetDbUnavailable("请先在设置中启用并填写 Bitmagnet 库 DSN")
-    return dsn
+    return _IMPL.load_dsn()
 
 
 def get_pool() -> ConnectionPool:
-    global _pool, _pool_dsn
-    dsn = _load_dsn()
-    if _pool is None or _pool_dsn != dsn:
-        if _pool is not None:
-            try:
-                _pool.close()
-            except Exception:
-                pass
-        _pool = ConnectionPool(
-            conninfo=dsn,
-            min_size=1,
-            max_size=8,
-            kwargs={"row_factory": dict_row},
-            open=True,
-        )
-        _pool_dsn = dsn
-    return _pool
+    return _IMPL.get_pool()
 
 
 def query(
@@ -57,19 +51,7 @@ def query(
     *,
     statement_timeout_ms: int = _DEFAULT_STATEMENT_TIMEOUT_MS,
 ) -> list[dict[str, Any]]:
-    pool = get_pool()
-    with pool.connection() as conn:
-        with conn.cursor() as cur:
-            if statement_timeout_ms > 0:
-                # SET LOCAL 仅当前事务；pool.connection() 会开事务，防慢查询挂死连接池
-                cur.execute(
-                    "SELECT set_config('statement_timeout', %s, true)",
-                    [f"{int(statement_timeout_ms)}ms"],
-                )
-            cur.execute(sql, params or [])
-            if cur.description is None:
-                return []
-            return list(cur.fetchall())
+    return _IMPL.query(sql, params, statement_timeout_ms=statement_timeout_ms)
 
 
 def iter_batches(
@@ -78,38 +60,19 @@ def iter_batches(
     *,
     batch_size: int = 2000,
     statement_timeout_ms: int = 600_000,
-):
+) -> Iterator[list[dict[str, Any]]]:
     """服务端游标分批吐行。全表扫描不要 query()+fetchall。"""
-    size = max(200, int(batch_size or 2000))
-    pool = get_pool()
-    with pool.connection() as conn:
-        if statement_timeout_ms > 0:
-            with conn.cursor() as setup:
-                setup.execute(
-                    "SELECT set_config('statement_timeout', %s, true)",
-                    [f"{int(statement_timeout_ms)}ms"],
-                )
-        with conn.cursor(name="bitmagnet_scan_batch") as cur:
-            cur.itersize = size
-            cur.execute(sql, params or [])
-            while True:
-                rows = cur.fetchmany(size)
-                if not rows:
-                    break
-                yield rows
+    return _IMPL.iter_batches(
+        sql,
+        params,
+        batch_size=batch_size,
+        statement_timeout_ms=statement_timeout_ms,
+    )
 
 
 def close_pool() -> None:
-    global _pool, _pool_dsn
-    if _pool is not None:
-        try:
-            _pool.close()
-        except Exception:
-            pass
-    _pool = None
-    _pool_dsn = None
+    _IMPL.close_pool()
 
 
 def is_configured() -> bool:
-    raw = settings_store.get_setting(settings_store.BITMAGNET_DB_KEY) or {}
-    return bool(raw.get("enabled") and str(raw.get("dsn") or "").strip())
+    return _IMPL.is_configured()

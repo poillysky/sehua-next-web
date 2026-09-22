@@ -162,6 +162,35 @@ def std_code(raw: str) -> str:
     return s
 
 
+def with_https(url: str) -> str:
+    """补全协议头（``//`` 开头补 https），并把 JSON 里的 ``\\/`` 还原为 ``/``。"""
+    s = str(url or "").strip().replace("\\/", "/")
+    if not s:
+        return ""
+    if s.startswith("//"):
+        return f"https:{s}"
+    return s
+
+
+def build_fanza_trailer(sample: str) -> str:
+    """把 FANZA 的 hls 预览地址转成可直接播放的 mp4 预览。
+
+    ``dmm`` 与 ``freejavbt`` 曾各写一份逐字节相同的实现，此处收敛为唯一版本。
+    """
+    raw = with_https(sample)
+    if not raw:
+        return ""
+    if re.search(r"\.mp4(?:[?#].*)?$", raw, re.I):
+        return raw
+    trailer = re.sub(r"hlsvideo", "litevideo", raw, flags=re.I)
+    if re.search(r"/pv/", trailer, re.I) and re.search(r"playlist\.m3u8", trailer, re.I):
+        return ""
+    m = re.search(r"/([^/]+)/playlist\.m3u8", trailer, re.I)
+    if m:
+        return re.sub(r"playlist\.m3u8", f"{m.group(1)}_sm_w.mp4", trailer, flags=re.I)
+    return ""
+
+
 def abs_url(href: str | None, base: str) -> str | None:
     u = str(href or "").strip()
     if not u:

@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "apps" / "api"))
 
-from app import prefix_catalog_store as store
+from app.prefix import catalog_store as store
 from app.search.av import resolve_maker_shape
 
 DIGIT_HEAD_RE = re.compile(r"^(\d{2,3})([A-Z]{2,14})$")

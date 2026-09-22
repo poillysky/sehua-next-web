@@ -34,3 +34,19 @@ def enforce_max(cache: CacheMap, max_size: int) -> None:
     victims = sorted(cache.items(), key=lambda kv: kv[1][0])[:overflow]
     for k, _ in victims:
         cache.pop(k, None)
+
+
+def cache_get(cache: CacheMap, key: str) -> Any | None:
+    """读一条；已过期则顺手删除并返回 None。
+
+    ``media.routes`` 与 ``makers.catalog_routes`` 曾各写一份逐字节相同的 ``_cache_get``；
+    这里收敛为唯一实现，两个模块各自传自己的 ``_cache``（缓存仍是各自独立的 dict）。
+    """
+    hit = cache.get(key)
+    if not hit:
+        return None
+    exp, payload = hit
+    if time.time() > exp:
+        cache.pop(key, None)
+        return None
+    return payload

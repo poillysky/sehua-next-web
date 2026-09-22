@@ -11,9 +11,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]  # repo root
 sys.path.insert(0, str(ROOT / "apps" / "api"))
 
-from app import prefix_catalog_dmm as dmm  # noqa: E402
-from app import prefix_catalog_harvest as harvest  # noqa: E402
-from app import prefix_catalog_store as store  # noqa: E402
+from app.prefix import catalog_dmm as dmm  # noqa: E402
+from app.prefix import catalog_harvest as harvest  # noqa: E402
+from app.prefix import catalog_store as store  # noqa: E402
 from app.core.region_meta import std_prefix  # noqa: E402
 
 SEED = ROOT / "apps" / "maps" / "prefixes" / "catalog.seed.json"

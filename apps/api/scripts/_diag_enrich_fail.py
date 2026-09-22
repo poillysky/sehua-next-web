@@ -3,14 +3,14 @@ from app.core.db import init_db, get_meta_pool
 from app.scrap_library import embed as e
 from app.scrap_library import enrich as en
 from app.scrape import sources_settings as s
-from app import scrap_enrich_strategy as strat
+from app.scrap_library import enrich_strategy as strat
 
 init_db()
 
 # enabled sources for japan
 print("strategy", strat.get_strategy() if hasattr(strat, "get_strategy") else "n/a")
 try:
-    from app import scrap_enrich_strategy as st
+    from app.scrap_library import enrich_strategy as st
     print("strategy file", st.load() if hasattr(st, "load") else dir(st)[:20])
 except Exception as ex:
     print("strat err", ex)
@@ -36,7 +36,7 @@ with pool.connection() as conn, conn.cursor() as cur:
 
 # try fetch one source directly
 from app.scrape_details import fetch_detail_for_source
-from app import outbound_http
+from app.core import outbound_http
 outbound_http.set_thread_allow_flare(True)
 for sid in ["dmm", "javlibrary", "javdb", "r18dev", "avwikidb"]:
     try:

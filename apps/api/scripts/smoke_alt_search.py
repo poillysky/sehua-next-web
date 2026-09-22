@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from urllib.parse import quote
 
-from app import makers_settings as ms
-from app import outbound_http as o
+from app.makers import settings as ms
+from app.core import outbound_http as o
 
 
 def peek(label: str, url: str, **kw) -> str:

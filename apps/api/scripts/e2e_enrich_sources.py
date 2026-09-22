@@ -207,8 +207,8 @@ def run_one(
     code: str,
     include_flare: bool,
 ) -> dict[str, Any]:
-    from app import outbound_http
-    from app import scrape_sources_settings as scrape_src
+    from app.core import outbound_http
+    from app.scrape import sources_settings as scrape_src
     from app.scrape_details import fetch_detail_for_source
     from app.scrap_library.enrich import _clean_actors, _clean_tags, _detail_usable
 
@@ -303,8 +303,8 @@ def main() -> int:
     from app.core.db import init_db
 
     init_db()
-    from app import scrap_enrich_strategy as strat
-    from app import scrape_sources_settings as scrape_src
+    from app.scrap_library import enrich_strategy as strat
+    from app.scrape import sources_settings as scrape_src
     from app.scrape_details import registered_detail_ids
 
     cfg = strat.get_strategy()

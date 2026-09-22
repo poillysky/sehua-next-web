@@ -28,6 +28,7 @@ import app.p115.share as p115_share_svc
 import app.p115.upload as p115_upload
 import app.scrap_library.subtitles as scrap_subtitles
 from app.core.db import ROOT
+from app.core.outbound_http import normalize_proxy_url
 
 log = logging.getLogger(__name__)
 
@@ -101,17 +102,8 @@ def _safe_data_rel(raw: str | None, *, default: str = "data") -> str:
 
 
 def _normalize_proxy_url(raw: str | None) -> str:
-    """裸 host:port → http://；非法则空串。"""
-    s = str(raw or "").strip()
-    if not s:
-        return ""
-    if "://" not in s:
-        s = f"http://{s}"
-    s = s.rstrip("/")
-    parsed = urlparse(s)
-    if parsed.scheme not in ("http", "https", "socks4", "socks5") or not parsed.netloc:
-        return ""
-    return s
+    """裸 host:port → http://；非法则空串。（唯一实现见 app.core.outbound_http）"""
+    return normalize_proxy_url(raw)
 
 
 class Envelope(BaseModel):

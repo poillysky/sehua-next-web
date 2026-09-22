@@ -13,9 +13,9 @@ from urllib.parse import quote
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "apps" / "api"))
 
-from app import makers_settings as ms  # noqa: E402
-from app import outbound_http as o  # noqa: E402
-from app import prefix_catalog_store as store  # noqa: E402
+from app.makers import settings as ms  # noqa: E402
+from app.core import outbound_http as o  # noqa: E402
+from app.prefix import catalog_store as store  # noqa: E402
 from app.core.region_meta import std_prefix  # noqa: E402
 from app.scrape.source_catalog import MIRROR_SEEDS  # noqa: E402
 
