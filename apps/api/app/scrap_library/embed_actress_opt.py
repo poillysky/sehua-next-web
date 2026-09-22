@@ -30,7 +30,8 @@ from app.core.ttl_cache import enforce_max, prune_by_age
 import app.scrap_library.embed as _embed
 import app.scrap_library.embed_catalog as _embed_catalog
 import app.scrap_library.embed_facets as _embed_facets
-from app.scrap_library.embed import (_ACTRESS_OPT_LOCK, _FACETS_CACHE, _actress_opt_job, _hydrate_actress_opt_job, _split_tokens, _vec_literal, get_job_status, log)
+from app.scrap_library.embed import (_split_tokens, _vec_literal, log)
+from app.scrap_library.embed_runtime import (_ACTRESS_OPT_LOCK, _FACETS_CACHE, _actress_opt_job, _hydrate_actress_opt_job, get_job_status)
 
 
 def _append_actress_clause(

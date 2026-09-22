@@ -8,14 +8,13 @@ import {
   testPansou,
 } from '@/lib/api';
 import { Switch } from '@/components/ui/switch';
-import { AppPush } from '@/components/ui/AppPush';
-import { AppMsg } from '@/components/ui/AppMsg';
 import { cn } from '@/lib/utils';
 import {
   testResultText,
   usePanelAction,
   type StatusReporter,
 } from '@/hooks/usePanelAction';
+import { ConnectionPanelShell } from './connection/ConnectionPanelShell';
 
 export function PansouPanel({
   onBack,
@@ -91,7 +90,17 @@ export function PansouPanel({
   }
 
   return (
-    <AppPush title="盘搜 PanSou" onBack={onBack}>
+    <ConnectionPanelShell
+      title="盘搜 PanSou"
+      onBack={onBack}
+      msg={msg}
+      onDismissMsg={() => setMsg('')}
+      loading={loading}
+      busy={busy}
+      onTest={() => void onTest()}
+      onSave={() => void onSave()}
+      testLabel="测试"
+    >
       <ul className="settings-group">
         <li>
           <div className="settings-kv">
@@ -104,7 +113,7 @@ export function PansouPanel({
                   : 'settings-nav__status--warn',
               )}
             >
-              {loading ? '…' : enabled ? '已启用' : '未启用'}
+              {enabled ? '已启用' : '未启用'}
             </span>
           </div>
         </li>
@@ -156,30 +165,6 @@ export function PansouPanel({
           </label>
         </div>
       </section>
-
-      <div className="app-actions">
-        <button
-          type="button"
-          className="app-btn-secondary"
-          disabled={busy || loading}
-          onClick={() => void onTest()}
-        >
-          测试
-        </button>
-        <button
-          type="button"
-          className="app-btn-primary"
-          style={{ flex: 1 }}
-          disabled={busy || loading}
-          onClick={() => void onSave()}
-        >
-          保存
-        </button>
-      </div>
-
-      <AppMsg allowSelect onDismiss={() => setMsg('')}>
-        {msg}
-      </AppMsg>
-    </AppPush>
+    </ConnectionPanelShell>
   );
 }

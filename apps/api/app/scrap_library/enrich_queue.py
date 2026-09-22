@@ -35,7 +35,16 @@ import app.scrap_library.enrich_history as _enrich_history
 import app.scrap_library.enrich_retry as _enrich_retry
 import app.scrap_library.enrich_scan as _enrich_scan
 import app.scrap_library.enrich_status as _enrich_status
-from app.scrap_library.enrich import (_CLASSIFIED_SKIP_TTL_SEC, _COUNTS_CACHE_TTL_SEC, _LOCAL_STATUS_TOTALS, _QUEUE_SCAN_LOCK, _QUEUE_SCAN_STATE, _SOFT_SUCCESS_GAPS, _STALE_RUNNING_MIN_INTERVAL_SEC, _SUCCESS_BLOCK_GAPS, _classified_skip_cache, _counts_cache, _counts_ok_cache, _demoted_false_dones, _enrich_job, _enrich_lock, _ensure_local_status_totals_loaded, _scrape_counts_cache, _set_progress, _set_queue_scan_progress, _stale_running_last, log)
+from app.scrap_library.enrich import (_CLASSIFIED_SKIP_TTL_SEC, _SOFT_SUCCESS_GAPS, _STALE_RUNNING_MIN_INTERVAL_SEC, _SUCCESS_BLOCK_GAPS, _classified_skip_cache, _demoted_false_dones, _stale_running_last, log)
+from app.scrap_library.enrich_queue_io import (
+    _COUNTS_CACHE_TTL_SEC,
+    _LOCAL_STATUS_TOTALS,
+    _counts_cache,
+    _counts_ok_cache,
+    _ensure_local_status_totals_loaded,
+    _scrape_counts_cache,
+)
+from app.scrap_library.enrich_runtime import (_QUEUE_SCAN_LOCK, _QUEUE_SCAN_STATE, _enrich_job, _enrich_lock, _set_progress, _set_queue_scan_progress)
 
 
 _QUEUE_LOG_DONE_KEEP = 4000
@@ -107,14 +116,14 @@ def _queue_scan_preview_item(
         item["partialOk"] = False
         item["error"] = ""
     elif kind == "soft":
-        soft_gaps = [g for g in gaps if g in _SOFT_SUCCESS_GAPS]
+        soft_gaps = [g for g in gaps if g in _enrich._SOFT_SUCCESS_GAPS]
         labels = _enrich_retry._gap_labels(soft_gaps)
         item["status"] = "done"
         item["partialOk"] = True
         item["error"] = _enrich_retry._format_soft_ok_error(labels or ["女优"])
         item["gapsAfter"] = soft_gaps
     else:
-        block = [g for g in gaps if g in _SUCCESS_BLOCK_GAPS] or list(gaps or [])
+        block = [g for g in gaps if g in _enrich._SUCCESS_BLOCK_GAPS] or list(gaps or [])
         labels = _enrich_retry._gap_labels(block)
         item["status"] = "fail"
         item["partialOk"] = False
@@ -123,23 +132,23 @@ def _queue_scan_preview_item(
 
 
 def _queue_scan_snapshot() -> dict[str, Any] | None:
-    with _QUEUE_SCAN_LOCK:
-        if not _QUEUE_SCAN_STATE.get("active"):
+    with _enrich._QUEUE_SCAN_LOCK:
+        if not _enrich._QUEUE_SCAN_STATE.get("active"):
             return None
         return {
             "active": True,
-            "region": str(_QUEUE_SCAN_STATE.get("region") or ""),
-            "stage": str(_QUEUE_SCAN_STATE.get("stage") or ""),
-            "label": str(_QUEUE_SCAN_STATE.get("label") or ""),
-            "scanned": int(_QUEUE_SCAN_STATE.get("scanned") or 0),
-            "total": int(_QUEUE_SCAN_STATE.get("total") or 0),
-            "done": int(_QUEUE_SCAN_STATE.get("done") or 0),
-            "soft": int(_QUEUE_SCAN_STATE.get("soft") or 0),
-            "fail": int(_QUEUE_SCAN_STATE.get("fail") or 0),
-            "pending": int(_QUEUE_SCAN_STATE.get("pending") or 0),
-            "samplesDone": list(_QUEUE_SCAN_STATE.get("samplesDone") or []),
-            "samplesSoft": list(_QUEUE_SCAN_STATE.get("samplesSoft") or []),
-            "samplesFail": list(_QUEUE_SCAN_STATE.get("samplesFail") or []),
+            "region": str(_enrich._QUEUE_SCAN_STATE.get("region") or ""),
+            "stage": str(_enrich._QUEUE_SCAN_STATE.get("stage") or ""),
+            "label": str(_enrich._QUEUE_SCAN_STATE.get("label") or ""),
+            "scanned": int(_enrich._QUEUE_SCAN_STATE.get("scanned") or 0),
+            "total": int(_enrich._QUEUE_SCAN_STATE.get("total") or 0),
+            "done": int(_enrich._QUEUE_SCAN_STATE.get("done") or 0),
+            "soft": int(_enrich._QUEUE_SCAN_STATE.get("soft") or 0),
+            "fail": int(_enrich._QUEUE_SCAN_STATE.get("fail") or 0),
+            "pending": int(_enrich._QUEUE_SCAN_STATE.get("pending") or 0),
+            "samplesDone": list(_enrich._QUEUE_SCAN_STATE.get("samplesDone") or []),
+            "samplesSoft": list(_enrich._QUEUE_SCAN_STATE.get("samplesSoft") or []),
+            "samplesFail": list(_enrich._QUEUE_SCAN_STATE.get("samplesFail") or []),
         }
 
 
@@ -152,13 +161,13 @@ def _queue_scan_add_sample(kind: str, item: dict[str, Any]) -> None:
     }.get(str(kind or "").strip())
     if not key or not isinstance(item, dict):
         return
-    with _QUEUE_SCAN_LOCK:
-        if not _QUEUE_SCAN_STATE.get("active"):
+    with _enrich._QUEUE_SCAN_LOCK:
+        if not _enrich._QUEUE_SCAN_STATE.get("active"):
             return
-        bucket = _QUEUE_SCAN_STATE.get(key)
+        bucket = _enrich._QUEUE_SCAN_STATE.get(key)
         if not isinstance(bucket, list):
             bucket = []
-            _QUEUE_SCAN_STATE[key] = bucket
+            _enrich._QUEUE_SCAN_STATE[key] = bucket
         if len(bucket) >= _QUEUE_SCAN_SAMPLE_CAP:
             return
         code_u = str(item.get("code") or "").strip().upper()
@@ -174,7 +183,7 @@ def _queue_scan_add_sample(kind: str, item: dict[str, Any]) -> None:
 
 
 def _clear_queue_scan_progress() -> None:
-    _set_queue_scan_progress(active=False, notify=True)
+    _enrich._set_queue_scan_progress(active=False, notify=True)
 
 
 def _queue_log_status_counts_db_ex(region: str) -> tuple[dict[str, int], bool]:
@@ -239,8 +248,8 @@ def _queue_log_scrape_counts_db(region: str) -> dict[str, int]:
     if not rid:
         return out
     now = time.monotonic()
-    hit = _scrape_counts_cache.get(rid)
-    if hit and (now - float(hit[0])) < _COUNTS_CACHE_TTL_SEC:
+    hit = _enrich._scrape_counts_cache.get(rid)
+    if hit and (now - float(hit[0])) < _enrich._COUNTS_CACHE_TTL_SEC:
         return dict(hit[1])
     try:
         from app.core.db import connect, init_db
@@ -273,18 +282,19 @@ def _queue_log_scrape_counts_db(region: str) -> dict[str, int]:
     except Exception as e:  # noqa: BLE001
         log.debug("queue log scrape counts db failed region=%s: %s", rid, e)
         return dict(out)
-    _scrape_counts_cache[rid] = (now, dict(out))
-    if len(_scrape_counts_cache) > 64:
-        _scrape_counts_cache.clear()
+    _enrich._scrape_counts_cache[rid] = (now, dict(out))
+    if len(_enrich._scrape_counts_cache) > 64:
+        _enrich._scrape_counts_cache.clear()
     return dict(out)
 
 
 def _queue_log_status_counts(region: str, *, fresh: bool = False) -> dict[str, int]:
-    """队列表按 status 计数（角标用；done 再拆完整成功 / 软成功）。
+    """队列表按 status 计数（角标唯一真相；done 再拆完整成功 / 软成功）。
 
     默认走 ~1.2s 短缓存：状态接口/轮询高频重复查询同一个分区时，1 秒级的
-    角标延迟不可见，但能把「每帧一次 DB + 一次纠偏扫描」的固定开销摊掉。
+    角标延迟不可见，但能把「每帧一次 DB」的固定开销摊掉。
     需要真实值（暂停/结束判定、写检查点）时传 fresh=True。
+    tip 不再参与角标合并。
     """
     rid = _enrich._queue_log_region(region)
     out = _enrich_status._empty_queue_counts()
@@ -292,18 +302,18 @@ def _queue_log_status_counts(region: str, *, fresh: bool = False) -> dict[str, i
         return out
     # 纠偏（假成功回滚 / 软成功提升）只在扫描·开刮时跑，绝不挂在状态读路径。
     if not fresh:
-        hit = _counts_cache.get(rid)
-        if hit and (time.monotonic() - float(hit[0])) < _COUNTS_CACHE_TTL_SEC:
+        hit = _enrich._counts_cache.get(rid)
+        if hit and (time.monotonic() - float(hit[0])) < _enrich._COUNTS_CACHE_TTL_SEC:
             return dict(hit[1])
     raw, db_ok = _queue_log_status_counts_db_ex(rid)
-    _counts_ok_cache[rid] = (time.monotonic(), bool(db_ok))
-    if len(_counts_ok_cache) > 64:
-        _counts_ok_cache.clear()
+    _enrich._counts_ok_cache[rid] = (time.monotonic(), bool(db_ok))
+    if len(_enrich._counts_ok_cache) > 64:
+        _enrich._counts_ok_cache.clear()
     out = _enrich_status._apply_local_status_totals(raw, rid)
     out = _enrich_status._clamp_pending_badge(out, rid)
-    _counts_cache[rid] = (time.monotonic(), dict(out))
-    if len(_counts_cache) > 64:
-        _counts_cache.clear()
+    _enrich._counts_cache[rid] = (time.monotonic(), dict(out))
+    if len(_enrich._counts_cache) > 64:
+        _enrich._counts_cache.clear()
     return out
 
 
@@ -562,9 +572,9 @@ def _queue_log_reopen_stale_running(
         return 0
     if not force:
         now = time.monotonic()
-        if (now - float(_stale_running_last.get(rid) or 0.0)) < _STALE_RUNNING_MIN_INTERVAL_SEC:
+        if (now - float(_enrich._stale_running_last.get(rid) or 0.0)) < _enrich._STALE_RUNNING_MIN_INTERVAL_SEC:
             return 0
-        _stale_running_last[rid] = now
+        _enrich._stale_running_last[rid] = now
     keep = {str(x or "").strip() for x in (keep_item_ids or set()) if str(x or "").strip()}
     try:
         from app.core.db import connect, init_db
@@ -1010,10 +1020,10 @@ def _ensure_queue_log_ids(
     if to_insert:
         n = len(to_insert)
         running = False
-        with _enrich_lock:
-            running = bool(_enrich_job.get("running"))
+        with _enrich._enrich_lock:
+            running = bool(_enrich._enrich_job.get("running"))
         if running:
-            _set_progress(
+            _enrich._set_progress(
                 stage="queue",
                 label=f"写入队列日志 0/{n}",
                 done=0,
@@ -1027,7 +1037,7 @@ def _ensure_queue_log_ids(
             got = _enrich._queue_log_insert_many(region, chunk)
             ids.extend(got)
             if running:
-                _set_progress(
+                _enrich._set_progress(
                     stage="queue",
                     label=f"写入队列日志 {min(start + len(chunk), n)}/{n}",
                     done=min(start + len(chunk), n),
@@ -1400,8 +1410,8 @@ def _queue_log_classified_skip_keys(
         return empty
     now = time.time()
     if not fresh:
-        hit = _classified_skip_cache.get(rid)
-        if hit and now - float(hit[0]) < _CLASSIFIED_SKIP_TTL_SEC:
+        hit = _enrich._classified_skip_cache.get(rid)
+        if hit and now - float(hit[0]) < _enrich._CLASSIFIED_SKIP_TTL_SEC:
             return hit[1], hit[2]
     iids: set[str] = set()
     codes: set[str] = set()
@@ -1433,7 +1443,7 @@ def _queue_log_classified_skip_keys(
     except Exception as e:  # noqa: BLE001
         log.warning("load classified skip keys failed region=%s: %s", rid, e)
         return empty
-    _classified_skip_cache[rid] = (now, iids, codes)
+    _enrich._classified_skip_cache[rid] = (now, iids, codes)
     return iids, codes
 
 
@@ -1469,7 +1479,7 @@ def _queue_log_clear_local_scan_status(region: str) -> int:
                 conn.commit()
             except Exception:  # noqa: BLE001
                 pass
-            _counts_cache.pop(rid, None)
+            _enrich._counts_cache.pop(rid, None)
             return max(0, n)
     except Exception as e:  # noqa: BLE001
         log.warning("clear local_scan status failed region=%s: %s", rid, e)
@@ -1555,7 +1565,7 @@ def _queue_log_insert_local_status_samples(
                     or now - last_progress_at >= 0.4
                 ):
                     last_progress_at = now
-                    _set_queue_scan_progress(
+                    _enrich._set_queue_scan_progress(
                         region=rid,
                         stage="write",
                         label=(
@@ -1574,7 +1584,7 @@ def _queue_log_insert_local_status_samples(
         log.warning(
             "insert local status rows failed region=%s: %s", rid, e
         )
-    _counts_cache.pop(rid, None)
+    _enrich._counts_cache.pop(rid, None)
     return {
         "done": int(maps.done_n or 0),
         "soft": int(maps.soft_n or 0),
@@ -1840,9 +1850,9 @@ def _queue_log_demote_false_dones_budgeted(
     if not rid:
         return 0
     # 标记已调度，避免同一进程反复开线程；未扫完也不再强制全量挡启动
-    if rid in _demoted_false_dones:
+    if rid in _enrich._demoted_false_dones:
         return 0
-    _demoted_false_dones.add(rid)
+    _enrich._demoted_false_dones.add(rid)
     t0 = time.monotonic()
     budget = max(1.0, float(time_budget_sec or 8.0))
     try:
@@ -2008,11 +2018,11 @@ def _queue_log_promote_actress_soft_fails(region: str) -> int:
                 except Exception:  # noqa: BLE001
                     gaps_hint = []
                 soft_by_err = _enrich_retry._is_soft_remain_error(err)
-                soft_hint = [g for g in gaps_hint if g in _SOFT_SUCCESS_GAPS]
+                soft_hint = [g for g in gaps_hint if g in _enrich._SOFT_SUCCESS_GAPS]
                 # 仅女优/片商软缺口，或「无硬缺口」的历史 fail（可能升完整成功）
                 soft_by_gaps = bool(soft_hint) or (
                     bool(gaps_hint)
-                    and not any(g in _SUCCESS_BLOCK_GAPS for g in gaps_hint)
+                    and not any(g in _enrich._SUCCESS_BLOCK_GAPS for g in gaps_hint)
                 )
                 if not soft_by_err and not soft_by_gaps:
                     continue
@@ -2026,10 +2036,10 @@ def _queue_log_promote_actress_soft_fails(region: str) -> int:
                     _, disk_gaps = _enrich_scan._local_folder_gaps(folder)
                 except Exception:  # noqa: BLE001
                     continue
-                if any(g in _SUCCESS_BLOCK_GAPS for g in disk_gaps):
+                if any(g in _enrich._SUCCESS_BLOCK_GAPS for g in disk_gaps):
                     continue
                 soft_only = [
-                    g for g in disk_gaps if g in _SOFT_SUCCESS_GAPS
+                    g for g in disk_gaps if g in _enrich._SOFT_SUCCESS_GAPS
                 ]
                 ids.append(lid)
                 # 磁盘无女优/片商缺口 → 完整成功（剧情/外链不算软成功）
@@ -2138,7 +2148,7 @@ def _queue_log_normalize_soft_to_full_success(region: str) -> int:
                 if not isinstance(payload, dict):
                     payload = {}
                 after = list(payload.get("gapsAfter") or gaps or [])
-                soft_gaps = [g for g in after if str(g) in _SOFT_SUCCESS_GAPS]
+                soft_gaps = [g for g in after if str(g) in _enrich._SOFT_SUCCESS_GAPS]
                 # 仍缺女优/片商 → 保留软成功，只规范化文案/gaps
                 if soft_gaps or _enrich_retry._is_soft_remain_error(err):
                     if soft_gaps and (
@@ -2182,8 +2192,8 @@ def _queue_log_normalize_soft_to_full_success(region: str) -> int:
             # 角标 tip 与库对齐（软成功降档必须立刻反映到 UI）
             try:
                 dbc = _queue_log_status_counts_db(rid)
-                tip_prev = (_LOCAL_STATUS_TOTALS.get(rid) or {}) if rid else {}
-                _ensure_local_status_totals_loaded()
+                tip_prev = (_enrich._LOCAL_STATUS_TOTALS.get(rid) or {}) if rid else {}
+                _enrich._ensure_local_status_totals_loaded()
                 _enrich_status._set_local_status_totals(
                     rid,
                     done=int(dbc.get("done") or 0),

@@ -20,16 +20,16 @@ export default function HomePage() {
       <DeviceFrame label="资源仓库">
         <TabProvider>
           <AppShell>
-            <TabPane>
+            <TabPane tab="/">
               <HomeScreen />
             </TabPane>
-            <TabPane>
+            <TabPane tab="/media">
               <MediaScreen />
             </TabPane>
-            <TabPane>
+            <TabPane tab="/makers">
               <MakersScreen />
             </TabPane>
-            <TabPane>
+            <TabPane tab="/settings">
               <SettingsScreen />
             </TabPane>
           </AppShell>

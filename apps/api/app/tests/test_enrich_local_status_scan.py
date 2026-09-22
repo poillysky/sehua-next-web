@@ -127,17 +127,17 @@ class LocalNfoStatusMapsTests(unittest.TestCase):
             self.assertEqual(len(maps.fail_cands), 1)
 
     def test_status_totals_overlay(self) -> None:
+        """tip 不再覆盖角标；队列表 counts 原样返回。"""
         E._LOCAL_STATUS_TOTALS_LOADED = True  # noqa: SLF001
         E._set_local_status_totals("japan_censored", done=10, soft=20, fail=3)
         out = E._apply_local_status_totals(
             {"pending": 1, "running": 0, "done": 0, "soft": 0, "fail": 0},
             "japan_censored",
         )
-        self.assertEqual(out["done"], 10)
-        self.assertEqual(out["soft"], 20)
-        self.assertEqual(out["fail"], 3)
+        self.assertEqual(out["done"], 0)
+        self.assertEqual(out["soft"], 0)
+        self.assertEqual(out["fail"], 0)
         self.assertEqual(out["pending"], 1)
-        # 库有数据时以队列表为准，不再与 tip 合并
         out_soft = E._apply_local_status_totals(
             {"pending": 1, "running": 0, "done": 100, "soft": 5, "fail": 1},
             "japan_censored",
@@ -167,16 +167,17 @@ class LocalNfoStatusMapsTests(unittest.TestCase):
                 self.assertTrue(path.is_file())
                 E._LOCAL_STATUS_TOTALS.clear()  # noqa: SLF001
                 E._LOCAL_STATUS_TOTALS_LOADED = False  # noqa: SLF001
-                # 库分类全 0 → 完全采用 tip：本用例只验证落盘 / 重载往返，
-                # done=1001 只可能来自重新读回的文件。
+                # tip 仍可落盘重载；但角标路径不再读 tip
+                E._ensure_local_status_totals_loaded()
+                tip = E._LOCAL_STATUS_TOTALS.get("fc2") or {}  # noqa: SLF001
+                self.assertEqual(int(tip.get("done") or 0), 1001)
+                self.assertEqual(int(tip.get("soft") or 0), 2002)
+                self.assertEqual(int(tip.get("fail") or 0), 3)
                 out = E._apply_local_status_totals(
                     {"pending": 0, "running": 0, "done": 0, "soft": 0, "fail": 0},
                     "fc2",
                 )
-                self.assertEqual(out["done"], 1001)
-                self.assertEqual(out["soft"], 2002)
-                self.assertEqual(out["fail"], 3)
-                # 库有数据时以队列表为准
+                self.assertEqual(out["done"], 0)
                 out_mix = E._apply_local_status_totals(
                     {"pending": 0, "running": 0, "done": 500, "soft": 500, "fail": 1},
                     "fc2",
@@ -317,15 +318,15 @@ class LocalNfoStatusMapsTests(unittest.TestCase):
         self.assertEqual(fail_n, 1)
 
     def test_pending_badge_formula_vector_total(self) -> None:
-        """未处理角标 = 向量所有番号 − 成功 − 软成功 − 失败。"""
+        """未处理估算公式：向量总数 − 成功 − 软成功 − 失败；角标不再读 tip。"""
         E._set_local_status_totals("japan_censored", done=10, soft=5, fail=3)
         out = E._apply_local_status_totals(
             {"pending": 0, "running": 0, "done": 0, "soft": 0, "fail": 0},
             "japan_censored",
         )
-        self.assertEqual(out["done"], 10)
-        self.assertEqual(out["soft"], 5)
-        self.assertEqual(out["fail"], 3)
+        self.assertEqual(out["done"], 0)
+        self.assertEqual(out["soft"], 0)
+        self.assertEqual(out["fail"], 0)
         # 公式本身：total 100 − 18 = 82
         self.assertEqual(max(0, 100 - 10 - 5 - 3), 82)
         E._clear_local_status_totals("japan_censored")

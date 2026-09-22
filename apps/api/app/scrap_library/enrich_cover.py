@@ -31,14 +31,15 @@ from app.scrap_library import enrich_monitor as enrich_mon
 import app.scrap_library.enrich as _enrich
 import app.scrap_library.enrich_detail as _enrich_detail
 import app.scrap_library.enrich_merge as _enrich_merge
-from app.scrap_library.enrich import (_COVER_FAIL_LABEL, _COVER_JOB_WORKERS_MAX, _COVER_JOB_WORKERS_MIN, _ITEM_WORKERS_DEFAULT, _ITEM_WORKERS_MAX, _cover_job_slot, _enrich_job, _enrich_lock, _get_cover_job_pool, _poster_ok_cache)
+from app.scrap_library.enrich import (_COVER_FAIL_LABEL, _COVER_JOB_WORKERS_MAX, _COVER_JOB_WORKERS_MIN, _ITEM_WORKERS_DEFAULT, _ITEM_WORKERS_MAX, _cover_job_slot, _get_cover_job_pool, _poster_ok_cache)
+from app.scrap_library.enrich_runtime import (_enrich_job, _enrich_lock)
 
 
 def _cover_fail_message(cover_fail: str) -> str:
     cf = str(cover_fail or "").strip()
     if not cf:
         return "封面空图或下载失败"
-    return f"封面失败:{_COVER_FAIL_LABEL.get(cf, cf)}"
+    return f"封面失败:{_enrich._COVER_FAIL_LABEL.get(cf, cf)}"
 
 
 def _poster_rank(url: str) -> int:
@@ -209,25 +210,25 @@ def _cover_job_workers_target() -> int:
     番号 5 → 封面 10；番号 8 → 12；番号 16 → 16。
     避免「元数据工人全卡在封面排队」；也不盲目开太大打爆 CDN。
     """
-    iw = int(_ITEM_WORKERS_DEFAULT)
+    iw = int(_enrich._ITEM_WORKERS_DEFAULT)
     try:
         from app.scrap_library.enrich_strategy import get_strategy
 
         iw = max(
             1,
             min(
-                int(_ITEM_WORKERS_MAX),
-                int(get_strategy().get("itemWorkers") or _ITEM_WORKERS_DEFAULT),
+                int(_enrich._ITEM_WORKERS_MAX),
+                int(get_strategy().get("itemWorkers") or _enrich._ITEM_WORKERS_DEFAULT),
             ),
         )
     except Exception:  # noqa: BLE001
         pass
     # 番号 5 → 封面 10；番号 8 → 16；再夹在 [MIN, MAX]
     want = max(iw * 2, iw + 4)
-    raw = max(int(_COVER_JOB_WORKERS_MIN), min(int(_COVER_JOB_WORKERS_MAX), want))
+    raw = max(int(_enrich._COVER_JOB_WORKERS_MIN), min(int(_enrich._COVER_JOB_WORKERS_MAX), want))
     from app.core.container_budget import cap_parallel
 
-    return cap_parallel(raw, tight=2, small=4, hard=int(_COVER_JOB_WORKERS_MAX))
+    return cap_parallel(raw, tight=2, small=4, hard=int(_enrich._COVER_JOB_WORKERS_MAX))
 
 
 def _download_covers(
@@ -252,8 +253,8 @@ def _download_covers(
     code_u = str(code or "").strip().upper()
     item_id_s = str(item_id or "").strip()
     batch_mode = False
-    with _enrich_lock:
-        batch_mode = bool(_enrich_job.get("running"))
+    with _enrich._enrich_lock:
+        batch_mode = bool(_enrich._enrich_job.get("running"))
 
     cfg = normalize_cover_settings(
         cover_cfg
@@ -291,8 +292,8 @@ def _download_covers(
 
     # 批量：走封面专用池 + 动态闸门；单刷：直接跑，避免池排队拖尾
     if batch_mode:
-        with _cover_job_slot():
-            return _get_cover_job_pool().submit(_run).result()
+        with _enrich._cover_job_slot():
+            return _enrich._get_cover_job_pool().submit(_run).result()
     return _run()
 
 
@@ -398,7 +399,7 @@ def list_local_covers(
     if folder is None:
         return empty
     try:
-        media_root = media_dir().resolve()
+        media_root = _enrich.media_dir().resolve()
         folder_rel = folder.relative_to(media_root).as_posix()
     except ValueError:
         folder_rel = folder.name

@@ -31,7 +31,8 @@ import app.scrap_library.embed as _embed
 import app.scrap_library.embed_catalog as _embed_catalog
 import app.scrap_library.embed_poster as _embed_poster
 import app.scrap_library.embed_recommend as _embed_recommend
-from app.scrap_library.embed import (_CODEISH_RE, _FACETS_CACHE, _FACETS_SNAP_DIR, _FACETS_SNAP_VERSION, _FACET_LINE_RE, _ITEMS_HUB_CACHE, _append_prefix_clause, _append_studio_clause, _facets_snap_lock, _prefix_blurb, _recommend_snap_path, _split_tokens, _studio_blurb, _studio_display_name, _studio_match_key, log)
+from app.scrap_library.embed import (_CODEISH_RE, _FACETS_SNAP_DIR, _FACETS_SNAP_VERSION, _FACET_LINE_RE, _append_prefix_clause, _append_studio_clause, _prefix_blurb, _recommend_snap_path, _split_tokens, _studio_blurb, _studio_display_name, _studio_match_key, log)
+from app.scrap_library.embed_runtime import (_FACETS_CACHE, _ITEMS_HUB_CACHE, _facets_snap_lock)
 
 
 _DISPLAY_READY_SQL = (

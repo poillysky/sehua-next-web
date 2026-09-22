@@ -31,7 +31,13 @@ from app.scrap_library import enrich_monitor as enrich_mon
 import app.scrap_library.enrich as _enrich
 import app.scrap_library.enrich_cover as _enrich_cover
 import app.scrap_library.enrich_merge as _enrich_merge
-from app.scrap_library.enrich import (_ACT_TAG_FRAG_RE, _JUNK_ACTORS, _JUNK_TAGS, _JUNK_TITLE_MARKERS, _TITLE_TAIL_NOISE, _TRAD_HINT_RE, _TRAILING_ALT_CODE_RE)
+from app.scrap_library.enrich_junk import (
+    _ACT_TAG_FRAG_RE,
+    _JUNK_ACTORS,
+    _JUNK_TAGS,
+    _JUNK_TITLE_MARKERS,
+)
+from app.scrap_library.enrich import (_TITLE_TAIL_NOISE, _TRAD_HINT_RE, _TRAILING_ALT_CODE_RE)
 
 
 _NAME_PAIR_CENSOR_RESTORE = (
@@ -110,7 +116,7 @@ def _looks_like_act_tag_token(name: str) -> bool:
         return False
     if t in _enrich._JUNK_ACTOR_TAGS or t.casefold() in _enrich._JUNK_ACTOR_TAGS:
         return True
-    if _ACT_TAG_FRAG_RE.search(t):
+    if _enrich._ACT_TAG_FRAG_RE.search(t):
         return True
     # 叠词玩法（イチャイチャ / モジモジ）
     if re.fullmatch(r"([ぁ-んァ-ン]{2,4})\1", t):
@@ -128,7 +134,7 @@ def _looks_like_person_name_tag(tag: str) -> bool:
     if _looks_like_act_tag_token(t):
         return False
     key = t.casefold()
-    if key in _JUNK_ACTORS or key in _enrich._JUNK_ACTOR_TAGS or t in _JUNK_TITLE_MARKERS:
+    if key in _enrich._JUNK_ACTORS or key in _enrich._JUNK_ACTOR_TAGS or t in _enrich._JUNK_TITLE_MARKERS:
         return False
     if any(s in t for s in _enrich._JUNK_ACTOR_SUBSTR):
         return False
@@ -146,7 +152,7 @@ def _looks_like_person_name_tag(tag: str) -> bool:
         return False
     if _looks_like_actor_sentence_frag(t):
         return False
-    return _enrich._is_plausible_actress_name(t)
+    return _is_plausible_actress_name(t)
 
 
 def _names_from_title_pairs(title: str) -> list[str]:
@@ -521,7 +527,7 @@ def _clean_tags(tags: list[str] | None, *, fold: bool = True) -> list[str]:
     """清洗标签：去空/超长/垃圾词/按字形去重。
 
     `fold=True`（默认）会先做繁简/异体/日文旧字归一，用于**最终输出**去重。
-    `fold=False` 用于**源侧明细**（`_detail_usable` 与源解析后的 detail）：
+    `fold=False` 用于**源侧明细**（`_enrich._detail_usable` 与源解析后的 detail）：
     因为 `_score_tags` 依赖「繁体惩罚」来偏好简中源，若提前折叠，
     javbus 这类繁中源会失去惩罚、反压过 airav/iqqtv（案例 ACHJ-078：
     折叠后 javbus 116→134，与 E2E 预期 airav_io@123 冲突）。
@@ -537,7 +543,7 @@ def _clean_tags(tags: list[str] | None, *, fold: bool = True) -> list[str]:
         if not tag or len(tag) > 30:
             continue
         key = tag.casefold()
-        if raw_tag.casefold() in _JUNK_TAGS or key in _JUNK_TAGS or key in seen:
+        if raw_tag.casefold() in _enrich._JUNK_TAGS or key in _enrich._JUNK_TAGS or key in seen:
             continue
         if _is_platform_exclusivity_label(raw_tag) or _is_platform_exclusivity_label(tag):
             continue
@@ -563,7 +569,7 @@ def _has_kana(text: str) -> bool:
 
 
 def _has_traditional(text: str) -> bool:
-    return bool(_TRAD_HINT_RE.search(str(text or "")))
+    return bool(_enrich._TRAD_HINT_RE.search(str(text or "")))
 
 
 def _has_han(text: str) -> bool:
@@ -752,7 +758,7 @@ def _title_trailing_person_name(title: str) -> str:
     if not m:
         return ""
     nm = m.group(1).strip()
-    if len(nm) < 2 or nm in _TITLE_TAIL_NOISE:
+    if len(nm) < 2 or nm in _enrich._TITLE_TAIL_NOISE:
         return ""
     if nm.casefold() in _enrich._JUNK_ACTOR_TAGS or nm in _enrich._JUNK_ACTOR_TAGS:
         return ""
@@ -915,7 +921,7 @@ def _norm_code_token(s: str) -> str:
 def _trailing_alt_code(title: str, code: str) -> str:
     """标题末尾挂的其它品番（与本号不同）；无则空串。"""
     t = str(title or "").strip()
-    m = _TRAILING_ALT_CODE_RE.search(t)
+    m = _enrich._TRAILING_ALT_CODE_RE.search(t)
     if not m:
         return ""
     alt = _norm_code_token(m.group(1))
@@ -933,7 +939,7 @@ def _strip_trailing_alt_code(title: str, code: str) -> str:
     alt = _trailing_alt_code(t, code)
     if not alt:
         return t
-    m = _TRAILING_ALT_CODE_RE.search(t)
+    m = _enrich._TRAILING_ALT_CODE_RE.search(t)
     if not m:
         return t
     return t[: m.start()].rstrip(" 　-–—|｜/")
@@ -1120,7 +1126,7 @@ def _score_year(value: str, *, source_id: str) -> int:
 def _score_actors(names: list[str] | None, *, source_id: str) -> int:
     import app.scrape.source_catalog as catalog
 
-    actors = _enrich._clean_actors(names)
+    actors = _clean_actors(names)
     if not actors:
         return -10_000
     score = catalog.field_trust(source_id, "actors")
@@ -1342,7 +1348,7 @@ def _prune_junk_actors(parent: ET.Element) -> bool:
         text = "".join(nm.itertext()).strip()
         if text:
             before.append(text)
-    cleaned = _enrich._clean_actors(before)
+    cleaned = _clean_actors(before)
     if cleaned == before:
         return False
     for a in list(parent.findall("actor")):
@@ -1384,3 +1390,94 @@ def _replace_list_tags(
     _enrich_merge._merge_list_tags(parent, tag, values, max_n=max_n)
     after = ["".join(el.itertext()).strip() for el in parent.findall(tag)]
     return before != after
+
+def _is_plausible_actress_name(name: str) -> bool:
+    """女优栏正向形态：宁可空着，也不收体型/玩法标签。"""
+    t = str(name or "").strip()
+    if not t or len(t) < 2 or len(t) > 40:
+        return False
+    if _looks_like_act_tag_token(t):
+        return False
+    if _looks_like_actor_sentence_frag(t):
+        return False
+    # 姓 + 假名读
+    if re.fullmatch(r"[一-龥々〆ヵヶ]{1,4}[ぁ-んァ-ンー･・]{1,10}", t):
+        return True
+    # 姓 名（官网空格分隔：横畠 杏菜 / 中村 あゆみ）
+    if re.fullmatch(
+        r"[一-龥々〆ヵヶ]{1,4}[\s　]+[一-龥々ぁ-んァ-ンー･・]{1,10}",
+        t,
+    ):
+        return True
+    # 纯汉字人名（题材 junk / act_tag 已滤）
+    # 2～6 字：覆盖「宮田加奈子」「小向美奈子」等 5 字姓名（旧上限 4 会误杀）
+    if re.fullmatch(r"[一-龥々]{2,6}", t):
+        if t.endswith(("娘", "母", "妻", "父", "妇", "婦", "女", "男", "生")):
+            return False
+        return True
+    # 西洋名 / 中间点名
+    if re.search(r"[A-Za-z]", t) or "・" in t or "·" in t:
+        return True
+    # 纯假名短艺名（ことね）；叠词与体型词已在 act_tag 拦
+    if re.fullmatch(r"[ぁ-んァ-ンー]{2,8}", t):
+        # 描述性接头：デカ/超/巨 + 体词
+        if re.match(r"^(デカ|超|巨|美|微|貧|贫)", t) and len(t) >= 3:
+            return False
+        return True
+    # 汉字 + 假名其它短混合
+    if (
+        re.search(r"[一-龥]", t)
+        and re.search(r"[ぁ-んァ-ン]", t)
+        and len(t) <= 16
+    ):
+        return True
+    return False
+
+
+def _clean_actors(names: list[str] | None) -> list[str]:
+    from app.scrape.metadata_optimize import _clean_actor_raw
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in names or []:
+        name = _clean_actor_raw(str(raw or ""))
+        if not name or len(name) > 40:
+            continue
+        key = name.casefold()
+        if key in _enrich._JUNK_ACTORS or key in _enrich._JUNK_ACTOR_TAGS or key in seen:
+            continue
+        if name in _enrich._JUNK_TITLE_MARKERS:
+            continue
+        if _looks_like_act_tag_token(name):
+            continue
+        if _is_platform_exclusivity_label(name):
+            continue
+        if any(s in name.casefold() for s in _enrich._JUNK_ACTOR_SUBSTR):
+            continue
+        # 片商/企划名误入女优栏（勿误伤西洋名中的「・」）
+        if any(s in name for s in ("プロジェクト", "アネックス", "スタジオ")):
+            continue
+        if "project" in key or (key.startswith("studio") and len(name) >= 6):
+            continue
+        # 类型复合词：出轨/NTR、痴女/OL 等
+        if "/" in name or "|" in name or "／" in name:
+            continue
+        # 纯英文缩写题材（NTR、SM、BDAM）
+        if re.fullmatch(r"[A-Za-z]{2,8}", name):
+            continue
+        if _looks_like_actor_sentence_frag(name):
+            continue
+        # 带数字的前缀/番号（SOD123 / MIMK-286）；纯字母艺名如 Rio 保留
+        if re.fullmatch(r"[A-Z]{2,10}-?\d{2,}[A-Z0-9]*", name, re.I):
+            continue
+        # 纯数字 / URL / HTML
+        if re.fullmatch(r"\d+", name) or re.search(r"https?://|<|>", name, re.I):
+            continue
+        # 正名单：不像人名的（デカ尻/イチャイチャ）直接丢
+        if not _is_plausible_actress_name(name):
+            continue
+        seen.add(key)
+        out.append(name)
+    return out
+
+

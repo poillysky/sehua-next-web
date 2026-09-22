@@ -13,11 +13,17 @@ import {
 } from '@/hooks/usePanelAction';
 import {
   MODE_OPTIONS,
-  UNCENSORED_OFFICIAL_FALLBACK,
   clampInt,
   cloneStrategy,
-  type SectionId,
-} from './shared';
+} from './defaults';
+import type { SectionId } from './types';
+import {
+  flushPendingPersist as flushPending,
+  patchAndPersist as patchPersist,
+  persistStrategy as doPersist,
+  type PersistDeps,
+} from './persist';
+import * as mut from './mutations';
 
 export type EnrichStrategyForm = ReturnType<typeof useEnrichStrategyForm>;
 
@@ -25,37 +31,42 @@ export function useEnrichStrategyForm(
   onStatus: StatusReporter,
   onSaved?: (cfg: ScrapEnrichStrategy) => void,
 ) {
-const [cfg, setCfg] = useState<ScrapEnrichStrategy | null>(null);
+  const [cfg, setCfg] = useState<ScrapEnrichStrategy | null>(null);
+  const [section, setSection] = useState<SectionId | null>(null);
+  const [adaptiveWorkersText, setAdaptiveWorkersText] = useState('');
+  const [itemWorkersText, setItemWorkersText] = useState('');
+  const [flareWorkersText, setFlareWorkersText] = useState('');
+  const [timeoutText, setTimeoutText] = useState('');
+  const [recompressBusy, setRecompressBusy] = useState(false);
+  const [recompressHint, setRecompressHint] = useState('');
+  const [fpOpen, setFpOpen] = useState<string | null>(null);
+  const [rsOpen, setRsOpen] = useState<string | null>(null);
+  const [fpHideEmpty, setFpHideEmpty] = useState(false);
+  const [autoSaving, setAutoSaving] = useState(false);
+  const persistTimerRef = useRef<number | null>(null);
+  const pendingPersistRef = useRef<ScrapEnrichStrategy | null>(null);
+  const { msg, setMsg, busy, run } = usePanelAction();
 
-const [section, setSection] = useState<SectionId | null>(null);
+  function syncNumDrafts(s: ScrapEnrichStrategy) {
+    setItemWorkersText(String(s.itemWorkers ?? 5));
+    setAdaptiveWorkersText(String(s.adaptiveWorkers ?? 0));
+    setFlareWorkersText(String(s.flareWorkers ?? 0));
+    setTimeoutText(String(s.perSourceTimeoutSec ?? 45));
+  }
 
-const [adaptiveWorkersText, setAdaptiveWorkersText] = useState('');
+  const persistDeps: PersistDeps = {
+    setCfg,
+    setFpHideEmpty,
+    setAutoSaving,
+    setMsg,
+    syncNumDrafts,
+    onStatus,
+    onSaved,
+    persistTimerRef,
+    pendingPersistRef,
+  };
 
-const [itemWorkersText, setItemWorkersText] = useState('');
-
-const [flareWorkersText, setFlareWorkersText] = useState('');
-
-const [timeoutText, setTimeoutText] = useState('');
-
-const [recompressBusy, setRecompressBusy] = useState(false);
-
-const [recompressHint, setRecompressHint] = useState('');
-
-const [fpOpen, setFpOpen] = useState<string | null>(null);
-
-const [rsOpen, setRsOpen] = useState<string | null>(null);
-
-const [fpHideEmpty, setFpHideEmpty] = useState(false);
-
-const [autoSaving, setAutoSaving] = useState(false);
-
-const persistTimerRef = useRef<number | null>(null);
-
-const pendingPersistRef = useRef<ScrapEnrichStrategy | null>(null);
-
-const { msg, setMsg, busy, run } = usePanelAction();
-
-useEffect(() => {
+  useEffect(() => {
     if (!rsOpen && !fpOpen) return;
     const onPointer = (e: PointerEvent) => {
       const t = e.target;
@@ -87,103 +98,34 @@ useEffect(() => {
     };
   }, [rsOpen, fpOpen]);
 
-function syncNumDrafts(s: ScrapEnrichStrategy) {
-    setItemWorkersText(String(s.itemWorkers ?? 5));
-    setAdaptiveWorkersText(String(s.adaptiveWorkers ?? 0));
-    setFlareWorkersText(String(s.flareWorkers ?? 0));
-    setTimeoutText(String(s.perSourceTimeoutSec ?? 45));
+  function persistStrategy(next: ScrapEnrichStrategy, soft = true) {
+    return doPersist(persistDeps, next, soft);
   }
 
-async function persistStrategy(next: ScrapEnrichStrategy, soft = true) {
-    try {
-      if (soft) setAutoSaving(true);
-      // 全局 / 字段优先级相关字段整包写入，避免漏键
-      const payload: ScrapEnrichStrategy = {
-        ...next,
-        regionSources: { ...(next.regionSources || {}) },
-        fieldPriority: { ...(next.fieldPriority || {}) },
-        fieldPriorityHideEmpty: Boolean(next.fieldPriorityHideEmpty),
-        localMaps: {
-          title:
-            next.localMaps?.title === 'off'
-              ? 'off'
-              : next.localMaps?.title === 'force'
-                ? 'force'
-                : 'prefer',
-          actors: next.localMaps?.actors === 'off' ? 'off' : 'fallback',
-          tags: next.localMaps?.tags === 'off' ? 'off' : 'fallback',
-          compactOutlineNewlines:
-            next.localMaps?.compactOutlineNewlines !== false,
-        },
-        regionGroups: { ...(next.regionGroups || {}) },
-      };
-      const saved = await putScrapEnrichStrategy(payload);
-      const cloned = cloneStrategy(saved);
-      setCfg(cloned);
-      setFpHideEmpty(Boolean(cloned.fieldPriorityHideEmpty));
-      syncNumDrafts(cloned);
-      onSaved?.(cloned);
-      if (soft) {
-        onStatus('已自动保存', 'ok');
-        setMsg('已自动保存');
-      }
-      return cloned;
-    } catch (e) {
-      const text = e instanceof Error ? e.message : '保存失败';
-      setMsg(text);
-      onStatus(text, 'warn');
-      return null;
-    } finally {
-      if (soft) setAutoSaving(false);
-    }
+  function flushPendingPersist() {
+    flushPending(persistDeps);
   }
 
-function flushPendingPersist() {
-    if (persistTimerRef.current != null) {
-      window.clearTimeout(persistTimerRef.current);
-      persistTimerRef.current = null;
-    }
-    const snap = pendingPersistRef.current;
-    pendingPersistRef.current = null;
-    if (snap) void persistStrategy(snap, true);
-  }
-
-function patchAndPersist(
+  function patchAndPersist(
     updater: (prev: ScrapEnrichStrategy) => ScrapEnrichStrategy,
   ) {
-    setCfg((prev) => {
-      if (!prev) return prev;
-      const next = updater(prev);
-      if (next === prev) return prev;
-      pendingPersistRef.current = next;
-      // 立即落库（短延迟合并连点 ↑↓）
-      if (persistTimerRef.current != null) {
-        window.clearTimeout(persistTimerRef.current);
-      }
-      persistTimerRef.current = window.setTimeout(() => {
-        const snap = pendingPersistRef.current;
-        pendingPersistRef.current = null;
-        persistTimerRef.current = null;
-        if (snap) void persistStrategy(snap, true);
-      }, 120);
-      return next;
-    });
+    patchPersist(persistDeps, setCfg, updater);
   }
 
-useEffect(() => {
-    const onHide = () => flushPendingPersist();
+  useEffect(() => {
+    const onHide = () => flushPending(persistDeps);
     window.addEventListener('pagehide', onHide);
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden') onHide();
     });
     return () => {
       window.removeEventListener('pagehide', onHide);
-      flushPendingPersist();
+      flushPending(persistDeps);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- flush on unmount only
   }, []);
 
-useEffect(() => {
+  useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
@@ -205,39 +147,39 @@ useEffect(() => {
     };
   }, []);
 
-function patch(partial: Partial<ScrapEnrichStrategy>) {
+  function patch(partial: Partial<ScrapEnrichStrategy>) {
     setCfg((prev) => (prev ? { ...prev, ...partial } : prev));
   }
 
-function commitItemWorkers(raw = itemWorkersText) {
+  function commitItemWorkers(raw = itemWorkersText) {
     const n = clampInt(raw, 5, 1, 16);
     setItemWorkersText(String(n));
     patch({ itemWorkers: n });
     return n;
   }
 
-function commitAdaptiveWorkers(raw = adaptiveWorkersText) {
+  function commitAdaptiveWorkers(raw = adaptiveWorkersText) {
     const n = clampInt(raw, 0, 0, 64);
     setAdaptiveWorkersText(String(n));
     patch({ adaptiveWorkers: n });
     return n;
   }
 
-function commitFlareWorkers(raw = flareWorkersText) {
+  function commitFlareWorkers(raw = flareWorkersText) {
     const n = clampInt(raw, 0, 0, 32);
     setFlareWorkersText(String(n));
     patch({ flareWorkers: n });
     return n;
   }
 
-function commitTimeout(raw = timeoutText) {
+  function commitTimeout(raw = timeoutText) {
     const n = clampInt(raw, 45, 5, 180);
     setTimeoutText(String(n));
     patch({ perSourceTimeoutSec: n });
     return n;
   }
 
-function setMode(mode: string) {
+  function setMode(mode: string) {
     if (mode === 'adaptive_only') {
       patch({ mode, includeFlare: false });
       return;
@@ -245,125 +187,7 @@ function setMode(mode: string) {
     patch({ mode });
   }
 
-function toggleRegionSource(regionId: string, sourceId: string) {
-    const official = new Set(
-      (cfg?.uncensoredOfficialSources?.length
-        ? cfg.uncensoredOfficialSources
-        : UNCENSORED_OFFICIAL_FALLBACK
-      ).map((s) => s),
-    );
-    if (regionId === 'japan_uncensored' && official.has(sourceId)) {
-      return;
-    }
-    patchAndPersist((prev) => {
-      const cur = [...((prev.regionSources || {})[regionId] || [])];
-      const i = cur.indexOf(sourceId);
-      if (i >= 0) cur.splice(i, 1);
-      else cur.push(sourceId);
-      const regionSources = { ...(prev.regionSources || {}), [regionId]: cur };
-      const regions = (prev.regions || []).map((r) =>
-        r.id === regionId ? { ...r, sources: cur } : r,
-      );
-      return { ...prev, regionSources, regions };
-    });
-  }
-
-function moveRegionSource(
-    regionId: string,
-    sourceId: string,
-    dir: -1 | 1,
-  ) {
-    patchAndPersist((prev) => {
-      const cur = [...((prev.regionSources || {})[regionId] || [])];
-      const i = cur.indexOf(sourceId);
-      if (i < 0) return prev;
-      const j = i + dir;
-      if (j < 0 || j >= cur.length) return prev;
-      const tmp = cur[i]!;
-      cur[i] = cur[j]!;
-      cur[j] = tmp;
-      return {
-        ...prev,
-        regionSources: { ...(prev.regionSources || {}), [regionId]: cur },
-        regions: (prev.regions || []).map((r) =>
-          r.id === regionId ? { ...r, sources: cur } : r,
-        ),
-      };
-    });
-  }
-
-function setCoverRatio(cropRatio: 'full' | 'emby') {
-    setCfg((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        cover: {
-          quality: 'compact',
-          cropRatio,
-          regionCrop: { ...(prev.cover?.regionCrop || {}) },
-          minShortEdge: prev.cover?.minShortEdge,
-          coverLogicVersion: prev.cover?.coverLogicVersion,
-        },
-      };
-    });
-  }
-
-function setRegionCoverCrop(regionId: string, mode: string) {
-    const next =
-      mode === 'face' ? 'face' : mode === 'none' ? 'none' : 'right';
-    setCfg((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        cover: {
-          quality: 'compact',
-          cropRatio: prev.cover?.cropRatio === 'emby' ? 'emby' : 'full',
-          regionCrop: {
-            ...(prev.cover?.regionCrop || {}),
-            [regionId]: next,
-          },
-          minShortEdge: prev.cover?.minShortEdge,
-          coverLogicVersion: prev.cover?.coverLogicVersion,
-        },
-      };
-    });
-  }
-
-function toggleFieldPrioritySite(fieldId: string, sourceId: string) {
-    patchAndPersist((prev) => {
-      const cur = [...((prev.fieldPriority || {})[fieldId] || [])];
-      const i = cur.indexOf(sourceId);
-      if (i >= 0) cur.splice(i, 1);
-      else cur.push(sourceId);
-      const next = { ...(prev.fieldPriority || {}) };
-      if (cur.length === 0) delete next[fieldId];
-      else next[fieldId] = cur;
-      return { ...prev, fieldPriority: next };
-    });
-  }
-
-function moveFieldPrioritySite(
-    fieldId: string,
-    sourceId: string,
-    dir: -1 | 1,
-  ) {
-    patchAndPersist((prev) => {
-      const cur = [...((prev.fieldPriority || {})[fieldId] || [])];
-      const i = cur.indexOf(sourceId);
-      if (i < 0) return prev;
-      const j = i + dir;
-      if (j < 0 || j >= cur.length) return prev;
-      const tmp = cur[i]!;
-      cur[i] = cur[j]!;
-      cur[j] = tmp;
-      return {
-        ...prev,
-        fieldPriority: { ...(prev.fieldPriority || {}), [fieldId]: cur },
-      };
-    });
-  }
-
-async function onSave() {
+  async function onSave() {
     if (!cfg || busy || autoSaving) return;
     if (persistTimerRef.current != null) {
       window.clearTimeout(persistTimerRef.current);
@@ -398,7 +222,7 @@ async function onSave() {
     );
   }
 
-async function onRecompressPosters(dryRun: boolean) {
+  async function onRecompressPosters(dryRun: boolean) {
     if (recompressBusy || busy) return;
     setRecompressBusy(true);
     setRecompressHint(dryRun ? '预览中…' : '重压中…');
@@ -444,47 +268,35 @@ async function onRecompressPosters(dryRun: boolean) {
     }
   }
 
-const regions = cfg?.regions || [];
-
-const mode = cfg?.mode || 'parallel_all';
-
-const modeMeta =
+  const regions = cfg?.regions || [];
+  const mode = cfg?.mode || 'parallel_all';
+  const modeMeta =
     MODE_OPTIONS.find((m) => m.value === mode) || MODE_OPTIONS[0];
-
-const allowFlare = mode !== 'adaptive_only';
-
-const flareOn = allowFlare && Boolean(cfg?.includeFlare);
-
-const showFlareWorkers = mode === 'adaptive_first' && flareOn;
-
-const fillMode =
+  const allowFlare = mode !== 'adaptive_only';
+  const flareOn = allowFlare && Boolean(cfg?.includeFlare);
+  const showFlareWorkers = mode === 'adaptive_first' && flareOn;
+  const fillMode =
     cfg?.fillMode === 'overwrite'
       ? 'overwrite'
       : cfg?.fillMode === 'refresh_weak'
         ? 'refresh_weak'
         : 'incremental';
-
-const fillModeHint =
+  const fillModeHint =
     fillMode === 'overwrite'
       ? '全部重跑覆盖；队列先空壳再其余'
       : fillMode === 'refresh_weak'
         ? '缺口队列，强制写回薄标题 / 空剧情 / 坏封面'
         : '先刮空壳（仅骨架），再补缺数据';
-
-const actressAvatarMode =
+  const actressAvatarMode =
     cfg?.actressAvatarMode === 'overwrite' ? 'overwrite' : 'incremental';
-
-const actressAvatarModeHint =
+  const actressAvatarModeHint =
     actressAvatarMode === 'overwrite'
       ? '已有头像也重新下载覆盖'
       : '只排队缺头像的人，已有的不进进度';
-
-const coverQualityLabel = '省盘';
-
-const coverRatioLabel =
+  const coverQualityLabel = '省盘';
+  const coverRatioLabel =
     (cfg?.cover?.cropRatio || 'full') === 'emby' ? 'Emby 2:3' : '完整海报';
-
-const coverCropSummary = (() => {
+  const coverCropSummary = (() => {
     if (!cfg?.cover?.regionCrop) return '分区裁切';
     const modes = Object.values(cfg.cover.regionCrop);
     const right = modes.filter((m) => m === 'right' || m === 'smart').length;
@@ -492,15 +304,13 @@ const coverCropSummary = (() => {
     const none = modes.filter((m) => m === 'none').length;
     return `右${right}/脸${face}/不裁${none}`;
   })();
-
-const regionSourceHint = (() => {
+  const regionSourceHint = (() => {
     if (!cfg) return '…';
     const rs = cfg.regionSources || {};
     const n = regions.filter((r) => (rs[r.id] || []).length > 0).length;
     return n > 0 ? `${n}/${regions.length || 7} 类型已配源` : '未配置';
   })();
-
-const fieldPriorityHint = (() => {
+  const fieldPriorityHint = (() => {
     if (!cfg) return '…';
     const fp = cfg.fieldPriority || {};
     const n = Object.values(fp).filter((v) => Array.isArray(v) && v.length > 0)
@@ -509,8 +319,7 @@ const fieldPriorityHint = (() => {
     const base = n > 0 ? `${n}/${total} 字段已配` : '未配置 · 用默认链';
     return `${base} · 仅有码`;
   })();
-
-const localMapsHint = (() => {
+  const localMapsHint = (() => {
     if (!cfg) return '…';
     const onOff = (on: boolean) => (on ? '开' : '关');
     return [
@@ -521,11 +330,7 @@ const localMapsHint = (() => {
     ].join(' · ');
   })();
 
-const hubRows: Array<{
-    id: SectionId;
-    title: string;
-    desc: string;
-  }> = [
+  const hubRows: Array<{ id: SectionId; title: string; desc: string }> = [
     {
       id: 'fill',
       title: '补齐与女优',
@@ -542,27 +347,16 @@ const hubRows: Array<{
       title: '调度与并发',
       desc: `番号×${itemWorkersText || '5'} · ${modeMeta.label}${flareOn ? ' · 含过盾' : ''} · 超时 ${timeoutText || '—'}s`,
     },
-    {
-      id: 'regions',
-      title: '优先级设置(全局)',
-      desc: regionSourceHint,
-    },
-    {
-      id: 'fields',
-      title: '字段优先级',
-      desc: fieldPriorityHint,
-    },
-    {
-      id: 'maps',
-      title: '元数据优化',
-      desc: localMapsHint,
-    },
+    { id: 'regions', title: '优先级设置(全局)', desc: regionSourceHint },
+    { id: 'fields', title: '字段优先级', desc: fieldPriorityHint },
+    { id: 'maps', title: '元数据优化', desc: localMapsHint },
     {
       id: 'cover',
       title: '刮削封面',
       desc: `${coverQualityLabel} · ${coverCropSummary} · ${coverRatioLabel}`,
     },
   ];
+
   return {
     actressAvatarMode,
     actressAvatarModeHint,
@@ -591,8 +385,10 @@ const hubRows: Array<{
     localMapsHint,
     mode,
     modeMeta,
-    moveFieldPrioritySite,
-    moveRegionSource,
+    moveFieldPrioritySite: (fieldId: string, sourceId: string, dir: -1 | 1) =>
+      mut.moveFieldPrioritySite(patchAndPersist, fieldId, sourceId, dir),
+    moveRegionSource: (regionId: string, sourceId: string, dir: -1 | 1) =>
+      mut.moveRegionSource(patchAndPersist, regionId, sourceId, dir),
     msg,
     onRecompressPosters,
     onSave,
@@ -611,7 +407,8 @@ const hubRows: Array<{
     setAdaptiveWorkersText,
     setAutoSaving,
     setCfg,
-    setCoverRatio,
+    setCoverRatio: (cropRatio: 'full' | 'emby') =>
+      mut.setCoverRatio(setCfg, cropRatio),
     setFlareWorkersText,
     setFpHideEmpty,
     setFpOpen,
@@ -620,14 +417,17 @@ const hubRows: Array<{
     setMsg,
     setRecompressBusy,
     setRecompressHint,
-    setRegionCoverCrop,
+    setRegionCoverCrop: (regionId: string, mode: string) =>
+      mut.setRegionCoverCrop(setCfg, regionId, mode),
     setRsOpen,
     setSection,
     setTimeoutText,
     showFlareWorkers,
     syncNumDrafts,
     timeoutText,
-    toggleFieldPrioritySite,
-    toggleRegionSource,
+    toggleFieldPrioritySite: (fieldId: string, sourceId: string) =>
+      mut.toggleFieldPrioritySite(patchAndPersist, fieldId, sourceId),
+    toggleRegionSource: (regionId: string, sourceId: string) =>
+      mut.toggleRegionSource(patchAndPersist, cfg, regionId, sourceId),
   };
 }

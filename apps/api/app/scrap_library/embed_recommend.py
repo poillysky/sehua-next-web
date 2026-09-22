@@ -28,7 +28,8 @@ from app.scrap_library.nfo import (
 from app.core.ttl_cache import enforce_max, prune_by_age
 
 import app.scrap_library.embed as _embed
-from app.scrap_library.embed import (_RECOMMEND_CACHE, _RECOMMEND_SNAP_VERSION, _recommend_snap_path, log)
+from app.scrap_library.embed import (_RECOMMEND_SNAP_VERSION, _recommend_snap_path, log)
+from app.scrap_library.embed_runtime import (_RECOMMEND_CACHE)
 
 
 def list_recommend(*, region: str = "") -> dict[str, Any]:

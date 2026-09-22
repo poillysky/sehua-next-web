@@ -31,7 +31,16 @@ from app.scrap_library import enrich_monitor as enrich_mon
 import app.scrap_library.enrich as _enrich
 import app.scrap_library.enrich_history as _enrich_history
 import app.scrap_library.enrich_queue as _enrich_queue
-from app.scrap_library.enrich import (_ENRICH_KINDS, _LIB_PROGRESS_COUNTS_TTL_SEC, _LOCAL_STATUS_TOTALS, _STATUS_QUEUE_HEAVY_KEYS, _checkpoint_summaries, _counts_cache, _counts_ok_cache, _enrich_job, _enrich_lock, _enrich_percent, _ensure_local_status_totals_loaded, _hydrate_enrich_runtime, _incomplete_cache, _lib_progress_counts_cache, _sample_queue_for_status, log)
+from app.scrap_library.enrich import (_ENRICH_KINDS, _LIB_PROGRESS_COUNTS_TTL_SEC, _incomplete_cache, _lib_progress_counts_cache, log)
+from app.scrap_library.enrich_queue_io import (
+    _LOCAL_STATUS_TOTALS,
+    _STATUS_QUEUE_HEAVY_KEYS,
+    _counts_cache,
+    _counts_ok_cache,
+    _ensure_local_status_totals_loaded,
+    _sample_queue_for_status,
+)
+from app.scrap_library.enrich_runtime import (_checkpoint_summaries, _enrich_job, _enrich_lock, _enrich_percent, _hydrate_enrich_runtime)
 
 
 def _persist_local_status_totals() -> None:
@@ -51,7 +60,7 @@ def _persist_local_status_totals() -> None:
                         else {}
                     ),
                 }
-                for rid, v in _LOCAL_STATUS_TOTALS.items()
+                for rid, v in _enrich._LOCAL_STATUS_TOTALS.items()
                 if rid and isinstance(v, dict)
             },
         }
@@ -79,8 +88,8 @@ def _set_local_status_totals(
     rid = _enrich._queue_log_region(region)
     if not rid:
         return
-    _ensure_local_status_totals_loaded()
-    prev = _LOCAL_STATUS_TOTALS.get(rid) or {}
+    _enrich._ensure_local_status_totals_loaded()
+    prev = _enrich._LOCAL_STATUS_TOTALS.get(rid) or {}
     row: dict[str, int] = {
         "done": max(
             0, int(prev.get("done") or 0) if done is None else int(done or 0)
@@ -95,52 +104,37 @@ def _set_local_status_totals(
     tot = int(prev.get("total") or 0) if total is None else max(0, int(total or 0))
     if tot > 0:
         row["total"] = tot
-    _LOCAL_STATUS_TOTALS[rid] = row
-    _counts_cache.pop(rid, None)
+    _enrich._LOCAL_STATUS_TOTALS[rid] = row
+    _enrich._counts_cache.pop(rid, None)
     _persist_local_status_totals()
 
 
 def _clear_local_status_totals(region: str = "") -> None:
-    _ensure_local_status_totals_loaded()
+    _enrich._ensure_local_status_totals_loaded()
     rid = _enrich._queue_log_region(region) if str(region or "").strip() else ""
     if rid:
-        _LOCAL_STATUS_TOTALS.pop(rid, None)
-        _counts_cache.pop(rid, None)
+        _enrich._LOCAL_STATUS_TOTALS.pop(rid, None)
+        _enrich._counts_cache.pop(rid, None)
     else:
-        _LOCAL_STATUS_TOTALS.clear()
-        _counts_cache.clear()
+        _enrich._LOCAL_STATUS_TOTALS.clear()
+        _enrich._counts_cache.clear()
     _persist_local_status_totals()
 
 
 def _apply_local_status_totals(counts: dict[str, int], region: str) -> dict[str, int]:
-    """队列表为唯一真相；tip 仅在库全空时兜底（扫描写入前）。"""
-    rid = _enrich._queue_log_region(region)
-    out = dict(counts)
-    db_d = int(counts.get("done") or 0)
-    db_s = int(counts.get("soft") or 0)
-    db_f = int(counts.get("fail") or 0)
-    db_p = int(counts.get("pending") or 0)
-    db_sum = db_d + db_s + db_f + db_p
-    if db_sum > 0:
-        if rid:
-            _set_local_status_totals(
-                rid, done=db_d, soft=db_s, fail=db_f, total=None
-            )
-        return out
-    _ensure_local_status_totals_loaded()
-    tip = _LOCAL_STATUS_TOTALS.get(rid) if rid else None
-    if not tip:
-        return out
-    out["done"] = int(tip.get("done") or 0)
-    out["soft"] = int(tip.get("soft") or 0)
-    out["fail"] = int(tip.get("fail") or 0)
-    return out
+    """角标只认队列表 counts；tip 永不覆盖（库进度旁路仍可单独读 tip）。
+
+    历史 tip 兜底会在「扫描写盘前 / 读库瞬时 0」把落盘旧值盖上角标，
+    下一帧 COUNT 回来又跳回真值 → 数字来回波动。此处恒等透传。
+    """
+    _ = region  # 保留签名：调用方 / 测试仍按 (counts, region) 传入
+    return dict(counts)
 
 
 def _region_counts_ok(region: str) -> bool:
     """上一次读库计数是否成功。未知时按 True（不要因为没记录就冻住角标）。"""
     rid = _enrich._queue_log_region(region)
-    hit = _counts_ok_cache.get(rid)
+    hit = _enrich._counts_ok_cache.get(rid)
     return bool(hit[1]) if hit else True
 
 
@@ -163,15 +157,15 @@ def _slim_one_result_mem(one: dict[str, Any]) -> dict[str, Any]:
 def _pending_total_estimate(
     region: str, *, classified: dict[str, int] | None = None
 ) -> int:
-    """未处理角标：向量总数 − 成功/软成功/失败。
+    """未处理估算：向量总数 − 队列表已分类（不再与 tip 取大）。
 
-    向量总数走轻量 COUNT（可缓存）；tip 仅作 COUNT 失败时回退。
+    向量总数走轻量 COUNT（可缓存）；仅向量 COUNT 失败时用 tip.total 回退。
     """
     rid = _enrich._queue_log_region(region)
     if not rid:
         return 0
-    _ensure_local_status_totals_loaded()
-    tip = _LOCAL_STATUS_TOTALS.get(rid) if rid else None
+    _enrich._ensure_local_status_totals_loaded()
+    tip = _enrich._LOCAL_STATUS_TOTALS.get(rid) if rid else None
     vector_total = _enrich._fresh_vector_library_total(rid)
     if vector_total <= 0:
         vector_total = int((tip or {}).get("total") or 0)
@@ -181,9 +175,9 @@ def _pending_total_estimate(
         fail_n = int(classified.get("fail") or 0)
     else:
         raw = _enrich_queue._queue_log_status_counts_db(rid)
-        done_n = max(int(raw.get("done") or 0), int((tip or {}).get("done") or 0))
-        soft_n = max(int(raw.get("soft") or 0), int((tip or {}).get("soft") or 0))
-        fail_n = max(int(raw.get("fail") or 0), int((tip or {}).get("fail") or 0))
+        done_n = int(raw.get("done") or 0)
+        soft_n = int(raw.get("soft") or 0)
+        fail_n = int(raw.get("fail") or 0)
     return max(0, vector_total - done_n - soft_n - fail_n)
 
 
@@ -241,7 +235,7 @@ def _pending_page_from_vector(
             it["status"] = "pending"
             it["region"] = rid
             if not it.get("gaps"):
-                it["gaps"] = list(_ENRICH_KINDS)
+                it["gaps"] = list(_enrich._ENRICH_KINDS)
             out.append(it)
         if out or off == 0:
             return out
@@ -261,7 +255,7 @@ def _pending_page_from_vector(
         return []
 
     # 回退：向量 updated DESC（与开刮取号同序）+ 排除已分类
-    # ⚠️ 已分类集合走 _queue_log_classified_skip_keys 的 TTL 缓存。
+    # ⚠️ 已分类集合走 _enrich._queue_log_classified_skip_keys 的 TTL 缓存。
     # 旧实现每次翻页都现查一遍 enrich_queue_log（本区 done+fail ≈ 10.9 万行），
     # 单次 1.5~2.9s 全耗在这一步；缓存后翻页只付一次。
     done_iids, done_codes = _enrich_queue._queue_log_classified_skip_keys(rid)
@@ -284,7 +278,7 @@ def _pending_page_from_vector(
             )
             break
         try:
-            # ⚠️ 必须与「开刮取号」（iter_enrich_pending_items → order="updated"）
+            # ⚠️ 必须与「开刮取号」（_enrich.iter_enrich_pending_items → order="updated"）
             # 同序，否则未处理列表首条 ≠ 下一个会被处理的番号。旧实现用
             # order="code"，列表顶显示 AARM-002 这类最小番号，与开刮顺序不符。
             batch = embed_svc.list_region_code_items(
@@ -316,7 +310,7 @@ def _pending_page_from_vector(
             item = {
                 "itemId": iid2,
                 "code": code_u,
-                "gaps": list(r.get("gaps") or []) or list(_ENRICH_KINDS),
+                "gaps": list(r.get("gaps") or []) or list(_enrich._ENRICH_KINDS),
                 "status": "pending",
                 "region": rid,
                 "shell": bool(r.get("shell")),
@@ -344,7 +338,7 @@ def _slim_queue_row_for_status(row: dict[str, Any]) -> dict[str, Any]:
     """
     if not isinstance(row, dict):
         return {}
-    out = {k: v for k, v in row.items() if k not in _STATUS_QUEUE_HEAVY_KEYS}
+    out = {k: v for k, v in row.items() if k not in _enrich._STATUS_QUEUE_HEAVY_KEYS}
     title = str(row.get("detailTitle") or "")
     if title:
         out["detailTitle"] = title[:120]
@@ -474,55 +468,48 @@ def _progress_from_queue_counts(
             "total": tot,
             "ok": ok_n,
             "failed": int(counts.get("fail") or 0),
-            "percent": _enrich_percent(fin, tot) if tot > 0 else 0,
+            "percent": _enrich._enrich_percent(fin, tot) if tot > 0 else 0,
         }
     )
     return cur
 
 
 def _region_library_progress(region: str) -> dict[str, int]:
-    """库内进度（状态热路径）：轻量 total + tip 已分类。
+    """库内进度（状态热路径）：向量 total + 队列表已分类。
 
-    未处理 = total − done − soft − fail（与扫描角标同源）。
+    未处理 = total − done − soft − fail（与角标同源：enrich_queue_log）。
     禁止调用 quality_stats（分项 COUNT 在有码区要数秒，会卡死设置页）。
-    total 以向量库 COUNT 为准（缓存），不再钉死旧 tip.total。
+    total 以向量库 COUNT 为准（缓存）；tip.total 仅作 COUNT 失败回退。
+    已分类一律队列表 COUNT，不再与 tip 取大（避免 tip 虚高钉死进度）。
     """
     rid = _enrich._queue_log_region(region)
     if not rid:
         return {"total": 0, "incomplete": 0, "complete": 0, "percent": 0}
-    _ensure_local_status_totals_loaded()
-    tip = _LOCAL_STATUS_TOTALS.get(rid) or {}
+    _enrich._ensure_local_status_totals_loaded()
+    tip = _enrich._LOCAL_STATUS_TOTALS.get(rid) or {}
     total = _enrich._fresh_vector_library_total(rid)
     if total <= 0:
         total = int(tip.get("total") or 0)
-    tip = _LOCAL_STATUS_TOTALS.get(rid) or tip
-    done_n = int(tip.get("done") or 0)
-    soft_n = int(tip.get("soft") or 0)
-    fail_n = int(tip.get("fail") or 0)
-    # ⚠️ tip 是缓存，可能被「先删后写」的扫描中断留在瞬时低值：实测 japan_censored
-    # tip.done=2 而磁盘实际已分类 10.2 万 → 未处理被算成 129,250（虚高 6 倍），
-    # 连带开刮时的「预估未处理」也失真。这里用**纯只读**的库内计数取大纠正。
-    # 必须用 _queue_log_status_counts_db：另一条 _queue_log_status_counts 会经
-    # _lift_local_status_totals_from_counts 写盘，属于状态热路径禁用的磁盘写。
-    # 加 3s 备忘，避免每次状态轮询都做一次 GROUP BY。
+    done_n = soft_n = fail_n = 0
+    # 纯只读 GROUP BY；~3s 备忘，避免 SSE 每帧打库。
     try:
-        _memo = _lib_progress_counts_cache.get(rid)
+        _memo = _enrich._lib_progress_counts_cache.get(rid)
         _now_m = time.monotonic()
-        if not _memo or _now_m - float(_memo[0]) >= _LIB_PROGRESS_COUNTS_TTL_SEC:
+        if not _memo or _now_m - float(_memo[0]) >= _enrich._LIB_PROGRESS_COUNTS_TTL_SEC:
             _memo = (_now_m, _enrich_queue._queue_log_status_counts_db(rid))
-            _lib_progress_counts_cache[rid] = _memo
+            _enrich._lib_progress_counts_cache[rid] = _memo
         dbc = _memo[1] or {}
-        done_n = max(done_n, int(dbc.get("done") or 0))
-        soft_n = max(soft_n, int(dbc.get("soft") or 0))
-        fail_n = max(fail_n, int(dbc.get("fail") or 0))
+        done_n = int(dbc.get("done") or 0)
+        soft_n = int(dbc.get("soft") or 0)
+        fail_n = int(dbc.get("fail") or 0)
     except Exception as e:  # noqa: BLE001
         log.debug("region library progress db merge failed region=%s: %s", rid, e)
     # 已刮完（含软成功）视为完成；未处理(+fail 仍算待办里的剩余用 pending 公式)
     complete = done_n + soft_n
     incomplete = max(0, total - done_n - soft_n - fail_n) if total > 0 else 0
     now = time.time()
-    _incomplete_cache[rid] = (now, total, incomplete)
-    pct = _enrich_percent(complete, total) if total > 0 else 0
+    _enrich._incomplete_cache[rid] = (now, total, incomplete)
+    pct = _enrich._enrich_percent(complete, total) if total > 0 else 0
     return {
         "total": total,
         "incomplete": incomplete,
@@ -537,9 +524,9 @@ def get_enrich_status(*, lite: bool = False) -> dict[str, Any]:
     lite=True：总览页 / 角标用，不含 queue 抽样与大段日志（SSE 高频友好）。
     lite=False：详情直播页用，带瘦身后的 queue 抽样。
     """
-    _hydrate_enrich_runtime()
-    with _enrich_lock:
-        region_logs_raw = _enrich_job.get("regionLogs") or {}
+    _enrich._hydrate_enrich_runtime()
+    with _enrich._enrich_lock:
+        region_logs_raw = _enrich._enrich_job.get("regionLogs") or {}
         region_logs: dict[str, list[str]] = {}
         region_log_counts: dict[str, int] = {}
         log_tail = 8 if lite else _enrich_history._ENRICH_LOG_RETURN
@@ -552,11 +539,11 @@ def get_enrich_status(*, lite: bool = False) -> dict[str, Any]:
                 region_log_counts[key] = len(full)
                 if not lite:
                     region_logs[key] = full[-log_tail:]
-        checkpoints = _checkpoint_summaries()
-        halt = _enrich_job.get("halt")
-        current_region = str(_enrich_job.get("currentRegion") or "")
-        running = bool(_enrich_job["running"])
-        phase_now = str(_enrich_job.get("phase") or "")
+        checkpoints = _enrich._checkpoint_summaries()
+        halt = _enrich._enrich_job.get("halt")
+        current_region = str(_enrich._enrich_job.get("currentRegion") or "")
+        running = bool(_enrich._enrich_job["running"])
+        phase_now = str(_enrich._enrich_job.get("phase") or "")
         # 已暂停/停止：状态对外一律非 running（避免清空被「繁忙」误拦）
         if halt in {"pause", "stop"} or phase_now in {
             "paused",
@@ -566,13 +553,13 @@ def get_enrich_status(*, lite: bool = False) -> dict[str, Any]:
             running = False
         # 热路径：队列可达 2 万+ 行。**不要**在这里 `list(...)` 拷贝——
         # 队列每次改动都是整体替换新 list 对象，直接持有引用即可得到一致快照，
-        # 而拷贝会破坏 `_sample_queue_for_status` 的按身份缓存（导致每帧重扫）。
-        raw_queue = _enrich_job.get("queue") or []
+        # 而拷贝会破坏 `_enrich._sample_queue_for_status` 的按身份缓存（导致每帧重扫）。
+        raw_queue = _enrich._enrich_job.get("queue") or []
         if lite:
             queue: list[dict[str, Any]] = []
         else:
-            queue = _slim_queue_for_status(_sample_queue_for_status(raw_queue))
-        stored_counts = _enrich_job.get("queueCounts")
+            queue = _slim_queue_for_status(_enrich._sample_queue_for_status(raw_queue))
+        stored_counts = _enrich._enrich_job.get("queueCounts")
         if isinstance(stored_counts, dict) and any(
             int(stored_counts.get(k) or 0) > 0
             for k in ("pending", "running", "done", "soft", "fail")
@@ -586,7 +573,7 @@ def get_enrich_status(*, lite: bool = False) -> dict[str, Any]:
         # 暂停后若运行时队列被置空，用检查点剩余队列回填展示（停止则无检查点）
         # 切勿物化 10万+ 行：只抽样 + 用长度/计数填角标
         if not running and not queue:
-            raw_cps = dict(_enrich_job.get("checkpoints") or {})
+            raw_cps = dict(_enrich._enrich_job.get("checkpoints") or {})
             for rid, cp in raw_cps.items():
                 if not isinstance(cp, dict):
                     continue
@@ -629,16 +616,16 @@ def get_enrich_status(*, lite: bool = False) -> dict[str, Any]:
                 }
                 break
         progress = _progress_from_queue_counts(
-            queue_counts, base=dict(_enrich_job.get("progress") or {})
+            queue_counts, base=dict(_enrich._enrich_job.get("progress") or {})
         )
         if running:
-            _enrich_job["progress"] = progress
-            _enrich_job["queueCounts"] = queue_counts
+            _enrich._enrich_job["progress"] = progress
+            _enrich._enrich_job["queueCounts"] = queue_counts
         # 暂停/停止：内存队列禁止残留 running（一律视作 pending）
         # 旧实现为此遍历并拷贝整个队列（2 万+ 行）——状态热路径不允许。
         # 计数直接用 queue_counts 的 running 搬移到 pending（O(1)，两者同源），
         # 展示层只对抽样出的行（≤limit）改状态。
-        if halt in {"pause", "stop"} or str(_enrich_job.get("phase") or "") in {
+        if halt in {"pause", "stop"} or str(_enrich._enrich_job.get("phase") or "") in {
             "paused",
             "stopping",
             "stopped",
@@ -722,13 +709,13 @@ def get_enrich_status(*, lite: bool = False) -> dict[str, Any]:
         )
         status = {
             "running": running,
-            "phase": _enrich_job.get("phase") or "",
+            "phase": _enrich._enrich_job.get("phase") or "",
             "progress": progress,
-            "log": list(_enrich_job.get("log") or [])[-(8 if lite else 40) :],
+            "log": list(_enrich._enrich_job.get("log") or [])[-(8 if lite else 40) :],
             "regionLogs": region_logs,
             "regionLogCounts": region_log_counts,
             "currentRegion": current_region,
-            "cancel": bool(_enrich_job.get("cancel")) or halt in {"pause", "stop"},
+            "cancel": bool(_enrich._enrich_job.get("cancel")) or halt in {"pause", "stop"},
             "halt": halt,
             "paused": bool(checkpoints),
             "checkpoints": checkpoints,
@@ -737,15 +724,15 @@ def get_enrich_status(*, lite: bool = False) -> dict[str, Any]:
             "queueCounts": dict(queue_counts),
             # queueTotal 由计数求和得出，等价于旧 `len(queue_full)`（每行必归一类）
             "queueTruncated": pending_total > len(queue) or queue_total_n > len(queue),
-            "current": None if lite else _slim_current_for_status(_enrich_job.get("current")),
-            "result": _slim_result_for_status(_enrich_job.get("result")),
-            "error": _enrich_job.get("error"),
+            "current": None if lite else _slim_current_for_status(_enrich._enrich_job.get("current")),
+            "result": _slim_result_for_status(_enrich._enrich_job.get("result")),
+            "error": _enrich._enrich_job.get("error"),
             "monitor": monitor,
             "queueScan": None if lite else _enrich_queue._queue_scan_snapshot(),
             "lite": bool(lite),
         }
 
-    # 角标成功/失败并入库计数（勿在 _enrich_lock 内打 DB）
+    # 角标成功/失败并入库计数（勿在 _enrich._enrich_lock 内打 DB）
     # 暂停时 currentRegion 常为空：按检查点分区回填，避免成功/失败仍停在本轮内存 15
     # 完成后检查点已清：仍要从 result.regions/parts 回填，否则角标卡在截断内存队列（如 80/80）
     count_regions: list[str] = []
@@ -775,32 +762,20 @@ def get_enrich_status(*, lite: bool = False) -> dict[str, Any]:
             if key and key not in count_regions:
                 count_regions.append(key)
         # 空闲时把 tip 里已有分区也算上，避免详情页角标停在旧扫描数
-        _ensure_local_status_totals_loaded()
-        for rid in list(_LOCAL_STATUS_TOTALS.keys()):
+        _enrich._ensure_local_status_totals_loaded()
+        for rid in list(_enrich._LOCAL_STATUS_TOTALS.keys()):
             key = _enrich._queue_log_region(str(rid or ""))
             if key and key not in count_regions:
                 count_regions.append(key)
     if count_regions:
-        # 运行中（含详情 SSE）：只用内存 queueCounts / monitor，禁止每帧打库
+        # 角标一律 enrich_queue_log COUNT（短缓存）；inflight 只修正本区 running。
         if status.get("running"):
-            ui_counts = dict(status.get("queueCounts") or {})
             mon = (
                 status.get("monitor")
                 if isinstance(status.get("monitor"), dict)
                 else {}
             )
             inflight_n = len(list(mon.get("inflight") or []))
-            if inflight_n > 0:
-                ui_counts["running"] = inflight_n
-            status["queueCounts"] = ui_counts
-            status["queueTotal"] = sum(
-                int(ui_counts.get(k) or 0)
-                for k in ("pending", "running", "done", "soft", "fail")
-            )
-            base_prog = dict(status.get("progress") or {})
-            status["progress"] = _progress_from_queue_counts(
-                ui_counts, base=base_prog
-            )
             library: dict[str, Any] = {}
             region_queue_counts: dict[str, dict[str, int]] = {}
             cur_rid_mem = _enrich._queue_log_region(str(status.get("currentRegion") or ""))
@@ -814,7 +789,7 @@ def get_enrich_status(*, lite: bool = False) -> dict[str, Any]:
                 pending_n = int(dbc.get("pending") or 0)
                 run_n = (
                     inflight_n
-                    if rid_counts == cur_rid_mem
+                    if rid_counts == cur_rid_mem and inflight_n > 0
                     else int(dbc.get("running") or 0)
                 )
                 complete = done_n + soft_n
@@ -838,128 +813,81 @@ def get_enrich_status(*, lite: bool = False) -> dict[str, Any]:
                 status["library"] = library
             status["regionQueueCounts"] = region_queue_counts
             if cur_rid_mem and cur_rid_mem in region_queue_counts:
-                status["queueCounts"] = dict(region_queue_counts[cur_rid_mem])
+                ui_counts = dict(region_queue_counts[cur_rid_mem])
+                status["queueCounts"] = ui_counts
                 status["queueCountsRegion"] = cur_rid_mem
             elif count_regions:
                 status["queueCountsRegion"] = count_regions[0]
+                ui_counts = dict(
+                    region_queue_counts.get(count_regions[0])
+                    or status.get("queueCounts")
+                    or {}
+                )
+                status["queueCounts"] = ui_counts
+            else:
+                ui_counts = dict(status.get("queueCounts") or {})
+            status["queueTotal"] = sum(
+                int(ui_counts.get(k) or 0)
+                for k in ("pending", "running", "done", "soft", "fail")
+            )
+            base_prog = dict(status.get("progress") or {})
+            status["progress"] = _progress_from_queue_counts(
+                ui_counts, base=base_prog
+            )
         else:
             ui_counts = dict(status.get("queueCounts") or {})
             cps_ui = dict(status.get("checkpoints") or {})
             for rid_counts in count_regions:
                 dbc = _enrich_queue._queue_log_status_counts(rid_counts)
                 # 空闲时清掉库残留 running，避免「处理中」假数据
-                if not status.get("running") and int(dbc.get("running") or 0) > 0:
+                if int(dbc.get("running") or 0) > 0:
                     _enrich_queue._queue_log_reopen_running(region=rid_counts)
                     dbc = _enrich_queue._queue_log_status_counts(rid_counts)
-                if status.get("running"):
-                    # 运行中：本轮内存与库取大（避免轮询漏计）
-                    ui_counts["done"] = max(
-                        int(ui_counts.get("done") or 0), int(dbc.get("done") or 0)
-                    )
-                    ui_counts["soft"] = max(
-                        int(ui_counts.get("soft") or 0), int(dbc.get("soft") or 0)
-                    )
-                    ui_counts["fail"] = max(
-                        int(ui_counts.get("fail") or 0), int(dbc.get("fail") or 0)
-                    )
-                    ui_counts["pending"] = max(
-                        int(ui_counts.get("pending") or 0),
-                        int(dbc.get("pending") or 0),
-                    )
-                else:
-                    # 暂停/空闲：队列表是唯一真相
-                    ui_counts["done"] = int(dbc.get("done") or 0)
-                    ui_counts["soft"] = int(dbc.get("soft") or 0)
-                    ui_counts["fail"] = int(dbc.get("fail") or 0)
-                    ui_counts["pending"] = int(dbc.get("pending") or 0)
-                    ui_counts["running"] = 0
-                    stray_run = int(dbc.get("running") or 0)
-                    if stray_run > 0:
-                        ui_counts["pending"] = int(ui_counts["pending"]) + stray_run
+                # 暂停/空闲：队列表是唯一真相（不与内存 / tip 取大）
+                ui_counts["done"] = int(dbc.get("done") or 0)
+                ui_counts["soft"] = int(dbc.get("soft") or 0)
+                ui_counts["fail"] = int(dbc.get("fail") or 0)
+                ui_counts["pending"] = int(dbc.get("pending") or 0)
+                ui_counts["running"] = 0
+                stray_run = int(dbc.get("running") or 0)
+                if stray_run > 0:
+                    ui_counts["pending"] = int(ui_counts["pending"]) + stray_run
                 cp = cps_ui.get(rid_counts)
                 if isinstance(cp, dict):
                     cp = dict(cp)
                     ok_bucket = int(dbc.get("done") or 0) + int(dbc.get("soft") or 0)
-                    if status.get("running"):
-                        cp["ok"] = max(int(cp.get("ok") or 0), ok_bucket)
-                        cp["failed"] = max(
-                            int(cp.get("failed") or 0), int(dbc.get("fail") or 0)
-                        )
-                    else:
-                        cp["ok"] = ok_bucket
-                        cp["failed"] = int(dbc.get("fail") or 0)
-                        cp["remaining"] = int(ui_counts.get("pending") or 0)
-                        done_n = int(cp["ok"]) + int(cp["failed"])
-                        rem_n = int(cp["remaining"])
-                        cp["total"] = max(int(cp.get("total") or 0), done_n + rem_n)
-                        cp["done"] = done_n
+                    cp["ok"] = ok_bucket
+                    cp["failed"] = int(dbc.get("fail") or 0)
+                    cp["remaining"] = int(ui_counts.get("pending") or 0)
+                    done_n = int(cp["ok"]) + int(cp["failed"])
+                    rem_n = int(cp["remaining"])
+                    cp["total"] = max(int(cp.get("total") or 0), done_n + rem_n)
+                    cp["done"] = done_n
                     cps_ui[rid_counts] = cp
-            # 「处理中」= 真实 inflight；暂停/停止归零
-            halt_now = str(status.get("halt") or "")
-            phase_now = str(status.get("phase") or "")
-            if (
-                not status.get("running")
-                or halt_now in {"pause", "stop"}
-                or phase_now in {"paused", "stopping", "stopped"}
-            ):
-                stray = int(ui_counts.get("running") or 0)
-                if stray > 0:
-                    ui_counts["pending"] = int(ui_counts.get("pending") or 0) + stray
-                ui_counts["running"] = 0
-            elif status.get("running"):
-                mon = (
-                    status.get("monitor")
-                    if isinstance(status.get("monitor"), dict)
-                    else {}
-                )
-                inflight = list(mon.get("inflight") or [])
-                inflight_n = len(inflight)
-                ui_counts["running"] = inflight_n
-                keep_ids = {
-                    str(it.get("itemId") or "").strip()
-                    for it in inflight
-                    if isinstance(it, dict) and str(it.get("itemId") or "").strip()
-                }
-                for rid_counts in count_regions:
-                    stale = _enrich_queue._queue_log_reopen_stale_running(
-                        rid_counts, keep_item_ids=keep_ids
-                    )
-                    if stale:
-                        ui_counts["pending"] = int(ui_counts.get("pending") or 0) + stale
-                with _enrich_lock:
-                    qc_mem = dict(_enrich_job.get("queueCounts") or {})
-                    qc_mem["running"] = inflight_n
-                    _enrich_job["queueCounts"] = qc_mem
+            # 空闲/暂停：处理中归零（残留 running 已并入 pending）
+            ui_counts["running"] = 0
             status["checkpoints"] = cps_ui
             status["queueCounts"] = ui_counts
             status["queueTotal"] = sum(
                 int(ui_counts.get(k) or 0)
-                for k in ("pending", "running", "done", "fail")
+                for k in ("pending", "running", "done", "soft", "fail")
             )
             base_prog = dict(status.get("progress") or {})
             status["progress"] = _progress_from_queue_counts(ui_counts, base=base_prog)
 
-            # 未处理 = 向量库所有番号 − 成功 − 软成功 − 失败（按分区独立，禁止串区）
+            # 分区角标：队列表 COUNT（running 对外恒 0）
             library: dict[str, Any] = {}
             region_queue_counts: dict[str, dict[str, int]] = {}
-            run_n_global = int(ui_counts.get("running") or 0)
             for rid_counts in count_regions:
                 dbc = _enrich_queue._queue_log_status_counts(rid_counts)
                 lib = _region_library_progress(rid_counts)
-                pending_n = int(dbc.get("pending") or 0)
-                run_n = int(dbc.get("running") or 0)
+                pending_n = int(dbc.get("pending") or 0) + int(dbc.get("running") or 0)
                 done_n = int(dbc.get("done") or 0)
                 soft_n = int(dbc.get("soft") or 0)
                 fail_n = int(dbc.get("fail") or 0)
-                if (
-                    rid_counts
-                    == _enrich._queue_log_region(str(status.get("currentRegion") or ""))
-                    and status.get("running")
-                ):
-                    run_n = run_n_global
                 region_queue_counts[rid_counts] = {
                     "pending": pending_n,
-                    "running": run_n,
+                    "running": 0,
                     "done": done_n,
                     "soft": soft_n,
                     "fail": fail_n,

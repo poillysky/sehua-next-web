@@ -29,7 +29,8 @@ from app.core.ttl_cache import enforce_max, prune_by_age
 
 import app.scrap_library.embed as _embed
 import app.scrap_library.embed_catalog as _embed_catalog
-from app.scrap_library.embed import (_POSTER_DL_FAIL_CAP, _blank_cover_cache, _ensure_poster_dl_pool, _is_http_url, _media_rel, _poster_dl_fail_until, _poster_dl_inflight, _poster_dl_lock, canonical_fc2_scrap_rel, log)
+from app.scrap_library.embed import (_is_http_url, _media_rel, canonical_fc2_scrap_rel, log)
+from app.scrap_library.embed_runtime import (_POSTER_DL_FAIL_CAP, _blank_cover_cache, _ensure_poster_dl_pool, _poster_dl_fail_until, _poster_dl_inflight, _poster_dl_lock)
 
 
 def _blank_pixels(im) -> list:

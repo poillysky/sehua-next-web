@@ -33,7 +33,13 @@ import app.scrap_library.enrich_cover as _enrich_cover
 import app.scrap_library.enrich_detail as _enrich_detail
 import app.scrap_library.enrich_queue as _enrich_queue
 import app.scrap_library.enrich_status as _enrich_status
-from app.scrap_library.enrich import (_DONE_LOG_RE, _enrich_job, _enrich_lock, _enrich_log_sink, _hist_log_cache, _hydrate_queue_item_from_library, _invalidate_classified_skip_cache, _pending_backfill_done, _persist_enrich_runtime, log, notify_enrich_watchers)
+from app.scrap_library.enrich import (_DONE_LOG_RE, _invalidate_classified_skip_cache, _pending_backfill_done, log)
+from app.scrap_library.enrich_queue_io import (
+    _enrich_log_sink,
+    _hist_log_cache,
+    _hydrate_queue_item_from_library,
+)
+from app.scrap_library.enrich_runtime import (_enrich_job, _enrich_lock, _persist_enrich_runtime, notify_enrich_watchers)
 
 
 _ENRICH_LOG_KEEP = 2000
@@ -87,12 +93,12 @@ def _enrich_log_region_keys(region: str) -> list[str]:
 def _canonical_enrich_log_region(region: str | None = None) -> str:
     """落库/内存统一用稳定 id，避免 日本有码 / japan_censored 分裂。
 
-    注意：禁止在已持有 _enrich_lock 时再 acquire（旧 Lock 会死锁）。
+    注意：禁止在已持有 _enrich._enrich_lock 时再 acquire（旧 Lock 会死锁）。
     空 region 时无锁读 currentRegion（可接受极短竞态）。
     """
     raw = str(region or "").strip()
     if not raw:
-        raw = str(_enrich_job.get("currentRegion") or "").strip()
+        raw = str(_enrich._enrich_job.get("currentRegion") or "").strip()
     if not raw:
         return "_all"
     from app.core.region_meta import REGION_META
@@ -123,17 +129,17 @@ def _persist_enrich_log(region: str, text: str) -> None:
     line = str(text or "").strip()
     if not line:
         return
-    _enrich_log_sink.push(rid, line)
+    _enrich._enrich_log_sink.push(rid, line)
 
 
 def flush_enrich_logs() -> None:
     """把缓冲里的日志立刻写库（任务收尾 / 探针 / 清空日志前用）。"""
-    _enrich_log_sink.flush()
+    _enrich._enrich_log_sink.flush()
 
 
 def enrich_log_sink_stats() -> dict[str, int]:
     """缓冲状态（诊断用）：pending / written / dropped。"""
-    return _enrich_log_sink.stats()
+    return _enrich._enrich_log_sink.stats()
 
 
 def load_enrich_logs(*, region: str = "", limit: int = 200) -> list[str]:
@@ -182,13 +188,13 @@ _HIST_LOG_TTL_SEC = 3.0
 
 def _load_enrich_logs_cached(region: str, limit: int) -> list[str]:
     key = (str(region or ""), int(limit))
-    hit = _hist_log_cache.get(key)
+    hit = _enrich._hist_log_cache.get(key)
     if hit and (time.monotonic() - float(hit[0])) < _HIST_LOG_TTL_SEC:
         return list(hit[1])
     rows = load_enrich_logs(region=region, limit=limit)
-    if len(_hist_log_cache) > 64:
-        _hist_log_cache.clear()
-    _hist_log_cache[key] = (time.monotonic(), list(rows))
+    if len(_enrich._hist_log_cache) > 64:
+        _enrich._hist_log_cache.clear()
+    _enrich._hist_log_cache[key] = (time.monotonic(), list(rows))
     return rows
 
 
@@ -196,32 +202,32 @@ def _clear_enrich_logs(*, region: str = "", wipe_all_tail: bool = True) -> None:
     """清分区运行日志（内存 + 元库）；暂停绝不能调用。"""
     rid = str(region or "").strip()
     keys = _enrich_log_region_keys(rid) if rid else []
-    with _enrich_lock:
+    with _enrich._enrich_lock:
         if rid:
-            region_logs = dict(_enrich_job.get("regionLogs") or {})
+            region_logs = dict(_enrich._enrich_job.get("regionLogs") or {})
             for k in keys:
                 region_logs.pop(k, None)
             # 当前分区停止时顺带清空全局尾日志，避免 UI 回退到 st.log
-            cur = str(_enrich_job.get("currentRegion") or "").strip()
+            cur = str(_enrich._enrich_job.get("currentRegion") or "").strip()
             if not cur or cur == rid or cur in keys or _canonical_enrich_log_region(cur) == _canonical_enrich_log_region(rid):
-                _enrich_job["log"] = []
-            _enrich_job["regionLogs"] = region_logs
+                _enrich._enrich_job["log"] = []
+            _enrich._enrich_job["regionLogs"] = region_logs
         else:
-            _enrich_job["regionLogs"] = {}
-            _enrich_job["log"] = []
+            _enrich._enrich_job["regionLogs"] = {}
+            _enrich._enrich_job["log"] = []
     try:
         from app.core.db import connect, init_db
 
         # ⚠️ 必须先丢掉**未落库**的缓冲行：否则 DELETE 之后后台线程再 flush，
         # 刚清掉的日志又被写回来（`discard` 与写库共用 `_io_lock`，不会交错）。
         if not rid:
-            _enrich_log_sink.discard(None)
+            _enrich._enrich_log_sink.discard(None)
         else:
             drop_keys = set(keys) | {_canonical_enrich_log_region(rid)}
             if wipe_all_tail:
                 drop_keys.add("_all")
             for k in drop_keys:
-                _enrich_log_sink.discard(k)
+                _enrich._enrich_log_sink.discard(k)
         init_db()
         with connect() as conn:
             if rid:
@@ -252,21 +258,21 @@ def clear_enrich_logs(*, region: str = "") -> dict[str, Any]:
     cur = ""
     halt = None
     phase = ""
-    if not _enrich_lock.acquire(timeout=2.0):
+    if not _enrich._enrich_lock.acquire(timeout=2.0):
         # 锁被卡：仍允许清库（用户已点暂停），内存态尽量事后对齐
         log.warning("clear_enrich_logs lock busy region=%s — force clear db", rid)
-        running = bool(_enrich_job.get("running"))
-        cur = _enrich._queue_log_region(str(_enrich_job.get("currentRegion") or ""))
-        halt = _enrich_job.get("halt")
-        phase = str(_enrich_job.get("phase") or "")
+        running = bool(_enrich._enrich_job.get("running"))
+        cur = _enrich._queue_log_region(str(_enrich._enrich_job.get("currentRegion") or ""))
+        halt = _enrich._enrich_job.get("halt")
+        phase = str(_enrich._enrich_job.get("phase") or "")
         locked = False
     else:
         locked = True
         try:
-            running = bool(_enrich_job.get("running"))
-            cur = _enrich._queue_log_region(str(_enrich_job.get("currentRegion") or ""))
-            halt = _enrich_job.get("halt")
-            phase = str(_enrich_job.get("phase") or "")
+            running = bool(_enrich._enrich_job.get("running"))
+            cur = _enrich._queue_log_region(str(_enrich._enrich_job.get("currentRegion") or ""))
+            halt = _enrich._enrich_job.get("halt")
+            phase = str(_enrich._enrich_job.get("phase") or "")
             # 真正在跑且未暂停/停止：拒绝硬清
             paused_like = halt in {"pause", "stop"} or phase in {
                 "paused",
@@ -283,41 +289,41 @@ def clear_enrich_logs(*, region: str = "") -> dict[str, Any]:
                 }
             # 暂停收尾中：打断残留 running，避免 UI/清空一直以为在刮
             if paused_like and running and rid and cur == rid:
-                _enrich_job["running"] = False
-                _enrich_job["halt"] = "stop"
-                _enrich_job["phase"] = "stopped"
+                _enrich._enrich_job["running"] = False
+                _enrich._enrich_job["halt"] = "stop"
+                _enrich._enrich_job["phase"] = "stopped"
                 running = False
         finally:
             if locked:
-                _enrich_lock.release()
+                _enrich._enrich_lock.release()
 
     _clear_enrich_logs(region=rid, wipe_all_tail=False)
     _enrich_queue._clear_queue_log(region=rid)
     _enrich_status._clear_local_status_totals(rid)
-    _invalidate_classified_skip_cache(rid)
+    _enrich._invalidate_classified_skip_cache(rid)
     if rid:
-        _pending_backfill_done.discard(rid)
+        _enrich._pending_backfill_done.discard(rid)
     else:
-        _pending_backfill_done.clear()
+        _enrich._pending_backfill_done.clear()
     cleared_cp = False
-    got_lock = _enrich_lock.acquire(timeout=2.0)
+    got_lock = _enrich._enrich_lock.acquire(timeout=2.0)
     try:
         if got_lock:
-            running = bool(_enrich_job.get("running"))
-            cur = _enrich._queue_log_region(str(_enrich_job.get("currentRegion") or ""))
-            halt = _enrich_job.get("halt")
-            phase = str(_enrich_job.get("phase") or "")
+            running = bool(_enrich._enrich_job.get("running"))
+            cur = _enrich._queue_log_region(str(_enrich._enrich_job.get("currentRegion") or ""))
+            halt = _enrich._enrich_job.get("halt")
+            phase = str(_enrich._enrich_job.get("phase") or "")
             paused_like = halt in {"pause", "stop"} or phase in {
                 "paused",
                 "stopping",
                 "stopped",
             }
             if paused_like:
-                _enrich_job["running"] = False
+                _enrich._enrich_job["running"] = False
                 running = False
             # 非本区运行中才清检查点；本区已暂停/空闲都清
             if rid and (not running or cur != rid or paused_like):
-                cps = dict(_enrich_job.get("checkpoints") or {})
+                cps = dict(_enrich._enrich_job.get("checkpoints") or {})
                 if rid in cps or any(
                     _enrich._queue_log_region(str(k)) == rid for k in list(cps.keys())
                 ):
@@ -325,8 +331,8 @@ def clear_enrich_logs(*, region: str = "") -> dict[str, Any]:
                         if _enrich._queue_log_region(str(k)) == rid or str(k) == rid:
                             cps.pop(k, None)
                             cleared_cp = True
-                    _enrich_job["checkpoints"] = cps
-                prog = dict(_enrich_job.get("progress") or {})
+                    _enrich._enrich_job["checkpoints"] = cps
+                prog = dict(_enrich._enrich_job.get("progress") or {})
                 if prog:
                     prog.update(
                         {
@@ -338,39 +344,39 @@ def clear_enrich_logs(*, region: str = "") -> dict[str, Any]:
                             "stage": "idle",
                         }
                     )
-                    _enrich_job["progress"] = prog
-                result = _enrich_job.get("result")
+                    _enrich._enrich_job["progress"] = prog
+                result = _enrich._enrich_job.get("result")
                 if isinstance(result, dict):
-                    _enrich_job["result"] = {
+                    _enrich._enrich_job["result"] = {
                         **result,
                         "ok": 0,
                         "failed": 0,
                         "queued": 0,
                     }
-                _enrich_job["queue"] = []
-                _enrich_job["queueCounts"] = {
+                _enrich._enrich_job["queue"] = []
+                _enrich._enrich_job["queueCounts"] = {
                     "pending": 0,
                     "running": 0,
                     "done": 0,
                     "fail": 0,
                 }
-                _enrich_job["phase"] = ""
-                _enrich_job["halt"] = None
-                _enrich_job["paused"] = False
-                _enrich_job["cancel"] = False
+                _enrich._enrich_job["phase"] = ""
+                _enrich._enrich_job["halt"] = None
+                _enrich._enrich_job["paused"] = False
+                _enrich._enrich_job["cancel"] = False
                 if cur == rid:
-                    _enrich_job["currentRegion"] = ""
-                    _enrich_job["current"] = None
+                    _enrich._enrich_job["currentRegion"] = ""
+                    _enrich._enrich_job["current"] = None
     finally:
         if got_lock:
-            _enrich_lock.release()
+            _enrich._enrich_lock.release()
     if cleared_cp or rid:
         try:
-            _persist_enrich_runtime()
+            _enrich._persist_enrich_runtime()
         except Exception as e:  # noqa: BLE001
             log.warning("persist after clear enrich logs failed: %s", e)
     try:
-        notify_enrich_watchers(force=True)
+        _enrich.notify_enrich_watchers(force=True)
     except Exception:  # noqa: BLE001
         pass
     return {
@@ -405,7 +411,7 @@ def _recover_done_from_enrich_logs(region: str) -> int:
                 line = str(
                     (raw.get("line") if isinstance(raw, dict) else raw[0]) or ""
                 ).strip()
-                m = _DONE_LOG_RE.match(line)
+                m = _enrich._DONE_LOG_RE.match(line)
                 if not m:
                     continue
                 code = m.group(1).strip().upper()
@@ -493,7 +499,7 @@ def _recover_done_from_enrich_logs(region: str) -> int:
                     if st == "done" and has_fields and detail_title:
                         continue
                     # done 但空壳 / pending→done：用本地库补全
-                    hydrated = _hydrate_queue_item_from_library(
+                    hydrated = _enrich._hydrate_queue_item_from_library(
                         code=code, region=rid, item_id=item_id
                     )
                     if lid > 0:
@@ -537,7 +543,7 @@ def _recover_done_from_enrich_logs(region: str) -> int:
                         recovered += 1
                         continue
                 # 无行：插入并尽量补全
-                hydrated = _hydrate_queue_item_from_library(code=code, region=rid)
+                hydrated = _enrich._hydrate_queue_item_from_library(code=code, region=rid)
                 merged = {
                     "itemId": hydrated.get("itemId") or "",
                     "code": code,

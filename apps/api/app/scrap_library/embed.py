@@ -30,6 +30,31 @@ from app.core.ttl_cache import enforce_max, prune_by_age
 log = logging.getLogger(__name__)
 
 
+from app.scrap_library.embed_runtime import (  # noqa: E402
+    _ACTRESS_OPT_LOCK,
+    _FACETS_CACHE,
+    _ITEMS_HUB_CACHE,
+    _POSTER_DL_FAIL_CAP,
+    _POSTER_DL_WORKERS,
+    _RECOMMEND_CACHE,
+    _actress_opt_job,
+    _blank_cover_cache,
+    _ensure_poster_dl_pool,
+    _facets_snap_lock,
+    _hydrate_actress_opt_job,
+    _hydrate_embed_job,
+    _job,
+    _job_lock,
+    _persist_embed_job,
+    _poster_dl_fail_until,
+    _poster_dl_inflight,
+    _poster_dl_lock,
+    _poster_dl_q,
+    _push_log,
+    _set_progress,
+    get_job_status,
+)
+
 SETTINGS_KEY = "scrap_library.embed"
 
 
@@ -38,121 +63,6 @@ DEFAULT_REL_ROOT = "scrap-library"
 
 TABLE = "scrap_library_embed"
 
-
-_job_lock = threading.Lock()
-
-
-_job: dict[str, Any] = {
-    "running": False,
-    "phase": "",
-    "progress": None,
-    "log": [],
-    "result": None,
-    "error": None,
-}
-
-
-_job_hydrated = False
-
-
-_job_hydrate_lock = threading.Lock()
-
-
-def _persist_embed_job(**extra: Any) -> None:
-    try:
-        from app.core import job_persist
-
-        with _job_lock:
-            payload = {
-                "status": "running" if _job.get("running") else str(extra.get("status") or _job.get("phase") or "idle"),
-                "phase": str(_job.get("phase") or ""),
-                "progress": dict(_job.get("progress") or {}) or None,
-                "log": list(_job.get("log") or [])[-40:],
-                "result": _job.get("result"),
-                "error": _job.get("error"),
-                "running": bool(_job.get("running")),
-            }
-        for k, v in extra.items():
-            if k == "status" and _job.get("running"):
-                payload["status"] = "running"
-            else:
-                payload[k] = v
-        if payload.get("running"):
-            payload["status"] = "running"
-        job_persist.save_job(job_persist.EMBED_JOB_KEY, payload)
-    except Exception as e:  # noqa: BLE001
-        log.warning("persist embed job failed: %s", e)
-
-
-def _hydrate_embed_job(*, force: bool = False) -> dict[str, Any]:
-    """从 DB 恢复上次任务快照；若上次崩溃中 running→interrupted。"""
-    global _job_hydrated
-    with _job_hydrate_lock:
-        if _job_hydrated and not force:
-            return {}
-        _job_hydrated = True
-    try:
-        from app.core import job_persist
-
-        raw = job_persist.load_job(job_persist.EMBED_JOB_KEY)
-        if not raw:
-            return {}
-        with _job_lock:
-            if _job.get("running"):
-                return raw
-            if not _job.get("phase") and raw.get("phase"):
-                _job["phase"] = str(raw.get("phase") or "")
-            if not _job.get("progress") and raw.get("progress"):
-                _job["progress"] = dict(raw.get("progress") or {})
-            if not _job.get("log") and raw.get("log"):
-                _job["log"] = list(raw.get("log") or [])[-40:]
-            if _job.get("result") is None and raw.get("result") is not None:
-                _job["result"] = raw.get("result")
-            if not _job.get("error") and raw.get("error"):
-                _job["error"] = raw.get("error")
-            st = str(raw.get("status") or "")
-            if st == "running":
-                _job["phase"] = "interrupted"
-                prog = dict(_job.get("progress") or {})
-                prog["label"] = "进程中断 · 可继续"
-                _job["progress"] = prog
-                raw = dict(raw)
-                raw["status"] = "interrupted"
-                raw["running"] = False
-                job_persist.save_job(job_persist.EMBED_JOB_KEY, raw)
-        return raw
-    except Exception as e:  # noqa: BLE001
-        log.warning("hydrate embed job failed: %s", e)
-        return {}
-
-
-def get_job_status() -> dict[str, Any]:
-    _hydrate_embed_job()
-    with _job_lock:
-        return {
-            "running": bool(_job["running"]),
-            "phase": _job.get("phase") or "",
-            "progress": _job.get("progress"),
-            "log": list(_job.get("log") or [])[-12:],
-            "result": _job.get("result"),
-            "error": _job.get("error"),
-        }
-
-
-def _push_log(msg: str) -> None:
-    with _job_lock:
-        log_list = list(_job.get("log") or [])
-        log_list.append(str(msg))
-        _job["log"] = log_list[-40:]
-
-
-def _set_progress(**kwargs: Any) -> None:
-    with _job_lock:
-        cur = dict(_job.get("progress") or {})
-        cur.update(kwargs)
-        _job["progress"] = cur
-        if kwargs.get("label"):
-            _job["phase"] = str(kwargs["label"])
 
 
 def get_settings() -> dict[str, Any]:
@@ -1043,25 +953,18 @@ def _is_blank_cover_bytes(raw: bytes) -> bool:
     return _image_bytes_looks_blank(raw)
 
 
-_blank_cover_cache: dict[str, bool] = {}
 
 
-_POSTER_DL_WORKERS = 3
 
 
-_poster_dl_q: queue.Queue[tuple[str, str, str]] | None = None
 
 
-_poster_dl_lock = threading.Lock()
 
 
-_poster_dl_inflight: set[str] = set()
 
 
-_poster_dl_fail_until: dict[str, float] = {}
 
 
-_POSTER_DL_FAIL_CAP = 4096
 
 
 def _is_http_url(url: str) -> bool:
@@ -2173,7 +2076,6 @@ def _list_items_uncached(
     }
 
 
-_ITEMS_HUB_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
 _ITEMS_HUB_CACHE_TTL_S = 90.0
@@ -2361,7 +2263,6 @@ def _split_tokens(raw: str) -> list[str]:
     return out
 
 
-_FACETS_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 
 
 _FACETS_SNAP_DIR = ("cache", "facets")
@@ -2373,7 +2274,6 @@ _FACETS_SNAP_VERSION = 4
 _FACETS_SNAP_KINDS = ("genre", "actress", "studio", "tag")
 
 
-_facets_snap_lock = threading.Lock()
 
 
 def list_facets(
@@ -2469,7 +2369,6 @@ def list_facets(
     return {"facets": page, "total": total}
 
 
-_RECOMMEND_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
 _RECOMMEND_SNAP_VERSION = 2
@@ -2521,68 +2420,6 @@ def search(query: str, *, limit: int = 8, region: str = "") -> list[dict[str, An
             continue
         out.append(_hit_from_row(row, score=float(row.get("score") or 0)))
     return out
-
-
-_ACTRESS_OPT_LOCK = threading.Lock()
-
-
-_actress_opt_job: dict[str, Any] = {
-    "running": False,
-    "phase": "",
-    "progress": None,
-    "log": [],
-    "result": None,
-    "error": None,
-}
-
-
-_actress_opt_hydrated = False
-
-
-_actress_opt_hydrate_lock = threading.Lock()
-
-
-def _hydrate_actress_opt_job(*, force: bool = False) -> dict[str, Any]:
-    global _actress_opt_hydrated
-    with _actress_opt_hydrate_lock:
-        if _actress_opt_hydrated and not force:
-            return {}
-        _actress_opt_hydrated = True
-    try:
-        from app.core import job_persist
-
-        raw = job_persist.load_job(job_persist.ACTRESS_OPTIMIZE_JOB_KEY)
-        if not raw:
-            return {}
-        with _ACTRESS_OPT_LOCK:
-            if _actress_opt_job.get("running"):
-                return raw
-            if not _actress_opt_job.get("phase") and raw.get("phase"):
-                _actress_opt_job["phase"] = str(raw.get("phase") or "")
-            if not _actress_opt_job.get("progress") and raw.get("progress"):
-                _actress_opt_job["progress"] = dict(raw.get("progress") or {})
-            if not _actress_opt_job.get("log") and raw.get("log"):
-                _actress_opt_job["log"] = list(raw.get("log") or [])[-40:]
-            if (
-                _actress_opt_job.get("result") is None
-                and raw.get("result") is not None
-            ):
-                _actress_opt_job["result"] = raw.get("result")
-            if not _actress_opt_job.get("error") and raw.get("error"):
-                _actress_opt_job["error"] = raw.get("error")
-            if str(raw.get("status") or "") == "running":
-                _actress_opt_job["phase"] = "interrupted"
-                prog = dict(_actress_opt_job.get("progress") or {})
-                prog["label"] = "进程中断 · 可继续"
-                _actress_opt_job["progress"] = prog
-                raw = dict(raw)
-                raw["status"] = "interrupted"
-                raw["running"] = False
-                job_persist.save_job(job_persist.ACTRESS_OPTIMIZE_JOB_KEY, raw)
-        return raw
-    except Exception as e:  # noqa: BLE001
-        log.warning("hydrate actress optimize job failed: %s", e)
-        return {}
 
 
 def local_file_api(rel: str) -> str:

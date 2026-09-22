@@ -30,7 +30,8 @@ from app.scrap_library import enrich_monitor as enrich_mon
 
 import app.scrap_library.enrich as _enrich
 import app.scrap_library.enrich_queue as _enrich_queue
-from app.scrap_library.enrich import (_enrich_job, _enrich_lock, _hydrate_enrich_runtime, _persist_enrich_runtime, log)
+from app.scrap_library.enrich import (log)
+from app.scrap_library.enrich_runtime import (_enrich_job, _enrich_lock, _hydrate_enrich_runtime, _persist_enrich_runtime)
 
 
 def _save_checkpoint(region: str, payload: dict[str, Any]) -> None:
@@ -56,34 +57,34 @@ def _save_checkpoint(region: str, payload: dict[str, Any]) -> None:
     row["queueInLog"] = bool(row.get("queueInLog")) or rem_n > len(queue_list) or db_pending > len(
         queue_list
     )
-    with _enrich_lock:
-        cps = dict(_enrich_job.get("checkpoints") or {})
+    with _enrich._enrich_lock:
+        cps = dict(_enrich._enrich_job.get("checkpoints") or {})
         cps[rid] = row
-        _enrich_job["checkpoints"] = cps
-    _persist_enrich_runtime()
+        _enrich._enrich_job["checkpoints"] = cps
+    _enrich._persist_enrich_runtime()
 
 
 def _clear_checkpoint(region: str = "") -> None:
     rid = str(region or "").strip()
-    with _enrich_lock:
+    with _enrich._enrich_lock:
         if not rid:
-            _enrich_job["checkpoints"] = {}
+            _enrich._enrich_job["checkpoints"] = {}
         else:
-            cps = dict(_enrich_job.get("checkpoints") or {})
+            cps = dict(_enrich._enrich_job.get("checkpoints") or {})
             cps.pop(rid, None)
-            _enrich_job["checkpoints"] = cps
-    _persist_enrich_runtime()
+            _enrich._enrich_job["checkpoints"] = cps
+    _enrich._persist_enrich_runtime()
 
 
 def _take_checkpoint(region: str) -> dict[str, Any] | None:
     rid = str(region or "").strip()
     if not rid:
         return None
-    with _enrich_lock:
-        cps = dict(_enrich_job.get("checkpoints") or {})
+    with _enrich._enrich_lock:
+        cps = dict(_enrich._enrich_job.get("checkpoints") or {})
         raw = cps.pop(rid, None)
-        _enrich_job["checkpoints"] = cps
-    _persist_enrich_runtime()
+        _enrich._enrich_job["checkpoints"] = cps
+    _enrich._persist_enrich_runtime()
     return dict(raw) if isinstance(raw, dict) else None
 
 
@@ -91,9 +92,9 @@ def _peek_checkpoint(region: str) -> dict[str, Any] | None:
     rid = str(region or "").strip()
     if not rid:
         return None
-    _hydrate_enrich_runtime()
-    with _enrich_lock:
-        raw = (dict(_enrich_job.get("checkpoints") or {})).get(rid)
+    _enrich._hydrate_enrich_runtime()
+    with _enrich._enrich_lock:
+        raw = (dict(_enrich._enrich_job.get("checkpoints") or {})).get(rid)
     return dict(raw) if isinstance(raw, dict) else None
 
 

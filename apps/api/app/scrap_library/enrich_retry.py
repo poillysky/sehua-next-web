@@ -34,7 +34,8 @@ import app.scrap_library.enrich_detail as _enrich_detail
 import app.scrap_library.enrich_merge as _enrich_merge
 import app.scrap_library.enrich_queue as _enrich_queue
 import app.scrap_library.enrich_scan as _enrich_scan
-from app.scrap_library.enrich import (_COVER_ONLY_GAPS, _ENRICH_KINDS, _GAP_FAIL_LABEL, _SOFT_GAP_LABELS, _SOFT_SUCCESS_GAPS, _SUCCESS_BLOCK_GAPS, _demoted_false_dones, _enrich_job, _enrich_lock, _promoted_actress_soft, _retry_hint_cache, _retry_hint_known, _retry_hint_primed, _soft_correction_last, log)
+from app.scrap_library.enrich import (_COVER_ONLY_GAPS, _ENRICH_KINDS, _GAP_FAIL_LABEL, _SOFT_GAP_LABELS, _SOFT_SUCCESS_GAPS, _SUCCESS_BLOCK_GAPS, _demoted_false_dones, _promoted_actress_soft, _retry_hint_cache, _retry_hint_known, _retry_hint_primed, _soft_correction_last, log)
+from app.scrap_library.enrich_runtime import (_enrich_job, _enrich_lock)
 
 
 _SOFT_OK_PREFIX = "软成功"
@@ -50,7 +51,7 @@ _SOFT_CORRECTION_MIN_INTERVAL_SEC = 6.0
 
 
 def _gap_labels(gaps: list[str]) -> list[str]:
-    return [_GAP_FAIL_LABEL.get(g, g) for g in gaps]
+    return [_enrich._GAP_FAIL_LABEL.get(g, g) for g in gaps]
 
 
 def _strip_soft_ok_prefix(err: str) -> str:
@@ -94,7 +95,7 @@ def _is_soft_remain_error(err: str) -> bool:
         return False
     rest = s[len("仍缺:") :].strip()
     parts = [p.strip() for p in re.split(r"[·,，]", rest) if p.strip()]
-    return bool(parts) and all(p in _SOFT_GAP_LABELS for p in parts)
+    return bool(parts) and all(p in _enrich._SOFT_GAP_LABELS for p in parts)
 
 
 def _soft_gaps_from_remain_error(err: str) -> list[str]:
@@ -104,11 +105,11 @@ def _soft_gaps_from_remain_error(err: str) -> list[str]:
         return []
     rest = s[len("仍缺:") :].strip()
     parts = [p.strip() for p in re.split(r"[·,，]", rest) if p.strip()]
-    rev = {v: k for k, v in _GAP_FAIL_LABEL.items()}
+    rev = {v: k for k, v in _enrich._GAP_FAIL_LABEL.items()}
     out: list[str] = []
     for p in parts:
         gid = rev.get(p)
-        if gid and gid in _SOFT_SUCCESS_GAPS and gid not in out:
+        if gid and gid in _enrich._SOFT_SUCCESS_GAPS and gid not in out:
             out.append(gid)
     return out
 
@@ -137,7 +138,7 @@ def _retry_next_state(attempts: int, *, cap: int) -> tuple[int, bool]:
 def _is_cover_only_gaps(gaps: Any) -> bool:
     """剩余缺口是否「只有封面」（no_local=无合格海报 / no_media=无 cover_url）。"""
     g = {str(x).strip() for x in (gaps or []) if str(x).strip()}
-    return bool(g) and g <= _COVER_ONLY_GAPS
+    return bool(g) and g <= _enrich._COVER_ONLY_GAPS
 
 
 _SRC_GIVEUP_POLL_SEC = 0.25
@@ -200,7 +201,7 @@ def _src_retry_item(hint: dict[str, Any], *, region: str) -> dict[str, Any] | No
     return {
         "itemId": iid,
         "code": code_h,
-        "gaps": list(_ENRICH_KINDS),
+        "gaps": list(_enrich._ENRICH_KINDS),
         "rel_path": rel or iid,
         "relPath": rel or iid,
         "region": region,
@@ -212,7 +213,7 @@ def _src_retry_item(hint: dict[str, Any], *, region: str) -> dict[str, Any] | No
 
 
 def _retry_hint_load(region: str, kind: str) -> list[dict[str, Any]]:
-    """读某分区某类重试提示（TTL 缓存）。顺带把已知番号灌进 `_retry_hint_known`。
+    """读某分区某类重试提示（TTL 缓存）。顺带把已知番号灌进 `_enrich._retry_hint_known`。
 
     缓存必须由这里灌 `known` —— 否则进程重启后「成功清零」会因 known 为空而跳过 DELETE，
     提示行会永远留在库里、每轮被重新入队。
@@ -220,9 +221,9 @@ def _retry_hint_load(region: str, kind: str) -> list[dict[str, Any]]:
     rid = _enrich._queue_log_region(region) or region
     key = (rid, str(kind or ""))
     now = time.time()
-    hit = _retry_hint_cache.get(key)
+    hit = _enrich._retry_hint_cache.get(key)
     if hit and now - hit[0] < _RETRY_HINT_CACHE_TTL:
-        _retry_hint_primed.add(key)
+        _enrich._retry_hint_primed.add(key)
         return hit[1]
     rows: list[dict[str, Any]] = []
     known: set[str] = set()
@@ -259,15 +260,15 @@ def _retry_hint_load(region: str, kind: str) -> list[dict[str, Any]]:
                 )
     except Exception as e:  # noqa: BLE001
         log.debug("retry hint load failed region=%s kind=%s: %s", rid, kind, e)
-    _retry_hint_cache[key] = (now, rows)
-    _retry_hint_known.setdefault(key, set()).update(known)
-    _retry_hint_primed.add(key)
+    _enrich._retry_hint_cache[key] = (now, rows)
+    _enrich._retry_hint_known.setdefault(key, set()).update(known)
+    _enrich._retry_hint_primed.add(key)
     return rows
 
 
 def _retry_hint_invalidate(region: str, kind: str) -> None:
     rid = _enrich._queue_log_region(region) or region
-    _retry_hint_cache.pop((rid, str(kind or "")), None)
+    _enrich._retry_hint_cache.pop((rid, str(kind or "")), None)
 
 
 def _retry_hint_clear_region(region: str, kind: str | None = None) -> int:
@@ -292,9 +293,9 @@ def _retry_hint_clear_region(region: str, kind: str | None = None) -> int:
             n = int(getattr(cur, "rowcount", 0) or 0)
             conn.commit()
         for k in {_RETRY_KIND_COVER, _RETRY_KIND_SRC_DOWN} if not kind else {kind}:
-            _retry_hint_cache.pop((rid, str(k or "")), None)
-            _retry_hint_known.pop((rid, str(k or "")), None)
-            _retry_hint_primed.discard((rid, str(k or "")))
+            _enrich._retry_hint_cache.pop((rid, str(k or "")), None)
+            _enrich._retry_hint_known.pop((rid, str(k or "")), None)
+            _enrich._retry_hint_primed.discard((rid, str(k or "")))
         return n
     except Exception as e:  # noqa: BLE001
         log.debug("retry hint clear failed region=%s: %s", rid, e)
@@ -343,8 +344,8 @@ def _retry_hint_clear_codes(
                 dropped += int(getattr(cur, "rowcount", 0) or 0)
             conn.commit()
         for k in {_RETRY_KIND_COVER, _RETRY_KIND_SRC_DOWN} if not kind else {kind}:
-            _retry_hint_cache.pop((rid, str(k or "")), None)
-            known = _retry_hint_known.get((rid, str(k or "")))
+            _enrich._retry_hint_cache.pop((rid, str(k or "")), None)
+            known = _enrich._retry_hint_known.get((rid, str(k or "")))
             if isinstance(known, set):
                 known.difference_update(code_list)
         return dropped
@@ -507,8 +508,8 @@ def _apply_local_gap_success(
         except Exception:  # noqa: BLE001
             remain = []
     remain = list(remain or [])
-    block = [g for g in remain if g in _SUCCESS_BLOCK_GAPS]
-    soft = [g for g in remain if g in _SOFT_SUCCESS_GAPS]
+    block = [g for g in remain if g in _enrich._SUCCESS_BLOCK_GAPS]
+    soft = [g for g in remain if g in _enrich._SOFT_SUCCESS_GAPS]
     if block:
         if only_if_ok and not out.get("ok"):
             return
@@ -556,27 +557,27 @@ def _ensure_actress_soft_promoted(region: str, *, force: bool = False) -> int:
         return 0
     now = time.monotonic()
     first = (
-        rid not in _demoted_false_dones
-        or _promoted_actress_soft.get(rid) != _SOFT_PROMOTE_RULE_VER
+        rid not in _enrich._demoted_false_dones
+        or _enrich._promoted_actress_soft.get(rid) != _SOFT_PROMOTE_RULE_VER
     )
     if not force and not first:
-        last = float(_soft_correction_last.get(rid) or 0.0)
+        last = float(_enrich._soft_correction_last.get(rid) or 0.0)
         if (now - last) < _SOFT_CORRECTION_MIN_INTERVAL_SEC:
             return 0
-    _soft_correction_last[rid] = now
+    _enrich._soft_correction_last[rid] = now
     demoted = 0
-    if rid not in _demoted_false_dones:
+    if rid not in _enrich._demoted_false_dones:
         demoted = _enrich_queue._queue_log_demote_false_dones(rid)
-        _demoted_false_dones.add(rid)
+        _enrich._demoted_false_dones.add(rid)
     n = 0
-    if _promoted_actress_soft.get(rid) != _SOFT_PROMOTE_RULE_VER:
+    if _enrich._promoted_actress_soft.get(rid) != _SOFT_PROMOTE_RULE_VER:
         n = _enrich_queue._queue_log_promote_actress_soft_fails(rid)
         n += _enrich_queue._queue_log_normalize_soft_to_full_success(rid)
-        _promoted_actress_soft[rid] = _SOFT_PROMOTE_RULE_VER
+        _enrich._promoted_actress_soft[rid] = _SOFT_PROMOTE_RULE_VER
     # 内存队列同步：假成功→pending；软缺口 fail→软成功（须本地封面）
     mem_n = 0
-    with _enrich_lock:
-        q = list(_enrich_job.get("queue") or [])
+    with _enrich._enrich_lock:
+        q = list(_enrich._enrich_job.get("queue") or [])
         if q:
             new_q: list[Any] = []
             pending_delta = 0
@@ -630,7 +631,7 @@ def _ensure_actress_soft_promoted(region: str, *, force: bool = False) -> int:
                     or (
                         isinstance(r.get("gaps") or r.get("gapsAfter"), list)
                         and not any(
-                            g in _SUCCESS_BLOCK_GAPS
+                            g in _enrich._SUCCESS_BLOCK_GAPS
                             for g in (r.get("gapsAfter") or r.get("gaps") or [])
                         )
                     )
@@ -640,11 +641,11 @@ def _ensure_actress_soft_promoted(region: str, *, force: bool = False) -> int:
                             _, disk_gaps = _enrich_scan._local_folder_gaps(folder)
                         except Exception:  # noqa: BLE001
                             disk_gaps = []
-                        if not any(g in _SUCCESS_BLOCK_GAPS for g in disk_gaps):
+                        if not any(g in _enrich._SUCCESS_BLOCK_GAPS for g in disk_gaps):
                             soft_only = [
                                 g
                                 for g in disk_gaps
-                                if g in _SOFT_SUCCESS_GAPS
+                                if g in _enrich._SOFT_SUCCESS_GAPS
                             ]
                             nr = dict(r)
                             nr["status"] = "done"
@@ -673,9 +674,9 @@ def _ensure_actress_soft_promoted(region: str, *, force: bool = False) -> int:
                         _, disk_gaps = _enrich_scan._local_folder_gaps(folder)
                     except Exception:  # noqa: BLE001
                         disk_gaps = []
-                    if not any(g in _SUCCESS_BLOCK_GAPS for g in disk_gaps):
+                    if not any(g in _enrich._SUCCESS_BLOCK_GAPS for g in disk_gaps):
                         soft_only = [
-                            g for g in disk_gaps if g in _SOFT_SUCCESS_GAPS
+                            g for g in disk_gaps if g in _enrich._SOFT_SUCCESS_GAPS
                         ]
                         was_soft = bool(r.get("partialOk")) or _is_soft_ok_error(
                             err
@@ -708,8 +709,8 @@ def _ensure_actress_soft_promoted(region: str, *, force: bool = False) -> int:
                             continue
                 new_q.append(r)
             if mem_n:
-                _enrich_job["queue"] = new_q
-                counts = dict(_enrich_job.get("queueCounts") or {})
+                _enrich._enrich_job["queue"] = new_q
+                counts = dict(_enrich._enrich_job.get("queueCounts") or {})
                 if counts:
                     counts["pending"] = max(
                         0, int(counts.get("pending") or 0) + pending_delta
@@ -723,13 +724,13 @@ def _ensure_actress_soft_promoted(region: str, *, force: bool = False) -> int:
                     counts["soft"] = max(
                         0, int(counts.get("soft") or 0) + soft_delta
                     )
-                    _enrich_job["queueCounts"] = counts
-                    prog = dict(_enrich_job.get("progress") or {})
+                    _enrich._enrich_job["queueCounts"] = counts
+                    prog = dict(_enrich._enrich_job.get("progress") or {})
                     prog["ok"] = int(counts.get("done") or 0) + int(
                         counts.get("soft") or 0
                     )
                     prog["failed"] = int(counts.get("fail") or 0)
-                    _enrich_job["progress"] = prog
+                    _enrich._enrich_job["progress"] = prog
     if demoted:
         log.info(
             "demoted false enrich dones region=%s n=%s", rid, demoted

@@ -8,14 +8,13 @@ import {
   testCloudSaver,
 } from '@/lib/api';
 import { Switch } from '@/components/ui/switch';
-import { AppPush } from '@/components/ui/AppPush';
-import { AppMsg } from '@/components/ui/AppMsg';
 import { cn } from '@/lib/utils';
 import {
   testResultText,
   usePanelAction,
   type StatusReporter,
 } from '@/hooks/usePanelAction';
+import { ConnectionPanelShell } from './connection/ConnectionPanelShell';
 
 export function CloudSaverPanel({
   onBack,
@@ -68,7 +67,6 @@ export function CloudSaverPanel({
     await run(
       '测试失败',
       async () => {
-        // 先保存当前表单再测，避免测到旧配置（密码留空则沿用已存）
         await putCloudSaverSettings({
           enabled,
           baseUrl: baseUrl.trim(),
@@ -130,7 +128,17 @@ export function CloudSaverPanel({
   }
 
   return (
-    <AppPush title="CloudSaver" onBack={onBack}>
+    <ConnectionPanelShell
+      title="CloudSaver"
+      onBack={onBack}
+      msg={msg}
+      onDismissMsg={() => setMsg('')}
+      loading={loading}
+      busy={busy}
+      onTest={() => void onTest()}
+      onSave={() => void onSave()}
+      testLabel="测试登录"
+    >
       <ul className="settings-group">
         <li>
           <div className="settings-kv">
@@ -143,11 +151,7 @@ export function CloudSaverPanel({
                   : 'settings-nav__status--warn',
               )}
             >
-              {loading
-                ? '…'
-                : enabled && username && hasPassword
-                  ? '已配置'
-                  : '未完整'}
+              {enabled && username && hasPassword ? '已配置' : '未完整'}
             </span>
           </div>
         </li>
@@ -225,30 +229,6 @@ export function CloudSaverPanel({
           </label>
         </div>
       </section>
-
-      <div className="app-actions">
-        <button
-          type="button"
-          className="app-btn-secondary"
-          disabled={busy || loading}
-          onClick={() => void onTest()}
-        >
-          测试登录
-        </button>
-        <button
-          type="button"
-          className="app-btn-primary"
-          style={{ flex: 1 }}
-          disabled={busy || loading}
-          onClick={() => void onSave()}
-        >
-          保存
-        </button>
-      </div>
-
-      <AppMsg allowSelect onDismiss={() => setMsg('')}>
-        {msg}
-      </AppMsg>
-    </AppPush>
+    </ConnectionPanelShell>
   );
 }

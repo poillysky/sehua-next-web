@@ -34,7 +34,9 @@ import app.scrap_library.enrich_merge as _enrich_merge
 import app.scrap_library.enrich_retry as _enrich_retry
 import app.scrap_library.enrich_scan as _enrich_scan
 import app.scrap_library.enrich_text as _enrich_text
-from app.scrap_library.enrich import (_CN_WAIT_BUDGET_SEC, _GAP_FIELD_PRIORITY_KEYS, _JUNK_TITLE_MARKERS, _META_FILL_SOURCE_IDS, _META_WAIT_BUDGET_SEC, _SOFT_SUCCESS_GAPS, _SOURCE_COOLDOWN_LOCK, _SOURCE_COOLDOWN_UNTIL, _SOURCE_DOWN_STREAK, _SOURCE_WORKERS_MAX, _SUCCESS_BLOCK_GAPS, _cn_text_ids_in_batch, _enrich_job, _enrich_lock, _hydrate_queue_item_from_library, _maybe_llm_fill_zh, _set_progress, log, notify_enrich_watchers)
+from app.scrap_library.enrich import (_CN_WAIT_BUDGET_SEC, _GAP_FIELD_PRIORITY_KEYS, _JUNK_TITLE_MARKERS, _META_FILL_SOURCE_IDS, _META_WAIT_BUDGET_SEC, _SOFT_SUCCESS_GAPS, _SOURCE_COOLDOWN_LOCK, _SOURCE_COOLDOWN_UNTIL, _SOURCE_DOWN_STREAK, _SOURCE_WORKERS_MAX, _SUCCESS_BLOCK_GAPS, _cn_text_ids_in_batch, _maybe_llm_fill_zh, log)
+from app.scrap_library.enrich_queue_io import _hydrate_queue_item_from_library
+from app.scrap_library.enrich_runtime import (_enrich_job, _enrich_lock, _set_progress, notify_enrich_watchers)
 
 
 def _detail_usable(detail: dict[str, Any] | None, *, code: str) -> bool:
@@ -46,7 +48,7 @@ def _detail_usable(detail: dict[str, Any] | None, *, code: str) -> bool:
     title_l = title.casefold()
     if not title:
         return False
-    if any(m in title_l for m in (x.casefold() for x in _JUNK_TITLE_MARKERS)):
+    if any(m in title_l for m in (x.casefold() for x in _enrich._JUNK_TITLE_MARKERS)):
         return False
     if _enrich._title_is_thin(title, code_u) and not (
         detail.get("posterUrl") or detail.get("overview") or _enrich._clean_actors(detail.get("actors"))
@@ -105,7 +107,7 @@ def _detail_from_local_folder(
             break
     if not title:
         nfo = _find_nfo(folder)
-        meta = parse_nfo(nfo) if nfo else None
+        meta = _enrich.parse_nfo(nfo) if nfo else None
         if isinstance(meta, dict):
             title = str(meta.get("title") or "").strip()
             code_u = str(meta.get("num") or code_u).strip().upper() or code_u
@@ -159,7 +161,7 @@ def _backfill_queue_item_detail(item: dict[str, Any], *, region: str) -> dict[st
         # 仅有 NFO 级字段：仍试本地 enrich.log 补源耗时
         item = _enrich_merge._merge_enrich_sidecar_into_item(item, region=region)
         return item
-    hydrated = _hydrate_queue_item_from_library(
+    hydrated = _enrich._hydrate_queue_item_from_library(
         code=str(item.get("code") or ""),
         region=region,
         item_id=str(item.get("itemId") or ""),
@@ -286,9 +288,9 @@ def _classify_disk_gaps(gaps: list[str] | None) -> str:
     gs = [str(g) for g in (gaps or []) if str(g).strip()]
     if not gs:
         return "done"
-    if any(g in _SUCCESS_BLOCK_GAPS for g in gs):
+    if any(g in _enrich._SUCCESS_BLOCK_GAPS for g in gs):
         return "fail"
-    if any(g in _SOFT_SUCCESS_GAPS for g in gs):
+    if any(g in _enrich._SOFT_SUCCESS_GAPS for g in gs):
         return "soft"
     return "done"
 
@@ -389,7 +391,7 @@ def _fields_after_local_write(
     """写回后按本地 NFO 刷新字段表，避免早停没采到剧情却误报「缺剧情」。"""
     d = dict(detail) if isinstance(detail, dict) else {}
     nfo = _find_nfo(folder)
-    meta = parse_nfo(nfo) if nfo else None
+    meta = _enrich.parse_nfo(nfo) if nfo else None
     if isinstance(meta, dict) and meta:
         plot = str(meta.get("plot") or meta.get("overview") or "").strip()
         title = str(meta.get("title") or "").strip()
@@ -462,8 +464,8 @@ def _source_in_cooldown(sid: str) -> bool:
     key = str(sid or "").strip().lower()
     if not key:
         return False
-    with _SOURCE_COOLDOWN_LOCK:
-        until = float(_SOURCE_COOLDOWN_UNTIL.get(key) or 0.0)
+    with _enrich._SOURCE_COOLDOWN_LOCK:
+        until = float(_enrich._SOURCE_COOLDOWN_UNTIL.get(key) or 0.0)
     return time.monotonic() < until
 
 
@@ -471,20 +473,20 @@ def _note_source_fetch_outcome(sid: str, *, kind: str) -> None:
     key = str(sid or "").strip().lower()
     if not key:
         return
-    with _SOURCE_COOLDOWN_LOCK:
+    with _enrich._SOURCE_COOLDOWN_LOCK:
         if kind == "hit":
-            _SOURCE_DOWN_STREAK[key] = 0
-            _SOURCE_COOLDOWN_UNTIL.pop(key, None)
+            _enrich._SOURCE_DOWN_STREAK[key] = 0
+            _enrich._SOURCE_COOLDOWN_UNTIL.pop(key, None)
             return
         if kind != "down":
             return
-        n = int(_SOURCE_DOWN_STREAK.get(key) or 0) + 1
-        _SOURCE_DOWN_STREAK[key] = n
+        n = int(_enrich._SOURCE_DOWN_STREAK.get(key) or 0) + 1
+        _enrich._SOURCE_DOWN_STREAK[key] = n
         if n >= int(_enrich_retry._SOURCE_COOLDOWN_STREAK):
-            _SOURCE_COOLDOWN_UNTIL[key] = time.monotonic() + float(
+            _enrich._SOURCE_COOLDOWN_UNTIL[key] = time.monotonic() + float(
                 _enrich_retry._SOURCE_COOLDOWN_SEC
             )
-            _SOURCE_DOWN_STREAK[key] = 0
+            _enrich._SOURCE_DOWN_STREAK[key] = 0
             log.info(
                 "enrich source cooldown sid=%s for %.0fs (down streak)",
                 key,
@@ -564,7 +566,7 @@ def _classify_source_failure(err: Any) -> str:
 
 
 def _safe_local_gaps(folder: Path) -> list[str]:
-    """`_local_folder_gaps` 的安全包装（失败时按空处理，不打断流程）。"""
+    """`_enrich._local_folder_gaps` 的安全包装（失败时按空处理，不打断流程）。"""
     try:
         _, gaps = _enrich_scan._local_folder_gaps(folder)
         return list(gaps or [])
@@ -885,7 +887,7 @@ def _detail_satisfies_gaps(
         return False
     # ⚠️ `no_zh_title` **刻意不在这里判**（第二十一轮修正）。
     # 它曾是硬闸门：标题非中文就一律不许早停。但 dmm / avbase 这类源给出的是
-    # 日文标题（含假名 → `_zh_prefer_bonus` 恒为 0），**永远不可能**满足这条，
+    # 日文标题（含假名 → `_enrich._zh_prefer_bonus` 恒为 0），**永远不可能**满足这条，
     # 于是这些番号必然等到全部源回或超时 —— 早停对它们完全失效（现场 12% 的号）。
     # 正确归属是 `_may_early_stop` 的「中文源等待」逻辑：等中文源跑完即放行，
     # 而不是无限等所有源（含注定给不出中文的那几个）。
@@ -917,7 +919,7 @@ def _prioritize_batch_for_gaps(
 
     needed_fields: set[str] = set()
     for gap in gap_set:
-        needed_fields.update(_GAP_FIELD_PRIORITY_KEYS.get(gap, ()))
+        needed_fields.update(_enrich._GAP_FIELD_PRIORITY_KEYS.get(gap, ()))
     if not needed_fields:
         return list(batch)
     field_keys = [fk for fk in _enrich_merge._FIELD_LAUNCH_ORDER if fk in needed_fields]
@@ -1020,7 +1022,7 @@ def _may_early_stop(
         if "no_plot" in gap_set:
             plot_ok = _enrich_text._zh_prefer_bonus(str(detail.get("overview") or "")) > 0
         if not (title_ok and plot_ok):
-            pending = _cn_text_ids_in_batch(batch) - finished
+            pending = _enrich._cn_text_ids_in_batch(batch) - finished
             if pending:
                 if meta_wait is None:
                     return False
@@ -1029,7 +1031,7 @@ def _may_early_stop(
                 if since is None:
                     meta_wait["cn_since"] = now
                     return False
-                if (now - float(since)) < _CN_WAIT_BUDGET_SEC:
+                if (now - float(since)) < _enrich._CN_WAIT_BUDGET_SEC:
                     return False
                 if not meta_wait.get("cn_logged"):
                     meta_wait["cn_logged"] = 1.0
@@ -1037,7 +1039,7 @@ def _may_early_stop(
                         "enrich %s cn-wait budget %.1fs expired, early-stop "
                         "pending_cn=%s (中文标题/剧情可能本就缺失)",
                         code,
-                        _CN_WAIT_BUDGET_SEC,
+                        _enrich._CN_WAIT_BUDGET_SEC,
                         ",".join(sorted(pending)),
                     )
     # 主缺口已齐，但系列/发行/官网仍缺：若本批还有元数据源未回，**在预算内**继续等。
@@ -1048,7 +1050,7 @@ def _may_early_stop(
             sid = catalog.canonicalize_id(str(src.get("id") or ""))
             if not sid or sid in finished:
                 continue
-            if sid in _META_FILL_SOURCE_IDS:
+            if sid in _enrich._META_FILL_SOURCE_IDS:
                 pending_meta.add(sid)
         if pending_meta:
             if meta_wait is None:
@@ -1059,7 +1061,7 @@ def _may_early_stop(
                 # 第一次需要等：起表，先让快源（dmm/libredmm）把窗口用起来
                 meta_wait["since"] = now
                 return False
-            if (now - float(since)) < _META_WAIT_BUDGET_SEC:
+            if (now - float(since)) < _enrich._META_WAIT_BUDGET_SEC:
                 return False
             if not meta_wait.get("logged"):
                 meta_wait["logged"] = 1.0
@@ -1067,7 +1069,7 @@ def _may_early_stop(
                     "enrich %s meta-wait budget %.1fs expired, early-stop "
                     "pending_meta=%s (series/publisher/website 可能本就缺失)",
                     code,
-                    _META_WAIT_BUDGET_SEC,
+                    _enrich._META_WAIT_BUDGET_SEC,
                     ",".join(sorted(pending_meta)),
                 )
     return True
@@ -1079,7 +1081,7 @@ def _gaps_likely_ready(
     *,
     code: str = "",
 ) -> bool:
-    """早停廉价闸：跨源 OR 字段是否已可能齐，未齐则跳过整次 `_merge_got`。"""
+    """早停廉价闸：跨源 OR 字段是否已可能齐，未齐则跳过整次 `_enrich._merge_got`。"""
     if not got:
         return False
     gap_set = {str(g).strip() for g in (gaps or []) if str(g).strip()}
@@ -1177,17 +1179,17 @@ def _fetch_detail(
 
     if adapt_n:
         adapt_n = _cap_parallel(
-            min(adapt_n, int(_SOURCE_WORKERS_MAX)),
+            min(adapt_n, int(_enrich._SOURCE_WORKERS_MAX)),
             tight=4,
             small=8,
-            hard=int(_SOURCE_WORKERS_MAX),
+            hard=int(_enrich._SOURCE_WORKERS_MAX),
         )
     if flare_n:
         flare_n = _cap_parallel(
-            min(flare_n, int(_SOURCE_WORKERS_MAX)),
+            min(flare_n, int(_enrich._SOURCE_WORKERS_MAX)),
             tight=2,
             small=4,
-            hard=int(_SOURCE_WORKERS_MAX),
+            hard=int(_enrich._SOURCE_WORKERS_MAX),
         )
     # 对齐 mdc-ng：单番号匹配源全开并发；出站压力交给 host/global 调度，
     # 不再因 itemWorkers 把单条压成 3 路（否则墙钟≈慢源串行、越跑越像超时）。
@@ -1204,10 +1206,10 @@ def _fetch_detail(
 
         all_n = (
             _cap_parallel(
-                min(all_n, int(_SOURCE_WORKERS_MAX)),
+                min(all_n, int(_enrich._SOURCE_WORKERS_MAX)),
                 tight=4,
                 small=8,
-                hard=int(_SOURCE_WORKERS_MAX),
+                hard=int(_enrich._SOURCE_WORKERS_MAX),
             )
             if all_n
             else 0
@@ -1245,8 +1247,8 @@ def _fetch_detail(
     def _publish_timings() -> None:
         """把当前源耗时推到 live current + 对应队列行（支持多番号并发）。"""
         rows = _timings_snapshot()
-        with _enrich_lock:
-            cur = _enrich_job.get("current")
+        with _enrich._enrich_lock:
+            cur = _enrich._enrich_job.get("current")
             if isinstance(cur, dict):
                 code_cur = str(cur.get("code") or "").strip().upper()
                 if not code_cur or code_cur == code_u:
@@ -1254,9 +1256,9 @@ def _fetch_detail(
                     nxt["sourceTimings"] = rows
                     if code_u:
                         nxt["code"] = code_u
-                    _enrich_job["current"] = nxt
+                    _enrich._enrich_job["current"] = nxt
             # 队列行也写源耗时，点开任一「处理中」都能看实时进度
-            queue = list(_enrich_job.get("queue") or [])
+            queue = list(_enrich._enrich_job.get("queue") or [])
             changed = False
             for i, r in enumerate(queue):
                 if not isinstance(r, dict):
@@ -1267,10 +1269,10 @@ def _fetch_detail(
                 changed = True
                 break
             if changed:
-                _enrich_job["queue"] = queue
+                _enrich._enrich_job["queue"] = queue
         try:
             enrich_mon.touch_sources(code=code_u, sources=rows)
-            notify_enrich_watchers()
+            _enrich.notify_enrich_watchers()
         except Exception:  # noqa: BLE001
             pass
 
@@ -1362,7 +1364,7 @@ def _fetch_detail(
             for r in _timings_snapshot()
             if str(r.get("status") or "") in {"done", "fail"}
         )
-        _set_progress(
+        _enrich._set_progress(
             stage="enrich",
             label=f"{sid} {row['ms']}ms",
             done=done_n,
@@ -1372,7 +1374,7 @@ def _fetch_detail(
     # 本番号本轮 fetch 的取消令牌：早停/暂停后置位，让被放弃的在飞源
     # 立刻从出站等槽队列里退出（详见 _run_pool）。
     _fetch_ctx: dict[str, Any] = {"cancel": None}
-    # 本番号的「元数据有界等待」状态（详见 _META_WAIT_BUDGET_SEC）。
+    # 本番号的「元数据有界等待」状态（详见 _enrich._META_WAIT_BUDGET_SEC）。
     # 必须跨多次 `_may_early_stop` 调用累计，所以放在本函数作用域而非函数内部。
     _meta_wait: dict[str, float] = {}
 
@@ -1503,7 +1505,7 @@ def _fetch_detail(
             # 丢弃该源结果（后台线程可能仍在跑，但合并不再采纳）；
             # 置本源令牌 → 它若还在等槽会在 ≤0.2s 内退出，不再占槽/发无用请求。
             src_cancel.set()
-            # 分类：早停被主动放弃 ≠ 源故障；「从没拿到过槽」= 没轮到（详见 _give_up_kind）
+            # 分类：早停被主动放弃 ≠ 源故障；「从没拿到过槽」= 没轮到（详见 _enrich._give_up_kind）
             t_kind = _enrich._give_up_kind(
                 give_up=give_up,
                 acquired=int(meter.acquired),
@@ -1592,8 +1594,8 @@ def _fetch_detail(
         except Exception:  # noqa: BLE001
             detail["actors"] = _enrich._clean_actors(detail.get("actors"))
             detail["_actorsPolished"] = False
-        # 源侧明细标签：**不折叠**字形。此处结果会喂给 `_score_tags`
-        # （via `_merge_got` 读 `d.get("tags")`），提前折叠会让繁中源
+        # 源侧明细标签：**不折叠**字形。此处结果会喂给 `_enrich._score_tags`
+        # （via `_enrich._merge_got` 读 `d.get("tags")`），提前折叠会让繁中源
         # 失去「繁体惩罚」而反压简中源（案例 ACHJ-078）。输出侧折叠在合并主循环做。
         detail["tags"] = _enrich_text._clean_tags(detail.get("tags"), fold=False)
         detail["source"] = detail.get("source") or sid
@@ -1704,7 +1706,7 @@ def _fetch_detail(
                                     not title_need or _enrich_text._got_has_zh_title(got)
                                 ) and (not plot_need or _enrich_text._got_has_zh_plot(got))
                                 cn_pending = (
-                                    _cn_text_ids_in_batch(ordered) - finished
+                                    _enrich._cn_text_ids_in_batch(ordered) - finished
                                 )
                                 # 有界等中文源：预算内才跳过早停探测。
                                 # 否则 iqqtv「搜索无结果」12~20s 会钉死墙钟。
@@ -1714,7 +1716,7 @@ def _fetch_detail(
                                         _meta_wait["cn_since"] = now_cn
                                     if (
                                         now_cn - float(_meta_wait["cn_since"])
-                                    ) < _CN_WAIT_BUDGET_SEC:
+                                    ) < _enrich._CN_WAIT_BUDGET_SEC:
                                         continue
                             keys_now = frozenset(got.keys())
                             if keys_now != probe_keys:
@@ -1882,7 +1884,7 @@ def _fetch_detail(
     try:
         enrich_mon.set_phase(code=code_u, phase="write")
         enrich_mon.touch_sources(code=code_u, sources=_timings_snapshot())
-        notify_enrich_watchers()
+        _enrich.notify_enrich_watchers()
     except Exception:  # noqa: BLE001
         pass
     t_merge0 = time.perf_counter()
@@ -1892,16 +1894,16 @@ def _fetch_detail(
     merge_ms = int(round((time.perf_counter() - t_merge0) * 1000))
     try:
         enrich_mon.touch_sources(code=code_u, sources=_timings_snapshot())
-        notify_enrich_watchers()
+        _enrich.notify_enrich_watchers()
     except Exception:  # noqa: BLE001
         pass
     # 批量：跳过串行译文（机翻/LLM 可占 10–30s+ 番号槽）；中文靠源站合并+映射
     # 单刷/覆盖：可走 LLM 补中文
     if not fast_zh:
-        merged = _maybe_llm_fill_zh(merged) or merged
+        merged = _enrich._maybe_llm_fill_zh(merged) or merged
         try:
             enrich_mon.touch_sources(code=code_u, sources=_timings_snapshot())
-            notify_enrich_watchers()
+            _enrich.notify_enrich_watchers()
         except Exception:  # noqa: BLE001
             pass
         # LLM 可能改写标题/剧情：映射表再盖一次（对齐 MDCX：映射在译后仍以表为准）
@@ -2014,7 +2016,7 @@ def _resolve_enrich_folder(
             return hit
         try:
             embed_svc.ensure_schema()
-            pool = get_meta_pool()
+            pool = _enrich.get_meta_pool()
             with pool.connection() as conn, conn.cursor() as cur:
                 cur.execute(
                     f"""

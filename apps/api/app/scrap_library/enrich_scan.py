@@ -37,7 +37,9 @@ import app.scrap_library.enrich_retry as _enrich_retry
 import app.scrap_library.enrich_sidecar as _enrich_sidecar
 import app.scrap_library.enrich_status as _enrich_status
 import app.scrap_library.enrich_text as _enrich_text
-from app.scrap_library.enrich import (_ENRICH_KINDS, _LOCAL_NFO_MAPS_CACHE_MAX, _LOCAL_NFO_MAPS_TTL_SEC, _QUEUE_SCAN_LOCK, _QUEUE_SCAN_STATE, _SOFT_SUCCESS_GAPS, _SUCCESS_BLOCK_GAPS, _counts_cache, _demoted_false_dones, _enrich_job, _enrich_lock, _folder_gaps_cache, _folder_gaps_cache_lock, _invalidate_classified_skip_cache, _local_nfo_maps_cache, _pending_backfill_done, _set_queue_scan_progress, load_queue_log, log)
+from app.scrap_library.enrich import (_ENRICH_KINDS, _LOCAL_NFO_MAPS_CACHE_MAX, _LOCAL_NFO_MAPS_TTL_SEC, _SOFT_SUCCESS_GAPS, _SUCCESS_BLOCK_GAPS, _demoted_false_dones, _folder_gaps_cache, _folder_gaps_cache_lock, _invalidate_classified_skip_cache, _local_nfo_maps_cache, _pending_backfill_done, log)
+from app.scrap_library.enrich_queue_io import _counts_cache, load_queue_log
+from app.scrap_library.enrich_runtime import (_QUEUE_SCAN_LOCK, _QUEUE_SCAN_STATE, _enrich_job, _enrich_lock, _set_queue_scan_progress)
 
 
 _SQL_NOT_SCAN_SOURCE = "COALESCE(source, '') NOT IN ('local_scan', 'scan')"
@@ -75,21 +77,21 @@ class _CachedLocalMapsMarker:
 def _local_nfo_maps_cache_get(
     region: str,
 ) -> tuple[set[str], set[str], int, int, int] | None:
-    hit = _local_nfo_maps_cache.get(region)
+    hit = _enrich._local_nfo_maps_cache.get(region)
     if not hit:
         return None
-    if time.monotonic() - float(hit[0]) >= _LOCAL_NFO_MAPS_TTL_SEC:
-        _local_nfo_maps_cache.pop(region, None)
+    if time.monotonic() - float(hit[0]) >= _enrich._LOCAL_NFO_MAPS_TTL_SEC:
+        _enrich._local_nfo_maps_cache.pop(region, None)
         return None
     return set(hit[1]), set(hit[2]), int(hit[3]), int(hit[4]), int(hit[5])
 
 
 def _local_nfo_maps_cache_put(region: str, maps: Any) -> None:
     try:
-        if len(_local_nfo_maps_cache) >= _LOCAL_NFO_MAPS_CACHE_MAX:
-            oldest = min(_local_nfo_maps_cache.items(), key=lambda kv: kv[1][0])[0]
-            _local_nfo_maps_cache.pop(oldest, None)
-        _local_nfo_maps_cache[region] = (
+        if len(_enrich._local_nfo_maps_cache) >= _enrich._LOCAL_NFO_MAPS_CACHE_MAX:
+            oldest = min(_enrich._local_nfo_maps_cache.items(), key=lambda kv: kv[1][0])[0]
+            _enrich._local_nfo_maps_cache.pop(oldest, None)
+        _enrich._local_nfo_maps_cache[region] = (
             time.monotonic(),
             set(getattr(maps, "skip_rels", ()) or ()),
             set(getattr(maps, "classified_codes", ()) or ()),
@@ -169,7 +171,7 @@ def _local_folder_gaps(folder: Path) -> tuple[str, list[str]]:
     """只读本地 NFO + poster，算出与增量 kinds 对齐的缺口（不看向量库）。
 
     ⚠️ 这是启动/续跑路径上的固定开销大头：`_local_nfo_gap_maps` 要对整个分区
-    逐目录跑，每目录一次 parse_nfo（读解析 XML）+ 一次空白封面判定（读图），
+    逐目录跑，每目录一次 _enrich.parse_nfo（读解析 XML）+ 一次空白封面判定（读图），
     实测 1.1ms/目录（冷缓存 9.4ms/目录），有码区 1349 个目录 ≈ 1.5s。
     按 (目录 mtime, NFO/海报 mtime+size) 缓存结果 → 命中只需几次 stat。
     """
@@ -185,16 +187,16 @@ def _local_folder_gaps(folder: Path) -> tuple[str, list[str]]:
                 posters.append(p)
     ckey = str(folder)
     stamp = _folder_gaps_stamp(folder, nfo, posters)
-    with _folder_gaps_cache_lock:
-        hit = _folder_gaps_cache.get(ckey)
+    with _enrich._folder_gaps_cache_lock:
+        hit = _enrich._folder_gaps_cache.get(ckey)
         if hit is not None and hit[0] == stamp:
             return hit[1][0], list(hit[1][1])
 
     def _remember(code_u: str, gaps: list[str]) -> tuple[str, list[str]]:
-        with _folder_gaps_cache_lock:
-            if len(_folder_gaps_cache) > _folder_gaps_cache_cap():
-                _folder_gaps_cache.clear()
-            _folder_gaps_cache[ckey] = (stamp, (code_u, list(gaps)))
+        with _enrich._folder_gaps_cache_lock:
+            if len(_enrich._folder_gaps_cache) > _folder_gaps_cache_cap():
+                _enrich._folder_gaps_cache.clear()
+            _enrich._folder_gaps_cache[ckey] = (stamp, (code_u, list(gaps)))
         return code_u, gaps
 
     if not nfo or not nfo.is_file():
@@ -202,7 +204,7 @@ def _local_folder_gaps(folder: Path) -> tuple[str, list[str]]:
             code_name,
             ["no_local", "no_media", "no_actress", "no_studio", "no_plot", "thin_title"],
         )
-    meta = parse_nfo(nfo) or {}
+    meta = _enrich.parse_nfo(nfo) or {}
     code_u = str(meta.get("num") or code_name).strip().upper() or code_name
     title = str(meta.get("title") or "").strip()
     plot = str(meta.get("plot") or meta.get("overview") or "").strip()
@@ -312,7 +314,7 @@ def _local_status_item(
 
     enrich_detail=False：扫描全量写入用，只写状态/番号，不读盘 NFO
     （10 万+ 行时读盘会卡在「写入分类队列 · 4,000/109,xxx」数十分钟）。
-    详情页仍走 _backfill_queue_item_detail 按需补全。
+    详情页仍走 _enrich._backfill_queue_item_detail 按需补全。
     """
     code_u = str(code or "").strip().upper()
     rid = str(region or "").strip()
@@ -331,14 +333,14 @@ def _local_status_item(
         item["partialOk"] = False
         item["error"] = ""
     elif kind == "soft":
-        soft_gaps = [g for g in gaps if g in _SOFT_SUCCESS_GAPS]
+        soft_gaps = [g for g in gaps if g in _enrich._SOFT_SUCCESS_GAPS]
         labels = _enrich_retry._gap_labels(soft_gaps)
         item["status"] = "done"
         item["partialOk"] = True
         item["error"] = _enrich_retry._format_soft_ok_error(labels or ["女优"])
         item["gapsAfter"] = soft_gaps
     else:
-        block = [g for g in gaps if g in _SUCCESS_BLOCK_GAPS] or list(gaps or [])
+        block = [g for g in gaps if g in _enrich._SUCCESS_BLOCK_GAPS] or list(gaps or [])
         labels = _enrich_retry._gap_labels(block)
         item["status"] = "fail"
         item["partialOk"] = False
@@ -496,7 +498,7 @@ def _local_nfo_gap_maps(
             total_est = _enrich._fresh_vector_library_total(rid or region, force=True)
         except Exception:  # noqa: BLE001
             total_est = 0
-        _set_queue_scan_progress(
+        _enrich._set_queue_scan_progress(
             region=rid or region,
             stage="disk",
             label=f"扫描本地 NFO…（{n_workers} 线程）",
@@ -558,7 +560,7 @@ def _local_nfo_gap_maps(
                 stream_written_n[0] < len(rows) + 5
                 or stream_written_n[0] % 2000 < len(rows)
             ):
-                _set_queue_scan_progress(
+                _enrich._set_queue_scan_progress(
                     region=rid or region,
                     stage="disk",
                     label=(
@@ -695,7 +697,7 @@ def _local_nfo_gap_maps(
             written_tip = (
                 f" · 已入库 {stream_written_n[0]:,}" if stream_q is not None else ""
             )
-            _set_queue_scan_progress(
+            _enrich._set_queue_scan_progress(
                 region=rid or region,
                 stage="disk",
                 label=(
@@ -713,7 +715,7 @@ def _local_nfo_gap_maps(
             )
 
     if report_progress:
-        _set_queue_scan_progress(
+        _enrich._set_queue_scan_progress(
             region=rid or region,
             stage="disk",
             label=f"枚举番号目录…（{n_workers} 线程）",
@@ -724,7 +726,7 @@ def _local_nfo_gap_maps(
     )
     if report_progress and folder_jobs:
         total_est = max(total_est, len(folder_jobs))
-        _set_queue_scan_progress(
+        _enrich._set_queue_scan_progress(
             region=rid or region,
             stage="disk",
             label=f"分类本地 NFO… {len(folder_jobs):,} 个（{n_workers} 线程）",
@@ -822,7 +824,7 @@ def _local_nfo_gap_maps(
         written_tip = (
             f" · 已入库 {stream_written_n[0]:,}" if stream_written_n[0] else ""
         )
-        _set_queue_scan_progress(
+        _enrich._set_queue_scan_progress(
             region=rid or region,
             stage="disk",
             label=(
@@ -851,12 +853,12 @@ def _rebuild_region_queue_from_scan(
     if not rid:
         return empty
     _enrich_queue._clear_queue_log(region=rid)
-    _invalidate_classified_skip_cache(rid)
-    _counts_cache.pop(rid, None)
-    _demoted_false_dones.discard(rid)
-    _pending_backfill_done.discard(rid)
+    _enrich._invalidate_classified_skip_cache(rid)
+    _enrich._counts_cache.pop(rid, None)
+    _enrich._demoted_false_dones.discard(rid)
+    _enrich._pending_backfill_done.discard(rid)
 
-    _set_queue_scan_progress(
+    _enrich._set_queue_scan_progress(
         region=rid,
         stage="write",
         label="写入成功 / 软成功 / 失败…",
@@ -881,7 +883,7 @@ def _rebuild_region_queue_from_scan(
     )
     _enrich_history._recover_done_from_enrich_logs(rid)
     db_counts, db_ok = _enrich_queue._queue_log_status_counts_db_ex(rid)
-    _invalidate_classified_skip_cache(rid)
+    _enrich._invalidate_classified_skip_cache(rid)
     if db_ok:
         _enrich_status._set_local_status_totals(
             rid,
@@ -931,7 +933,7 @@ def _replace_pending_from_vector(
     vec_off = 0
     batch_sz = 2000
     scanned_vec = 0
-    _set_queue_scan_progress(
+    _enrich._set_queue_scan_progress(
         region=rid,
         stage="pending",
         label="对照最新向量库生成未处理…",
@@ -974,7 +976,7 @@ def _replace_pending_from_vector(
             if code_u and code_u in skip_codes:
                 continue
             seen.add(key)
-            gaps = list(r.get("gaps") or []) or list(_ENRICH_KINDS)
+            gaps = list(r.get("gaps") or []) or list(_enrich._ENRICH_KINDS)
             pending_rows.append(
                 {
                     "itemId": iid or rel or code_u,
@@ -988,7 +990,7 @@ def _replace_pending_from_vector(
                 }
             )
         if scanned_vec == len(batch) or scanned_vec % 4000 < batch_sz:
-            _set_queue_scan_progress(
+            _enrich._set_queue_scan_progress(
                 region=rid,
                 stage="pending",
                 label=(
@@ -1010,9 +1012,9 @@ def _replace_pending_from_vector(
         _enrich_queue._queue_log_clear_pending(rid)
     if pending_rows:
         _enrich._queue_log_insert_many(rid, pending_rows)
-    _counts_cache.pop(rid, None)
+    _enrich._counts_cache.pop(rid, None)
     n = len(pending_rows)
-    _set_queue_scan_progress(
+    _enrich._set_queue_scan_progress(
         region=rid,
         stage="pending",
         label=f"未处理已按最新向量库写入 {n:,}",
@@ -1115,11 +1117,11 @@ def scan_enrich_queue(
         empty["error"] = "region required"
         return empty
 
-    with _enrich_lock:
-        running = bool(_enrich_job.get("running"))
-        cur_reg = str(_enrich_job.get("currentRegion") or "").strip()
+    with _enrich._enrich_lock:
+        running = bool(_enrich._enrich_job.get("running"))
+        cur_reg = str(_enrich._enrich_job.get("currentRegion") or "").strip()
     if running and _enrich_history._canonical_enrich_log_region(cur_reg) == rid:
-        out = load_queue_log(region=rid, status="pending", limit=200)
+        out = _enrich.load_queue_log(region=rid, status="pending", limit=200)
         out["ok"] = True
         out["scanned"] = False
         out["reason"] = "running"
@@ -1144,9 +1146,9 @@ def scan_enrich_queue(
 
     # 每次重扫强制回滚：本地已删的 done/fail → pending（不限频）
     try:
-        _demoted_false_dones.discard(rid)
+        _enrich._demoted_false_dones.discard(rid)
         demoted_scan = _enrich_queue._queue_log_demote_false_dones(rid)
-        _demoted_false_dones.add(rid)
+        _enrich._demoted_false_dones.add(rid)
         if demoted_scan:
             log.info(
                 "scan demote missing-local region=%s n=%s", rid, demoted_scan
@@ -1159,10 +1161,10 @@ def scan_enrich_queue(
         (set(), set()) if overwrite else _enrich_queue._queue_log_done_keys(rid)
     )
 
-    _pending_backfill_done.discard(rid)
-    _invalidate_classified_skip_cache(rid)
+    _enrich._pending_backfill_done.discard(rid)
+    _enrich._invalidate_classified_skip_cache(rid)
 
-    _set_queue_scan_progress(
+    _enrich._set_queue_scan_progress(
         region=rid,
         stage="start",
         label="开始扫描队列…",
@@ -1189,7 +1191,7 @@ def scan_enrich_queue(
             samples: list[dict[str, Any]] = []
             seen: set[str] = set()
             write_cap = fetch_lim if fetch_lim > 0 else _SCAN_WRITE
-            _set_queue_scan_progress(
+            _enrich._set_queue_scan_progress(
                 region=rid,
                 stage="disk",
                 label="覆盖模式 · 扫描本地 NFO…",
@@ -1216,7 +1218,7 @@ def scan_enrich_queue(
                             {
                                 "itemId": rel,
                                 "code": code_u,
-                                "gaps": list(_ENRICH_KINDS),
+                                "gaps": list(_enrich._ENRICH_KINDS),
                                 "rel_path": rel,
                                 "relPath": rel,
                                 "region": rid,
@@ -1226,7 +1228,7 @@ def scan_enrich_queue(
                     n = len(seen)
                     if n - last_report >= 200 or n == 1:
                         last_report = n
-                        _set_queue_scan_progress(
+                        _enrich._set_queue_scan_progress(
                             region=rid,
                             stage="disk",
                             label=f"覆盖扫描 · 已发现 {n:,} 个番号",
@@ -1243,7 +1245,7 @@ def scan_enrich_queue(
             # 扫盘要数分钟，期间任何中断（切页 / 暂停 / 进程重启）都会先把该区
             # 全部分类行删掉、只写回一小部分：实测 japan_censored 因此从 10.8 万
             # 行掉到 4,799 行，tip 被留在瞬时值 done=2，后果是
-            #   ① 角标「未处理」虚高到 12.9 万（见 _region_library_progress）；
+            #   ① 角标「未处理」虚高到 12.9 万（见 _enrich._region_library_progress）；
             #   ② 之后每次开刮都失去库侧分类，只能重跑全盘分类数分钟。
             # 改为「先扫盘、再原子替换」：扫盘阶段只读磁盘、不碰库；扫完统一
             # clear + 全量写入（见下方 stream_written 分支），中断窗口由分钟级
@@ -1297,8 +1299,8 @@ def scan_enrich_queue(
 
         if overwrite:
             _enrich_queue._clear_queue_log(region=rid)
-            _invalidate_classified_skip_cache(rid)
-            _counts_cache.pop(rid, None)
+            _enrich._invalidate_classified_skip_cache(rid)
+            _enrich._counts_cache.pop(rid, None)
             pruned = 0
             queue_view = _enrich_queue._ensure_queue_log_ids(rid, queue_view)
             recovered = _enrich_history._recover_done_from_enrich_logs(rid)
@@ -1321,7 +1323,7 @@ def scan_enrich_queue(
             queue_view = _enrich_queue._ensure_queue_log_ids(rid, queue_view)
             recovered = 0
 
-        out = load_queue_log(region=rid, status="pending", limit=200)
+        out = _enrich.load_queue_log(region=rid, status="pending", limit=200)
         listed = len(queue_view)
         counts = dict(out.get("counts") or {})
         db_counts, db_ok = _enrich_queue._queue_log_status_counts_db_ex(rid)
@@ -1384,13 +1386,13 @@ def _lookup_code_from_scan_samples(
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
     try:
-        with _QUEUE_SCAN_LOCK:
+        with _enrich._QUEUE_SCAN_LOCK:
             snap = {
-                "done": list(_QUEUE_SCAN_STATE.get("samplesDone") or []),
-                "soft": list(_QUEUE_SCAN_STATE.get("samplesSoft") or []),
-                "fail": list(_QUEUE_SCAN_STATE.get("samplesFail") or []),
-                "region": str(_QUEUE_SCAN_STATE.get("region") or ""),
-                "active": bool(_QUEUE_SCAN_STATE.get("active")),
+                "done": list(_enrich._QUEUE_SCAN_STATE.get("samplesDone") or []),
+                "soft": list(_enrich._QUEUE_SCAN_STATE.get("samplesSoft") or []),
+                "fail": list(_enrich._QUEUE_SCAN_STATE.get("samplesFail") or []),
+                "region": str(_enrich._QUEUE_SCAN_STATE.get("region") or ""),
+                "active": bool(_enrich._QUEUE_SCAN_STATE.get("active")),
             }
         if snap["region"] and snap["region"] != rid:
             return []
@@ -1493,7 +1495,7 @@ def _lookup_code_outside_queue_log(
     # 向量库：未落盘分类 → 未处理
     try:
         embed_svc.ensure_schema()
-        pool = get_meta_pool()
+        pool = _enrich.get_meta_pool()
         with pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 f"""
@@ -1529,7 +1531,7 @@ def _lookup_code_outside_queue_log(
                     "itemId": key,
                     "code": code_u,
                     "status": "pending",
-                    "gaps": list(_ENRICH_KINDS),
+                    "gaps": list(_enrich._ENRICH_KINDS),
                     "rel_path": rel,
                     "relPath": rel,
                     "region": rid,

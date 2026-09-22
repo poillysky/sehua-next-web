@@ -29,7 +29,8 @@ from app.core.ttl_cache import enforce_max, prune_by_age
 
 import app.scrap_library.embed as _embed
 import app.scrap_library.embed_poster as _embed_poster
-from app.scrap_library.embed import (DEFAULT_REL_ROOT, _FACETS_CACHE, _ITEMS_HUB_CACHE, _RECOMMEND_CACHE, _SHELL_GAPS, _embed_code_set, _persist_embed_job, _push_log, _set_progress, _skeleton_content_sha, _skeleton_source_text, _vec_literal, _zero_vec_literal, catalog_code_set, ensure_hnsw, log)
+from app.scrap_library.embed import (DEFAULT_REL_ROOT, _SHELL_GAPS, _embed_code_set, _skeleton_content_sha, _skeleton_source_text, _vec_literal, _zero_vec_literal, catalog_code_set, ensure_hnsw, log)
+from app.scrap_library.embed_runtime import (_FACETS_CACHE, _ITEMS_HUB_CACHE, _RECOMMEND_CACHE, _persist_embed_job, _push_log, _set_progress)
 
 
 ProgressCb = Callable[[dict[str, Any]], None]

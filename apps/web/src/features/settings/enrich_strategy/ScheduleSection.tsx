@@ -1,7 +1,7 @@
 import { Check } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
-import { MODE_OPTIONS, digitsOnly } from './shared';
+import { MODE_OPTIONS, digitsOnly } from './defaults';
 import type { EnrichStrategyForm } from './useEnrichStrategyForm';
 
 export function ScheduleSection({

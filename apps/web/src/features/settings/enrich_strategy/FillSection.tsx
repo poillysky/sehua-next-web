@@ -1,7 +1,7 @@
 import { Check } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
-import { SegTwo } from './shared';
+import { SegTwo } from './ui';
 import type { EnrichStrategyForm } from './useEnrichStrategyForm';
 
 export function FillSection({

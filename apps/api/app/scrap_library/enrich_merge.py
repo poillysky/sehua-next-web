@@ -33,22 +33,32 @@ import app.scrap_library.enrich_cover as _enrich_cover
 import app.scrap_library.enrich_detail as _enrich_detail
 import app.scrap_library.enrich_sidecar as _enrich_sidecar
 import app.scrap_library.enrich_text as _enrich_text
-from app.scrap_library.enrich import (_JUNK_TITLE_MARKERS, _enrich_job, _enrich_lock, _fill_mode_to_job_mode, _persist_enrich_runtime, _strategy_epoch_mu, bump_strategy_epoch, notify_enrich_watchers)
+from app.scrap_library.enrich_junk import _JUNK_TITLE_MARKERS
+from app.scrap_library.enrich_job_control import _fill_mode_to_job_mode
+from app.scrap_library.enrich_runtime import (
+    _enrich_job,
+    _enrich_lock,
+    _persist_enrich_runtime,
+    _strategy_epoch,
+    _strategy_epoch_mu,
+    bump_strategy_epoch,
+    notify_enrich_watchers,
+)
 
 
 def _halt_kind() -> str | None:
-    with _enrich_lock:
-        halt = _enrich_job.get("halt")
+    with _enrich._enrich_lock:
+        halt = _enrich._enrich_job.get("halt")
         if halt in {"pause", "stop"}:
             return str(halt)
-        if _enrich_job.get("cancel"):
+        if _enrich._enrich_job.get("cancel"):
             # 旧 cancel 视为暂停（保留进度）
             return "pause"
         return None
 
 
 def current_strategy_epoch() -> int:
-    with _strategy_epoch_mu:
+    with _enrich._strategy_epoch_mu:
         return int(_enrich._strategy_epoch)
 
 
@@ -57,12 +67,12 @@ def _note_strategy_hot_if_needed(region: str = "") -> None:
     ep = current_strategy_epoch()
     if ep <= 0:
         return
-    with _enrich_lock:
-        applied = int(_enrich_job.get("strategyEpochApplied") or 0)
+    with _enrich._enrich_lock:
+        applied = int(_enrich._enrich_job.get("strategyEpochApplied") or 0)
         if ep <= applied:
             return
-        _enrich_job["strategyEpochApplied"] = ep
-        running = bool(_enrich_job.get("running"))
+        _enrich._enrich_job["strategyEpochApplied"] = ep
+        running = bool(_enrich._enrich_job.get("running"))
     srcs = _enrich_detail._detail_sources(region=region)
     ids = [str(s.get("id") or "").strip() for s in srcs if str(s.get("id") or "").strip()]
     label = " → ".join(ids[:14]) if ids else "(无启用源)"
@@ -72,7 +82,7 @@ def _note_strategy_hot_if_needed(region: str = "") -> None:
     _enrich._push_log(tip, region=region or "")
     if running:
         try:
-            notify_enrich_watchers(force=True)
+            _enrich.notify_enrich_watchers(force=True)
         except Exception:  # noqa: BLE001
             pass
 
@@ -88,23 +98,23 @@ def apply_live_strategy(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
         data = cfg if isinstance(cfg, dict) else get_strategy()
     except Exception:  # noqa: BLE001
         data = cfg if isinstance(cfg, dict) else {}
-    mode_norm = _fill_mode_to_job_mode(str((data or {}).get("fillMode") or ""))
-    ep = bump_strategy_epoch()
+    mode_norm = _enrich._fill_mode_to_job_mode(str((data or {}).get("fillMode") or ""))
+    ep = _enrich.bump_strategy_epoch()
     mode_changed = False
     paused_like = False
     running = False
     regions: list[str] = []
     cur_region = ""
-    with _enrich_lock:
-        running = bool(_enrich_job.get("running"))
-        cur_region = str(_enrich_job.get("currentRegion") or "").strip()
-        prev_mode = str(_enrich_job.get("jobMode") or "")
+    with _enrich._enrich_lock:
+        running = bool(_enrich._enrich_job.get("running"))
+        cur_region = str(_enrich._enrich_job.get("currentRegion") or "").strip()
+        prev_mode = str(_enrich._enrich_job.get("jobMode") or "")
         if prev_mode != mode_norm:
-            _enrich_job["jobMode"] = mode_norm
+            _enrich._enrich_job["jobMode"] = mode_norm
             mode_changed = True
         # 强制下一番号重新打热更新日志
-        _enrich_job["strategyEpochApplied"] = max(0, ep - 1)
-        cps = dict(_enrich_job.get("checkpoints") or {})
+        _enrich._enrich_job["strategyEpochApplied"] = max(0, ep - 1)
+        cps = dict(_enrich._enrich_job.get("checkpoints") or {})
         new_cps: dict[str, Any] = {}
         for rid, cp in cps.items():
             if not isinstance(cp, dict):
@@ -116,24 +126,24 @@ def apply_live_strategy(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
             new_cps[str(rid)] = row
             regions.append(str(rid))
         if new_cps:
-            _enrich_job["checkpoints"] = new_cps
-        phase = str(_enrich_job.get("phase") or "")
-        halt = _enrich_job.get("halt")
+            _enrich._enrich_job["checkpoints"] = new_cps
+        phase = str(_enrich._enrich_job.get("phase") or "")
+        halt = _enrich._enrich_job.get("halt")
         paused_like = bool(new_cps) or phase == "paused" or halt == "pause"
         if paused_like:
-            prog = dict(_enrich_job.get("progress") or {})
+            prog = dict(_enrich._enrich_job.get("progress") or {})
             prog["label"] = "已暂停 · 新策略已生效"
-            _enrich_job["progress"] = prog
+            _enrich._enrich_job["progress"] = prog
             if phase == "paused" or halt == "pause":
-                _enrich_job["phase"] = "paused"
+                _enrich._enrich_job["phase"] = "paused"
         elif running:
-            prog = dict(_enrich_job.get("progress") or {})
+            prog = dict(_enrich._enrich_job.get("progress") or {})
             if prog:
                 prog["label"] = str(prog.get("label") or "补齐中") + " · 策略已更新"
-                _enrich_job["progress"] = prog
+                _enrich._enrich_job["progress"] = prog
     if mode_changed:
         try:
-            _persist_enrich_runtime()
+            _enrich._persist_enrich_runtime()
         except Exception:  # noqa: BLE001
             pass
     # 无论 mode 是否变（可能只改了数据源），都提示
@@ -150,7 +160,7 @@ def apply_live_strategy(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     else:
         _enrich._push_log(f"策略已保存（{mode_norm}）")
     try:
-        notify_enrich_watchers(force=True)
+        _enrich.notify_enrich_watchers(force=True)
     except Exception:  # noqa: BLE001
         pass
     return {
@@ -427,7 +437,7 @@ def _merge_got(
             title_cands.append(
                 (sid, title_zh, _enrich_text._score_title(title_zh, code=code, source_id=sid))
             )
-        # code-titles 映射不在此注入：源站先合并定稿，再于 _apply_mdcx_maps 优选/兜底/强制
+        # code-titles 映射不在此注入：源站先合并定稿，再于 _enrich._apply_mdcx_maps 优选/兜底/强制
         studio = str(d.get("studio") or "").strip()
         if studio:
             studio_cands.append((sid, studio, _enrich_text._score_studio(studio, source_id=sid)))
@@ -548,7 +558,7 @@ def _merge_got(
             merged["title"] = cand
             field_sources["title"] = sid
             break
-    # 色花堂标题覆盖改在合并末尾 _apply_mdcx_maps（对齐 MDCX translate_title_outline）
+    # 色花堂标题覆盖改在合并末尾 _enrich._apply_mdcx_maps（对齐 MDCX translate_title_outline）
     # 保留最佳日文标题，供机翻过烂时 LLM 回译（须与定稿标题兼容）
     jp_title_cands = [
         (sid, t, sc)
@@ -1280,7 +1290,7 @@ def merge_nfo_with_detail(
             movie = root.find("movie")
             root = movie if movie is not None else ET.Element("movie")
         code_pre = str(detail.get("code") or detail.get("id") or "").strip().upper()
-        fields = fields_from_movie_root(root, code_fallback=code_pre)
+        fields = _enrich.fields_from_movie_root(root, code_fallback=code_pre)
 
     force = bool(overwrite)
     ff = {str(x).strip().lower() for x in (force_fields or set()) if str(x).strip()}
@@ -1303,7 +1313,7 @@ def merge_nfo_with_detail(
 
     title = str(detail.get("title") or "").strip()
     if title and title.upper() != code and not any(
-        m in title.casefold() for m in (x.casefold() for x in _JUNK_TITLE_MARKERS)
+        m in title.casefold() for m in (x.casefold() for x in _enrich._JUNK_TITLE_MARKERS)
     ):
         cur_title = str(fields.get("title") or "")
         force_title = _force("title") or _enrich._title_is_thin(cur_title, code)
@@ -1460,12 +1470,12 @@ def merge_nfo_with_detail(
     if not str(fields.get("num") or "").strip() and not nfo_path.is_file():
         return False
 
-    new_root = build_mdcx_nfo_root(fields)
+    new_root = _enrich.build_mdcx_nfo_root(fields)
     new_bytes = format_nfo_xml(new_root)
     if old_bytes and old_bytes == new_bytes:
         return False
     # 无旧文件且几乎空壳
     if not old_bytes and not str(fields.get("num") or "").strip():
         return False
-    write_nfo(nfo_path, new_root)
+    _enrich.write_nfo(nfo_path, new_root)
     return True

@@ -3,14 +3,13 @@
 import { useEffect, useState } from 'react';
 import { KeyRound } from 'lucide-react';
 import { getTmdb, putTmdb, testTmdb } from '@/lib/api';
-import { AppPush } from '@/components/ui/AppPush';
-import { AppMsg } from '@/components/ui/AppMsg';
 import { cn } from '@/lib/utils';
 import {
   testResultText,
   usePanelAction,
   type StatusReporter,
 } from '@/hooks/usePanelAction';
+import { ConnectionPanelShell } from './connection/ConnectionPanelShell';
 
 export function TmdbPanel({
   onBack,
@@ -29,7 +28,6 @@ export function TmdbPanel({
   function applyStatus(nextConfigured: boolean, nextFromEnv: boolean) {
     setConfigured(nextConfigured);
     setFromEnv(nextFromEnv);
-    // 仅认界面保存的 Key；纯环境变量不算「已配置」
     const saved = nextConfigured && !nextFromEnv;
     onStatus(saved ? '已配置' : '未配置', saved ? 'ok' : 'warn');
   }
@@ -83,12 +81,21 @@ export function TmdbPanel({
     });
   }
 
-  const statusLabel =
-    configured && !fromEnv ? '已配置' : '未配置';
+  const statusLabel = configured && !fromEnv ? '已配置' : '未配置';
   const statusOk = configured && !fromEnv;
 
   return (
-    <AppPush title="TMDB" onBack={onBack}>
+    <ConnectionPanelShell
+      title="TMDB"
+      onBack={onBack}
+      msg={msg}
+      onDismissMsg={() => setMsg('')}
+      busy={busy}
+      onTest={() => void onTest()}
+      onSave={() => void onSave()}
+      testLabel="测试"
+      saveDisabled={configured && !fromEnv && !showEdit}
+    >
       <ul className="settings-group">
         <li>
           <div className="settings-kv">
@@ -168,29 +175,6 @@ export function TmdbPanel({
           ) : null}
         </>
       )}
-
-      <div className="app-actions">
-        <button
-          type="button"
-          className="app-btn-secondary"
-          disabled={busy}
-          onClick={() => void onTest()}
-        >
-          测试
-        </button>
-        <button
-          type="button"
-          className="app-btn-primary"
-          style={{ flex: 1 }}
-          disabled={busy || (configured && !fromEnv && !showEdit)}
-          onClick={() => void onSave()}
-        >
-          保存
-        </button>
-      </div>
-      <AppMsg allowSelect onDismiss={() => setMsg('')}>
-        {msg}
-      </AppMsg>
-    </AppPush>
+    </ConnectionPanelShell>
   );
 }

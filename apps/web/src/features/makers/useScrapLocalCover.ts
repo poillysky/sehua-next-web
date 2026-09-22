@@ -13,6 +13,7 @@ import {
   SCRAP_COLLAGE_THUMB_W,
   SCRAP_LIST_THUMB_W,
 } from '@/lib/api';
+import { useTabPaneVisible } from '@/shell';
 
 export type ScrapLocalCoverOpts = {
   posterApi?: string;
@@ -68,6 +69,7 @@ function localUrl(
  * - 只读本地；缺图则落盘后再显示
  */
 export function useScrapLocalCover(opts: ScrapLocalCoverOpts) {
+  const tabVisible = useTabPaneVisible();
   const prefer = opts.prefer ?? 'poster';
   const w =
     opts.w ??
@@ -125,13 +127,18 @@ export function useScrapLocalCover(opts: ScrapLocalCoverOpts) {
     srcGen.current += 1;
     retriedGen.current = -1;
     setPosters(locals);
-    setSrc(locals[0] || '');
+    // 非本 Tab：清空 src，中止已发出的封面请求（切到「更多」不应继续刷 /file）
+    setSrc(tabVisible ? locals[0] || '' : '');
     if (locals[0]) setEnsuring(false);
     // localKey 已覆盖 locals 内容；避免数组引用进依赖导致死循环
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [localKey]);
+  }, [localKey, tabVisible]);
 
   useEffect(() => {
+    if (!tabVisible) {
+      setEnsuring(false);
+      return;
+    }
     const id = String(opts.itemId || '').trim();
     const cover = String(opts.coverUrl || '').trim();
     if (locals[0]) {
@@ -178,9 +185,10 @@ export function useScrapLocalCover(opts: ScrapLocalCoverOpts) {
       setEnsuring(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [opts.itemId, opts.coverUrl, localKey, coverOpts, prefer]);
+  }, [opts.itemId, opts.coverUrl, localKey, coverOpts, prefer, tabVisible]);
 
   const onError = (ev?: SyntheticEvent<HTMLImageElement>) => {
+    if (!tabVisible) return;
     const el = ev?.currentTarget;
     // 已解码成功却误报 error（合成层/transform）：忽略
     if (el && el.naturalWidth > 0) return;
@@ -236,7 +244,7 @@ export function useScrapLocalCover(opts: ScrapLocalCoverOpts) {
     })();
   };
 
-  return { src, posters, onError, ensuring };
+  return { src: tabVisible ? src : '', posters, onError, ensuring };
 }
 
 /** 列表 / 货架 / 厂牌墙：优先 poster。有码另传 rp 做横图右裁。 */
