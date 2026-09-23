@@ -330,8 +330,9 @@ def _zero_vec_literal(dim: int) -> str:
 
 
 def catalog_code_set() -> set[str]:
-    """六区目录全部番号（大写）。"""
+    """六区目录全部番号（大写；FC2-PPV 归一为 FC2-{num}）。"""
     import app.prefix.catalog_store as store
+    from app.core.region_meta import normalize_fc2_code
 
     doc = store.load_catalog(force=True)
     out: set[str] = set()
@@ -340,6 +341,10 @@ def catalog_code_set() -> set[str]:
         for _pref, ent in (reg.get("prefixes") or {}).items():
             for code in store.codes_of(ent):
                 cu = str(code or "").strip().upper()
+                if not cu:
+                    continue
+                if "FC2" in cu:
+                    cu = normalize_fc2_code(cu)
                 if cu:
                     out.add(cu)
     return out

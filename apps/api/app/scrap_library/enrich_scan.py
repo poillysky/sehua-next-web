@@ -337,7 +337,7 @@ def _local_status_item(
         labels = _enrich_retry._gap_labels(soft_gaps)
         item["status"] = "done"
         item["partialOk"] = True
-        item["error"] = _enrich_retry._format_soft_ok_error(labels or ["女优"])
+        item["error"] = _enrich_retry._format_soft_ok_error(labels or ["标题"])
         item["gapsAfter"] = soft_gaps
     else:
         block = [g for g in gaps if g in _enrich._SUCCESS_BLOCK_GAPS] or list(gaps or [])

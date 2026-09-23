@@ -16,7 +16,12 @@ from typing import Any
 
 from app.core.db import ROOT, prefix_catalog_dir
 from app.core.maps_paths import prefix_catalog_seed
-from app.core.region_meta import REGION_META, REGION_ORDER, std_prefix
+from app.core.region_meta import (
+    REGION_META,
+    REGION_ORDER,
+    normalize_fc2_code,
+    std_prefix,
+)
 import app.prefix.maker_names as maker_names
 
 log = logging.getLogger(__name__)
@@ -63,6 +68,88 @@ def empty_catalog() -> dict[str, Any]:
     }
 
 
+def coalesce_fc2_prefixes(doc: dict[str, Any]) -> bool:
+    """把 FC2PPV / FC2-PPV 并入 FC2：番号取并集去重，不丢扫描量。"""
+    reg = (doc.get("regions") or {}).get("fc2")
+    if not isinstance(reg, dict):
+        return False
+    prefs = reg.get("prefixes")
+    if not isinstance(prefs, dict) or not prefs:
+        return False
+
+    alias_keys = [
+        k
+        for k in list(prefs.keys())
+        if std_prefix(str(k)) == "FC2" and str(k).strip().upper() != "FC2"
+    ]
+    base = dict(prefs.get("FC2") or {})
+    if not alias_keys and not base:
+        return False
+
+    codes: set[str] = set()
+    serials: set[int] = set()
+    sources: set[str] = set()
+    for k in ("FC2", *alias_keys):
+        ent = prefs.get(k)
+        if not isinstance(ent, dict):
+            continue
+        for c in ent.get("codes") or []:
+            n = normalize_fc2_code(str(c))
+            if n:
+                codes.add(n)
+        for s in ent.get("serials") or []:
+            try:
+                n = int(s)
+            except (TypeError, ValueError):
+                continue
+            if n > 0:
+                serials.add(n)
+        for src in ent.get("sources") or []:
+            if str(src).strip():
+                sources.add(str(src).strip())
+        if not base.get("maker") and ent.get("maker"):
+            base["maker"] = ent.get("maker")
+        if not base.get("maker_zh") and ent.get("maker_zh"):
+            base["maker_zh"] = ent.get("maker_zh")
+        if not base.get("maker_ja") and ent.get("maker_ja"):
+            base["maker_ja"] = ent.get("maker_ja")
+        if not base.get("maker_en") and ent.get("maker_en"):
+            base["maker_en"] = ent.get("maker_en")
+        if not base.get("notes") and ent.get("notes"):
+            base["notes"] = ent.get("notes")
+
+    if not codes and not serials and not alias_keys:
+        # 仅有空壳 FC2 且无别名：仍统一 format
+        if base and str(base.get("format") or "") != "FC2-{num}":
+            prefs["FC2"] = _normalize_prefix_entry(
+                "FC2", {**base, "format": "FC2-{num}", "prefix": "FC2"}
+            )
+            return True
+        return False
+
+    merged = {
+        **base,
+        "prefix": "FC2",
+        "format": "FC2-{num}",
+        "maker": str(base.get("maker") or "FC2"),
+        "maker_en": str(base.get("maker_en") or "FC2"),
+        "codes": sorted(codes),
+        "serials": sorted(serials),
+        "sources": sorted(sources) if sources else list(base.get("sources") or []),
+    }
+    if codes:
+        try:
+            from app.search.av import code_sort_key
+
+            merged["latest_code"] = max(codes, key=code_sort_key)
+        except Exception:
+            merged["latest_code"] = max(codes)
+    prefs["FC2"] = _normalize_prefix_entry("FC2", merged)
+    for k in alias_keys:
+        prefs.pop(k, None)
+    return True
+
+
 def _normalize_prefix_entry(prefix: str, raw: dict[str, Any] | None = None) -> dict[str, Any]:
     from app.prefix.code_read import (
         CODE_READ_PRESETS,
@@ -87,6 +174,13 @@ def _normalize_prefix_entry(prefix: str, raw: dict[str, Any] | None = None) -> d
             if str(x).strip()
         }
     )
+    if p == "FC2":
+        codes = sorted({normalize_fc2_code(c) for c in codes if c})
+        src["format"] = "FC2-{num}"
+        if not str(src.get("maker") or "").strip():
+            src["maker"] = "FC2"
+        if not str(src.get("maker_en") or "").strip():
+            src["maker_en"] = "FC2"
     pad = int(src.get("pad") or 3)
     pad = max(1, min(8, pad))
     had_code_read = str(src.get("code_read") or "").strip() in VALID_CODE_READ_IDS
@@ -243,11 +337,37 @@ def load_seed() -> dict[str, Any]:
     for rid, region in (raw.get("regions") or {}).items():
         if rid not in doc["regions"]:
             continue
-        prefixes = {}
+        prefixes: dict[str, Any] = {}
         for key, ent in (region.get("prefixes") or {}).items():
             pe = _normalize_prefix_entry(key, ent)
-            prefixes[pe["prefix"]] = pe
+            pk = pe["prefix"]
+            if pk in prefixes:
+                # 同键（含 FC2PPV→FC2）并集，避免后写覆盖丢号
+                prev = prefixes[pk]
+                codes = sorted(
+                    set(prev.get("codes") or []) | set(pe.get("codes") or [])
+                )
+                serials = sorted(
+                    set(int(x) for x in (prev.get("serials") or []) if str(x).isdigit())
+                    | set(int(x) for x in (pe.get("serials") or []) if str(x).isdigit())
+                )
+                sources = sorted(
+                    set(prev.get("sources") or []) | set(pe.get("sources") or [])
+                )
+                prefixes[pk] = _normalize_prefix_entry(
+                    pk,
+                    {
+                        **prev,
+                        **{k: v for k, v in pe.items() if v},
+                        "codes": codes,
+                        "serials": serials,
+                        "sources": sources,
+                    },
+                )
+            else:
+                prefixes[pk] = pe
         doc["regions"][rid]["prefixes"] = prefixes
+    coalesce_fc2_prefixes(doc)
     return doc
 
 
@@ -274,6 +394,27 @@ def load_catalog(*, force: bool = False) -> dict[str, Any]:
                 doc = json.loads(path.read_text(encoding="utf-8"))
                 if not isinstance(doc.get("regions"), dict):
                     raise ValueError("bad catalog")
+                if coalesce_fc2_prefixes(doc):
+                    # 落盘归并结果，避免下次仍看到 FC2PPV 空壳
+                    out = deepcopy(doc)
+                    out["version"] = CATALOG_VERSION
+                    out["updated_at"] = _now()
+                    base = empty_catalog()
+                    for rid in REGION_ORDER:
+                        out.setdefault("regions", {}).setdefault(
+                            rid, base["regions"][rid]
+                        )
+                    tmp = path.with_suffix(".tmp")
+                    tmp.write_text(
+                        json.dumps(out, ensure_ascii=False, indent=2) + "\n",
+                        encoding="utf-8",
+                    )
+                    tmp.replace(path)
+                    doc = out
+                    try:
+                        mtime = path.stat().st_mtime
+                    except OSError:
+                        mtime = None
                 _cache = doc
                 _cache_mtime = mtime
                 return deepcopy(doc)
@@ -288,6 +429,7 @@ def save_catalog(doc: dict[str, Any]) -> Path:
     global _cache, _cache_mtime
     with _lock:
         out = deepcopy(doc)
+        coalesce_fc2_prefixes(out)
         out["version"] = CATALOG_VERSION
         out["updated_at"] = _now()
         # ensure all regions exist
@@ -348,7 +490,7 @@ def rebuild_empty() -> dict[str, Any]:
 def scrap_library_prefix_counts(*, force: bool = False) -> dict[str, int]:
     """刮削库磁盘上「实际有番号夹」的前缀数（按六区 id）。
 
-    六区统一区/前缀/番号；FC2 现行 ``FC2/FC2/FC2-*``（扫描仍认旧 FC2-PPV）。结果短缓存。
+    六区统一区/前缀/番号；FC2 现行 ``FC2/FC2/FC2-*``（旧 FC2-PPV 夹计入同一前缀）。结果短缓存。
     """
     import time
 
@@ -383,14 +525,24 @@ def scrap_library_prefix_counts(*, force: bool = False) -> dict[str, int]:
             continue
         try:
             count = 0
+            fc2_bucket_hit = False
             for pref_dir in region_dir.iterdir():
                 if not pref_dir.is_dir() or pref_dir.name.startswith("_"):
                     continue
                 name_u = pref_dir.name.strip().upper().replace("_", "-")
-                # FC2 前缀夹：FC2 / FC2-PPV / 旧 FC2PPV
+                # FC2 前缀夹：FC2 / 旧 FC2-PPV / FC2PPV → 计为 1 个前缀
                 if rid == "fc2" and name_u in {"FC2", "FC2-PPV", "FC2PPV"}:
-                    pass  # 正常前缀夹，继续往下数番号
-                elif rid == "fc2" and name_u.startswith("FC2") and any(
+                    try:
+                        has_code = any(
+                            c.is_dir() and not c.name.startswith("_")
+                            for c in pref_dir.iterdir()
+                        )
+                    except OSError:
+                        has_code = False
+                    if has_code:
+                        fc2_bucket_hit = True
+                    continue
+                if rid == "fc2" and name_u.startswith("FC2") and any(
                     ch.isdigit() for ch in name_u
                 ):
                     # 扁平残留 FC2-{num}，不算前缀夹
@@ -404,7 +556,9 @@ def scrap_library_prefix_counts(*, force: bool = False) -> dict[str, int]:
                     has_code = False
                 if has_code:
                     count += 1
-            # 若仍是纯扁平（无前缀夹），按番号形态估 1~2
+            if rid == "fc2" and fc2_bucket_hit:
+                count += 1
+            # 若仍是纯扁平（无前缀夹），按番号形态估 1 个 FC2 前缀
             if rid == "fc2" and count == 0:
                 from app.core.region_meta import fc2_prefix_from_code
 

@@ -12,7 +12,7 @@ DetailFn = Callable[..., dict[str, Any]]
 
 
 def _legacy_javbus(code: str, *, base_url: str = "", cookie: str = "", api_key: str = "") -> dict[str, Any]:
-    from ..makers_catalog_routes import _javbus_detail
+    from app.makers.catalog_routes import _javbus_detail
 
     del api_key
     return _javbus_detail(code, base_url=base_url, cookie=cookie)

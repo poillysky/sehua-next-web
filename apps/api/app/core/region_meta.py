@@ -28,7 +28,12 @@ _LEGACY_REGION_REDIRECT: dict[str, str] = {
 
 
 def std_prefix(prefix: str) -> str:
-    return str(prefix or "").strip().upper().replace("_", "-")
+    """前缀键规范化；FC2-PPV / FC2PPV 一律归并为 FC2。"""
+    p = str(prefix or "").strip().upper().replace("_", "-")
+    compact = re.sub(r"[\s\-]", "", p)
+    if compact == "FC2PPV" or p in {"FC2-PPV", "FC2_PPV"}:
+        return "FC2"
+    return p
 
 
 def resolve_fs_region(region: str | None) -> str | None:

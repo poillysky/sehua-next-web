@@ -273,6 +273,15 @@ def run_enrich(
             except Exception as e:  # noqa: BLE001
                 log.warning("enrich start demote schedule failed: %s", e)
             try:
+                threading.Thread(
+                    target=_enrich._ensure_actress_soft_promoted,
+                    kwargs={"region": region, "force": False},
+                    name=f"soft-norm-{region}",
+                    daemon=True,
+                ).start()
+            except Exception as e:  # noqa: BLE001
+                log.warning("enrich start soft normalize schedule failed: %s", e)
+            try:
                 lib = _enrich._region_library_progress(region)
                 est_total = max(int(lib.get("incomplete") or 0), 1)
             except Exception:  # noqa: BLE001

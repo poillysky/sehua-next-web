@@ -120,7 +120,7 @@ def _queue_scan_preview_item(
         labels = _enrich_retry._gap_labels(soft_gaps)
         item["status"] = "done"
         item["partialOk"] = True
-        item["error"] = _enrich_retry._format_soft_ok_error(labels or ["女优"])
+        item["error"] = _enrich_retry._format_soft_ok_error(labels or ["标题"])
         item["gapsAfter"] = soft_gaps
     else:
         block = [g for g in gaps if g in _enrich._SUCCESS_BLOCK_GAPS] or list(gaps or [])
@@ -1613,9 +1613,14 @@ def _queue_counts_of(rows: list[dict[str, Any]]) -> dict[str, int]:
             continue
         st = _queue_row_status(row) or "pending"
         if st == "done":
-            if bool(row.get("partialOk")) or _enrich_retry._is_soft_ok_error(
-                str(row.get("error") or "")
-            ):
+            err = str(row.get("error") or "")
+            gaps = row.get("gapsAfter") or row.get("gaps") or []
+            soft_by_gaps = any(
+                str(g) in _enrich._SOFT_SUCCESS_GAPS
+                for g in (gaps if isinstance(gaps, list) else [])
+            )
+            # 仅认当前软缺口（片商）；「软成功 · 仍缺:女优」旧文案算完整成功
+            if soft_by_gaps or _enrich_retry._is_soft_remain_error(err):
                 counts["soft"] += 1
             else:
                 counts["done"] += 1
@@ -1970,7 +1975,7 @@ def _queue_log_demote_false_dones_budgeted(
 
 
 def _queue_log_promote_actress_soft_fails(region: str) -> int:
-    """历史软缺口失败（不缺封面/标题）→ 软成功（done）。须本地封面已落盘。"""
+    """历史软缺口失败/误入未处理（有封面）→ 软成功或完整成功。"""
     rid = _enrich._queue_log_region(region)
     if not rid:
         return 0
@@ -1981,7 +1986,7 @@ def _queue_log_promote_actress_soft_fails(region: str) -> int:
         with connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, code, item_id, error, gaps_json, payload_json
+                SELECT id, code, item_id, error, gaps_json, payload_json, status
                 FROM enrich_queue_log
                 WHERE region=? AND status='fail'
                 """,
@@ -1996,6 +2001,7 @@ def _queue_log_promote_actress_soft_fails(region: str) -> int:
                     err = str(raw.get("error") or "")
                     gaps_raw = raw.get("gaps_json")
                     payload_raw = raw.get("payload_json")
+                    st0 = str(raw.get("status") or "").strip().lower()
                 else:
                     lid = int(raw[0] or 0)
                     code = str(raw[1] or "").strip().upper()
@@ -2003,6 +2009,7 @@ def _queue_log_promote_actress_soft_fails(region: str) -> int:
                     err = str(raw[3] or "")
                     gaps_raw = raw[4]
                     payload_raw = raw[5]
+                    st0 = str(raw[6] or "").strip().lower()
                 if lid <= 0:
                     continue
                 # 文案已是软缺口，或 gaps_json 不含硬缺口
@@ -2019,7 +2026,7 @@ def _queue_log_promote_actress_soft_fails(region: str) -> int:
                     gaps_hint = []
                 soft_by_err = _enrich_retry._is_soft_remain_error(err)
                 soft_hint = [g for g in gaps_hint if g in _enrich._SOFT_SUCCESS_GAPS]
-                # 仅女优/片商软缺口，或「无硬缺口」的历史 fail（可能升完整成功）
+                # 仅标题软缺口，或「无硬缺口」的历史 fail/pending
                 soft_by_gaps = bool(soft_hint) or (
                     bool(gaps_hint)
                     and not any(g in _enrich._SUCCESS_BLOCK_GAPS for g in gaps_hint)
@@ -2042,7 +2049,7 @@ def _queue_log_promote_actress_soft_fails(region: str) -> int:
                     g for g in disk_gaps if g in _enrich._SOFT_SUCCESS_GAPS
                 ]
                 ids.append(lid)
-                # 磁盘无女优/片商缺口 → 完整成功（剧情/外链不算软成功）
+                # 磁盘无标题缺口 → 完整成功（剧情/女优/片商不算软成功）
                 soft_gaps = (
                     soft_only
                     or _enrich_retry._soft_gaps_from_remain_error(err)
@@ -2074,13 +2081,14 @@ def _queue_log_promote_actress_soft_fails(region: str) -> int:
                     UPDATE enrich_queue_log
                     SET status='done', error=?, gaps_json=?, payload_json=?,
                         updated_at=NOW()
-                    WHERE id=? AND status='fail'
+                    WHERE id=? AND status=?
                     """,
                     (
                         new_err[:500],
                         gaps_js,
                         json.dumps(payload, ensure_ascii=False, default=str),
                         lid,
+                        st0 or "fail",
                     ),
                 )
             if ids:
@@ -2094,9 +2102,10 @@ def _queue_log_promote_actress_soft_fails(region: str) -> int:
 
 
 def _queue_log_normalize_soft_to_full_success(region: str) -> int:
-    """旧规则把「缺剧情/外链」也标成软成功 → 升为完整成功。
+    """旧规则软成功收口：仅「有封面无标题」保留 soft；其余升完整成功。
 
-    仅保留缺女优/片商为 soft；其余 done+partialOk 清掉 soft 标记。
+    须扫全部「软成功/次成功」前缀 done 行（不能只扫仍缺:标题，否则旧女优 soft
+    永远留在 done 文案里，新 soft_pred 角标为 0、软成功页空白）。
     """
     rid = _enrich._queue_log_region(region)
     if not rid:
@@ -2106,12 +2115,16 @@ def _queue_log_normalize_soft_to_full_success(region: str) -> int:
 
         init_db()
         with connect() as conn:
-            soft_pred = _enrich_retry._soft_done_sql_pred(error_col="error")
             rows = conn.execute(
-                f"""
+                """
                 SELECT id, error, gaps_json, payload_json
                 FROM enrich_queue_log
-                WHERE region=? AND status='done' AND {soft_pred}
+                WHERE region=? AND status='done'
+                  AND (
+                    error LIKE '软成功%%'
+                    OR error LIKE '次成功%%'
+                    OR gaps_json LIKE '%%thin_title%%'
+                  )
                 """,
                 (rid,),
             ).fetchall()
@@ -2149,11 +2162,17 @@ def _queue_log_normalize_soft_to_full_success(region: str) -> int:
                     payload = {}
                 after = list(payload.get("gapsAfter") or gaps or [])
                 soft_gaps = [g for g in after if str(g) in _enrich._SOFT_SUCCESS_GAPS]
-                # 仍缺女优/片商 → 保留软成功，只规范化文案/gaps
-                if soft_gaps or _enrich_retry._is_soft_remain_error(err):
-                    if soft_gaps and (
+                if not soft_gaps and _enrich_retry._is_soft_remain_error(err):
+                    soft_gaps = _enrich_retry._soft_gaps_from_remain_error(err)
+                # 仍缺标题 → 保留/写正软成功；女优/片商等旧 soft 升完整成功
+                if soft_gaps and "no_local" not in {str(g) for g in after}:
+                    want_err = _enrich_retry._format_soft_ok_error(
+                        _enrich_retry._gap_labels(soft_gaps)
+                    )
+                    if (
                         list(payload.get("gapsAfter") or []) != soft_gaps
                         or not _enrich_retry._is_soft_remain_error(err)
+                        or err != want_err
                     ):
                         payload["partialOk"] = True
                         payload["gapsAfter"] = soft_gaps
@@ -2164,7 +2183,7 @@ def _queue_log_normalize_soft_to_full_success(region: str) -> int:
                             WHERE id=?
                             """,
                             (
-                                _enrich_retry._format_soft_ok_error(_enrich_retry._gap_labels(soft_gaps)),
+                                want_err,
                                 json.dumps(soft_gaps, ensure_ascii=False),
                                 json.dumps(payload, ensure_ascii=False, default=str),
                                 lid,
@@ -2172,21 +2191,27 @@ def _queue_log_normalize_soft_to_full_success(region: str) -> int:
                         )
                         n += 1
                     continue
-                # 仅缺剧情/外链等 → 升完整成功
-                payload["partialOk"] = False
-                payload["gapsAfter"] = []
-                conn.execute(
-                    """
-                    UPDATE enrich_queue_log
-                    SET error='', gaps_json='[]', payload_json=?, updated_at=NOW()
-                    WHERE id=?
-                    """,
-                    (
-                        json.dumps(payload, ensure_ascii=False, default=str),
-                        lid,
-                    ),
-                )
-                n += 1
+                # 旧软成功（女优/片商等）→ 升完整成功
+                if (
+                    _enrich_retry._is_soft_ok_error(err)
+                    or bool(payload.get("partialOk"))
+                    or soft_gaps
+                    or "thin_title" in {str(g) for g in after}
+                ):
+                    payload["partialOk"] = False
+                    payload["gapsAfter"] = []
+                    conn.execute(
+                        """
+                        UPDATE enrich_queue_log
+                        SET error='', gaps_json='[]', payload_json=?, updated_at=NOW()
+                        WHERE id=?
+                        """,
+                        (
+                            json.dumps(payload, ensure_ascii=False, default=str),
+                            lid,
+                        ),
+                    )
+                    n += 1
             if n:
                 conn.commit()
             # 角标 tip 与库对齐（软成功降档必须立刻反映到 UI）

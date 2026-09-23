@@ -468,7 +468,7 @@ def post_local_index() -> dict[str, Any]:
     def run() -> None:
         try:
             result = local_index.run_local_db_index(on_progress=_local_index_log)
-            # 扫描结束后：删光旧骨架，按目录 1:1 重建（保留已刮削，删目录外）
+            # 扫描结束后：以最新目录为唯一真相源，向量与目录 1:1（目录外含已刮削删除）
             skeleton: dict[str, Any] = {"ok": False, "skipped": True}
             try:
                 import app.scrap_library.embed as embed_svc
@@ -523,7 +523,7 @@ def post_local_index() -> dict[str, Any]:
                 "percent": 100,
                 "label": (
                     f"done · 骨架重建 删壳{sk_purged} 目录外-{sk_codes}"
-                    f" 新壳+{sk_ins} 保留已刮{sk_skip}"
+                    f" 新壳+{sk_ins} 目录内保留{sk_skip}"
                 ),
             }
         except Exception as e:  # noqa: BLE001

@@ -104,7 +104,7 @@ export function useMakersLocalStrm({
             const skBits: string[] = [];
             if (st.result.skeleton?.ok) {
               skBits.push(
-                `骨架重建 删壳${skPurged} 目录外-${skCodes} 新壳+${skIns} 保留已刮${skSkip}`,
+                `骨架重建 删壳${skPurged} 目录外-${skCodes} 新壳+${skIns} 目录内保留${skSkip}`,
               );
             } else if (st.result.skeleton?.error) {
               skBits.push(`骨架失败 · ${st.result.skeleton.error}`);

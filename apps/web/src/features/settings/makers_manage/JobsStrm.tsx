@@ -16,7 +16,7 @@ export function JobsStrm({ p }: { p: MakersManagePanelState }) {
                   <span className="settings-nav__desc">
                     {p.localIndexBusy
                       ? p.localIndexPhase || '扫描中…'
-                      : 'Sehua · Bitmagnet 合并去脏 · 扫完删骨架按目录重建进向量'}
+                      : 'Sehua · Bitmagnet 合并去脏 · 扫完按目录 1:1 重建向量（目录外含已刮削删除）'}
                   </span>
                 </span>
                 <button

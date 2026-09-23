@@ -74,27 +74,67 @@ def strip_title_actor_suffix(title: str, actors: list[str]) -> str:
 
 
 def strip_title_code_prefix(title: str, code: str) -> str:
-    """I43：剥标题番号前缀。"""
+    """I43：剥标题番号前缀。
+
+    FC2 同号多写法（FC2-123 / FC2-PPV-123）会连续剥净，避免
+    「FC2-998960 FC2-PPV-998960 [HD版]…」叠号残留。
+    """
     t = str(title or "").strip()
     c = str(code or "").strip().upper()
-    if not t or not c:
+    if not t:
         return t
-    # ABC-123 / ABC123 开头
-    pat = re.compile(
-        rf"^\s*{re.escape(c)}\s*[-:：]?\s*",
-        re.I,
-    )
-    out = pat.sub("", t).strip()
-    if not out:
-        return t
-    # 无横杠形态
-    compact = c.replace("-", "")
-    if compact and compact != c:
-        pat2 = re.compile(rf"^\s*{re.escape(compact)}\s*[-:：]?\s*", re.I)
-        out2 = pat2.sub("", out).strip()
-        if out2:
-            out = out2
+    out = t
+    if c:
+        pat = re.compile(
+            rf"^\s*{re.escape(c)}\s*[-:：]?\s*",
+            re.I,
+        )
+        stripped = pat.sub("", out).strip()
+        if stripped:
+            out = stripped
+        compact = c.replace("-", "")
+        if compact and compact != c:
+            pat2 = re.compile(rf"^\s*{re.escape(compact)}\s*[-:：]?\s*", re.I)
+            stripped2 = pat2.sub("", out).strip()
+            if stripped2:
+                out = stripped2
+
+    # FC2：不论策略开关，同数字 id 的 FC2 / FC2-PPV 前缀一律剥净
+    num = ""
+    if c and "FC2" in c:
+        try:
+            from app.core.region_meta import normalize_fc2_code
+
+            canon = normalize_fc2_code(c)
+            m = re.search(r"(\d{5,10})$", canon)
+            if m:
+                num = m.group(1)
+        except Exception:  # noqa: BLE001
+            num = ""
+    if not num:
+        m2 = re.match(
+            r"^\s*FC2(?:\s*[-_]?\s*PPV)?\s*[-_]?\s*(\d{5,10})\b",
+            out,
+            re.I,
+        )
+        if m2:
+            num = m2.group(1)
+    if num:
+        alt = re.compile(
+            rf"^\s*FC2(?:\s*[-_]?\s*PPV)?\s*[-_]?\s*{re.escape(num)}\b\s*[-:：]?\s*",
+            re.I,
+        )
+        for _ in range(6):
+            nxt = alt.sub("", out).strip()
+            if nxt == out:
+                break
+            out = nxt
     return out or t
+
+
+def dedupe_fc2_title_codes(title: str, code: str = "") -> str:
+    """仅去掉标题开头叠写的 FC2 / FC2-PPV 同号（不碰其它前缀策略）。"""
+    return strip_title_code_prefix(title, code or "")
 
 
 def extract_facets_and_badges(
@@ -362,6 +402,8 @@ def apply_merge_extras(
         strip_actors = list(acts) + list(merged.get("actorsAll") or [])
         if bool(st.get("stripTitleActorSuffix")):
             title = strip_title_actor_suffix(title, strip_actors)
+        # FC2 叠号前缀始终剥；完整番号前缀仍看策略开关
+        title = dedupe_fc2_title_codes(title, code)
         if bool(st.get("stripTitleCodePrefix")):
             title = strip_title_code_prefix(title, code)
         merged["title"] = title

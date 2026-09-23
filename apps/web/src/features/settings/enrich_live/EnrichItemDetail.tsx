@@ -12,6 +12,7 @@ import {
 } from './cover';
 import { gapsText, statusLabel } from './queueFormat';
 import { displayHitSource, sourceIconMeta } from './sourceMeta';
+import { stripTitleCodePrefix } from '@/features/makers/makersUi';
 
 function FieldSourceIcon({ source }: { source?: string }) {
   const meta = sourceIconMeta(String(source || ''));
@@ -208,7 +209,10 @@ export function EnrichItemDetail({
             <div className="settings-kv">
               <span className="settings-kv__key">标题</span>
               <span className="settings-kv__val allow-select">
-                {detail.detailTitle}
+                {stripTitleCodePrefix(
+                  detail.detailTitle,
+                  String(detail.code || ''),
+                ) || detail.detailTitle}
               </span>
             </div>
           </li>
@@ -339,10 +343,18 @@ export function EnrichItemDetail({
             const srcLabel = String(f.source || '').trim();
             const rawVal = f.ok ? f.value || '有' : '无';
             const isPoster = f.id === 'poster' || f.label === '封面';
+            const isTitle = f.id === 'title' || f.label === '标题';
+            const code = String(detail.code || '').trim();
+            const cleanedTitle =
+              isTitle && f.ok && code
+                ? stripTitleCodePrefix(String(f.value || ''), code)
+                : '';
             const val =
               isPoster && f.ok && /^https?:\/\//i.test(String(f.value || ''))
                 ? '有链接'
-                : rawVal;
+                : isTitle && cleanedTitle
+                  ? cleanedTitle
+                  : rawVal;
             return (
               <li key={f.id || f.label}>
                 <div

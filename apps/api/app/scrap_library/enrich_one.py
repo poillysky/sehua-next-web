@@ -550,7 +550,7 @@ def enrich_one_row(
         )
         return _done(out)
 
-    # 向量路径同样以本地 NFO 硬缺口判定成功（缺剧情/女优/片商→软成功）
+    # 向量路径：无封面→失败；有封面无标题→软成功；其余缺失→成功
     try:
         _, remain = _enrich._local_folder_gaps(folder)
     except Exception:  # noqa: BLE001

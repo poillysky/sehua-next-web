@@ -283,7 +283,7 @@ def _collect_nfo_folders_parallel(
 def _classify_disk_gaps(gaps: list[str] | None) -> str:
     """本地缺口 → done / soft / fail。
 
-    缺封面/空标题 → fail；缺女优/片商 → soft；其余（含缺剧情/外链/中文标题）→ done。
+    无封面 → fail；有封面但无标题 → soft；其余缺失（女优/片商/剧情等）→ done。
     """
     gs = [str(g) for g in (gaps or []) if str(g).strip()]
     if not gs:

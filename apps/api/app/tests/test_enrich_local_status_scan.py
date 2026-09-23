@@ -61,11 +61,12 @@ class LocalNfoStatusMapsTests(unittest.TestCase):
         E._counts_cache.clear()  # noqa: SLF001
 
     def test_classify_disk_gaps(self) -> None:
+        # 无封面→失败；有封面无标题→软成功；其余缺失→成功
         self.assertEqual(E._classify_disk_gaps([]), "done")
         self.assertEqual(E._classify_disk_gaps(["no_plot"]), "done")
-        self.assertEqual(E._classify_disk_gaps(["no_plot", "no_actress"]), "soft")
+        self.assertEqual(E._classify_disk_gaps(["no_plot", "no_actress"]), "done")
         self.assertEqual(E._classify_disk_gaps(["no_local"]), "fail")
-        self.assertEqual(E._classify_disk_gaps(["thin_title", "no_plot"]), "fail")
+        self.assertEqual(E._classify_disk_gaps(["thin_title", "no_plot"]), "soft")
 
     def test_maps_split_done_soft_fail(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -84,18 +85,18 @@ class LocalNfoStatusMapsTests(unittest.TestCase):
                 region=region,
                 prefix="ABP",
                 code="ABP-002",
-                title="足够长的完整标题内容",
+                title="ABP-002",  # soft: 有封面但 thin_title
                 plot="足够长的简介文本，用来通过 no_plot 的长度阈值检查。",
-                actor="",  # soft: no_actress
+                actor="",  # 缺女优仍算成功侧；与 thin_title 并存时归 soft
             )
             _write_code(
                 root,
                 region=region,
                 prefix="ABP",
                 code="ABP-003",
-                title="ABP-003",  # thin_title
+                title="足够长的完整标题内容",
                 plot="足够长的简介文本，用来通过 no_plot 的长度阈值检查。",
-                poster=False,
+                poster=False,  # fail: 无封面
             )
 
             with mock.patch.object(E.embed_svc, "get_settings", return_value={"root": str(root)}):

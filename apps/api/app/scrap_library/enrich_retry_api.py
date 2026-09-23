@@ -432,10 +432,10 @@ _COVER_FAIL_LABEL = {
 }
 
 
-_SUCCESS_BLOCK_GAPS = frozenset({"no_local", "thin_title"})
+_SUCCESS_BLOCK_GAPS = frozenset({"no_local"})
 
 
-_SOFT_SUCCESS_GAPS = frozenset({"no_actress", "no_studio"})
+_SOFT_SUCCESS_GAPS = frozenset({"thin_title"})
 
 
 _SOFT_GAP_LABELS = frozenset(

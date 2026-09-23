@@ -44,7 +44,7 @@ _SOFT_OK_PREFIX = "软成功"
 _SOFT_OK_PREFIXES = ("软成功", "次成功")
 
 
-_SOFT_PROMOTE_RULE_VER = 5
+_SOFT_PROMOTE_RULE_VER = 8
 
 
 _SOFT_CORRECTION_MIN_INTERVAL_SEC = 6.0
@@ -78,13 +78,17 @@ def _format_soft_ok_error(labels: list[str]) -> str:
 
 
 def _soft_done_sql_pred(*, error_col: str = "error") -> str:
-    """SQL：done 行是否软成功（兼容旧「次成功」前缀）。
+    """SQL：done 行是否软成功（当前规则：有封面但无标题）。
 
-    psycopg 要求字面量 ``%`` 写成 ``%%``，否则 LIKE '软成功%' 会报
-    placeholders 错误，导致整页队列读失败、列表空白。
+    兼容旧「次成功」前缀；须含「仍缺:标题」（不含仅「中文标题」）。
+    psycopg 要求字面量 ``%`` 写成 ``%%``。
     """
     return (
+        f"("
         f"({error_col} LIKE '软成功%%' OR {error_col} LIKE '次成功%%')"
+        f" AND {error_col} LIKE '%%仍缺:标题%%'"
+        f" AND {error_col} NOT LIKE '%%仍缺:中文标题%%'"
+        f")"
     )
 
 
@@ -473,9 +477,9 @@ def _apply_local_gap_success(
     remain: list[str] | None = None,
     only_if_ok: bool = False,
 ) -> None:
-    """本地 NFO 缺口收口：缺封面/空标题→失败；缺女优/片商→软成功；其余→成功。"""
-    # 无目录/无封面/无 NFO 绝不能算成功（防并发串写把别人的软成功盖到空壳番号）
-    if not _enrich_cover._local_success_disk_ok(folder):
+    """本地 NFO 缺口收口：无封面→失败；有封面无标题→软成功；其余缺失→成功。"""
+    # 无目录 / 无封面绝不能算成功（防并发串写把别人的结果盖到空壳番号）
+    if not folder.is_dir() or not _enrich_cover._local_poster_ok(folder):
         if only_if_ok and not out.get("ok"):
             return
         out["ok"] = False
@@ -491,14 +495,25 @@ def _apply_local_gap_success(
                 "thin_title",
             ]
             out["error"] = "仍缺:封面 · 无本地目录"
-        elif not _enrich_detail._find_nfo(folder):
-            out["gapsAfter"] = ["thin_title", "no_plot"]
-            out["error"] = "仍缺:标题 · 无 NFO"
         else:
             out["gapsAfter"] = ["no_local"]
             out["error"] = "仍缺:封面"
         _enrich._push_log(
             f"{code or folder.name} · 未算成功 · {out['error']}",
+            region=region,
+        )
+        return
+    # 有封面但无 NFO → 无标题 → 软成功
+    if not _enrich_detail._find_nfo(folder):
+        if only_if_ok and not out.get("ok"):
+            return
+        out["ok"] = True
+        out["partialOk"] = True
+        out["localCoverOk"] = True
+        out["gapsAfter"] = ["thin_title"]
+        out["error"] = _format_soft_ok_error(["标题"])
+        _enrich._push_log(
+            f"{code or folder.name} · {out['error']} · 无 NFO",
             region=region,
         )
         return
@@ -537,7 +552,7 @@ def _apply_local_gap_success(
         )
         return
     # 硬缺口已清：必须显式 ok=True（调用方初始 ok=False，否则会被当成失败提前 return）
-    # 缺剧情/外链等不算软成功 → 完整成功
+    # 缺剧情/女优/片商等不算软成功 → 完整成功
     if only_if_ok and not out.get("ok"):
         return
     out["ok"] = True

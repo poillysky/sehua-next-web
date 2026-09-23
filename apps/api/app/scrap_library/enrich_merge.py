@@ -544,15 +544,27 @@ def _merge_got(
     picked = _pick_by_field_priority(title_pick_cands, "title", region=region)
     if picked:
         title_v, title_src = picked
-        merged["title"] = _enrich_text._strip_trailing_alt_code(
-            _enrich_text._normalize_merged_title(title_v), code
+        from app.scrap_library.enrich_extras import dedupe_fc2_title_codes
+
+        merged["title"] = dedupe_fc2_title_codes(
+            _enrich_text._strip_trailing_alt_code(
+                _enrich_text._normalize_merged_title(title_v), code
+            ),
+            code,
         )
         field_sources["title"] = title_src
     # 定稿仍空或仍薄：回落全候选里「规范化后仍可用」的最高分
     if _enrich._title_is_thin(str(merged.get("title") or ""), code) and title_cands:
+        from app.scrap_library.enrich_extras import dedupe_fc2_title_codes
+
         ranked = sorted(title_cands, key=lambda x: -x[2])
         for sid, raw, _sc in ranked:
-            cand = _enrich_text._strip_trailing_alt_code(_enrich_text._normalize_merged_title(str(raw or "")), code)
+            cand = dedupe_fc2_title_codes(
+                _enrich_text._strip_trailing_alt_code(
+                    _enrich_text._normalize_merged_title(str(raw or "")), code
+                ),
+                code,
+            )
             if _enrich._title_is_thin(cand, code):
                 continue
             merged["title"] = cand

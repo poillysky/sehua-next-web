@@ -25,9 +25,9 @@ _SEP_RE = re.compile(r"[\s\-_.·・/／\\]+")
 
 # 别名 / 常见 NFO 写法 → MAKER_I18N 主名（或下方 CARD 覆盖的稳定主名）
 STUDIO_ALIASES: dict[str, str] = studio_alias_map()
-# 厂牌墙：FC2 与 FC2-PPV 分开；磁盘夹名 FC2-PPV 对应 catalog 前缀 FC2PPV
-for _fc2_alias in ("FC2 PPV", "FC2PPV", "FC2_PPV"):
-    STUDIO_ALIASES[_fc2_alias] = "FC2-PPV"
+# 厂牌墙：FC2-PPV / FC2PPV 并入 FC2
+for _fc2_alias in ("FC2 PPV", "FC2PPV", "FC2_PPV", "FC2-PPV"):
+    STUDIO_ALIASES[_fc2_alias] = "FC2"
 
 # 货架短名：优先中文或英文品牌名（避免日文假名）
 STUDIO_CARD_LABEL: dict[str, str] = studio_card_label_map()
@@ -226,8 +226,8 @@ def studio_filter_norm_keys(name: str) -> list[str]:
 # 前缀 → 厂牌主名（NFO 缺片商时按前缀归位）
 # 优先于此表；其余从 PREFIX_I18N / av-makers 推导
 PREFIX_STUDIO_MAP: dict[str, str] = prefix_studio_override_map()
-PREFIX_STUDIO_MAP["FC2PPV"] = "FC2-PPV"
-PREFIX_STUDIO_MAP["FC2-PPV"] = "FC2-PPV"
+PREFIX_STUDIO_MAP["FC2PPV"] = "FC2"
+PREFIX_STUDIO_MAP["FC2-PPV"] = "FC2"
 PREFIX_STUDIO_MAP["FC2"] = "FC2"
 
 
@@ -405,8 +405,8 @@ def invalidate_region_prefix_maps() -> None:
         makers_doc.cache_clear()
         STUDIO_ALIASES = studio_alias_map()
         STUDIO_CARD_LABEL = studio_card_label_map()
-        for _fc2_alias in ("FC2 PPV", "FC2PPV", "FC2_PPV"):
-            STUDIO_ALIASES[_fc2_alias] = "FC2-PPV"
+        for _fc2_alias in ("FC2 PPV", "FC2PPV", "FC2_PPV", "FC2-PPV"):
+            STUDIO_ALIASES[_fc2_alias] = "FC2"
     except Exception:  # noqa: BLE001
         pass
 

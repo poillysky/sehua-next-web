@@ -231,7 +231,7 @@ def scrape_detail(
     root = _root(base_url or DEFAULT_ROOT)
     if base_url:
         try:
-            from .. import site_mirror
+            from app.core import site_mirror
 
             site_mirror.remember("iqqtv", root, discovered_from=root)
         except Exception:
@@ -346,7 +346,7 @@ def scrape_detail(
 
     if landed:
         try:
-            from .. import site_mirror
+            from app.core import site_mirror
 
             host = re.match(r"https?://[^/]+", landed)
             if host:

@@ -364,7 +364,7 @@ def _page_fetch(
     access: str | None = None,
     fast: bool = False,
 ):
-    from .. import makers_settings
+    from app.makers import settings as makers_settings
     from app.core.outbound_http import fetch_page, looks_blocked_html
 
     sid = source_id
@@ -372,7 +372,7 @@ def _page_fetch(
     mode = str(access or "").strip()
     if not mode:
         try:
-            from .. import scrape_sources_settings as scrape_src
+            from app.scrape import sources_settings as scrape_src
 
             if sid:
                 mode = scrape_src.catalog_access(sid)
@@ -522,7 +522,7 @@ def fetch_post_form(
     access = ""
     if source_id:
         try:
-            from .. import scrape_sources_settings as scrape_src
+            from app.scrape import sources_settings as scrape_src
 
             access = scrape_src.catalog_access(source_id)
         except Exception:

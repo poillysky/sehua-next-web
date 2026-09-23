@@ -74,7 +74,7 @@ function resolveMakerShape(prefix: string): MakerCodeShape {
   const compact = westernKey(prefix);
   if (PREFIX_SHAPE[key]) return PREFIX_SHAPE[key];
   if (PREFIX_SHAPE[compact]) return PREFIX_SHAPE[compact];
-  if (key === "FC2-PPV" || compact === "FC2PPV") return "fc2ppv";
+  if (key === "FC2-PPV" || compact === "FC2PPV") return "fc2";
   if (isWesternStudioPrefix(prefix)) return "western_date";
   return "std";
 }
@@ -97,17 +97,9 @@ export function makerCodeFormatMeta(prefix: string): {
       padEditable: false,
     };
   }
-  if (shape === "fc2ppv") {
+  if (shape === "fc2ppv" || shape === "fc2") {
     return {
-      shape,
-      codeFormat: "fc2ppv",
-      codeSample: "FC2-PPV-1234567",
-      padEditable: false,
-    };
-  }
-  if (shape === "fc2") {
-    return {
-      shape,
+      shape: "fc2",
       codeFormat: "fc2",
       codeSample: "FC2-1234567",
       padEditable: false,
@@ -148,10 +140,10 @@ function parseFc2(raw: string): ParsedMakerCode | null {
   let m = u.match(/^FC2[-_\s.]?PPV[-_\s.]?(\d{5,10})$/i);
   if (m) {
     return {
-      shape: "fc2ppv",
-      canonical: `FC2-PPV-${m[1]}`,
-      parts: ["FC2", "PPV", m[1]],
-      prefix: "FC2PPV",
+      shape: "fc2",
+      canonical: `FC2-${m[1]}`,
+      parts: ["FC2", m[1]],
+      prefix: "FC2",
     };
   }
   m = u.match(/^FC2(?![-_\s.]?PPV)[-_\s.]?(\d{5,10})$/i);

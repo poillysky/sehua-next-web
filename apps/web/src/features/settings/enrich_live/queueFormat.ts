@@ -58,8 +58,8 @@ function isSoftRemainError(err?: string) {
     .split(/[·,，]/)
     .map((s) => s.trim())
     .filter(Boolean);
-  // 女优 / 片商算软成功（中文标题不再挡）
-  const softLabels = new Set(['女优', '片商']);
+  // 有封面但无标题 → 软成功；女优/片商等不算 soft
+  const softLabels = new Set(['标题']);
   return parts.length > 0 && parts.every((p) => softLabels.has(p));
 }
 
@@ -94,18 +94,23 @@ export function isPartialOk(row?: {
       ? { ...row, status: 'done' as const, partialOk: true }
       : row;
   if (normalized.status !== 'done') return false;
-  const softGaps = new Set(['no_actress', 'no_studio']);
-  const after = normalized.gapsAfter;
-  if (Array.isArray(after) && after.length) {
-    // 有 gapsAfter 时只认软缺口
-    return after.some((g) => softGaps.has(String(g || '')));
-  }
+  const softGaps = new Set(['thin_title']);
+  const after = [
+    ...(Array.isArray(normalized.gapsAfter) ? normalized.gapsAfter : []),
+    ...(Array.isArray(normalized.gaps) ? normalized.gaps : []),
+  ]
+    .map((g) => String(g || '').trim())
+    .filter(Boolean);
+  if (after.includes('no_local')) return false;
   const err = String(normalized.error || '').trim();
-  if (err.startsWith('软成功') || err.startsWith('次成功') || isSoftRemainError(err)) {
-    return isSoftRemainError(err);
+  // 有封面无标题 → 软成功（文案优先，避免 gapsAfter 混入女优等旧字段挡掉）
+  if (isSoftRemainError(err)) return true;
+  if (after.some((g) => softGaps.has(g))) return true;
+  // 旧「只缺女优/片商」软成功 → 按成功展示
+  if (err.startsWith('软成功') || err.startsWith('次成功')) {
+    return false;
   }
-  // 旧数据只有 partialOk、无 gaps/文案：保持软成功徽标，避免整页跳动
-  return Boolean(normalized.partialOk);
+  return false;
 }
 
 export function statusLabel(s?: string, row?: ScrapLibraryEnrichQueueItem) {

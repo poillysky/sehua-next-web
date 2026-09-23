@@ -172,7 +172,7 @@ export function EnrichLiveQueueList({
             waiting={Boolean(scanTip)}
             tone={scanTip ? 'neutral' : 'ok'}
             title={scanTip ? '扫描本地成功项…' : '暂无成功项'}
-            desc="本地封面与标题等字段齐全的番号会出现在这里；点「清空·扫描」按磁盘重建"
+            desc="有封面且有标题即计入成功（女优/片商/剧情等缺失也算）；点「清空·扫描」按磁盘重建"
             icon={
               scanTip ? (
                 <LoaderCircle size={22} strokeWidth={2.2} />
@@ -186,7 +186,7 @@ export function EnrichLiveQueueList({
             waiting={Boolean(scanTip)}
             tone={scanTip ? 'neutral' : 'ok'}
             title={scanTip ? '扫描本地软成功…' : '暂无软成功项'}
-            desc="本地封面和标题已齐，但仍缺女优或片商；点「清空·扫描」按磁盘重建"
+            desc="有封面但无标题才算软成功；点「清空·扫描」按磁盘重建"
             icon={
               scanTip ? (
                 <LoaderCircle size={22} strokeWidth={2.2} />
@@ -200,7 +200,7 @@ export function EnrichLiveQueueList({
             waiting={Boolean(scanTip)}
             tone={scanTip ? 'neutral' : 'fail'}
             title={scanTip ? '扫描本地失败项…' : '暂无失败项'}
-            desc="本地缺封面或标题；点「清空·扫描」按磁盘重建"
+            desc="无封面或网络/下载失败；点「清空·扫描」按磁盘重建"
             icon={
               scanTip ? (
                 <LoaderCircle size={22} strokeWidth={2.2} />

@@ -43,10 +43,22 @@ def is_skeleton_sha(sha: str | None) -> bool:
     return str(sha or "").startswith(SKELETON_SHA_PREFIX)
 
 
+def _canon_embed_code(code: str) -> str:
+    """向量/目录比对用番号键：FC2-PPV-* 与 FC2-* 同一键。"""
+    from app.core.region_meta import normalize_fc2_code
+
+    cu = str(code or "").strip().upper().replace("_", "-")
+    if not cu:
+        return ""
+    if "FC2" in cu:
+        return normalize_fc2_code(cu)
+    return cu
+
+
 def _catalog_code_locations() -> dict[str, tuple[str, str]]:
     """番号 → (区中文名, 前缀)。同号多路径按 REGION_ORDER 先出现的为准。"""
     import app.prefix.catalog_store as store
-    from app.core.region_meta import REGION_META, REGION_ORDER
+    from app.core.region_meta import REGION_META, REGION_ORDER, std_prefix
 
     doc = store.load_catalog(force=True)
     out: dict[str, tuple[str, str]] = {}
@@ -54,11 +66,11 @@ def _catalog_code_locations() -> dict[str, tuple[str, str]]:
         reg = (doc.get("regions") or {}).get(rid) or {}
         label = str(reg.get("label") or REGION_META.get(rid, {}).get("label") or rid)
         for pref, ent in (reg.get("prefixes") or {}).items():
-            p = str(pref or "").strip().upper()
+            p = std_prefix(str(pref or ""))
             if not p:
                 continue
             for code in store.codes_of(ent):
-                cu = str(code or "").strip().upper()
+                cu = _canon_embed_code(code)
                 if cu and cu not in out:
                     out[cu] = (label, p)
     return out
@@ -224,13 +236,18 @@ def realign_embed_locations(*, on_progress: ProgressCb | None = None) -> dict[st
             }
         if not item["item_id"] or not item["code"]:
             continue
-        by_code.setdefault(item["code"], []).append(item)
+        canon = _canon_embed_code(item["code"])
+        if not canon:
+            continue
+        item["canon"] = canon
+        by_code.setdefault(canon, []).append(item)
 
-    updates: list[tuple[str, str, str]] = []
+    updates: list[tuple[str, str, str, str]] = []  # region, prefix, code, item_id
     drop_ids: list[str] = []
-    for code, items in by_code.items():
-        target = locations.get(code)
+    for canon, items in by_code.items():
+        target = locations.get(canon)
         if not target:
+            # 不在最新目录 → 交给 prune 删；这里不去碰
             continue
         label, pref = target
         scraped = [x for x in items if not is_skeleton_sha(x["sha"])]
@@ -238,8 +255,10 @@ def realign_embed_locations(*, on_progress: ProgressCb | None = None) -> dict[st
         for extra in items:
             if extra["item_id"] != keeper["item_id"]:
                 drop_ids.append(extra["item_id"])
-        if keeper["region"] != label or keeper["prefix"] != pref:
-            updates.append((label, pref, keeper["item_id"]))
+        need_code = keeper["code"] != canon
+        need_loc = keeper["region"] != label or keeper["prefix"] != pref
+        if need_code or need_loc:
+            updates.append((label, pref, canon, keeper["item_id"]))
 
     moved = dropped = 0
     with pool.connection() as conn, conn.cursor() as cur:
@@ -248,7 +267,7 @@ def realign_embed_locations(*, on_progress: ProgressCb | None = None) -> dict[st
             cur.executemany(
                 f"""
                 UPDATE {_embed.TABLE}
-                   SET region = %s, prefix = %s, updated_at = now()
+                   SET region = %s, prefix = %s, code = %s, updated_at = now()
                  WHERE item_id = %s
                 """,
                 chunk,
@@ -292,15 +311,15 @@ def upsert_catalog_skeletons(
 ) -> dict[str, Any]:
     """按六区目录 1:1 同步番号骨架到向量库。
 
-    - 目录无 / 向量有 → 删（prune_embed_not_in_catalog）
+    - 目录无 / 向量有 → 删（含已刮削；prune_embed_not_in_catalog）
     - 目录有 / 向量无 → 插入仅骨架行（空壳态）
-    - 两边都有（含已刮削）→ 对齐 region/prefix，不覆盖正文
-    - 同番号多行保留已刮削，删多余骨架
+    - 两边都有（含已刮削）→ 对齐 region/prefix/code，不覆盖正文
+    - 同番号多行（含 FC2↔FC2-PPV）保留已刮削，删多余
     - embedding 用零向量占位；语义检索排除骨架
     """
     import app.prefix.catalog_store as store
     from app.prefix.catalog_strm_sync import safe_name
-    from app.core.region_meta import REGION_META, REGION_ORDER
+    from app.core.region_meta import REGION_META, REGION_ORDER, std_prefix
 
     def prog(stage: str, **kw: Any) -> None:
         payload = {"stage": stage, **kw}
@@ -362,7 +381,7 @@ def upsert_catalog_skeletons(
 
     prog("skeleton", percent=6, label="加载六区目录…", done=0, total=None)
     doc = store.load_catalog(force=True)
-    # 按番号去重：同 code 多路径只插一条
+    # 按番号去重：同 code 多路径只插一条（FC2 归一）
     jobs: list[tuple[str, str, str, str, str]] = []
     seen_job_codes: set[str] = set()
     dup_paths = 0
@@ -371,19 +390,19 @@ def upsert_catalog_skeletons(
         label = str(reg.get("label") or REGION_META.get(rid, {}).get("label") or rid)
         r_name = safe_name(label)
         for pref, ent in (reg.get("prefixes") or {}).items():
-            p_name = safe_name(str(pref))
+            p_key = std_prefix(str(pref))
+            p_name = safe_name(p_key or str(pref))
             for code in store.codes_of(ent):
-                c = str(code or "").strip()
-                if not c:
+                code_u = _canon_embed_code(code)
+                if not code_u:
                     continue
-                code_u = c.upper()
                 if code_u in seen_job_codes:
                     dup_paths += 1
                     continue
                 seen_job_codes.add(code_u)
-                c_name = safe_name(c)
+                c_name = safe_name(code_u)
                 rel = f"{r_name}/{p_name}/{c_name}"
-                jobs.append((label, str(pref), code_u, rel, item_id_from_rel(rel)))
+                jobs.append((label, p_key or str(pref).strip().upper(), code_u, rel, item_id_from_rel(rel)))
 
     total = len(jobs)
     prog(
@@ -402,14 +421,15 @@ def upsert_catalog_skeletons(
         for row in cur.fetchall() or []:
             if isinstance(row, dict):
                 iid = str(row.get("item_id") or "").strip()
-                code = str(row.get("code") or "").strip().upper()
+                code = str(row.get("code") or "").strip()
             else:
                 iid = str(row[0] or "").strip()
-                code = str(row[1] or "").strip().upper()
+                code = str(row[1] or "").strip()
             if iid:
                 existing_ids.add(iid)
-            if code:
-                existing_codes.add(code)
+            canon = _canon_embed_code(code)
+            if canon:
+                existing_codes.add(canon)
 
     pending: list[tuple[str, str, str, str, str]] = []
     skipped_existing = 0
@@ -425,7 +445,7 @@ def upsert_catalog_skeletons(
     prog(
         "skeleton",
         percent=14,
-        label=f"待写入骨架 {len(pending):,} · 跳过已有 {skipped_existing:,}",
+        label=f"待写入骨架 {len(pending):,} · 已有保留 {skipped_existing:,}",
         done=0,
         total=len(pending),
     )
@@ -507,12 +527,18 @@ def upsert_catalog_skeletons(
             "table": _embed.TABLE,
         }
 
+    # 写完再清一次：防止对齐/写入窗口插入目录外残留
+    try:
+        purged_codes += prune_embed_not_in_catalog()
+    except Exception:  # noqa: BLE001
+        pass
+
     elapsed = round(time.monotonic() - t0, 1)
     prog(
         "skeleton",
         percent=100,
         label=(
-            f"骨架同步完成 · 新写入 {inserted:,} · 跳过 {skipped_existing:,}"
+            f"骨架同步完成 · 新写入 {inserted:,} · 目录内保留 {skipped_existing:,}"
             f" · 分区调整 {int(relocated.get('moved') or 0):,}"
             f" · 清目录外 {purged_codes:,} · {elapsed}s"
         ),
@@ -557,12 +583,12 @@ def rebuild_catalog_skeletons(
     on_progress: ProgressCb | None = None,
     batch_size: int = 4000,
 ) -> dict[str, Any]:
-    """双库扫描后：删光骨架 → 按目录少删多补重建。
+    """双库扫描后：以最新目录为唯一真相源，向量库与目录 1:1。
 
-    - 已刮削行保留（非 skeleton）
-    - 目录外番号整行删除
-    - 目录有、向量无 → 重新插入骨架
-    保证向量库番号集合与 catalog 扫描结果 1:1（已刮削仍占位，不重复插骨架）。
+    - 删光旧骨架壳
+    - 目录外番号整行删除（**含已刮削**）
+    - 目录有、向量无 → 插入骨架
+    - 目录有且已刮削 → 保留正文，对齐 region/prefix/code（FC2 归一）
     """
 
     def prog(stage: str, **kw: Any) -> None:
@@ -603,7 +629,7 @@ def rebuild_catalog_skeletons(
     prog(
         "skeleton",
         percent=4,
-        label=f"已删骨架 {purged_skel:,} · 按目录重建…",
+        label=f"已删骨架 {purged_skel:,} · 按最新目录 1:1 重建…",
         done=0,
         total=None,
     )
@@ -626,13 +652,14 @@ def rebuild_catalog_skeletons(
     if sync.get("ok"):
         inserted = int(sync.get("inserted") or 0)
         purged_codes = int(sync.get("purged_codes") or 0)
+        kept = int(sync.get("skipped_existing") or 0)
         total = int(sync.get("total") or 0)
         prog(
             "skeleton",
             percent=100,
             label=(
                 f"骨架重建完成 · 删壳 {purged_skel:,} · 目录外 -{purged_codes:,}"
-                f" · 新壳 +{inserted:,} · 目录 {total:,}"
+                f" · 新壳 +{inserted:,} · 目录内保留 {kept:,} · 目录 {total:,}"
             ),
             done=total,
             total=total,
@@ -714,29 +741,49 @@ def reset_embed_to_catalog_skeletons(
 
 
 def prune_embed_not_in_catalog() -> int:
-    """删除向量库中番号不在六区目录里的行（多的删）。"""
+    """删除向量库中番号不在最新六区目录里的行（含已刮削）。
+
+    FC2-PPV-* 与 FC2-* 按同一番号比对；目录外一律删，保证与双库扫描结果 1:1。
+    """
     _embed.ensure_schema()
     codes = catalog_code_set()
     pool = get_meta_pool()
     with pool.connection() as conn, conn.cursor() as cur:
         if not codes:
-            # 目录空：只清带番号的行，避免误删异常空 code
             cur.execute(
                 f"""
                 DELETE FROM {_embed.TABLE}
                 WHERE coalesce(trim(code), '') <> ''
                 """
             )
-        else:
+            n = int(cur.rowcount or 0)
+            conn.commit()
+            return n
+
+        cur.execute(f"SELECT item_id, code FROM {_embed.TABLE}")
+        rows = cur.fetchall() or []
+        dead: list[str] = []
+        for row in rows:
+            if isinstance(row, dict):
+                iid = str(row.get("item_id") or "").strip()
+                code = str(row.get("code") or "").strip()
+            else:
+                iid = str(row[0] or "").strip()
+                code = str(row[1] or "").strip()
+            if not iid:
+                continue
+            canon = _canon_embed_code(code)
+            if not canon or canon not in codes:
+                dead.append(iid)
+
+        n = 0
+        for i in range(0, len(dead), 800):
+            chunk = dead[i : i + 800]
             cur.execute(
-                f"""
-                DELETE FROM {_embed.TABLE}
-                WHERE coalesce(trim(code), '') <> ''
-                  AND upper(trim(code)) <> ALL(%s)
-                """,
-                (list(codes),),
+                f"DELETE FROM {_embed.TABLE} WHERE item_id = ANY(%s)",
+                (chunk,),
             )
-        n = int(cur.rowcount or 0)
+            n += int(cur.rowcount or 0)
         conn.commit()
     return n
 
@@ -1449,7 +1496,7 @@ def vectorize_db_embeddings(
 
 
 def _folder_prefix_aliases(prefix: str) -> list[str]:
-    """前缀查询别名。FC2 / FC2PPV 已分目录，各自独立。"""
+    """前缀查询别名。FC2 / 旧 FC2PPV 一律归并。"""
     p = str(prefix or "").strip().upper()
     if not p:
         return []
@@ -1457,12 +1504,10 @@ def _folder_prefix_aliases(prefix: str) -> list[str]:
 
 
 def _canonical_folder_prefix(prefix: str) -> str:
-    """磁盘/查询前缀 → catalog 键（FC2-PPV → FC2PPV）。"""
+    """磁盘/查询前缀 → catalog 键（FC2-PPV / FC2PPV → FC2）。"""
     p = str(prefix or "").strip().upper()
     compact = re.sub(r"[-_\s]", "", p)
-    if compact.startswith("FC2PPV") or p in {"FC2-PPV", "FC2_PPV"}:
-        return "FC2PPV"
-    if compact == "FC2":
+    if compact.startswith("FC2PPV") or p in {"FC2-PPV", "FC2_PPV"} or compact == "FC2":
         return "FC2"
     return p
 

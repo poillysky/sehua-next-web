@@ -47,7 +47,7 @@ export type ScrapLibraryEnrichQueueItem = {
   vectorSynced?: boolean;
   vectorSkipped?: boolean;
   vectorError?: string;
-  /** 软成功：封面+标题已齐，仍缺剧情/女优等 */
+  /** 软成功：有封面但无标题；其余缺失算成功 */
   partialOk?: boolean;
   relPath?: string;
   rel_path?: string;

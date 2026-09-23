@@ -115,7 +115,7 @@ def guess_dmm_cids(code_raw: str) -> list[str]:
 
     digits: list[str] = []
     try:
-        from ..prefix_catalog_dmm import guess_digits
+        from app.prefix.catalog_dmm import guess_digits
 
         digits.extend(guess_digits(series))
     except Exception:

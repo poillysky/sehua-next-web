@@ -116,8 +116,8 @@ export function ScrapeHubRegionRow({
     return active ? 0 : null;
   })();
   const queueStage = prog?.stage === 'queue';
-  // 六区互斥：仅「当前开着 / 正在跑 / 有暂停检查点」的分区显示进度条。
-  const showProgress = active || region.enabled || Boolean(cp);
+  // 刮削开关关闭时不显示进度条（含已暂停检查点）；仅开关开着时展示。
+  const showProgress = region.enabled;
   const finN = Number(okN || 0) + Number(failN || 0);
   const speedState =
     p.enrichSpeedRef.current?.regionId === region.id

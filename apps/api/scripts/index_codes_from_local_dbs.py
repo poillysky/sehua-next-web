@@ -272,6 +272,10 @@ def ingest_line(
             return
         if shape in {"fc2", "fc2ppv"} and not accept_fc2_code(c):
             return
+        if shape in {"fc2", "fc2ppv"}:
+            from app.core.region_meta import normalize_fc2_code
+
+            c = normalize_fc2_code(c)
         if shape in {"western_date", "western_ep"} and not accept_western_code(c):
             return
         key = clean_prefix(pref)
@@ -842,11 +846,13 @@ def run_local_db_index(on_progress: Callable[[Any], None] | None = None) -> dict
     global _mky_collision_suspects
     _mky_collision_suspects = set()
     doc = store.load_catalog(force=True)
+    store.coalesce_fc2_prefixes(doc)
     # 回填每个前缀的 code_read（缺失则推断）
     for rid in REGION_ORDER:
         prefs = doc["regions"][rid].get("prefixes") or {}
         for p, ent in list(prefs.items()):
             prefs[p] = store._normalize_prefix_entry(p, ent)
+    store.coalesce_fc2_prefixes(doc)
 
     locations: dict[str, list[tuple[str, dict]]] = defaultdict(list)
     want: set[str] = set()
@@ -918,12 +924,16 @@ def run_local_db_index(on_progress: Callable[[Any], None] | None = None) -> dict
 
     def merge_codes(key: str, old_codes: list[Any], scanned: list[str]) -> list[str]:
         """旧号 ∪ 本轮扫到 → 准度过滤 → 离群裁剪。保留真号，丢掉明显脏号。"""
+        from app.core.region_meta import normalize_fc2_code
+
         prof = profiles.get(key) or resolve_code_read(key)
         merged: set[str] = set()
         for raw in list(old_codes or []) + list(scanned or []):
             c = str(raw or "").strip().upper()
             if not c:
                 continue
+            if key == "FC2" or _shape(key) in {"fc2", "fc2ppv"}:
+                c = normalize_fc2_code(c)
             if not accept_std_code(key, c, prof):
                 continue
             merged.add(c)
@@ -972,10 +982,9 @@ def run_local_db_index(on_progress: Callable[[Any], None] | None = None) -> dict
                     }
                 )
                 shape = _shape(key)
-                if shape == "fc2ppv":
-                    ent["format"] = "FC2-PPV-{num}"
-                elif shape == "fc2":
+                if shape in {"fc2", "fc2ppv"} or key == "FC2":
                     ent["format"] = "FC2-{num}"
+                    ent["prefix"] = "FC2"
                 # MKY 撞名嫌疑：本轮语境不清默认写入有码的番号
                 if key == "MKY" and rid == "japan_censored" and _mky_collision_suspects:
                     hit = sorted(c for c in codes if c in _mky_collision_suspects)

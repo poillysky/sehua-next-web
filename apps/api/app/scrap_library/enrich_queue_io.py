@@ -1102,8 +1102,18 @@ def load_queue_log(
             "limit": lim,
             "offset": off,
         }
-    # 纠偏只在「扫描 / 开刮」入口同步跑；列表读路径绝不触发（后台 demote
-    # 也会占满磁盘/连接池，把设置页其它接口拖死）。
+    # 纠偏：软成功规则版本升级时后台跑一次（女优 soft→成功；有封面无标题→软成功）。
+    # 不阻塞列表；限频在 _ensure_actress_soft_promoted 内。
+    if st in {"soft", "done", "fail"}:
+        try:
+            threading.Thread(
+                target=_enrich._ensure_actress_soft_promoted,
+                kwargs={"region": rid, "force": False},
+                name=f"soft-norm-q-{rid}",
+                daemon=True,
+            ).start()
+        except Exception:  # noqa: BLE001
+            pass
 
     # 读路径不做 prune；pending 以队列表为准。
 

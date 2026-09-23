@@ -234,9 +234,24 @@ export function stripTitleCodePrefix(title: string, code: string): string {
   const fc2 = c.match(/^FC2(?:[-_]?PPV)?[-_]?(\d+)$/i);
   if (fc2) {
     const n = fc2[1];
-    tryStrip(`FC2[-_]?PPV[-_]?${n}`);
-    tryStrip(`FC2[-_]?${n}`);
-    tryStrip(n);
+    for (let i = 0; i < 6; i++) {
+      const before = out;
+      tryStrip(`FC2[-_\\s]?PPV[-_\\s]?${n}`);
+      tryStrip(`FC2[-_\\s]?${n}`);
+      if (out === before) break;
+    }
+  } else {
+    // 标题本身以 FC2 / FC2-PPV 叠号开头时也剥（code 可能已是 FC2-）
+    const head = out.match(/^FC2(?:[-_\s]?PPV)?[-_\s]?(\d{5,10})\b/i);
+    if (head) {
+      const n = head[1];
+      for (let i = 0; i < 6; i++) {
+        const before = out;
+        tryStrip(`FC2[-_\\s]?PPV[-_\\s]?${n}`);
+        tryStrip(`FC2[-_\\s]?${n}`);
+        if (out === before) break;
+      }
+    }
   }
 
   // 标题以「任意厂牌形番号 + 本条数字」开头时一并去掉（如 SSIS-001 vs 库内 SSIS001）
