@@ -59,8 +59,309 @@ def parse_fc2_id(code: str) -> tuple[str, str] | None:
     return fid, f"FC2-{fid}"
 
 
+def fc2_slug_variants(code: str) -> list[str]:
+    """站点 URL / 搜索用的 FC2 形态：优先 ``fc2-ppv-{id}``（MissAV 等站真实 slug）。
+
+    目录已归一成 ``FC2-{n}`` 后，若先打 ``fc2-{n}`` 可能命中薄页（标题仅 ``FC2-PPV``），
+    必须把 PPV slug 放前面，否则重刮挂不上标题/封面。
+    """
+    parsed = parse_fc2_id(code)
+    if not parsed:
+        return []
+    fid, _canon = parsed
+    out: list[str] = []
+    for raw in (
+        f"fc2-ppv-{fid}",
+        f"fc2ppv-{fid}",
+        f"fc2ppv{fid}",
+        f"fc2-{fid}",
+        f"fc2{fid}",
+    ):
+        if raw not in out:
+            out.append(raw)
+    return out
+
+
+# JavBus 无码 date6 站内常见品牌前缀（路径/search 用，小写）
+_JAVBUS_DATE6_BRANDS: dict[str, tuple[str, ...]] = {
+    "1PON": ("1pondo", "pondo"),
+    "CARIB": ("caribbeancom", "caribbean"),
+    "CARIBPR": ("caribbeancompr", "caribpr"),
+    "10MU": ("10musume", "musume"),
+    "PACO": ("pacopacomama", "paco"),
+}
+
+# 综合站搜索常用 date6 变体（裸日期 + 品牌 slug；与 code_equiv 折叠键无关）
+_DATE6_SEARCH_BRANDS: dict[str, tuple[str, ...]] = {
+    "1PON": ("1pondo", "pondo", "_1pondo"),
+    "CARIB": ("caribbeancom", "caribbean", "carib"),
+    "CARIBPR": ("caribbeancompr", "caribpr"),
+    "10MU": ("10musume", "musume", "10mu"),
+    "PACO": ("pacopacomama", "paco"),
+}
+
+
+def date6_search_variants(
+    code: str, *, brands: dict[str, tuple[str, ...]] | None = None
+) -> list[str]:
+    """无码 date6 搜索/路径候选：``062014_830`` / ``1pondo_…`` 等。
+
+    ``code_equiv`` 不把裸日期与 ``1PON-…`` 视为等价，综合站必须显式扩候选。
+    """
+    raw = str(code or "").strip()
+    if not raw:
+        return []
+    out: list[str] = []
+
+    def _add(s: str) -> None:
+        t = str(s or "").strip()
+        if t and t not in out:
+            out.append(t)
+
+    try:
+        from app.search.av import parse_maker_code
+
+        parsed = parse_maker_code(raw)
+    except Exception:  # noqa: BLE001
+        return []
+    if not (parsed and parsed.shape == "date6" and len(parsed.parts) >= 3):
+        return []
+    label, d6, nnn = parsed.parts[0], parsed.parts[1], parsed.parts[2]
+    _add(f"{d6}_{nnn}")
+    _add(f"{d6}-{nnn}")
+    table = brands if brands is not None else _DATE6_SEARCH_BRANDS
+    for brand in table.get(str(label).upper(), ()):
+        b = str(brand or "").strip()
+        if not b:
+            continue
+        _add(f"{b}_{d6}_{nnn}")
+        _add(f"{b}-{d6}_{nnn}")
+        _add(f"{b}-{d6}-{nnn}")
+        if not b.startswith("_"):
+            _add(f"_{b}_{d6}_{nnn}")
+    return out
+
+
+# 目录不可用时的常见素人板号（japan_amateur 前缀反查失败时兜底）
+AMATEUR_FALLBACK_BOARD_PREFIX: dict[str, list[str]] = {
+    "LUXU": ["259LUXU"],
+    "GANA": ["200GANA"],
+    "MIUM": ["300MIUM"],
+    "MAAN": ["300MAAN"],
+    "NTK": ["300NTK"],
+    "DCV": ["277DCV"],
+    "HMDN": ["328HMDN"],
+}
+
+
+def amateur_digit_board_prefixes(letters: str) -> list[str]:
+    """字母前缀 → 带数字板号的完整前缀（如 LUXU → 259LUXU）。"""
+    letters_u = re.sub(r"[^A-Z0-9]", "", str(letters or "").upper())
+    if not letters_u:
+        return []
+    out: list[str] = []
+    try:
+        from app.prefix import catalog_store as store
+
+        doc = store.load_catalog(force=False)
+        prefs = (
+            ((doc.get("regions") or {}).get("japan_amateur") or {}).get("prefixes") or {}
+        )
+        for k in prefs:
+            ku = str(k or "").upper()
+            if re.fullmatch(rf"\d{{2,3}}{re.escape(letters_u)}", ku):
+                if ku not in out:
+                    out.append(ku)
+    except Exception:  # noqa: BLE001
+        pass
+    if not out:
+        for hit in AMATEUR_FALLBACK_BOARD_PREFIX.get(letters_u) or []:
+            if hit not in out:
+                out.append(hit)
+    return out
+
+
+def append_amateur_board_variants(add, code: str) -> None:
+    """对 ``add(str)`` 追加素人加板 / 剥板变体。"""
+    raw = str(code or "").strip()
+    if not raw:
+        return
+    std = std_code(raw).upper()
+    bare = re.fullmatch(r"([A-Z]{2,12})-(\d{1,6})", std)
+    if bare:
+        letters, num = bare.group(1), bare.group(2)
+        for board_pref in amateur_digit_board_prefixes(letters):
+            add(f"{board_pref}-{num}")
+            add(f"{board_pref}-{num.zfill(3)}")
+            add(f"{board_pref}-{num.zfill(4)}")
+    boarded = re.fullmatch(r"(\d{2,3})([A-Z]{2,12})-(\d{1,6})", std)
+    if boarded:
+        add(f"{boarded.group(2)}-{boarded.group(3)}")
+        add(f"{boarded.group(2)}-{boarded.group(3).zfill(3)}")
+        add(f"{boarded.group(2)}-{boarded.group(3).zfill(4)}")
+
+
+def append_std_pad_variants(add, code: str) -> None:
+    """对 ``add(str)`` 追加 parse canonical + pad3/4。"""
+    raw = str(code or "").strip()
+    if not raw:
+        return
+    try:
+        from app.search.av import parse_maker_code, std_code_key
+
+        parsed = parse_maker_code(raw)
+        if parsed and parsed.canonical:
+            add(parsed.canonical)
+            add(std_code_key(parsed.canonical, pad=3))
+            add(std_code_key(parsed.canonical, pad=4))
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def javbus_code_candidates(code: str) -> list[str]:
+    """JavBus 详情路径候选：有码补零变体 + 无码 date6 slug。
+
+    详情页是 ``GET {base}/{path}``，站点对 pad / 下划线 / 品牌前缀敏感；
+    与 ``code_equiv`` 对齐，避免 ``SONE-15``、``1PON-062014-830`` 直接 404。
+    """
+    raw = str(code or "").strip()
+    if not raw:
+        return []
+    out: list[str] = []
+
+    def _add(s: str) -> None:
+        t = str(s or "").strip()
+        if t and t not in out:
+            out.append(t)
+
+    _add(raw)
+    _add(raw.upper())
+    _add(raw.replace("_", "-").upper())
+    _add(raw.replace("-", "_"))
+
+    parsed = None
+    pad_key = None
+    try:
+        from app.search.av import parse_maker_code, std_code_key as pad_key
+
+        parsed = parse_maker_code(raw)
+    except Exception:  # noqa: BLE001
+        parsed = None
+
+    if parsed and parsed.shape == "std" and parsed.canonical:
+        can = parsed.canonical
+        _add(can)
+        if pad_key is not None:
+            for pad in (3, 4):
+                try:
+                    _add(pad_key(can, pad=pad))
+                except Exception:  # noqa: BLE001
+                    pass
+        m = re.fullmatch(r"([A-Z0-9]+)-(\d+)", can, re.I)
+        if m:
+            n = int(m.group(2))
+            pref = m.group(1).upper()
+            _add(f"{pref}-{n}")
+            # 显式 3/4 位：NAMH-0028 → NAMH-028（std_code_key 会保留源串位数）
+            for w in (3, 4):
+                _add(f"{pref}-{n:0{w}d}")
+    elif parsed and parsed.shape == "date6" and len(parsed.parts) >= 3:
+        label, d6, nnn = parsed.parts[0], parsed.parts[1], parsed.parts[2]
+        _add(f"{label}-{d6}-{nnn}")
+        _add(f"{label}-{d6}_{nnn}")
+        _add(f"{label}_{d6}_{nnn}")
+        _add(f"{d6}-{nnn}")
+        _add(f"{d6}_{nnn}")
+        for brand in _JAVBUS_DATE6_BRANDS.get(label.upper(), ()):
+            _add(f"{brand}-{d6}_{nnn}")
+            _add(f"{brand}-{d6}-{nnn}")
+            _add(f"{brand}_{d6}_{nnn}")
+    elif pad_key is not None:
+        try:
+            glued = raw.upper().replace("_", "-")
+            _add(pad_key(glued, pad=3))
+            _add(pad_key(glued, pad=4))
+        except Exception:  # noqa: BLE001
+            pass
+
+    return out[:20]
+
+
+def western_code_candidates(code: str) -> list[str]:
+    """欧美点分日候选：``STUDIO.YYYY.MM.DD`` ↔ ``STUDIO.YY.MM.DD``。
+
+    不依赖厂牌白名单（AVHeat 上常见 BrazzersExxtra / WeLiveTogether 等子系列键）。
+    """
+    raw = str(code or "").strip()
+    if not raw:
+        return []
+    out: list[str] = []
+
+    def _add(s: str) -> None:
+        t = str(s or "").strip()
+        if t and t not in out:
+            out.append(t)
+
+    _add(raw)
+    try:
+        from app.search.av import parse_maker_code
+
+        parsed = parse_maker_code(raw)
+    except Exception:  # noqa: BLE001
+        parsed = None
+    if parsed and parsed.shape == "western_date" and len(parsed.parts) == 4:
+        key, yyyy, mo, d = parsed.parts
+        _add(f"{key}.{yyyy}.{mo}.{d}")
+        if re.fullmatch(r"20\d{2}|19\d{2}", yyyy):
+            _add(f"{key}.{yyyy[2:]}.{mo}.{d}")
+        return out
+
+    # 未知厂牌：仍按点分日拆 YYYY / YY
+    m = re.fullmatch(
+        r"([A-Za-z][A-Za-z0-9]*)[._\-](19\d{2}|20\d{2})[._\-](\d{2})[._\-](\d{2})",
+        raw,
+    )
+    if m:
+        key, yyyy, mo, d = m.group(1), m.group(2), m.group(3), m.group(4)
+        _add(f"{key}.{yyyy}.{mo}.{d}")
+        _add(f"{key}.{yyyy[2:]}.{mo}.{d}")
+        return out
+    m = re.fullmatch(
+        r"([A-Za-z][A-Za-z0-9]*)[._\-](\d{2})[._\-](\d{2})[._\-](\d{2})",
+        raw,
+    )
+    if m:
+        key, yy, mo, d = m.group(1), m.group(2), m.group(3), m.group(4)
+        if yy not in ("19", "20"):
+            _add(f"{key}.{yy}.{mo}.{d}")
+            _add(f"{key}.20{yy}.{mo}.{d}")
+    return out
+
+
+def _western_date_fold_key(code: str) -> str | None:
+    """欧美完整日折叠键：``STUDIO + YYYY + MM + DD``（两位年补 20）。"""
+    raw = str(code or "").strip()
+    m = re.fullmatch(
+        r"([A-Za-z][A-Za-z0-9]*)[._\-](19\d{2}|20\d{2})[._\-](\d{2})[._\-](\d{2})",
+        raw,
+    )
+    if m:
+        return f"{m.group(1).upper()}{m.group(2)}{m.group(3)}{m.group(4)}"
+    m = re.fullmatch(
+        r"([A-Za-z][A-Za-z0-9]*)[._\-](\d{2})[._\-](\d{2})[._\-](\d{2})",
+        raw,
+    )
+    if m and m.group(2) not in ("19", "20"):
+        return f"{m.group(1).upper()}20{m.group(2)}{m.group(3)}{m.group(4)}"
+    return None
+
+
 def _code_bucket(folded: str) -> tuple[str, int, str] | None:
     """把折叠后的番号拆成 (字母前缀, 数字, 尾字母)，数字去掉前导零。"""
+    # FC2 / FC2PPV 同一数字视为同号（目录归一后与站点 PPV slug 对齐）
+    m_fc2 = re.fullmatch(r"FC2(?:PPV)?0*(\d+)", str(folded or ""))
+    if m_fc2:
+        return ("FC2", int(m_fc2.group(1)), "")
     m = re.fullmatch(r"([A-Z]+)0*(\d+)([A-Z]?)", str(folded or ""))
     if not m:
         return None
@@ -70,19 +371,74 @@ def _code_bucket(folded: str) -> tuple[str, int, str] | None:
 def code_equiv(a: str, b: str) -> bool:
     """番号等价判定：忽略分隔符/大小写，并容忍数字段**前导零补齐差异**。
 
-    例：`NAMH-0028` ≡ `NAMH-028`；`ABC-001` ≡ `ABC-1`。
+    例：`NAMH-0028` ≡ `NAMH-028`；`ABC-001` ≡ `ABC-1`；
+    ``FC2-976194`` ≡ ``FC2-PPV-976194``；
+    素人板号 ``259LUXU-001`` ≡ ``LUXU-001``（``parse_maker_code`` 剥板号后同键）。
+    欧美 ``BLACKED.2026.01.15`` ≡ ``BLACKED.26.01.15``（YYYY ↔ YY）。
     仅在「字母前缀 + 数字 + 可选尾字母」结构相同时才放宽，避免 `ABF0051`
     被当成 `ABF-005`（数字续写是另一个番号，仍判不等）。
+    国产保留数字前缀的前缀（如 ``91CM``）不会误剥成 ``CM``。
     """
     fa, fb = fold_code(a), fold_code(b)
     if not fa or not fb:
         return False
     if fa == fb:
         return True
+    # 显式 FC2 ↔ FC2-PPV（fold 后 FC2PPV976194 vs FC2976194）
+    pa, pb = parse_fc2_id(a), parse_fc2_id(b)
+    if pa and pb and pa[0].lstrip("0") == pb[0].lstrip("0"):
+        return True
+    # 欧美点分日：YYYY ↔ YY（不要求厂牌白名单）
+    wa, wb = _western_date_fold_key(a), _western_date_fold_key(b)
+    if wa and wb and wa == wb:
+        return True
+    # 素人数字板号 / pad：259LUXU-001 ≡ LUXU-001；SONE-15 ≡ SONE-015
+    try:
+        from app.search.av import parse_maker_code, std_code_key
+
+        ma, mb = parse_maker_code(a), parse_maker_code(b)
+        if (
+            ma
+            and mb
+            and ma.shape == "std"
+            and mb.shape == "std"
+            and ma.canonical
+            and mb.canonical
+            and std_code_key(ma.canonical, pad=3) == std_code_key(mb.canonical, pad=3)
+        ):
+            return True
+        if (
+            ma
+            and mb
+            and ma.shape == "western_date"
+            and mb.shape == "western_date"
+            and ma.canonical
+            and mb.canonical
+            and ma.canonical == mb.canonical
+        ):
+            return True
+    except Exception:
+        pass
     ba, bb = _code_bucket(fa), _code_bucket(fb)
     if ba is None or bb is None:
         return False
-    return ba == bb
+    if ba != bb:
+        return False
+    # 国产厂牌：数字段前导零常有语义（MDX-0001 ≠ 日系 MDX-001），禁止剥零桶判等。
+    # fold 已不等时走到此处；国产只认上文 std_code_key / 全等，不再放行。
+    try:
+        from app.prefix.ranges import load_china_prefixes
+        from app.search.av import parse_maker_code
+
+        china = {str(x).upper() for x in (load_china_prefixes() or set())}
+        ma, mb = parse_maker_code(a), parse_maker_code(b)
+        for parsed in (ma, mb):
+            pref = str(getattr(parsed, "prefix", "") or "").upper()
+            if pref and pref in china:
+                return False
+    except Exception:
+        pass
+    return True
 
 
 def folded_code_matches(

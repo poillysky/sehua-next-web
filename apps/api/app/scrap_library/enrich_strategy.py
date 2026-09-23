@@ -14,9 +14,9 @@ ENRICH_STRATEGY_KEY = "scrap.enrich.strategy"
 
 # 与 scrape_sources_settings.REGION_ENRICH_GROUPS 默认一致（由 regionSources 反推同步）
 _DEFAULT_REGION_GROUPS: dict[str, list[str]] = {
-    "japan_censored": ["av", "uncensored", "general"],
-    "japan_amateur": ["av", "uncensored", "general"],
-    "japan_uncensored": ["av", "uncensored", "general"],
+    "japan_censored": ["av", "general"],
+    "japan_amateur": ["amateur", "av", "general"],
+    "japan_uncensored": ["uncensored", "av", "general"],
     "fc2": ["fc2", "general"],
     "china": ["chinese", "general"],
     "western": ["western", "general"],
@@ -68,12 +68,12 @@ def uncensored_official_for_code(code: str) -> list[str]:
 
 
 # 全局优先级（番号类型 → 有序源）：对齐 COVER_LOGIC.md §1.2
-# 低质量源（MissAV / NJAV / FreeJavBT / 7MMTV 等）不进默认；需要时用户可手加。
+# 低质量源（NJAV / 7MMTV / JavDay 等）不进默认；需要时用户可手加。
 # 目录无站（hbox_jp / javdb）已跳过；fc2_hub → fd2ppv
-# v9：无码 UI/配置只保留通用兜底；heyzo/1pondo/paco/carib/10musume 按前缀内置注入
-REGION_SOURCES_LOGIC_VERSION = 9
+# v11：有码字段优先侧重中文标题/简介/标签；封面仍走 FANZA 权威
+REGION_SOURCES_LOGIC_VERSION = 11
 _DEFAULT_REGION_SOURCES: dict[str, list[str]] = {
-    # 有码（含原写真前缀）：DMM → LibreDMM → R18.dev → JavBus → Jav321 → AVBase → MGStage
+    # 有码：FANZA 三角权威 → JavBus 目录 → 候选已加强的 jav321/avbase → Prestige/素人交叉
     "japan_censored": [
         "dmm",
         "libredmm",
@@ -83,15 +83,16 @@ _DEFAULT_REGION_SOURCES: dict[str, list[str]] = {
         "avbase",
         "mgstage",
     ],
-    # 无码：仅通用兜底（专用站按番号前缀自动挂）
+    # 无码：专用站按前缀自动挂；此处仅通用兜底
+    # javbus date6 稳；iqqtv/airav/miss 已扩裸日期候选；avsox 殿后（空壳须 Flare）
     "japan_uncensored": [
-        "avsox",
         "javbus",
+        "iqqtv",
         "airav_io",
         "miss_av",
+        "avsox",
     ],
-    # 素人：矩阵实测（2026-09-18）mgstage 官方优先 → libredmm/jav321 元数据
-    # → miss_av 封面兜底 → freejavbt 女优 → avbase/iqqtv 补强；去掉 javday
+    # 素人：mgstage 官方 → libredmm/jav321 → miss 封面 → freejavbt（加板）→ avbase/iqqtv
     "japan_amateur": [
         "mgstage",
         "libredmm",
@@ -101,13 +102,12 @@ _DEFAULT_REGION_SOURCES: dict[str, list[str]] = {
         "avbase",
         "iqqtv",
     ],
-    # FC2 → FC2-PPV → AirAV.io（磁盘仍按骨架写入 FC2/FC2 与 FC2/FC2-PPV）
-    "fc2": ["fc2", "fd2ppv", "airav_io"],
-    # 国产：矩阵实测（2026-09-18）madouqu 全中 → 小黄书补覆盖 → madou → miss_av 兜底
-    # hscangku 能中但 20～50s+Flare，不进默认；javday/iqqtv 命中低或错页
-    "china": ["madouqu", "xiao_huang_shu", "madou", "miss_av"],
-    # 欧美
-    "western": ["theporndb"],
+    # FC2：官网 → fd2ppv（常 403）→ 中文/聚合兜底（候选已含 PPV）
+    "fc2": ["fc2", "fd2ppv", "airav_io", "miss_av", "freejavbt"],
+    # 国产：madou 可用打头；madouqu/小黄书现网弱，殿后；miss_av 聚合
+    "china": ["madou", "miss_av", "madouqu", "xiao_huang_shu"],
+    # 欧美：API 权威 → AVHeat（Flare）兜底
+    "western": ["theporndb", "avheat"],
 }
 
 # 设置页展示顺序（FC2 / FC2-PPV 共用「FC2 番号」一类，不拆开关）
@@ -233,15 +233,15 @@ def default_strategy() -> dict[str, Any]:
         "outlineShow": "zh",
         # I49：增量模式下仍强制写回的字段（空=不额外强制）
         "forceFields": [],
-        # 字段站点优先级：默认预填参考配置（设置页可见 tag）
+        # 字段站点优先级（仅 japan_censored）：中文标题/简介/标签 + 可靠封面
         "fieldPriority": {
-            "title": ["airav_io", "iqqtv", "javbus"],
-            "overview": ["airav_io", "iqqtv"],
-            # 女优：JavBus 与中文源并列择优（避免脏中文名独占）
-            "actors": ["javbus", "airav_io", "iqqtv"],
-            # 海报：DMM → LibreDMM → R18.dev → JavBus → MGStage
+            "title": ["airav_io", "iqqtv", "sevenmmtv", "miss_av", "javbus"],
+            "overview": ["airav_io", "iqqtv", "sevenmmtv", "miss_av"],
+            "tags": ["airav_io", "iqqtv", "javbus", "sevenmmtv", "freejavbt"],
+            # 海报：FANZA 三角 → JavBus / MGStage CDN
             "poster": ["dmm", "libredmm", "r18dev", "javbus", "mgstage"],
-            "tags": ["javbus", "avbase", "freejavbt"],
+            # 女优：日文权威名优先，中文源作补
+            "actors": ["javbus", "dmm", "libredmm", "airav_io", "iqqtv"],
         },
         # 字段优先级页：隐藏未配置行
         "fieldPriorityHideEmpty": False,
@@ -677,9 +677,11 @@ def _resolve_strategy() -> tuple[dict[str, Any], bool]:
             for rid in REGION_ORDER
         }
         cfg["regionSourcesLogicVersion"] = REGION_SOURCES_LOGIC_VERSION
-        fp = dict(cfg.get("fieldPriority") or {})
-        fp["poster"] = ["dmm", "libredmm", "r18dev", "javbus", "mgstage"]
-        cfg["fieldPriority"] = fp
+        # 有码字段优先：中文标题/简介/标签 + 权威封面（整表覆盖，与 restore 一致）
+        cfg["fieldPriority"] = {
+            k: list(v)
+            for k, v in (default_strategy().get("fieldPriority") or {}).items()
+        }
         need_persist = True
     if int(stored_cover.get("coverLogicVersion") or 0) < 11:
         from app.scrap_library.cover_scrape import default_cover_settings

@@ -40,7 +40,8 @@ export function FieldsSection({
   return (
     <div className="enrich-strategy__rs">
       <p className="enrich-strategy__rs-note settings-nav__desc">
-        仅对有码区生效；无码 / 素人 / FC2 等只看「优先级设置(全局)」分区源。
+        仅对有码区生效，侧重中文标题 / 简介 / 标签与可靠封面；无码 /
+        素人 / FC2 等只看「优先级设置(全局)」分区源。
       </p>
       <div className="enrich-strategy__rs-toolbar enrich-strategy__rs-toolbar--split">
         <label className="enrich-strategy__rs-hide">

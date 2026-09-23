@@ -913,26 +913,23 @@ def _replace_pending_from_vector(
     """用最新向量库差集整表重写未处理队列（不只留样例）。
 
     未处理 = 向量库有番号且本地未归入成功/软成功/失败。
-    边扫边报已发现条数，扫完清空旧 pending 再整批写入。
+    一次轻量 SELECT（不含 source_text）+ 内存差集，避免 OFFSET 分页拖到数分钟。
     """
     from app.scrap_library import embed as embed_svc
+    from app.scrap_library.embed_catalog import SKELETON_SHA_PREFIX
 
     rid = _enrich._queue_log_region(region)
     if not rid:
         return [], 0
     skip_rels = set(local_maps.skip_rels)
-    skip_codes = set(local_maps.classified_codes)
+    skip_codes = {str(c or "").strip().upper() for c in local_maps.classified_codes if c}
     classified_n = (
         int(local_maps.done_n or 0)
         + int(local_maps.soft_n or 0)
         + int(local_maps.fail_n or 0)
     )
     est = max(0, int(vector_total or 0) - classified_n)
-    pending_rows: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    vec_off = 0
-    batch_sz = 2000
-    scanned_vec = 0
+    t0 = time.monotonic()
     _enrich._set_queue_scan_progress(
         region=rid,
         stage="pending",
@@ -945,29 +942,37 @@ def _replace_pending_from_vector(
         total=max(int(vector_total or 0), 1),
         notify=True,
     )
-    while True:
-        try:
-            batch = embed_svc.list_region_code_items(
-                region=rid,
-                limit=batch_sz,
-                offset=vec_off,
-                order="code",
+
+    pending_rows: list[dict[str, Any]] = []
+    scanned_vec = 0
+    try:
+        region_sql, region_params = embed_svc._quality_region_sql(rid)
+        pool = get_meta_pool()
+        with pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT item_id, code, rel_path, content_sha
+                  FROM {embed_svc.TABLE}
+                 WHERE coalesce(trim(code), '') <> ''
+                   {region_sql}
+                """,
+                region_params,
             )
-        except Exception as e:  # noqa: BLE001
-            log.warning("pending vector diff failed region=%s: %s", rid, e)
-            break
-        if not batch:
-            break
-        vec_off += len(batch)
-        scanned_vec += len(batch)
-        for r in batch:
-            if not isinstance(r, dict):
-                continue
-            iid = str(r.get("itemId") or "").strip()
-            rel = str(r.get("relPath") or r.get("rel_path") or iid).strip().replace(
-                "\\", "/"
-            )
-            code_u = str(r.get("code") or "").strip().upper()
+            raw_rows = cur.fetchall() or []
+        scanned_vec = len(raw_rows)
+        seen: set[str] = set()
+        for raw in raw_rows:
+            if isinstance(raw, dict):
+                iid = str(raw.get("item_id") or "").strip()
+                code_u = str(raw.get("code") or "").strip().upper()
+                rel = str(raw.get("rel_path") or "").strip().replace("\\", "/")
+                sha = str(raw.get("content_sha") or "")
+            else:
+                iid = str(raw[0] or "").strip()
+                code_u = str(raw[1] or "").strip().upper()
+                rel = str(raw[2] or "").strip().replace("\\", "/")
+                sha = str(raw[3] or "")
+            rel = rel or iid
             key = iid or rel or code_u
             if not key or key in seen:
                 continue
@@ -976,7 +981,12 @@ def _replace_pending_from_vector(
             if code_u and code_u in skip_codes:
                 continue
             seen.add(key)
-            gaps = list(r.get("gaps") or []) or list(_enrich._ENRICH_KINDS)
+            shell = sha.startswith(f"{SKELETON_SHA_PREFIX}:")
+            gaps = (
+                list(embed_svc._SHELL_GAPS)
+                if shell
+                else list(_enrich._ENRICH_KINDS)
+            )
             pending_rows.append(
                 {
                     "itemId": iid or rel or code_u,
@@ -986,27 +996,26 @@ def _replace_pending_from_vector(
                     "relPath": rel or iid,
                     "region": rid,
                     "status": "pending",
-                    "shell": bool(r.get("shell")),
+                    "shell": shell,
                 }
             )
-        if scanned_vec == len(batch) or scanned_vec % 4000 < batch_sz:
-            _enrich._set_queue_scan_progress(
-                region=rid,
-                stage="pending",
-                label=(
-                    f"对照向量库 · 已读 {scanned_vec:,}"
-                    f" · 未处理约 {est:,}"
-                ),
-                done=int(local_maps.done_n or 0),
-                soft=int(local_maps.soft_n or 0),
-                fail=int(local_maps.fail_n or 0),
-                pending=est,
-                scanned=scanned_vec,
-                total=max(int(vector_total or 0), scanned_vec),
-                notify=True,
-            )
-        if len(batch) < batch_sz:
-            break
+        _enrich._set_queue_scan_progress(
+            region=rid,
+            stage="pending",
+            label=(
+                f"对照向量库 · 差集 {len(pending_rows):,}"
+                f" · {int((time.monotonic() - t0) * 1000)}ms"
+            ),
+            done=int(local_maps.done_n or 0),
+            soft=int(local_maps.soft_n or 0),
+            fail=int(local_maps.fail_n or 0),
+            pending=len(pending_rows) or est,
+            scanned=scanned_vec,
+            total=max(int(vector_total or 0), scanned_vec, 1),
+            notify=True,
+        )
+    except Exception as e:  # noqa: BLE001
+        log.warning("pending vector light-diff failed region=%s: %s", rid, e)
 
     if clear_pending:
         _enrich_queue._queue_log_clear_pending(rid)
@@ -1023,7 +1032,7 @@ def _replace_pending_from_vector(
         fail=int(local_maps.fail_n or 0),
         pending=n,
         scanned=scanned_vec,
-        total=max(int(vector_total or 0), scanned_vec),
+        total=max(int(vector_total or 0), scanned_vec, 1),
         notify=True,
     )
     cap = max(0, int(preview_cap or 0))
@@ -1257,6 +1266,45 @@ def scan_enrich_queue(
                 report_progress=True,
             )
             _local_nfo_maps_cache_put(rid, local_maps)
+            # 双库对齐：目录有、向量无 → 先建空壳番号行，再算未处理差集
+            try:
+                from app.scrap_library.embed_catalog import (
+                    ensure_region_catalog_skeletons,
+                )
+
+                def _skel_prog(p: dict[str, Any]) -> None:
+                    label = str(p.get("label") or "同步目录骨架…")
+                    _enrich._set_queue_scan_progress(
+                        region=rid,
+                        stage="skeleton",
+                        label=label,
+                        done=int(local_maps.done_n or 0),
+                        soft=int(local_maps.soft_n or 0),
+                        fail=int(local_maps.fail_n or 0),
+                        pending=max(
+                            0,
+                            int(p.get("total") or 0) - int(p.get("done") or 0),
+                        ),
+                        scanned=int(p.get("done") or 0),
+                        total=int(p.get("total") or 0) or None,
+                        notify=True,
+                    )
+
+                sk = ensure_region_catalog_skeletons(
+                    rid, on_progress=_skel_prog
+                )
+                if int(sk.get("inserted") or 0) or int(sk.get("deleted") or 0):
+                    log.info(
+                        "scan sync skeletons region=%s inserted=%s deleted=%s total=%s",
+                        rid,
+                        sk.get("inserted"),
+                        sk.get("deleted"),
+                        sk.get("total"),
+                    )
+            except Exception as e:  # noqa: BLE001
+                log.warning(
+                    "scan ensure skeletons failed region=%s: %s", rid, e
+                )
             vector_total = _enrich._fresh_vector_library_total(rid, force=True)
             db_counts = _rebuild_region_queue_from_scan(
                 region=rid,

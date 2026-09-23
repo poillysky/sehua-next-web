@@ -9,13 +9,16 @@ from urllib.parse import quote
 
 from .common import (
     abs_url,
+    append_amateur_board_variants,
     build_fanza_trailer,
     clean_title,
+    date6_search_variants,
     fetch_html,
     is_junk_cover_url,
     is_junk_title,
     make_detail,
     page_mentions_code,
+    parse_fc2_id,
     pick_og_image,
     std_code,
     strip_tags,
@@ -25,6 +28,58 @@ from .common import (
 
 DEFAULT_BASE = "https://www.freejavbt.com"
 SOURCE = "freejavbt"
+
+
+def freejavbt_code_candidates(code: str) -> list[str]:
+    """详情 path 候选：原串 / pad / 素人加剥板 / 无码 date6 裸日期 / FC2。"""
+    raw = str(code or "").strip()
+    if not raw:
+        return []
+    out: list[str] = []
+
+    def _add(val: str) -> None:
+        # date6 裸下划线须保留（062014_830）；其余走 std_code
+        if "_" in str(val or "") and re.search(r"\d{6}_\d+", str(val)):
+            u = str(val).strip()
+        else:
+            u = std_code(val)
+        if u and u not in out:
+            out.append(u)
+
+    _add(raw)
+    try:
+        from app.search.av import parse_maker_code, std_code_key
+
+        parsed = parse_maker_code(raw)
+        if parsed and parsed.canonical:
+            _add(parsed.canonical)
+            _add(std_code_key(parsed.canonical, pad=3))
+            _add(std_code_key(parsed.canonical, pad=4))
+    except Exception:
+        pass
+
+    append_amateur_board_variants(_add, raw)
+    for v in date6_search_variants(raw):
+        _add(v)
+
+    fc2 = parse_fc2_id(raw)
+    if fc2:
+        fid, canon = fc2
+        _add(canon)
+        _add(f"FC2-PPV-{fid}")
+        _add(f"FC2-{fid}")
+        _add(fid)
+    else:
+        m = re.search(r"FC2[-_]?PPV[-_]?(\d+)", raw, re.I) or re.search(
+            r"^FC2[-_]?(\d+)$", raw, re.I
+        )
+        if m:
+            _add(f"FC2-PPV-{m.group(1)}")
+            _add(f"FC2-{m.group(1)}")
+            _add(m.group(1))
+
+    return out
+
 
 AV_MAN_NAMES = {
     "貞松大輔", "鮫島", "森林原人", "黒田悠斗", "黒田将稔", "主観", "吉村卓", "野島誠", "小田切ジュン", "しみけん",
@@ -445,18 +500,18 @@ def scrape_detail(
     base = (base_url or DEFAULT_BASE).rstrip("/")
     if not base:
         raise RuntimeError("未配置网站地址")
-    std = std_code(code)
+    raw_code = str(code or "").strip()
+    std = std_code(raw_code)
     if not std:
         raise RuntimeError("番号为空")
     ck = cookie or None
-    slugs = [std]
-    fc2 = re.search(r"FC2[-_]?PPV[-_]?(\d+)", std, re.I) or re.search(
-        r"^FC2[-_]?(\d+)$", std, re.I
-    )
-    if fc2:
-        slugs = [f"FC2-PPV-{fc2.group(1)}", f"FC2-{fc2.group(1)}", *slugs]
+    slugs = freejavbt_code_candidates(raw_code)
 
     seen: set[str] = set()
+    soft404 = re.compile(
+        r"あなたは好きかもしれません|你可能喜欢|猜你喜欢|You May Like|404|找不到",
+        re.I,
+    )
     for slug in slugs:
         if slug in seen:
             continue
@@ -466,6 +521,7 @@ def scrape_detail(
             f"/zh/{quote(slug)}",
             f"/{quote(slug)}/",
             f"/ja/{quote(slug)}",
+            f"/en/{quote(slug)}",
         ):
             url = f"{base}{path}"
             try:
@@ -476,10 +532,10 @@ def scrape_detail(
                 continue
             if not html or len(html) < 800:
                 continue
-            if re.search(
-                r"あなたは好きかもしれません|你可能喜欢|404|找不到", html, re.I
-            ) and not page_mentions_code(html, std) and not page_mentions_code(html, slug):
-                raise RuntimeError("未找到")
+            if soft404.search(html) and not page_mentions_code(
+                html, std
+            ) and not page_mentions_code(html, slug):
+                continue
             if not page_mentions_code(html, std) and not page_mentions_code(html, slug):
                 continue
             try:

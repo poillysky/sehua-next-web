@@ -2472,7 +2472,7 @@ from app.scrap_library.embed_actress_opt import (  # noqa: E402
 )
 from app.scrap_library.embed_catalog import (  # noqa: E402
     ProgressCb, SKELETON_SHA_PREFIX, is_skeleton_sha, _catalog_code_locations, _catalog_prefix_labels, relocate_disk_prefix_dirs,
-    realign_embed_locations, upsert_catalog_skeletons, purge_catalog_skeletons, rebuild_catalog_skeletons, reset_embed_to_catalog_skeletons, prune_embed_not_in_catalog,
+    migrate_fc2_legacy_paths, realign_embed_locations, upsert_catalog_skeletons, ensure_region_catalog_skeletons, purge_catalog_skeletons, rebuild_catalog_skeletons, reset_embed_to_catalog_skeletons, prune_embed_not_in_catalog,
     prune_embed_missing_from_disk, prune_embed_missing_from_disk_ids, prune_embed_orphans_by_ids, _SKELETON_SQL, _NOT_SKELETON_SQL, _quality_region_sql,
     _catalog_region_ids, _shell_rel_path, iter_catalog_shell_items, count_catalog_shells, list_catalog_shell_items, count_skeleton_shells,
     _dedup_appender, _folder_file_names, _scan_workers, _scan_one_nfo, _scan_items, _existing_embed_rows,

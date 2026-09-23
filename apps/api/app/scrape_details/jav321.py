@@ -8,12 +8,16 @@ from urllib.parse import quote
 
 from .common import (
     abs_url,
+    append_amateur_board_variants,
+    append_std_pad_variants,
     clean_title,
     code_equiv,
+    date6_search_variants,
     fetch_html,
     is_junk_cover_url,
     is_junk_title,
     make_detail,
+    parse_fc2_id,
     pick_og_image,
     pick_og_title,
     soup,
@@ -22,6 +26,39 @@ from .common import (
 )
 
 DEFAULT_BASE = "https://www.jav321.com"
+SOURCE = "jav321"
+
+
+def jav321_code_candidates(code: str) -> list[str]:
+    """搜索词：pad / 素人加剥板 / FC2-PPV / 无码 date6。"""
+    raw = str(code or "").strip()
+    if not raw:
+        return []
+    out: list[str] = []
+
+    def _add(val: str) -> None:
+        s = str(val or "").strip()
+        if not s:
+            return
+        if "_" in s and re.search(r"\d{6}_\d+", s):
+            u = s
+        else:
+            u = std_code(s) or s
+        if u and u not in out:
+            out.append(u)
+
+    _add(raw)
+    append_std_pad_variants(_add, raw)
+    append_amateur_board_variants(_add, raw)
+    for v in date6_search_variants(raw):
+        _add(v)
+    fc2 = parse_fc2_id(raw)
+    if fc2:
+        fid, canon = fc2
+        _add(canon)
+        _add(f"FC2-PPV-{fid}")
+        _add(f"FC2-{fid}")
+    return out
 
 
 def _collect_by_re(html: str, pattern: re.Pattern[str]) -> list[str]:
@@ -37,7 +74,13 @@ def _page_mentions_code(html: str, code: str) -> bool:
     want = code_key_local(code)
     if not want:
         return False
-    return want in code_key_local(html)
+    folded = code_key_local(html)
+    if want in folded:
+        return True
+    return any(
+        code_key_local(c) and code_key_local(c) in folded
+        for c in jav321_code_candidates(code)
+    )
 
 
 def code_key_local(s: str) -> str:
@@ -89,7 +132,7 @@ def _fetch_post_search(base: str, code: str, cookie: str = "") -> str:
             body,
             referer=f"{base}/",
             cookie=cookie or None,
-            source_id="jav321",
+            source_id=SOURCE,
             timeout=20.0,
         )
     except Exception:
@@ -100,7 +143,7 @@ def _fetch_post_search(base: str, code: str, cookie: str = "") -> str:
         f"{url}?{body}",
         referer=f"{base}/",
         cookie=cookie or None,
-        source_id="jav321",
+        source_id=SOURCE,
     )
 
 
@@ -114,22 +157,41 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
     if not raw_code:
         raise RuntimeError("番号为空")
 
-    try:
-        html = _fetch_post_search(base, raw_code, cookie)
-    except Exception as e:
-        raise RuntimeError(f"请求失败: {e}") from e
-
-    if re.search(r"AVが見つかりませんでした|還沒有人投稿|not found|找不到|没有找到", html, re.I) and not re.search(
-        r"panel-info|og:title", html, re.I
-    ):
+    candidates = jav321_code_candidates(raw_code) or [raw_code]
+    html = ""
+    last_err: Exception | None = None
+    for kw in candidates:
+        try:
+            html = _fetch_post_search(base, kw, cookie)
+        except Exception as e:
+            last_err = e
+            continue
+        if re.search(
+            r"AVが見つかりませんでした|還沒有人投稿|not found|找不到|没有找到", html, re.I
+        ) and not re.search(r"panel-info|og:title", html, re.I):
+            continue
+        if (
+            not _page_mentions_code(html, raw_code)
+            and not re.search(r"panel-info", html, re.I)
+            and not pick_og_title(html)
+        ):
+            continue
+        doc = soup(html)
+        panel = doc.select_one(".panel-info")
+        if not panel:
+            continue
+        sn_raw = _meta_after_bold(panel, re.compile(r"品番|番號|番号|SN", re.I))
+        sn = std_code(sn_raw) or ""
+        if sn and any(code_equiv(sn, c) for c in candidates):
+            break
+        html = ""
+    else:
+        if last_err and not html:
+            raise RuntimeError(f"请求失败: {last_err}") from last_err
         raise RuntimeError("未找到")
 
-    if (
-        not _page_mentions_code(html, raw_code)
-        and not re.search(r"panel-info", html, re.I)
-        and not pick_og_title(html)
-    ):
-        raise RuntimeError("页面不匹配")
+    if not html:
+        raise RuntimeError("未找到")
 
     doc = soup(html)
     panel = doc.select_one(".panel-info")
@@ -139,9 +201,8 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
     std = std_code(raw_code)
     sn_raw = _meta_after_bold(panel, re.compile(r"品番|番號|番号|SN", re.I))
     sn = std_code(sn_raw) or ""
-    # 品番必须存在且与查询番号等价（容忍前导零补齐差异，如 NAMH-0028 ≡ NAMH-028）；
-    # 禁止页内 substring 放行错页
-    if not sn or not code_equiv(sn, std):
+    # 品番必须存在且与查询番号等价（容忍前导零 / 板号 / FC2）；禁止 substring 放行错页
+    if not sn or not any(code_equiv(sn, c) for c in candidates):
         raise RuntimeError("番号不匹配")
 
     h3 = panel.select_one(".panel-heading h3") or panel.select_one("h3")
@@ -162,11 +223,19 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
     panel_html = str(panel) or ""
     actors = [
         n
-        for n in _collect_by_re(panel_html, re.compile(r'href=["\'][^"\']*/star/[^"\']+["\'][^>]*>([^<]+)<', re.I))
+        for n in _collect_by_re(
+            panel_html, re.compile(r'href=["\'][^"\']*/star/[^"\']+["\'][^>]*>([^<]+)<', re.I)
+        )
         if len(n) < 40
     ]
     studio = (
-        (_collect_by_re(panel_html, re.compile(r'href=["\'][^"\']*/company/[^"\']+["\'][^>]*>([^<]+)<', re.I)) or [None])[0]
+        (
+            _collect_by_re(
+                panel_html,
+                re.compile(r'href=["\'][^"\']*/company/[^"\']+["\'][^>]*>([^<]+)<', re.I),
+            )
+            or [None]
+        )[0]
         or _meta_after_bold(panel, re.compile(r"メーカー|片商|Maker", re.I))
         or _studio_from_tokushu(panel_html)
         or None
@@ -176,16 +245,26 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
 
     tags = [
         n
-        for n in _collect_by_re(panel_html, re.compile(r'href=["\'][^"\']*/genre/[^"\']+["\'][^>]*>([^<]+)<', re.I))
+        for n in _collect_by_re(
+            panel_html, re.compile(r'href=["\'][^"\']*/genre/[^"\']+["\'][^>]*>([^<]+)<', re.I)
+        )
         if len(n) < 40 and not re.search(r"ジャンル|类别|類型", n, re.I)
     ][:40]
 
-    date_raw = _meta_after_bold(panel, re.compile(r"配信開始日|發行日期|发行日期|Release\s*Date|発売日", re.I))
+    date_raw = _meta_after_bold(
+        panel, re.compile(r"配信開始日|發行日期|发行日期|Release\s*Date|発売日", re.I)
+    )
     dm = re.search(r"(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})", date_raw)
     premiered = f"{dm.group(1)}-{dm.group(2).zfill(2)}-{dm.group(3).zfill(2)}" if dm else None
 
     series = (
-        (_collect_by_re(panel_html, re.compile(r'href=["\'][^"\']*/series/\d+[^"\']*["\'][^>]*>([^<]+)<', re.I)) or [None])[0]
+        (
+            _collect_by_re(
+                panel_html,
+                re.compile(r'href=["\'][^"\']*/series/\d+[^"\']*["\'][^>]*>([^<]+)<', re.I),
+            )
+            or [None]
+        )[0]
         or _meta_after_bold(panel, re.compile(r"シリーズ|系列|Series", re.I))
         or None
     )
@@ -262,7 +341,9 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
     if not poster_attr:
         m = re.search(r'poster=["\']([^"\']+pl\.jpg[^"\']*)["\']', html, re.I)
         poster_attr = m.group(1) if m else ""
-    img = panel.select_one(".col-md-3 img.img-responsive") or panel.select_one("img.img-responsive")
+    img = panel.select_one(".col-md-3 img.img-responsive") or panel.select_one(
+        "img.img-responsive"
+    )
     panel_img = (img.get("src") if img else "") or ""
     if poster_attr:
         cover = abs_url(tidy_url(poster_attr), base)

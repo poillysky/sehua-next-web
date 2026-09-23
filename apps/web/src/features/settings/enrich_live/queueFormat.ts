@@ -193,7 +193,9 @@ function fieldCompletenessText(row: ScrapLibraryEnrichQueueItem): string {
 }
 
 export function queueRowDesc(row: ScrapLibraryEnrichQueueItem): string {
-  const err = String(row.error || '').trim();
+  const err = String(row.error || '')
+    .trim()
+    .replace(/^detail_not_found$/i, '各数据源均未找到该番号');
   if (row.status === 'fail' && err) return err;
 
   if (row.status === 'done') {

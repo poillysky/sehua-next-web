@@ -165,7 +165,7 @@ def enrich_one_by_item_id(
 
     sync_vector=False：只写本地 NFO/封面（与分区批量一致），不清空向量行。
     """
-    iid = str(item_id or "").strip()
+    iid = str(item_id or "").strip().replace("\\", "/")
     if not iid:
         raise ValueError("itemId 必填")
     force = bool(overwrite)
@@ -208,11 +208,72 @@ def enrich_one_by_item_id(
                 (iid,),
             )
             row = cur.fetchone()
+            if not row:
+                # 回退：纯番号 / rel_path 末段
+                code_guess = iid.rsplit("/", 1)[-1].strip().upper()
+                if code_guess:
+                    cur.execute(
+                        f"""
+                        SELECT item_id, region, prefix, code, title, rel_path,
+                               poster_path, thumb_path, cover_url, source_text
+                        FROM {embed_svc.TABLE}
+                        WHERE UPPER(TRIM(code)) = %s
+                           OR UPPER(TRIM(item_id)) = %s
+                           OR REPLACE(rel_path, '\\', '/') = %s
+                        ORDER BY CASE WHEN item_id = %s THEN 0 ELSE 1 END
+                        LIMIT 1
+                        """,
+                        (code_guess, code_guess, iid, iid),
+                    )
+                    row = cur.fetchone()
         if not row:
-            raise ValueError("条目不存在")
-        d = dict(row) if isinstance(row, dict) else {}
-        gaps = embed_svc._row_gaps(d)
+            # 向量骨架已删：用 itemId 当 rel_path 继续刮本地（设置页重刮）
+            if "/" in iid:
+                code_u = iid.rsplit("/", 1)[-1].strip().upper()
+                region_u = iid.split("/", 1)[0].strip()
+                d = {
+                    "item_id": iid,
+                    "region": region_u,
+                    "prefix": "",
+                    "code": code_u,
+                    "title": "",
+                    "rel_path": iid,
+                    "poster_path": "",
+                    "thumb_path": "",
+                    "cover_url": "",
+                    "source_text": "",
+                }
+                gaps = [
+                    "no_local",
+                    "no_media",
+                    "no_actress",
+                    "no_studio",
+                    "no_plot",
+                    "thin_title",
+                ]
+            else:
+                raise ValueError("条目不存在")
+        else:
+            d = dict(row) if isinstance(row, dict) else {}
+            gaps = embed_svc._row_gaps(d)
+        # 统一用库内真实 item_id（避免调用方带反斜杠）
+        iid = str(d.get("item_id") or iid).strip().replace("\\", "/") or iid
         code = str(d.get("code") or "").strip().upper()
+        rel = str(d.get("rel_path") or iid).replace("\\", "/")
+        # 覆盖重刮：以磁盘真实缺口为准（成功行 gaps 常空，但仍缺女优/片商/剧情）
+        if force:
+            try:
+                settings = embed_svc.get_settings()
+                root = embed_svc.resolve_root(settings.get("root"))
+                folder = (root / rel).resolve()
+                if folder.is_dir() and _enrich._find_nfo(folder):
+                    _lc, local_gaps = _enrich._local_folder_gaps(folder)
+                    if local_gaps:
+                        gaps = list(local_gaps)
+                    if _lc and not code:
+                        code = _lc
+            except Exception:  # noqa: BLE001
+                pass
         mode_label = "覆盖重刮" if force else "增量补缺"
         _enrich._push_log(
             f"单条{mode_label} · {code or iid} · gaps={','.join(gaps) or 'none'}"
@@ -247,11 +308,11 @@ def enrich_one_by_item_id(
             {
                 "itemId": str(d.get("item_id") or iid),
                 "code": code,
-                "rel_path": str(d.get("rel_path") or "").replace("\\", "/"),
-                "relPath": str(d.get("rel_path") or "").replace("\\", "/"),
+                "rel_path": rel,
+                "relPath": rel,
                 "region": str(d.get("region") or ""),
-                # 覆盖时不当缺口限制，拉满源再整表写回
-                "gaps": [] if force else gaps,
+                # 覆盖也带上真实缺口，便于源优先级与结果分类；wait_all 仍拉满
+                "gaps": list(gaps or []),
             },
             dry_run=dry_run,
             wait_all=True,

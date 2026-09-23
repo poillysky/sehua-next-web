@@ -12,12 +12,14 @@ from app.core import detail_path_cache
 from .common import (
     abs_url,
     clean_title,
+    code_equiv,
     fetch_html,
     fetch_html_result,
     is_junk_cover_url,
     is_junk_title,
     make_detail,
     page_mentions_code,
+    parse_fc2_id,
     pick_og_image,
     std_code,
     strip_tags,
@@ -47,17 +49,119 @@ WEB_NUMBER_PREFIX = re.compile(
 )
 WEB_NUMBER_SUFFIX = re.compile(r"^(?=.*\d)[a-z0-9]+(?:[-_][a-z0-9]+)*$", re.I)
 
+# 站内无码 date6 标题尾常写成 ``_1pondo_062014_830`` / ``062014_830``
+_IQQTV_DATE6_BRANDS: dict[str, tuple[str, ...]] = {
+    "1PON": ("1pondo", "_1pondo", "pondo"),
+    "CARIB": ("caribbeancom", "carib"),
+    "CARIBPR": ("caribbeancompr", "caribpr"),
+    "10MU": ("10musume", "10mu"),
+    "PACO": ("pacopacomama", "paco"),
+}
+
+
+def iqqtv_code_candidates(code: str) -> list[str]:
+    """搜索词：原串 / 素人剥板号 / FC2 变体 / 无码 date6（``062014_830``、``_1pondo_…``）。"""
+    raw = str(code or "").strip()
+    if not raw:
+        return []
+    out: list[str] = []
+
+    def _add(val: str) -> None:
+        s = str(val or "").strip()
+        if s and s not in out:
+            out.append(s)
+
+    _add(raw)
+    _add(std_code(raw))
+    try:
+        from app.search.av import parse_maker_code, std_code_key
+
+        parsed = parse_maker_code(raw)
+        if parsed and parsed.canonical:
+            _add(parsed.canonical)
+            _add(std_code_key(parsed.canonical, pad=3))
+            _add(std_code_key(parsed.canonical, pad=4))
+        if parsed and parsed.shape == "date6" and len(parsed.parts) >= 3:
+            label, d6, nnn = parsed.parts[0], parsed.parts[1], parsed.parts[2]
+            _add(f"{d6}_{nnn}")
+            _add(f"{d6}-{nnn}")
+            for brand in _IQQTV_DATE6_BRANDS.get(label.upper(), ()):
+                _add(f"{brand}_{d6}_{nnn}")
+                _add(f"_{brand}_{d6}_{nnn}" if not brand.startswith("_") else f"{brand}_{d6}_{nnn}")
+                _add(f"{brand}-{d6}_{nnn}")
+    except Exception:  # noqa: BLE001
+        pass
+    fc2 = parse_fc2_id(raw)
+    if fc2:
+        fid, canon = fc2
+        _add(canon)
+        _add(f"FC2-PPV-{fid}")
+        _add(f"FC2PPV-{fid}")
+        _add(f"FC2PPV{fid}")
+        _add(fid)
+    return out
+
 
 def match_iqqtv_number(text: str, number: str) -> bool:
-    """MDCX number.match_number：BF-002 不匹配 ABF-002。"""
+    """MDCX number.match_number：BF-002 不匹配 ABF-002；另容忍板号/FC2/date6 等价。"""
     hay = str(text or "")
     num = str(number or "").strip()
-    if not num:
+    if not num or not hay:
         return False
     if re.match(r"^\d", num):
-        return num.upper() in hay.upper()
-    esc = re.escape(num)
-    return bool(re.search(rf"(?<![A-Z0-9]){esc}(?![A-Z0-9])", hay, re.I))
+        if num.upper() in hay.upper():
+            return True
+    else:
+        esc = re.escape(num)
+        if re.search(rf"(?<![A-Z0-9]){esc}(?![A-Z0-9])", hay, re.I):
+            return True
+    # 标题尾 / 内嵌番号用 code_equiv（259LUXU≡LUXU、FC2≡FC2PPV）
+    for tok in re.findall(r"[A-Za-z0-9][A-Za-z0-9._-]{2,}", hay):
+        if code_equiv(tok, num):
+            return True
+    # 无码：标题常 ``_1pondo_062014_830`` / ``062014_830``，与 ``1PON-062014-830`` 不等价折叠
+    try:
+        from app.search.av import parse_maker_code
+
+        parsed = parse_maker_code(num)
+        if parsed and parsed.shape == "date6" and len(parsed.parts) >= 3:
+            d6, nnn = parsed.parts[1], parsed.parts[2]
+            label = parsed.parts[0].upper()
+            brands = _IQQTV_DATE6_BRANDS.get(label, ())
+            brand_alt = "|".join(
+                re.escape(b.lstrip("_")) for b in brands if b
+            )
+            if brand_alt and re.search(
+                rf"(?<![A-Za-z0-9])_?(?:{brand_alt})[_-]?{re.escape(d6)}[_-]{re.escape(nnn)}(?![A-Za-z0-9])",
+                hay,
+                re.I,
+            ):
+                return True
+            if re.search(
+                rf"(?<![A-Za-z0-9]){re.escape(d6)}[_-]{re.escape(nnn)}(?![A-Za-z0-9])",
+                hay,
+                re.I,
+            ):
+                return True
+    except Exception:  # noqa: BLE001
+        pass
+    return False
+
+def _iqqtv_page_mentions(html: str, code: str) -> bool:
+    """详情页番号校验：标准 mentions + 标题内板号/FC2/date6 等价。"""
+    if page_mentions_code(html, code):
+        return True
+    doc = soup(html)
+    h1 = doc.select_one("h1.h4.b, h1")
+    title = strip_tags(h1.get_text()) if h1 else ""
+    if title and match_iqqtv_number(title, code):
+        return True
+    # og / 副标题偶发带番号
+    for el in doc.select("title, meta[property='og:title']"):
+        raw = el.get("content") if el.name == "meta" else el.get_text()
+        if match_iqqtv_number(strip_tags(str(raw or "")), code):
+            return True
+    return False
 
 
 def junk_iqqtv_title(title: str) -> bool:
@@ -132,8 +236,6 @@ def parse_iqqtv_outline(html: str) -> str:
 
 def get_iqqtv_real_url(html: str, number: str) -> str:
     doc = soup(html)
-    num = re.sub(r"FC2", "", number, flags=re.I)
-    num = re.sub(r"-PPV", "", num, flags=re.I)
     for span in doc.select("span.title"):
         a = span.find("a")
         if not a:
@@ -142,7 +244,7 @@ def get_iqqtv_real_url(html: str, number: str) -> str:
         title = a.get("title") or ""
         if not href or not title:
             continue
-        if not match_iqqtv_number(title, num) or junk_iqqtv_title(title):
+        if not match_iqqtv_number(title, number) or junk_iqqtv_title(title):
             continue
         return href
     return ""
@@ -257,12 +359,12 @@ def scrape_detail(
             return fetch_html(url, referer=referer, cookie=ck, source_id=SOURCE)
 
         cn_html = _fetch(cn_url)
-        if not cn_html or len(cn_html) < 800 or not page_mentions_code(cn_html, std):
+        if not cn_html or len(cn_html) < 800 or not _iqqtv_page_mentions(cn_html, std):
             # 中文页不可用再试日文
             if thread_is_cancelled():
                 raise RuntimeError("中文详情不可用")
             jp_html = _fetch(jp_url)
-            if not jp_html or len(jp_html) < 800 or not page_mentions_code(jp_html, std):
+            if not jp_html or len(jp_html) < 800 or not _iqqtv_page_mentions(jp_html, std):
                 raise RuntimeError("日文详情不可用")
             return jp_html, jp_html, jp_url, jp_url
 
@@ -280,7 +382,7 @@ def scrape_detail(
         if thread_is_cancelled():
             raise RuntimeError("中文无标题且已放弃")
         jp_html = _fetch(jp_url)
-        if not jp_html or len(jp_html) < 800 or not page_mentions_code(jp_html, std):
+        if not jp_html or len(jp_html) < 800 or not _iqqtv_page_mentions(jp_html, std):
             raise RuntimeError("日文详情不可用")
         return jp_html, cn_html, jp_url, cn_url
 
@@ -333,35 +435,50 @@ def scrape_detail(
         except Exception:
             pass
 
+    detail_path = ""
     search_url = f"{jp_base}/search.php?kw={quote(std)}"
-    try:
-        search_html, landed = fetch_html_result(
-            search_url,
-            referer=f"{jp_base}/",
-            cookie=ck,
-            source_id=SOURCE,
-        )
-    except Exception as e:
-        raise RuntimeError(f"搜索失败: {e}") from e
-
-    if landed:
+    saw_html = False
+    last_err: Exception | None = None
+    for cand in iqqtv_code_candidates(std):
+        search_url = f"{jp_base}/search.php?kw={quote(cand)}"
         try:
-            from app.core import site_mirror
+            search_html, landed = fetch_html_result(
+                search_url,
+                referer=f"{jp_base}/",
+                cookie=ck,
+                source_id=SOURCE,
+            )
+        except Exception as e:
+            last_err = e
+            continue
 
-            host = re.match(r"https?://[^/]+", landed)
-            if host:
-                site_mirror.remember("iqqtv", host.group(0), discovered_from=search_url)
-                root = _root(host.group(0))
-                jp_base, cn_base = _lang_bases(root)
-        except Exception:
-            pass
+        if landed:
+            try:
+                from app.core import site_mirror
 
-    if not search_html or len(search_html) < 400:
-        raise RuntimeError("搜索无响应")
+                host = re.match(r"https?://[^/]+", landed)
+                if host:
+                    site_mirror.remember(
+                        "iqqtv", host.group(0), discovered_from=search_url
+                    )
+                    root = _root(host.group(0))
+                    jp_base, cn_base = _lang_bases(root)
+            except Exception:
+                pass
 
-    detail_path = get_iqqtv_real_url(search_html, std)
+        if not search_html or len(search_html) < 400:
+            continue
+        saw_html = True
+
+        # 用原始 std 做等价匹配（cand 可能是剥板号 / date6 / FC2PPV）
+        detail_path = get_iqqtv_real_url(search_html, std)
+        if detail_path:
+            break
+
     if not detail_path:
-        raise RuntimeError("搜索无结果")
+        if not saw_html and last_err is not None:
+            raise RuntimeError(f"搜索失败: {last_err}") from last_err
+        raise RuntimeError("搜索无结果" if saw_html else "搜索无响应")
 
     rel = re.sub(r"^/(cn|jp)/", "", detail_path, flags=re.I).lstrip("/")
     # 第十六轮：记住详情路径（uuid 对同番号稳定），重复刮直接走缓存跳过搜索

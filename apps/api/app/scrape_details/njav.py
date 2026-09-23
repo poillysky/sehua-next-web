@@ -8,8 +8,11 @@ from urllib.parse import quote, unquote
 
 from .common import (
     abs_url,
+    amateur_digit_board_prefixes,
     clean_title,
-    code_key,
+    code_equiv,
+    date6_search_variants,
+    fc2_slug_variants,
     fetch_html,
     is_junk_cover_url,
     is_junk_title,
@@ -25,6 +28,76 @@ DETAIL_SUFFIX_RE = re.compile(
     r"-(?:uncensored-leaked|uncensored-leak|english-subtitle|chinese-subtitle)$",
     re.I,
 )
+SOURCE = "njav"
+
+
+def njav_code_candidates(code: str) -> list[str]:
+    """直链 / 搜索候选：pad / 素人加板号 / 剥板号 / 无码 date6 / FC2-PPV。"""
+    raw = str(code or "").strip()
+    if not raw:
+        return []
+    out: list[str] = []
+
+    def _add(val: str) -> None:
+        s = str(val or "").strip()
+        if s and s not in out:
+            out.append(s)
+
+    _add(raw)
+    _add(std_code(raw))
+    try:
+        from app.search.av import parse_maker_code, std_code_key
+
+        parsed = parse_maker_code(raw)
+        if parsed and parsed.canonical:
+            _add(parsed.canonical)
+            if parsed.shape == "std" and parsed.prefix and len(parsed.parts) >= 2:
+                pref = str(parsed.prefix).upper()
+                num = str(parsed.parts[1])
+                _add(std_code_key(parsed.canonical, pad=3))
+                _add(std_code_key(parsed.canonical, pad=4))
+                # 裸字母号 → 加数字板号（HMDN-332 → 328HMDN-332）
+                if not re.match(r"^\d{2,3}[A-Z]", pref):
+                    for board in amateur_digit_board_prefixes(pref):
+                        _add(f"{board}-{num}")
+                        _add(std_code_key(f"{board}-{num}", pad=3))
+    except Exception:  # noqa: BLE001
+        pass
+    for v in date6_search_variants(raw):
+        _add(v)
+    for v in fc2_slug_variants(raw):
+        _add(v)
+        _add(v.upper())
+    m = re.search(r"(?:FC2[-_]?PPV[-_]?|FC2[-_]?)(\d+)", raw, re.I)
+    if m:
+        fid = m.group(1)
+        _add(f"FC2-PPV-{fid}")
+        _add(f"FC2-{fid}")
+    return out
+
+
+def _path_slugs(code: str) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def _add(v: str) -> None:
+        s = str(v or "").strip().lower()
+        if not s or s in seen:
+            return
+        seen.add(s)
+        out.append(s)
+
+    for cand in njav_code_candidates(code):
+        if re.match(r"^fc2", cand, re.I):
+            for v in fc2_slug_variants(cand):
+                _add(v)
+        # date6 裸下划线必须保留（062014_830）
+        if "_" in cand and re.search(r"\d{6}_\d+", cand):
+            _add(cand)
+        _add(cand)
+        _add(cand.replace("_", "-"))
+        _add(re.sub(r"[-_]", "", cand))
+    return out
 
 
 def _locale_base(base_url: str) -> str:
@@ -34,13 +107,8 @@ def _locale_base(base_url: str) -> str:
     return f"{raw}/ja"
 
 
-def _search_url(base: str, code: str) -> str:
-    return f"{_locale_base(base)}/search?keyword={quote(std_code(code))}"
-
-
 def _pick_detail_href(html: str, code: str) -> str:
-    std = std_code(code).lower()
-    compact = std.replace("-", "")
+    want = {s.lower() for s in _path_slugs(code)}
     hrefs: list[str] = []
     for pat in (
         r'href=["\']([^"\']*/v/[^"\'#?]+)["\']',
@@ -56,9 +124,8 @@ def _pick_detail_href(html: str, code: str) -> str:
         score = 0
         if DETAIL_SUFFIX_RE.search(slug):
             score -= 80
-        if slug == std or slug == compact:
+        if slug in want or any(code_equiv(slug, c) for c in njav_code_candidates(code)):
             score += 100
-        # 禁止 startswith 模糊（abf-005-xxx 错页）
         if re.search(r"/search/", path, re.I):
             score -= 50
         if re.search(r"uncensored", slug, re.I):
@@ -73,13 +140,15 @@ def _is_detail_html(html: str, code: str) -> bool:
         return False
     if re.search(r"123av\.com に移転|moved__title|404 — 123AV", html[:12000], re.I):
         return False
-    std = std_code(code)
     m = re.search(r"<dt>コード</dt>\s*<dd[^>]*>([^<]+)<", html, re.I) or re.search(
         r"<dt>代码</dt>\s*<dd[^>]*>([^<]+)<", html, re.I
     )
     page_code = strip_tags(m.group(1) if m else "")
-    if page_code and code_key(page_code) != code_key(std):
-        return False
+    if page_code:
+        if any(code_equiv(page_code, c) for c in njav_code_candidates(code)):
+            pass
+        else:
+            return False
     return bool(
         re.search(r'class=["\']watch__title["\']', html)
         or re.search(r'class=["\']watch__info-row["\']', html)
@@ -220,7 +289,7 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
             rows = _parse_legacy_rows(detail_html)
 
         title = _parse_title(detail_html, std)
-        # 与 miss_av / dmm / jav321 / javday / javlibrary / lulubar 及 make_detail 口径一致：
+        # 与 miss_av / dmm / jav321 / javday 及 make_detail 口径一致：
         # 单字/占位标题（站点标题本身就短）只清空标题，不打死整源；
         # 详情页有效性已由 _is_detail_html 校验，真·空页由下方 (not title and not cover and ...) 拦住。
         if title and is_junk_title(title):
@@ -277,25 +346,48 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
             )
             return _build(cached_html or "", cached_url)
         except Exception:
-            pass  # 缓存失效 → 回落搜索
+            pass  # 缓存失效 → 回落直链/搜索
 
-    search_url = _search_url(base, std)
-    try:
-        search_html = fetch_html(search_url, referer=referer, cookie=cookie or None, source_id="njav")
-    except Exception as e:
-        raise RuntimeError(f"搜索无响应: {e}") from e
-    if not search_html or len(search_html) < 2000:
-        raise RuntimeError("搜索无响应")
+    # 直链 /v/{slug}（FC2-PPV、328HMDN 等站内形态）
+    last_err: Exception | None = None
+    for slug in _path_slugs(std):
+        url = f"{base}/v/{quote(slug)}"
+        try:
+            html = fetch_html(url, referer=referer, cookie=cookie or None, source_id=SOURCE)
+            if html and _is_detail_html(html, std):
+                detail_path_cache.remember("njav", std, f"/v/{slug}")
+                return _build(html, url)
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+            continue
 
-    detail_path = _pick_detail_href(search_html, std)
+    # 搜索：多候选关键词（FC2 裸号 / 板号）
+    detail_path = ""
+    search_url = ""
+    for kw in njav_code_candidates(std):
+        search_url = f"{base}/search?keyword={quote(kw)}"
+        try:
+            search_html = fetch_html(
+                search_url, referer=referer, cookie=cookie or None, source_id=SOURCE
+            )
+        except Exception as e:
+            last_err = e
+            continue
+        if not search_html or len(search_html) < 2000:
+            continue
+        detail_path = _pick_detail_href(search_html, std)
+        if detail_path:
+            break
+
     if not detail_path:
-        raise RuntimeError("未找到")
+        raise RuntimeError(f"未找到" + (f": {last_err}" if last_err else ""))
 
     detail_url = abs_url(detail_path, f"{base}/") or detail_path
-    # 第十六轮：记住详情路径，重复刮直接走缓存跳过搜索
     detail_path_cache.remember("njav", std, detail_path)
     try:
-        detail_html = fetch_html(detail_url, referer=search_url, cookie=cookie or None, source_id="njav")
+        detail_html = fetch_html(
+            detail_url, referer=search_url or referer, cookie=cookie or None, source_id=SOURCE
+        )
     except Exception as e:
         raise RuntimeError(f"详情页无响应: {e}") from e
 

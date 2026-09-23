@@ -404,7 +404,9 @@ export async function enrichScrapLibraryItem(opts: {
   };
   item?: ScrapLibraryEmbedItem | null;
 }> {
-  const itemId = String(opts.itemId || '').trim();
+  const itemId = String(opts.itemId || '')
+    .trim()
+    .replace(/\\/g, '/');
   if (!itemId) throw new Error('缺少条目 ID');
   const res = await apiFetch('/scrap-library/embed/enrich/one', {
     method: 'POST',
@@ -412,6 +414,7 @@ export async function enrichScrapLibraryItem(opts: {
       itemId,
       dryRun: Boolean(opts.dryRun),
       overwrite: opts.overwrite !== false,
+      // 默认 true（详情页清向量重写）；设置页 live 重刮显式传 false
       syncVector: opts.syncVector !== false,
     }),
   });

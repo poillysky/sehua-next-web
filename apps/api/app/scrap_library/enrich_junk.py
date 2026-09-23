@@ -18,6 +18,8 @@ _JUNK_TITLE_MARKERS = (
     "403 forbidden",
     "404",
     "cloudflare",
+    "web solutions",
+    "fc2 total",
 )
 
 

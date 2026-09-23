@@ -1,13 +1,11 @@
 # -*- coding: utf-8 -*-
 """第八轮：HTML 解析复用 + mgstage 标签表单次扫描 的回归测试。
 
-覆盖三件事：
+覆盖两件事：
 1. `common.soup` 语义 —— 同线程同对象只解析一次；换内容/换线程各解析一次；
    空串等价 `BeautifulSoup("", "lxml")`（旧行为）。
 2. `mgstage._table_value` / `_parse_genres` —— 与「旧实现」逐字等价（子串匹配、
    最后一个命中覆盖、td 缺失跳过、链接拼接、空白折叠）。
-3. `lulubar` 不再变异共享解析树（这是 `soup` 复用引入的真实地雷：
-   原来在 `soup(html)` 的树上 `decompose()`）。
 """
 
 from __future__ import annotations
@@ -17,7 +15,6 @@ import threading
 import unittest
 
 from app.scrape_details import common
-from app.scrape_details import lulubar
 from app.scrape_details import mgstage
 from app.scrape_details.common import soup, strip_tags
 
@@ -180,47 +177,6 @@ class MgstageTableEquivalenceTest(unittest.TestCase):
         self.assertEqual(
             scans["n"], 1, f"应只扫 1 遍，实际扫了 {scans['n']} 遍"
         )
-
-
-def _lulubar_html() -> str:
-    pad = "<!-- pad --> " * 400
-    return (
-        "<html><body>"
-        "<div id='detail'>"
-        "<h2 class='mb-1'>ABC-123 "
-        "<a class='ogtag'>标签文字不该出现</a> 正片标题</h2>"
-        "<div class='tag_box'>"
-        "<a class='tag' href='/bydatedetail/1'>2024-01-02</a>"
-        "</div>"
-        "</div>"
-        f"{pad}"
-        "</body></html>"
-    )
-
-
-class LulubarNoMutationTest(unittest.TestCase):
-    def setUp(self) -> None:
-        if hasattr(common._tls, "soup_entry"):
-            del common._tls.soup_entry
-
-    def test_shared_tree_is_not_mutated(self) -> None:
-        html = _lulubar_html()
-        first = lulubar._parse_detail(html, "https://example.com/detail/ABC-123/", "ABC-123")
-        # 共享树里 a.ogtag 必须还在（说明没有在原树上 decompose）
-        doc = soup(html)
-        self.assertEqual(
-            len(doc.select("h2.mb-1 a.ogtag")),
-            1,
-            "`lulubar` 不应再变异 `soup()` 返回的共享解析树",
-        )
-        second = lulubar._parse_detail(html, "https://example.com/detail/ABC-123/", "ABC-123")
-        self.assertEqual(first.get("title"), second.get("title"))
-
-    def test_ogtag_text_excluded_from_title(self) -> None:
-        html = _lulubar_html()
-        out = lulubar._parse_detail(html, "https://example.com/detail/ABC-123/", "ABC-123")
-        self.assertNotIn("标签文字不该出现", str(out.get("title") or ""))
-        self.assertIn("正片标题", str(out.get("title") or ""))
 
 
 if __name__ == "__main__":

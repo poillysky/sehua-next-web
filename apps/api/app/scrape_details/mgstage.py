@@ -10,6 +10,7 @@ from urllib.parse import quote
 
 from .common import (
     abs_url,
+    amateur_digit_board_prefixes,
     clean_title,
     fetch_html,
     fetch_json,
@@ -17,7 +18,6 @@ from .common import (
     is_junk_cover_url,
     make_detail,
     page_mentions_code,
-    pick_href_by_folded_code,
     std_code,
     strip_tags,
     soup,
@@ -25,6 +25,53 @@ from .common import (
 
 DEFAULT_BASE = "https://www.mgstage.com"
 SOURCE = "mgstage"
+
+
+def mgstage_code_candidates(code: str) -> list[str]:
+    """MGStage 直链/搜索候选。
+
+    - 保留原串与 pad 变体
+    - 素人：``LUXU-001`` → 追加目录板号 ``259LUXU-001``（站内搜索裸 LUXU 常空）
+    - 已有板号时也保留剥板后的形态（少见镜像）
+    """
+    raw = str(code or "").strip()
+    if not raw:
+        return []
+    out: list[str] = []
+
+    def _add(val: str) -> None:
+        u = std_code(val).upper()
+        if u and u not in out:
+            out.append(u)
+
+    _add(raw)
+    try:
+        from app.search.av import parse_maker_code, std_code_key
+
+        parsed = parse_maker_code(raw)
+        if parsed and parsed.canonical:
+            _add(parsed.canonical)
+            _add(std_code_key(parsed.canonical, pad=3))
+            _add(std_code_key(parsed.canonical, pad=4))
+    except Exception:
+        pass
+
+    std = std_code(raw).upper()
+    bare = re.fullmatch(r"([A-Z]{2,12})-(\d{1,6})", std)
+    if bare:
+        letters, num = bare.group(1), bare.group(2)
+        for board_pref in amateur_digit_board_prefixes(letters):
+            _add(f"{board_pref}-{num}")
+            _add(f"{board_pref}-{num.zfill(3)}")
+            _add(f"{board_pref}-{num.zfill(4)}")
+
+    boarded = re.fullmatch(r"(\d{2,3})([A-Z]{2,12})-(\d{1,6})", std)
+    if boarded:
+        _add(f"{boarded.group(2)}-{boarded.group(3)}")
+        _add(f"{boarded.group(2)}-{boarded.group(3).zfill(3)}")
+        _add(f"{boarded.group(2)}-{boarded.group(3).zfill(4)}")
+
+    return out
 
 
 def _normalize_label(raw: str) -> str:
@@ -180,34 +227,27 @@ def _parse_extrafanart(html: str) -> list[str]:
 
 
 def _pick_detail_href(html: str, code: str) -> str:
-    """仅接受 path 番号精确命中；禁止首个 product_detail 兜底。"""
+    """仅接受 path 番号精确/等价命中；禁止首个 product_detail 兜底。
+
+    素人站内常见 ``259LUXU-001``，查询可能是 ``LUXU-001`` —— 用 ``code_equiv``。
+    """
+    from .common import code_equiv
+
     std = std_code(code).upper()
     esc = re.escape(std)
     m = re.search(rf"/product/product_detail/{esc}/?", html, re.I)
     if m:
         hit = m.group(0)
         return hit if hit.startswith("/") else f"/{hit}"
-    # 折叠匹配（如 path 大小写 / 连字符差异）
-    hrefs = [
-        hm.group(1)
-        for hm in re.finditer(
-            r'href=["\'](/product/product_detail/[^"\'/]+/)[^"\']*["\']',
-            html or "",
-            re.I,
-        )
-    ]
-    hit = pick_href_by_folded_code(hrefs, code)
-    if hit:
-        return hit
-    # 少数页仅写 id=ABF005 形态
-    want = fold_code(code)
+    # 折叠匹配（如 path 大小写 / 连字符差异）+ 板号等价
     for hm in re.finditer(
         r'href=["\'](/product/product_detail/([^"\'/]+)/)[^"\']*["\']',
         html or "",
         re.I,
     ):
-        if fold_code(hm.group(2)) == want:
-            return hm.group(1)
+        path, slug = hm.group(1), hm.group(2)
+        if fold_code(slug) == fold_code(code) or code_equiv(slug, code):
+            return path
     return ""
 
 
@@ -266,9 +306,11 @@ def _parse_detail(html: str, page_url: str, code: str) -> dict[str, Any] | None:
 
     std = std_code(code)
     num = _table_value(html, "品番") or std
+    from .common import code_equiv
+
     if (
         num
-        and std_code(num).upper() != std.upper()
+        and not code_equiv(num, std)
         and std.upper() not in page_url.upper()
     ):
         return None
@@ -327,44 +369,57 @@ def scrape_detail(
     base = (base_url or DEFAULT_BASE).rstrip("/")
     if not base:
         raise RuntimeError("未配置网站地址")
-    std = std_code(code).upper()
-    if not std:
+    raw_code = str(code or "").strip()
+    candidates = mgstage_code_candidates(raw_code)
+    if not candidates:
         raise RuntimeError("番号为空")
     referer = f"{base}/"
     ck = cookie or ""
+    last_err: Exception | None = None
 
-    detail_url = f"{base}/product/product_detail/{quote(std)}/"
-    try:
-        html = fetch_html(
-            detail_url, referer=referer, cookie=ck or None, source_id=SOURCE
+    for cand in candidates:
+        detail_url = f"{base}/product/product_detail/{quote(cand)}/"
+        try:
+            html = fetch_html(
+                detail_url, referer=referer, cookie=ck or None, source_id=SOURCE
+            )
+            parsed = _parse_detail(html, detail_url, raw_code)
+            if parsed and (parsed.get("title") or parsed.get("posterUrl")):
+                return parsed
+        except RuntimeError as e:
+            last_err = e
+
+        search_url = f"{base}/search/cSearch.php?search_word={quote(cand)}&type=top"
+        try:
+            search_html = fetch_html(
+                search_url, referer=referer, cookie=ck or None, source_id=SOURCE
+            )
+        except RuntimeError as e:
+            last_err = e
+            continue
+
+        if re.search(r"一致する作品がありません", search_html, re.I):
+            last_err = RuntimeError("未找到")
+            continue
+
+        path = _pick_detail_href(search_html, raw_code) or _pick_detail_href(
+            search_html, cand
         )
-        parsed = _parse_detail(html, detail_url, std)
-        if parsed and (parsed.get("title") or parsed.get("posterUrl")):
-            # 第十六轮：不再为预告片多发 1 个 sampleRespons API 请求 ——
-            # trailerUrl 全链路（NFO / 前端 / 落库）无消费方，纯浪费。
-            # 要恢复预告片时重新调用下方保留的 _fetch_trailer。
-            return parsed
-    except RuntimeError:
-        pass
+        if not path:
+            last_err = RuntimeError("未找到")
+            continue
+        url = abs_url(path, base) or f"{base}{path}"
+        try:
+            html = fetch_html(
+                url, referer=search_url, cookie=ck or None, source_id=SOURCE
+            )
+            parsed = _parse_detail(html, url, raw_code)
+            if parsed:
+                return parsed
+            last_err = RuntimeError("未找到")
+        except RuntimeError as e:
+            last_err = e
 
-    search_url = f"{base}/search/cSearch.php?search_word={quote(std)}&type=top"
-    try:
-        search_html = fetch_html(
-            search_url, referer=referer, cookie=ck or None, source_id=SOURCE
-        )
-    except RuntimeError as e:
-        raise RuntimeError("搜索无响应") from e
-
-    if re.search(r"該当する作品がありません", search_html, re.I):
-        raise RuntimeError("未找到")
-
-    path = _pick_detail_href(search_html, std)
-    if not path:
-        raise RuntimeError("未找到")
-    url = abs_url(path, base) or f"{base}{path}"
-    html = fetch_html(url, referer=search_url, cookie=ck or None, source_id=SOURCE)
-    parsed = _parse_detail(html, url, std)
-    if not parsed:
-        raise RuntimeError("未找到")
-    # 第十六轮：同上，预告片请求省掉（trailerUrl 无消费方）。
-    return parsed
+    if isinstance(last_err, Exception):
+        raise last_err
+    raise RuntimeError("未找到")

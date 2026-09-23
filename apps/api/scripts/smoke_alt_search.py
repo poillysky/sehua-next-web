@@ -31,10 +31,6 @@ def main() -> None:
 
     peek("javdb AKNR", "https://javdb.com/search?q=AKNR&f=all")
     peek("javdb ARA", "https://javdb.com/search?q=ARA&f=all")
-    peek(
-        "javlib AKNR",
-        "https://www.javlibrary.com/cn/vl_searchbyid.php?keyword=AKNR",
-    )
     peek("123av AKNR", "https://123av.com/ja/search?keyword=AKNR")
     peek("avsox AKNR", "https://avsox.click/cn/search/AKNR")
     peek("missav2 AKNR", "https://missav.ai/cn/search/AKNR")

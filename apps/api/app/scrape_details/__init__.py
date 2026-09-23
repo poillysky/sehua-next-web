@@ -34,7 +34,6 @@ _PROVIDER_SPEC: dict[str, str | DetailFn] = {
     "miss_av": "miss_av",
     "madou": "madou",
     "r18dev": "r18dev",
-    "avwikidb": "avwikidb",
     "libredmm": "libredmm",
     "javday": "javday",
     "carib": "carib",
@@ -54,9 +53,7 @@ _PROVIDER_SPEC: dict[str, str | DetailFn] = {
     "jav321": "jav321",
     "mgstage": "mgstage",
     "dmm": "dmm",
-    "javlibrary": "javlibrary",
     "airav_io": "airav_io",
-    "airav": "airav",
     "avbase": "avbase",
     "freejavbt": "freejavbt",
     "fc2": "fc2",
@@ -64,11 +61,9 @@ _PROVIDER_SPEC: dict[str, str | DetailFn] = {
     "madouqu": "madouqu",
     "xiao_huang_shu": "xiao_huang_shu",
     "hscangku": "hscangku",
-    "avsex": "avsex",
     "avmoo": "avmoo",
     "avsox": "avsox",
     "avheat": "avheat",
-    "lulubar": "lulubar",
 }
 
 
@@ -77,7 +72,12 @@ def registered_detail_ids() -> list[str]:
 
 
 def resolve_detail_fn(source_id: str) -> DetailFn | None:
-    sid = str(source_id or "").strip().lower()
+    try:
+        from app.scrape.source_catalog import canonicalize_id
+
+        sid = canonicalize_id(str(source_id or "").strip().lower())
+    except Exception:  # noqa: BLE001
+        sid = str(source_id or "").strip().lower()
     spec = _PROVIDER_SPEC.get(sid)
     if spec is None:
         return None
@@ -101,7 +101,12 @@ def fetch_detail_for_source(
     """按数据源拉详情；失败抛异常。对齐 MDCS prepareProviderFetch → scrape。"""
     from .common import prepare_provider_site
 
-    sid = str(source_id or "").strip().lower()
+    try:
+        from app.scrape.source_catalog import canonicalize_id
+
+        sid = canonicalize_id(str(source_id or "").strip().lower())
+    except Exception:  # noqa: BLE001
+        sid = str(source_id or "").strip().lower()
     site = prepare_provider_site(sid, fallback_base=base_url)
     base = str(base_url or site.get("baseUrl") or "").strip()
     ck = str(cookie or site.get("cookie") or "").strip()

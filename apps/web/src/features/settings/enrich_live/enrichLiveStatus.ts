@@ -235,8 +235,16 @@ export function buildEnrichLiveStatusHandlers(d: EnrichLiveStatusDeps) {
           Number(qc.pending || 0) +
           (halted || qsHere ? Number(qc.running || 0) : 0);
         // 以服务端队列表为准；勿 Math.max 旧缓存
-        const pendingN =
+        let pendingN =
           libTotal > 0 ? Math.min(statusPending, libTotal) : statusPending;
+        // 清空·扫描第二步（向量差集）可能比成功/失败写入慢：用进度里的估数顶住角标
+        if (qsHere && qs) {
+          const scanPending = Number(qs.pending || 0);
+          if (scanPending > pendingN) {
+            pendingN =
+              libTotal > 0 ? Math.min(scanPending, libTotal) : scanPending;
+          }
+        }
         if (halted || qsHere) {
           pendingTotalRef.current = pendingN;
           writeCachedPendingTotal(regionId, pendingN);

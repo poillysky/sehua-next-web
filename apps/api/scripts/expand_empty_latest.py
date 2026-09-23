@@ -98,17 +98,6 @@ def search_javdb(query: str, pref: str, aliases: list[str]) -> tuple[str, int, s
     return "", 0, ""
 
 
-def search_javlibrary(query: str, pref: str, aliases: list[str]) -> tuple[str, int, str]:
-    for base in MIRROR_SEEDS.get("javlibrary", [])[:4]:
-        html = fetch(
-            f"{base.rstrip('/')}/cn/vl_searchbyid.php?keyword={quote(query)}"
-        )
-        p, n = best_code(pref, html, aliases)
-        if n > 0:
-            return p, n, f"javlibrary:{query}"
-    return "", 0, ""
-
-
 def search_123av(query: str, pref: str, aliases: list[str]) -> tuple[str, int, str]:
     for base in MIRROR_SEEDS.get("njav", [])[:3]:
         root = base.rstrip("/")
@@ -171,7 +160,6 @@ SOURCES = [
     ("javbus", search_javbus),
     ("javdb", search_javdb),
     ("missav", search_missav),
-    ("javlibrary", search_javlibrary),
     ("123av", search_123av),
     ("avsox", search_avsox),
     ("mgstage", search_mgs),

@@ -101,12 +101,55 @@ def _pick_trailer(sample2d: dict | None, sample_vr: dict | None) -> str | None:
     return best or None
 
 
-def guess_dmm_cids(code_raw: str) -> list[str]:
-    """CID 候选：优先 prefix_catalog_dmm.guess_digits，再补常见前缀。"""
+def _dmm_base_code(code_raw: str) -> str:
+    """剥分盘/破解/分集尾缀，得到 ``PREFIX-N`` 供 CID 构造。
+
+    例：``IPZZ-599C`` → ``IPZZ-599``；``SSNI-015`` → ``SSNI-15``（数字按 int）。
+    """
+    try:
+        from app.search.av import parse_maker_code, std_code_key
+
+        parsed = parse_maker_code(code_raw)
+        if parsed and parsed.shape == "std" and parsed.canonical:
+            return std_code_key(parsed.canonical, pad=0)
+    except Exception:  # noqa: BLE001
+        pass
     code = std_code(code_raw)
+    m = re.match(
+        r"^([A-Z]{2,10})-(\d{1,6})(?:[-_.]?(?:UC|C|CH|U|[A-Z]))?$",
+        code,
+        re.I,
+    )
+    if m:
+        return f"{m.group(1).upper()}-{int(m.group(2))}"
+    return code
+
+
+def _catalog_dmm_digit(series: str) -> str | None:
+    """目录已校验的 dmm_digit；无则 None（空串表示无数字板号前缀）。"""
+    try:
+        from app.prefix import catalog_store as store
+
+        for rid in ("japan_censored", "japan_amateur"):
+            ent = store.get_prefix(rid, series)
+            if not ent:
+                continue
+            # 仅当目录显式写过 digit（含 ""）且 notes/verified 有线索时难判；
+            # 约定：非空 digit 优先；空串且 SERIES_DIGIT 也没有时不强制。
+            dig = str(ent.get("dmm_digit") or "").strip()
+            if dig:
+                return dig
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
+def guess_dmm_cids(code_raw: str) -> list[str]:
+    """CID 候选：目录 dmm_digit → prefix_catalog_dmm.guess_digits → 常见前缀。"""
+    code = _dmm_base_code(code_raw)
     if not code or re.match(r"^FC2", code, re.I):
         return []
-    m = re.match(r"^([A-Z0-9]{2,10})-(\d{1,6})$", code, re.I)
+    m = re.match(r"^([A-Z]{2,10})-(\d{1,6})$", code, re.I)
     if not m:
         return []
     series = re.sub(r"[^A-Za-z0-9]", "", m.group(1)).lower()
@@ -114,12 +157,18 @@ def guess_dmm_cids(code_raw: str) -> list[str]:
     padded = str(n).zfill(5)
 
     digits: list[str] = []
+    cat = _catalog_dmm_digit(m.group(1))
+    if cat is not None and cat not in digits:
+        digits.append(cat)
     try:
         from app.prefix.catalog_dmm import guess_digits
 
-        digits.extend(guess_digits(series))
-    except Exception:
-        digits.append("")
+        for d in guess_digits(series):
+            if d not in digits:
+                digits.append(d)
+    except Exception:  # noqa: BLE001
+        if "" not in digits:
+            digits.append("")
     for d in _COMMON_PREFIXES:
         if d not in digits:
             digits.append(d)
@@ -286,10 +335,10 @@ def scrape_detail(
     code: str, *, base_url: str = "", cookie: str = "", api_key: str = ""
 ) -> dict:
     del base_url, api_key
-    code_s = std_code(code)
+    code_s = _dmm_base_code(code)
     if not code_s or re.match(r"^FC2", code_s, re.I):
         raise RuntimeError("番号格式无效")
-    if not re.match(r"^([A-Z]{2,10})-(\d{2,6})$", code_s):
+    if not re.match(r"^([A-Z]{2,10})-(\d{1,6})$", code_s):
         raise RuntimeError("番号格式无效")
 
     variants = guess_dmm_cids(code_s)
@@ -304,14 +353,5 @@ def scrape_detail(
         if parsed:
             return parsed
 
-    for cid in variants[:8]:
-        cover = _cover_fallback(cid)
-        if cover:
-            return make_detail(
-                source=SOURCE,
-                code=code_s,
-                poster=cover,
-                extra={"error": "详情 GraphQL 无数据（仅封面）"},
-            )
-
+    # 不再用「仅封面 URL」冒充命中（CDN 未探测，enrich 会当成功）
     raise RuntimeError("未找到")

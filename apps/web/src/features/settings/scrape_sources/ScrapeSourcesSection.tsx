@@ -103,6 +103,7 @@ const GROUP_ICON_TONE: Record<
   'orange' | 'teal' | 'blue' | 'violet' | 'indigo' | 'green'
 > = {
   av: 'orange',
+  amateur: 'orange',
   uncensored: 'teal',
   fc2: 'blue',
   chinese: 'violet',

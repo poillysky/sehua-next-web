@@ -367,6 +367,13 @@ def apply_merge_extras(
                 merged["actorRole"] = "seller"
                 acts = [seller]
 
+    # FC2 无片商时用 FC2 占位（官网源常写卖家/FC2；聚合站常空）
+    if (rid == "fc2" or code.startswith("FC2")) and not str(
+        merged.get("studio") or merged.get("maker") or ""
+    ).strip():
+        merged["studio"] = "FC2"
+        merged["maker"] = "FC2"
+
     # I52：director/runtime/score + 系列/发行/预告/官网（主源缺则后源补）
     sec = pick_secondary_fields(details)
     for k, v in sec.items():

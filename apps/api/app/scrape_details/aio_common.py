@@ -9,6 +9,7 @@ from urllib.parse import quote
 from .common import (
     abs_url,
     clean_title,
+    code_equiv,
     collect_by_re,
     fetch_html,
     fold_code,
@@ -18,6 +19,9 @@ from .common import (
     make_detail,
     std_code,
     strip_tags,
+    append_std_pad_variants,
+    date6_search_variants,
+    western_code_candidates,
 )
 
 # 对齐 MDCS avmoo.ts：SPA 需 FlareSolverr waitInSeconds
@@ -85,7 +89,9 @@ def pick_aio_movie_path(html: str, code: str, lang: str = "cn") -> str | None:
             chunk,
             re.I,
         )
-        if span and fold_code(span.group(1)) == want:
+        if span and (
+            fold_code(span.group(1)) == want or code_equiv(span.group(1), code)
+        ):
             return href
     return None
 
@@ -126,12 +132,11 @@ def parse_aio_detail_html(
         return None
 
     id_span = aio_detail_value(html, "识别码") or aio_detail_value(html, "識別碼")
-    # 必须有识别码且折叠全等；禁止「页内某处提到番号」放过错页（ABF-005→ジュポニカ）
+    # 必须有识别码且等价命中；禁止「页内某处提到番号」放过错页（ABF-005→ジュポニカ）
     if not id_span:
         return None
-    ik = fold_code(id_span)
-    want_keys = {fold_code(c) for c in [code, *(alt_codes or [])] if c}
-    if not ik or ik not in want_keys:
+    want_codes = [c for c in [code, *(alt_codes or [])] if c]
+    if not any(code_equiv(id_span, c) for c in want_codes):
         return None
     h1_m = re.search(
         r'class=["\']movie-detail["\'][\s\S]*?<h1[^>]*>([\s\S]*?)</h1>',
@@ -263,18 +268,29 @@ def scrape_aio_family(
     q = (search_code or std).strip()
     base = (base_url or default_base).rstrip("/")
     lang = "cn"
-    # MDCS：多候选搜索词（无码 CARIB → 010117-339）
+    # MDCS：多候选搜索词（无码 date6 / 欧美 YYYY↔YY / pad）
     queries: list[str] = []
-    for cand in (q, std):
-        if cand and cand not in queries:
-            queries.append(cand)
+
+    def _add_q(s: str) -> None:
+        t = str(s or "").strip()
+        if t and t not in queries:
+            queries.append(t)
+
+    for cand in western_code_candidates(code):
+        _add_q(cand)
+    _add_q(q)
+    _add_q(std)
+    append_std_pad_variants(_add_q, code)
+    for cand in date6_search_variants(code):
+        _add_q(cand)
     m = re.match(r"^([A-Z]{2,12})[-_]?(\d{6}-\d{3})$", std, re.I)
-    if m and m.group(2) not in queries:
-        queries.append(m.group(2))
+    if m:
+        _add_q(m.group(2))
 
     movie_path: str | None = None
     search_url = ""
     search_html = ""
+    matched_query = std
     for query in queries:
         search_url = f"{base}/{lang}/search/{quote(query)}"
         search_html = _fetch_aio_html(
@@ -282,11 +298,15 @@ def scrape_aio_family(
         )
         if re.search(r"没有结果|沒有結果|no results", search_html or "", re.I):
             continue
-        # 优先用本次搜索词挑链（CARIB 页上是 010117-339）
-        movie_path = pick_aio_movie_path(search_html, query, lang) or pick_aio_movie_path(
-            search_html, std, lang
-        )
+        # 优先用本次搜索词挑链（CARIB 页上是 010117-339；欧美页上是 YY 形）
+        movie_path = pick_aio_movie_path(search_html, query, lang)
+        if not movie_path:
+            for alt in queries:
+                movie_path = pick_aio_movie_path(search_html, alt, lang)
+                if movie_path:
+                    break
         if movie_path:
+            matched_query = query
             break
 
     if not movie_path:
@@ -302,7 +322,7 @@ def scrape_aio_family(
     parsed = parse_aio_detail_html(
         detail_html,
         detail_url,
-        std,
+        matched_query or std,
         source=source,
         alt_codes=queries,
     )

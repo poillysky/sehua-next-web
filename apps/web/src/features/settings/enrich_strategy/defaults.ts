@@ -102,7 +102,7 @@ export function cloneStrategy(s: ScrapEnrichStrategy): ScrapEnrichStrategy {
   };
 }
 
-/** 「恢复默认」以本表为准（对齐 COVER_LOGIC），不依赖可能过期的 API 缓存 */
+/** 「恢复默认」以本表为准（对齐后端 v10），不依赖可能过期的 API 缓存 */
 export const REGION_SOURCE_RESTORE: Record<string, string[]> = {
   japan_censored: [
     'dmm',
@@ -113,12 +113,20 @@ export const REGION_SOURCE_RESTORE: Record<string, string[]> = {
     'avbase',
     'mgstage',
   ],
-  // 无码：仅通用兜底；专用站按前缀内置
-  japan_uncensored: ['avsox', 'javbus', 'airav_io', 'miss_av'],
-  japan_amateur: ['mgstage', 'javbus', 'carib', 'airav_io'],
-  fc2: ['fc2', 'fd2ppv', 'airav_io'],
-  china: ['madouqu', 'madou', 'xiao_huang_shu'],
-  western: ['theporndb'],
+  // 无码：仅通用兜底；专用站按前缀内置；AvSox 须 Flare 殿后
+  japan_uncensored: ['javbus', 'iqqtv', 'airav_io', 'miss_av', 'avsox'],
+  japan_amateur: [
+    'mgstage',
+    'libredmm',
+    'jav321',
+    'miss_av',
+    'freejavbt',
+    'avbase',
+    'iqqtv',
+  ],
+  fc2: ['fc2', 'fd2ppv', 'airav_io', 'miss_av', 'freejavbt'],
+  china: ['madou', 'miss_av', 'madouqu', 'xiao_huang_shu'],
+  western: ['theporndb', 'avheat'],
 };
 
 export const UNCENSORED_OFFICIAL_FALLBACK = [
@@ -137,11 +145,13 @@ export const UNCENSORED_OFFICIAL_FALLBACK = [
 ] as const;
 
 export const FIELD_PRIORITY_RESTORE: Record<string, string[]> = {
-  title: ['airav_io', 'iqqtv', 'javbus'],
-  overview: ['airav_io', 'iqqtv'],
-  actors: ['javbus', 'airav_io', 'iqqtv'],
+  // 有码中文：AirAV / iQQTV 最强；7MMTV / MissAV 补；JavBus 日文兜底标题
+  title: ['airav_io', 'iqqtv', 'sevenmmtv', 'miss_av', 'javbus'],
+  overview: ['airav_io', 'iqqtv', 'sevenmmtv', 'miss_av'],
+  tags: ['airav_io', 'iqqtv', 'javbus', 'sevenmmtv', 'freejavbt'],
+  // 封面可靠：FANZA 官方三角 → 镜像 CDN
   poster: ['dmm', 'libredmm', 'r18dev', 'javbus', 'mgstage'],
-  tags: ['javbus', 'avbase', 'freejavbt'],
+  actors: ['javbus', 'dmm', 'libredmm', 'airav_io', 'iqqtv'],
 };
 
 export const MODE_OPTIONS = [

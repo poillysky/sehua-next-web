@@ -30,24 +30,44 @@ def _looks_jav(code: str) -> bool:
 def _build_search_queries(code: str) -> list[str]:
     raw = str(code or "").strip()
     out = [raw]
+    # YYYY 或 YY 完整日
     m = re.match(r"^([A-Za-z][A-Za-z0-9]*)\.(\d{4})\.(\d{2})\.(\d{2})$", raw)
     if not m:
-        return list(dict.fromkeys(out))
-    studio_key, y, mo, d = m.group(1), m.group(2), m.group(3), m.group(4)
+        yy_m = re.match(r"^([A-Za-z][A-Za-z0-9]*)\.(\d{2})\.(\d{2})\.(\d{2})$", raw)
+        if yy_m and yy_m.group(2) not in ("19", "20"):
+            studio_key = yy_m.group(1)
+            yyyy, mo, d = f"20{yy_m.group(2)}", yy_m.group(3), yy_m.group(4)
+        else:
+            return list(dict.fromkeys(out))
+    else:
+        studio_key, yyyy, mo, d = m.group(1), m.group(2), m.group(3), m.group(4)
     studio = WESTERN_STUDIO_ALIASES.get(studio_key.lower()) or re.sub(
         r"([a-z0-9])([A-Z])", r"\1 \2", studio_key
     )
-    iso = f"{y}-{mo}-{d}"
-    out.extend([f"{studio} {iso}", studio, f"{studio_key} {iso}"])
+    iso = f"{yyyy}-{mo}-{d}"
+    out.extend(
+        [
+            f"{studio_key}.{yyyy}.{mo}.{d}",
+            f"{studio_key}.{yyyy[2:]}.{mo}.{d}",
+            f"{studio} {iso}",
+            studio,
+            f"{studio_key} {iso}",
+        ]
+    )
     return list(dict.fromkeys(x for x in out if x))
 
 
 def _score_western_date_hit(item: dict[str, Any], code: str) -> int:
     m = re.match(r"^([A-Za-z][A-Za-z0-9]*)\.(\d{4})\.(\d{2})\.(\d{2})$", code)
     if not m:
-        return 0
-    studio_key, y, mo, d = m.group(1), m.group(2), m.group(3), m.group(4)
-    iso = f"{y}-{mo}-{d}"
+        m2 = re.match(r"^([A-Za-z][A-Za-z0-9]*)\.(\d{2})\.(\d{2})\.(\d{2})$", code)
+        if not m2 or m2.group(2) in ("19", "20"):
+            return 0
+        studio_key = m2.group(1)
+        yyyy, mo, d = f"20{m2.group(2)}", m2.group(3), m2.group(4)
+    else:
+        studio_key, yyyy, mo, d = m.group(1), m.group(2), m.group(3), m.group(4)
+    iso = f"{yyyy}-{mo}-{d}"
     score = 0
     if str(item.get("date") or "")[:10] == iso:
         score += 80

@@ -194,12 +194,12 @@ class NoteRetryHintsTest(unittest.TestCase):
             {
                 "ok": True,
                 "localCoverOk": True,
-                "degradedByDown": ["javdb", "airav"],
+                "degradedByDown": ["javdb", "airav_io"],
             }
         )
         src = [c for c in calls if c["kind"] == E._RETRY_KIND_SRC_DOWN][0]
         self.assertTrue(src["need"])
-        self.assertEqual(src["error"], "javdb,airav")
+        self.assertEqual(src["error"], "javdb,airav_io")
         self.assertEqual(src["cap"], E._SRC_DOWN_RETRY_MAX)
 
     def test_failed_row_does_not_enter_recheck(self):

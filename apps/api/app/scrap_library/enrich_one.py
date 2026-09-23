@@ -78,16 +78,20 @@ def enrich_one_row(
         region = rel.split("/", 1)[0].strip()
         out["region"] = region
 
-    # 队列 gaps 常是向量空壳（仅 no_local）；以本地 NFO 真实缺口为准，避免漏拉剧情
-    if not force and folder.is_dir() and _enrich._find_nfo(folder):
-        _lc, local_gaps = _enrich._local_folder_gaps(folder)
-        if _lc and not code:
-            code = _lc
-            out["code"] = code
-        if local_gaps:
-            gaps = list(dict.fromkeys([*local_gaps, *[g for g in gaps if g]]))
-            out["gaps"] = gaps
-            row = {**row, "gaps": gaps}
+    # 队列 gaps 常是向量空壳（仅 no_local）；以本地 NFO 真实缺口为准，避免漏拉剧情。
+    # 覆盖重刮也要读本地缺口：成功行 gaps_json 常为空，但仍缺女优/片商/剧情。
+    if folder.is_dir() and _enrich._find_nfo(folder):
+        try:
+            _lc, local_gaps = _enrich._local_folder_gaps(folder)
+            if _lc and not code:
+                code = _lc
+                out["code"] = code
+            if local_gaps:
+                gaps = list(dict.fromkeys([*local_gaps, *[g for g in gaps if g]]))
+                out["gaps"] = gaps
+                row = {**row, "gaps": gaps}
+        except Exception:  # noqa: BLE001
+            pass
 
     # E2E 等可传入已合并详情，跳过再拉源（仍写 NFO/封面/向量）
     try:
@@ -101,20 +105,20 @@ def enrich_one_row(
     else:
         # 运行中改策略：本条起热切数据源/超时（进行中的其它番号不打断）
         _enrich._note_strategy_hot_if_needed(region)
-        # 增量：缺口齐了就早停；覆盖：拉满各源再合并写回
+        # 增量：缺口齐了就早停；覆盖：拉满各源再合并写回（仍带本地缺口做源优先级）
         # wait_all=True（详情单刷）时强制自适应优先，不过盾池拖尾
         detail = _enrich._fetch_detail(
             code,
             region=region,
             wait_all=force,
-            gaps=None if force else gaps,
+            gaps=gaps if gaps else (None if force else gaps),
             # 增量：按需早停（近 MDCX 字段链）；覆盖/单刷再拉满
             adaptive_first=not force,
             # 分区批量只写本地：机翻短超时，避免 LLM 占满番号槽
             fast_zh=not sync_vector,
         )
     if not detail:
-        out["error"] = "detail_not_found"
+        out["error"] = "各数据源均未找到该番号"
         return out
     out["source"] = detail.get("source") or detail.get("provider")
     out["detailTitle"] = detail.get("title")

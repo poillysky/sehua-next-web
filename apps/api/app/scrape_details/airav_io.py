@@ -12,13 +12,17 @@ from app.core import detail_path_cache
 from .common import (
     abs_url,
     clean_title,
+    code_equiv,
     collect_by_re,
+    date6_search_variants,
     fetch_html_result,
     is_junk_cover_url,
     is_junk_title,
     make_detail,
+    parse_fc2_id,
     pick_og_image,
     pick_og_title,
+    std_code,
     strip_tags,
 )
 
@@ -47,15 +51,64 @@ def normalize_airav_code(code: str) -> str:
     return raw
 
 
+def airav_io_code_candidates(code: str) -> list[str]:
+    """搜索词：原串 / pad / 素人剥板号 / FC2-PPV / 无码 date6 品牌与裸日期。"""
+    raw = str(code or "").strip()
+    if not raw:
+        return []
+    out: list[str] = []
+
+    def _add(val: str) -> None:
+        s = str(val or "").strip()
+        if s and s not in out:
+            out.append(s)
+
+    _add(raw)
+    _add(normalize_airav_code(raw))
+    _add(std_code(raw))
+    try:
+        from app.search.av import parse_maker_code, std_code_key
+
+        parsed = parse_maker_code(raw)
+        if parsed and parsed.canonical:
+            _add(parsed.canonical)
+            _add(std_code_key(parsed.canonical, pad=3))
+            _add(std_code_key(parsed.canonical, pad=4))
+    except Exception:  # noqa: BLE001
+        pass
+    for v in date6_search_variants(raw):
+        _add(v)
+    fc2 = parse_fc2_id(raw)
+    if fc2:
+        fid, canon = fc2
+        _add(canon)
+        _add(f"FC2-PPV-{fid}")
+        _add(f"FC2PPV-{fid}")
+        _add(f"FC2-{fid}")
+    return out
+
+
 def match_airav_number(text: str, number: str) -> bool:
     hay = str(text or "")
     num = str(number or "").strip()
-    if not num:
+    if not num or not hay:
         return False
     if re.match(r"^\d", num):
-        return num.upper() in hay.upper()
-    esc = re.escape(num)
-    return bool(re.search(rf"(?<![A-Z0-9]){esc}(?![A-Z0-9])", hay, re.I))
+        if num.upper() in hay.upper():
+            return True
+    else:
+        esc = re.escape(num)
+        if re.search(rf"(?<![A-Z0-9]){esc}(?![A-Z0-9])", hay, re.I):
+            return True
+    for tok in re.findall(r"[A-Za-z0-9][A-Za-z0-9._-]{2,}", hay):
+        if code_equiv(tok, num):
+            return True
+    # 无码：标题常 ``1pondo_062014_830`` / ``062014_830``
+    for v in date6_search_variants(num):
+        esc = re.escape(v)
+        if re.search(rf"(?<![A-Za-z0-9]){esc}(?![A-Za-z0-9])", hay, re.I):
+            return True
+    return False
 
 
 def is_airav_junk_entry(title: str) -> bool:
@@ -82,15 +135,16 @@ def list_airav_search_cards(html: str) -> list[dict[str, str]]:
 def pick_airav_hid_from_search(html: str, code: str) -> str | None:
     hits = list_airav_search_cards(html)
     # 单卡也必须番号边界匹配；禁止 first-hit（错页风险）
+    want = airav_io_code_candidates(code) or [code]
     for hit in hits:
-        if not match_airav_number(hit["title"], code):
+        if not any(match_airav_number(hit["title"], c) for c in want):
             continue
         if is_airav_junk_entry(hit["title"]):
             continue
         return hit["href"]
     for m in re.finditer(r"<h5[^>]*>([\s\S]*?)</h5>", html or "", re.I):
         h5 = strip_tags(m.group(1) or "")
-        if not match_airav_number(h5, code) or is_airav_junk_entry(h5):
+        if not any(match_airav_number(h5, c) for c in want) or is_airav_junk_entry(h5):
             continue
         before = html[max(0, m.start() - 800) : m.start()]
         near = re.search(r'href=["\']([^"\']*/video\?hid=[^"\'#]+)["\'][^>]*>\s*$', before, re.I)
@@ -113,26 +167,31 @@ def _airav_code_flex(code: str) -> str:
 
 
 def airav_detail_code_ok(html: str, code: str) -> bool:
-    flex = _airav_code_flex(code)
-    if not flex:
-        return False
-    code_re = re.compile(rf"^{flex}$", re.I)
+    want = airav_io_code_candidates(code) or [code]
     span_m = re.search(
         r"番[号號]\s*[：:]\s*<span[^>]*>([^<]+)</span>", html, re.I
     ) or re.search(r"番[号號]\s*<span[^>]*>([^<]+)</span>", html, re.I)
-    if span_m and code_re.match(strip_tags(span_m.group(1))):
+    page_code = strip_tags(span_m.group(1) if span_m else "")
+    if page_code and any(code_equiv(page_code, c) for c in want):
         return True
+    if page_code:
+        for c in want:
+            flex = _airav_code_flex(c)
+            if flex and re.match(rf"^{flex}$", page_code, re.I):
+                return True
+            if match_airav_number(page_code, c):
+                return True
     h1_m = re.search(
         r'<div[^>]*class=["\'][^"\']*video-title[^"\']*["\'][^>]*>[\s\S]*?<h1[^>]*>([\s\S]*?)</h1>',
         html,
         re.I,
     ) or re.search(r"<h1[^>]*>([\s\S]*?)</h1>", html, re.I)
     h1 = strip_tags(h1_m.group(1) if h1_m else "")
-    prefix_re = re.compile(rf"^{flex}\b", re.I)
-    if h1 and prefix_re.search(h1):
-        return True
     og = pick_og_title(html)
-    return bool(og and prefix_re.search(og))
+    for hay in (h1, og):
+        if hay and any(match_airav_number(hay, c) for c in want):
+            return True
+    return False
 
 
 def pick_airav_ld_json_cover(html: str) -> str:
@@ -376,6 +435,7 @@ def scrape_detail(
         raise RuntimeError("番号为空")
     cn_base = _normalize_cn_base(base_url or DEFAULT_BASE)
     ck = cookie or None
+    candidates = airav_io_code_candidates(normalized) or [normalized]
 
     # 第十六轮：详情路径缓存命中（hid 对同番号实测稳定）→ 直接抓详情，
     # 跳过搜索；页面校验不过回落搜索并刷新缓存。坏缓存最多浪费 1 请求。
@@ -399,13 +459,18 @@ def scrape_detail(
         except Exception:
             pass  # 缓存失效 → 走下方完整搜索流程
 
-    search_url = f"{cn_base}/search_result?kw={quote(normalized)}"
-    search_html, landed = fetch_html_result(
-        search_url, referer=f"{cn_base}/", cookie=ck, source_id=SOURCE
-    )
-    landed_base = _normalize_cn_base(landed or cn_base)
-
-    hid_href = pick_airav_hid_from_search(search_html, normalized)
+    hid_href = None
+    search_url = ""
+    landed_base = cn_base
+    for kw in candidates:
+        search_url = f"{cn_base}/search_result?kw={quote(kw)}"
+        search_html, landed = fetch_html_result(
+            search_url, referer=f"{cn_base}/", cookie=ck, source_id=SOURCE
+        )
+        landed_base = _normalize_cn_base(landed or cn_base)
+        hid_href = pick_airav_hid_from_search(search_html, normalized)
+        if hid_href:
+            break
     if not hid_href:
         raise RuntimeError("未找到")
     # 第十六轮：记住 hid（实测稳定），重复刮直接走缓存跳过搜索
@@ -415,14 +480,17 @@ def scrape_detail(
     if not detail_url:
         raise RuntimeError("未找到")
     detail_html, detail_landed = fetch_html_result(
-        detail_url, referer=search_url, cookie=ck, source_id=SOURCE
+        detail_url, referer=search_url or f"{cn_base}/", cookie=ck, source_id=SOURCE
     )
     # 若被跳到根站繁体，再强制拉一次 /cn
     if detail_landed and not re.search(r"/cn/", detail_landed, re.I):
         retry = _cn_video_url(detail_landed, cn_base) or detail_url
         if retry and retry != detail_landed:
             html2, landed2 = fetch_html_result(
-                retry, referer=search_url, cookie=ck, source_id=SOURCE
+                retry,
+                referer=search_url or f"{cn_base}/",
+                cookie=ck,
+                source_id=SOURCE,
             )
             if html2 and airav_detail_code_ok(html2, normalized):
                 detail_html, detail_landed = html2, landed2

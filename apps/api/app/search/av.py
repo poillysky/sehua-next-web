@@ -465,8 +465,15 @@ def _china_prefix_set() -> set[str]:
 
 def _parse_std(raw: str) -> ParsedMakerCode | None:
     u = normalize_maker_code(raw).upper()
-    # 先剥国产分集尾巴，番号键只要基号：MDSR-0002-EP3 / MDSR-0002-4 → MDSR-0002
-    u = re.sub(r"[-_\s.](?:EP|E)?[-_\s.]?\d{1,2}$", "", u, flags=re.I)
+    # 先剥分集尾巴，番号键只要基号：MDSR-0002-EP3 / MDSR-0002-4 → MDSR-0002
+    # 注意：(?:EP|E)? 不能写成可选，否则 SONE-15 会被整段剥成 SONE。
+    u = re.sub(r"[-_\s.](?:EP|E)[-_\s.]?\d{1,2}$", "", u, flags=re.I)
+    u = re.sub(
+        r"^([A-Z0-9]+[-_\s.]\d{2,10})[-_\s.]\d{1,2}$",
+        r"\1",
+        u,
+        flags=re.I,
+    )
     m = re.fullmatch(
         r"(?:(\d{2,3}))?([A-Z]{2,20})[-_\s.]?(\d{2,10})(?:[-_\s.]?([A-Z0-9]{1,6}))?",
         u,

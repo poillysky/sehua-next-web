@@ -369,10 +369,12 @@ export function buildEnrichLiveActions(d: EnrichLiveActionDeps) {
     }
   }
 
-  async function resolveItemIdForRow(
+      async function resolveItemIdForRow(
     row: ScrapLibraryEnrichQueueItem,
   ): Promise<string> {
-    const iid = String(row.itemId || '').trim();
+    const iid = String(row.itemId || row.relPath || '')
+      .trim()
+      .replace(/\\/g, '/');
     if (iid) return iid;
     const code = String(row.code || '').trim();
     if (!code) return '';
@@ -382,7 +384,9 @@ export function buildEnrichLiveActions(d: EnrichLiveActionDeps) {
         (it) =>
           String(it.code || '').toUpperCase() === code.toUpperCase(),
       ) || (page.items || [])[0];
-    return String(hit?.itemId || '').trim();
+    return String(hit?.itemId || hit?.relPath || '')
+      .trim()
+      .replace(/\\/g, '/');
   }
 
   async function onRescrapeSelected() {
@@ -406,14 +410,19 @@ export function buildEnrichLiveActions(d: EnrichLiveActionDeps) {
         syncVector: false,
       });
       const result = data.result || {};
+      const errRaw = String(result.error || '').trim();
+      const errZh =
+        errRaw === 'detail_not_found' || errRaw === 'DETAIL_NOT_FOUND'
+          ? '各数据源均未找到该番号'
+          : errRaw;
       const softOk =
         Boolean(result.partialOk) ||
-        String(result.error || '').startsWith('软成功') ||
-        String(result.error || '').startsWith('次成功');
+        errZh.startsWith('软成功') ||
+        errZh.startsWith('次成功');
       const ok = Boolean(
         data.ok &&
           result.ok !== false &&
-          (!result.error || softOk),
+          (!errZh || softOk),
       );
       const resultFields = Array.isArray(result.fields)
         ? (result.fields as ScrapLibraryEnrichFieldRow[])
@@ -423,7 +432,7 @@ export function buildEnrichLiveActions(d: EnrichLiveActionDeps) {
         itemId,
         status: ok ? 'done' : 'fail',
         partialOk: ok ? Boolean(result.partialOk) : false,
-        error: String(result.error || (ok ? '' : '重刮失败')),
+        error: errZh || (ok ? '' : '重刮失败'),
         source: String(result.source || selectedRow.source || ''),
         fetchMs:
           typeof result.fetchMs === 'number'

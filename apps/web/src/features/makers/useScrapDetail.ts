@@ -393,9 +393,10 @@ export function useScrapDetail({
       const one = data.result;
       if (!data.ok || !one?.ok) {
         toast(
-          one?.error === 'detail_not_found'
-            ? '未找到该番号详情源'
-            : one?.error || '刷新失败',
+          one?.error === 'detail_not_found' ||
+            one?.error === '各数据源均未找到该番号'
+          ? '各数据源均未找到该番号'
+          : one?.error || '刷新失败',
           'error',
         );
         return;

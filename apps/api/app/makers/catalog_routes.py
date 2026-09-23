@@ -720,14 +720,59 @@ def _javbus_star(star_id: str, page: int) -> dict[str, Any]:
     return payload
 
 
+def _javbus_slug_matches(slug: str, want: str, candidates: list[str]) -> bool:
+    """列表/search 结果 slug 是否对应当前查询番号。"""
+    from app.scrape_details.common import code_equiv, fold_code
+
+    s = str(slug or "").strip()
+    if not s:
+        return False
+    if code_equiv(s, want):
+        return True
+    fs = fold_code(s)
+    for c in candidates:
+        if not c:
+            continue
+        if code_equiv(s, c) or fs == fold_code(c):
+            return True
+    return False
+
+
+def _javbus_search_detail_path(
+    html: str, want: str, candidates: list[str]
+) -> str | None:
+    """从 search HTML 里挑出详情路径（末段 slug）。"""
+    soup = BeautifulSoup(html or "", "lxml")
+    for a in soup.select("a.movie-box"):
+        href = str(a.get("href") or "").strip()
+        if not href:
+            continue
+        slug = href.rstrip("/").rsplit("/", 1)[-1]
+        if _javbus_slug_matches(slug, want, candidates):
+            return slug
+        # photo-info 里的番号文本（有时与 URL slug 不一致）
+        info = a.select_one(".photo-info")
+        if info:
+            texts = [t.strip() for t in info.stripped_strings if t.strip()]
+            if texts and _javbus_slug_matches(texts[0], want, candidates):
+                return slug
+    return None
+
+
 def _javbus_detail(
     code: str, *, base_url: str = "", cookie: str = ""
 ) -> dict[str, Any]:
-    code = code.strip().upper()
-    key = f"javbus:detail:v4:{code}"
+    from app.scrape_details.common import javbus_code_candidates
+
+    want = str(code or "").strip()
+    display = want.upper()
+    key = f"javbus:detail:v5:{display}"
     hit = _cache_get(key)
     if hit is not None:
         return hit
+    candidates = javbus_code_candidates(want)
+    if not candidates:
+        candidates = [display]
     last_err: Exception | None = None
     bases = list(_javbus_bases())
     pref = (base_url or "").strip().rstrip("/")
@@ -735,249 +780,316 @@ def _javbus_detail(
         bases = [pref] + [b for b in bases if str(b).rstrip("/") != pref]
     # cookie 由 _fetch_html → javbus_cookie / 数据源配置读取；此处仅保证测通链接置顶
     del cookie
-    for base in bases:
-        try:
-            html = _fetch_html(f"{base}/{code}", referer=f"{base}/", fast=True)
-            # 对齐 MDCS parseJavbusDetailHtml：404 页明确报未找到
-            if re.search(
-                r"404|找不到頁面|找不到页面|Page Not Found", html or "", re.I
-            ) and not re.search(
-                r"bigImage|movie-title|class=[\"'][^\"']*container", html or "", re.I
-            ):
-                last_err = RuntimeError("未找到影片")
-                continue
-            if re.search(r"Age Verification|年齡驗證|年龄验证", html or "", re.I) and not re.search(
-                r"bigImage", html or "", re.I
-            ):
-                last_err = RuntimeError(
-                    "需要年龄验证 Cookie（默认 existmag=all; age=verified; dv=1）"
-                )
-                continue
-            soup = BeautifulSoup(html, "lxml")
-            if not soup.select_one(".bigImage, .movie .info"):
-                last_err = RuntimeError("未找到影片")
-                continue
-            h3 = soup.select_one("h3")
-            title = (h3.get_text(" ", strip=True) if h3 else "") or code
-            title = re.sub(rf"^{re.escape(code)}\s+", "", title, flags=re.I).strip() or code
-            big = soup.select_one(".bigImage img, .bigImage")
-            poster = None
-            if big:
-                if big.name == "img":
-                    poster = _abs(base, big.get("src"))
-                else:
-                    poster = _abs(base, big.get("href"))
 
-            info: dict[str, str] = {}
-            info_links: dict[str, list[str]] = {}
-            for p in soup.select(".movie .info p"):
-                lab_el = p.select_one("span.header")
-                lab = (
-                    (lab_el.get_text(strip=True) if lab_el else "")
-                    .replace(":", "")
-                    .replace("：", "")
-                    .strip()
-                )
-                links = [
-                    a.get_text(" ", strip=True)
-                    for a in p.select("a")
-                    if a.get_text(" ", strip=True)
-                ]
+    def _parse_ok(html: str, base: str, path_code: str) -> dict[str, Any] | None:
+        nonlocal last_err
+        # 对齐 MDCS parseJavbusDetailHtml：404 页明确报未找到
+        if re.search(
+            r"404|找不到頁面|找不到页面|Page Not Found", html or "", re.I
+        ) and not re.search(
+            r"bigImage|movie-title|class=[\"'][^\"']*container", html or "", re.I
+        ):
+            last_err = RuntimeError("未找到影片")
+            return None
+        if re.search(r"Age Verification|年齡驗證|年龄验证", html or "", re.I) and not re.search(
+            r"bigImage", html or "", re.I
+        ):
+            last_err = RuntimeError(
+                "需要年龄验证 Cookie（默认 existmag=all; age=verified; dv=1）"
+            )
+            return None
+        soup = BeautifulSoup(html, "lxml")
+        if not soup.select_one(".bigImage, .movie .info"):
+            last_err = RuntimeError("未找到影片")
+            return None
+        # 页面展示番号优先；否则用请求码
+        page_code = display
+        for p in soup.select(".movie .info p"):
+            lab_el = p.select_one("span.header")
+            lab = (
+                (lab_el.get_text(strip=True) if lab_el else "")
+                .replace(":", "")
+                .replace("：", "")
+                .strip()
+            )
+            if any(x in lab for x in ("識別", "识别", "番號", "番号", "Code", "ID")):
                 rest = p.get_text(" ", strip=True)
                 if lab:
                     rest = rest.replace(lab, "", 1).lstrip(":： ").strip()
-                    info[lab] = rest
-                    if links:
-                        info_links[lab] = links
+                if rest:
+                    page_code = rest.upper()
+                break
+        h3 = soup.select_one("h3")
+        title = (h3.get_text(" ", strip=True) if h3 else "") or page_code
+        title = (
+            re.sub(rf"^{re.escape(page_code)}\s+", "", title, flags=re.I).strip()
+            or re.sub(rf"^{re.escape(path_code)}\s+", "", title, flags=re.I).strip()
+            or page_code
+        )
+        big = soup.select_one(".bigImage img, .bigImage")
+        poster = None
+        if big:
+            if big.name == "img":
+                poster = _abs(base, big.get("src"))
+            else:
+                poster = _abs(base, big.get("href"))
 
-            def _pick(*keys: str) -> str:
-                for k, v in info.items():
-                    if any(x in k for x in keys):
-                        return (v or "").strip()
-                return ""
+        info: dict[str, str] = {}
+        info_links: dict[str, list[str]] = {}
+        for p in soup.select(".movie .info p"):
+            lab_el = p.select_one("span.header")
+            lab = (
+                (lab_el.get_text(strip=True) if lab_el else "")
+                .replace(":", "")
+                .replace("：", "")
+                .strip()
+            )
+            links = [
+                a.get_text(" ", strip=True)
+                for a in p.select("a")
+                if a.get_text(" ", strip=True)
+            ]
+            rest = p.get_text(" ", strip=True)
+            if lab:
+                rest = rest.replace(lab, "", 1).lstrip(":： ").strip()
+                info[lab] = rest
+                if links:
+                    info_links[lab] = links
 
-            def _pick_links(*keys: str) -> list[str]:
-                for k, links in info_links.items():
-                    if any(x in k for x in keys):
-                        return [x for x in links if x]
-                return []
+        def _pick(*keys: str) -> str:
+            for k, v in info.items():
+                if any(x in k for x in keys):
+                    return (v or "").strip()
+            return ""
 
-            date_s = _pick("日期", "Date", "發行", "发行")
-            # 長度：120分鐘
-            runtime_raw = _pick("長度", "长度", "Runtime", "Duration", "時長", "时长")
-            runtime_m: int | None = None
-            m = re.search(r"(\d+)\s*分", runtime_raw) or re.search(r"(\d+)", runtime_raw)
-            if m:
-                try:
-                    runtime_m = int(m.group(1))
-                except ValueError:
-                    runtime_m = None
-            director = _pick("導演", "导演", "Director")
-            maker = _pick("製作", "制作", "Maker", "Studio")
-            # 製作商常带链接文字
-            maker_links = _pick_links("製作", "制作", "Maker", "Studio")
-            if maker_links:
-                maker = maker_links[0]
-            publisher = _pick("發行商", "发行商", "Label", "Publisher")
-            pub_links = _pick_links("發行商", "发行商", "Label", "Publisher")
-            if pub_links:
-                publisher = pub_links[0]
-            series = _pick("系列", "Series")
-            series_links = _pick_links("系列", "Series")
-            if series_links:
-                series = series_links[0]
-            tags = _pick_links("類別", "类别", "Genre", "Tags")
-            if not tags:
-                # JavBus：類別标题是 <p class="header">，标签在下一行 span.genre a
-                tags = [
-                    a.get_text(" ", strip=True)
-                    for a in soup.select(
-                        ".movie .info span.genre a, .movie .info .genre a, span.genre a"
-                    )
-                    if a.get_text(" ", strip=True)
-                ]
-            if not tags:
-                for k, v in info.items():
-                    if any(x in k for x in ("類別", "类别", "Genre")):
-                        tags = [t for t in re.split(r"[\s,，、]+", v) if t]
-                        break
-            # 去重保序
-            seen_tags: set[str] = set()
-            tags_uniq: list[str] = []
-            for t in tags:
-                if t in seen_tags:
-                    continue
-                seen_tags.add(t)
-                tags_uniq.append(t)
-            tags = tags_uniq
+        def _pick_links(*keys: str) -> list[str]:
+            for k, links in info_links.items():
+                if any(x in k for x in keys):
+                    return [x for x in links if x]
+            return []
 
-            # 女优：info 链接 + 头像瀑布 + /star/ 锚点
-            actors = _pick_links("女優", "女优", "Actor", "Actors", "演員", "演员")
-            cast: list[dict[str, Any]] = []
-            seen_names: set[str] = set()
-            star_rows: dict[str, dict[str, Any]] = {}
+        date_s = _pick("日期", "Date", "發行", "发行")
+        # 長度：120分鐘
+        runtime_raw = _pick("長度", "长度", "Runtime", "Duration", "時長", "时长")
+        runtime_m: int | None = None
+        m = re.search(r"(\d+)\s*分", runtime_raw) or re.search(r"(\d+)", runtime_raw)
+        if m:
+            try:
+                runtime_m = int(m.group(1))
+            except ValueError:
+                runtime_m = None
+        director = _pick("導演", "导演", "Director")
+        maker = _pick("製作", "制作", "Maker", "Studio")
+        # 製作商常带链接文字
+        maker_links = _pick_links("製作", "制作", "Maker", "Studio")
+        if maker_links:
+            maker = maker_links[0]
+        publisher = _pick("發行商", "发行商", "Label", "Publisher")
+        pub_links = _pick_links("發行商", "发行商", "Label", "Publisher")
+        if pub_links:
+            publisher = pub_links[0]
+        series = _pick("系列", "Series")
+        series_links = _pick_links("系列", "Series")
+        if series_links:
+            series = series_links[0]
+        tags = _pick_links("類別", "类别", "Genre", "Tags")
+        if not tags:
+            # JavBus：類別标题是 <p class="header">，标签在下一行 span.genre a
+            tags = [
+                a.get_text(" ", strip=True)
+                for a in soup.select(
+                    ".movie .info span.genre a, .movie .info .genre a, span.genre a"
+                )
+                if a.get_text(" ", strip=True)
+            ]
+        if not tags:
+            for k, v in info.items():
+                if any(x in k for x in ("類別", "类别", "Genre")):
+                    tags = [t for t in re.split(r"[\s,，、]+", v) if t]
+                    break
+        # 去重保序
+        seen_tags: set[str] = set()
+        tags_uniq: list[str] = []
+        for t in tags:
+            if t in seen_tags:
+                continue
+            seen_tags.add(t)
+            tags_uniq.append(t)
+        tags = tags_uniq
 
-            def _star_id(href: str | None) -> str | None:
-                m = re.search(r"/star/([^/?#]+)", str(href or ""), re.I)
-                return m.group(1).strip() if m else None
+        # 女优：info 链接 + 头像瀑布 + /star/ 锚点
+        actors = _pick_links("女優", "女优", "Actor", "Actors", "演員", "演员")
+        cast: list[dict[str, Any]] = []
+        seen_names: set[str] = set()
+        star_rows: dict[str, dict[str, Any]] = {}
 
-            def _add_cast(
-                name: str,
-                *,
-                avatar: str | None = None,
-                star_id: str | None = None,
-            ) -> None:
-                name = re.sub(r"\s+", " ", (name or "").strip())
-                # 去掉「本名（别名）」/ 半截「本名（」，避免瀑布 span 与 img title 重复
-                name = re.sub(r"\s*[\(（][^)）]*[\)）]\s*$", "", name).strip()
-                name = re.sub(r"\s*[\(（][^)）]*$", "", name).strip()
-                name = name.rstrip("（(").strip()
-                if not name:
+        def _star_id(href: str | None) -> str | None:
+            m = re.search(r"/star/([^/?#]+)", str(href or ""), re.I)
+            return m.group(1).strip() if m else None
+
+        def _add_cast(
+            name: str,
+            *,
+            avatar: str | None = None,
+            star_id: str | None = None,
+        ) -> None:
+            name = re.sub(r"\s+", " ", (name or "").strip())
+            # 去掉「本名（别名）」/ 半截「本名（」，避免瀑布 span 与 img title 重复
+            name = re.sub(r"\s*[\(（][^)）]*[\)）]\s*$", "", name).strip()
+            name = re.sub(r"\s*[\(（][^)）]*$", "", name).strip()
+            name = name.rstrip("（(").strip()
+            if not name:
+                return
+            # 同一 star_id 只能是一个人：javbus 同一女优会在头像瀑布 span（全名）、
+            # 裸 a[href*="/star/"] 锚点（常被站点截断）等处给出不同显示文本。
+            # 只按名字去重会让同一人变两条（案例 BONY-012 `ありすがわりな`+`ありすがわ`、
+            # OERO-009 `きょうこさん`+`きょうこさ`，两者 star_id 相同）→ 同号内计数虚高。
+            # 取**显示名更长**的那条，短的是截断。
+            prev = star_rows.get(star_id) if star_id else None
+            if prev is not None:
+                old = str(prev.get("name") or "")
+                if len(name) <= len(old):
                     return
-                # 同一 star_id 只能是一个人：javbus 同一女优会在头像瀑布 span（全名）、
-                # 裸 a[href*="/star/"] 锚点（常被站点截断）等处给出不同显示文本。
-                # 只按名字去重会让同一人变两条（案例 BONY-012 `ありすがわりな`+`ありすがわ`、
-                # OERO-009 `きょうこさん`+`きょうこさ`，两者 star_id 相同）→ 同号内计数虚高。
-                # 取**显示名更长**的那条，短的是截断。
-                prev = star_rows.get(star_id) if star_id else None
-                if prev is not None:
-                    old = str(prev.get("name") or "")
-                    if len(name) <= len(old):
-                        return
-                    prev["name"] = name
-                    if avatar and not prev.get("avatarUrl"):
-                        prev["avatarUrl"] = avatar
-                    seen_names.discard(old)
-                    seen_names.add(name)
-                    if old in actors:
-                        actors[actors.index(old)] = name
-                    if name not in actors:
-                        actors.append(name)
-                    return
-                if name in seen_names:
-                    return
+                prev["name"] = name
+                if avatar and not prev.get("avatarUrl"):
+                    prev["avatarUrl"] = avatar
+                seen_names.discard(old)
                 seen_names.add(name)
+                if old in actors:
+                    actors[actors.index(old)] = name
                 if name not in actors:
                     actors.append(name)
-                row: dict[str, Any] = {"name": name, "avatarUrl": avatar}
-                if star_id:
-                    row["id"] = star_id
-                    star_rows[star_id] = row
-                cast.append(row)
+                return
+            if name in seen_names:
+                return
+            seen_names.add(name)
+            if name not in actors:
+                actors.append(name)
+            row: dict[str, Any] = {"name": name, "avatarUrl": avatar}
+            if star_id:
+                row["id"] = star_id
+                star_rows[star_id] = row
+            cast.append(row)
 
-            for box in soup.select(
-                "#avatar-waterfall .avatar-box, #avatar-waterfall a.avatar-box, "
-                "#avatar-waterfall a"
+        for box in soup.select(
+            "#avatar-waterfall .avatar-box, #avatar-waterfall a.avatar-box, "
+            "#avatar-waterfall a"
+        ):
+            name_el = box.select_one(".star-name, span")
+            name = (
+                (name_el.get_text(" ", strip=True) if name_el else "")
+                or box.get_text(" ", strip=True)
+                or ""
+            )
+            img = box.select_one("img")
+            # JavBus 常把完整「本名（别名）」放在 img title，span 却截成「本名（」
+            img_title = ""
+            if img is not None:
+                img_title = str(img.get("title") or img.get("alt") or "").strip()
+            if img_title and (
+                name.endswith(("（", "("))
+                or (
+                    len(img_title) > len(name)
+                    and name.rstrip("（(")
+                    and name.rstrip("（(") in img_title
+                )
             ):
-                name_el = box.select_one(".star-name, span")
-                name = (
-                    (name_el.get_text(" ", strip=True) if name_el else "")
-                    or box.get_text(" ", strip=True)
-                    or ""
-                )
-                img = box.select_one("img")
-                # JavBus 常把完整「本名（别名）」放在 img title，span 却截成「本名（」
-                img_title = ""
-                if img is not None:
-                    img_title = str(img.get("title") or img.get("alt") or "").strip()
-                if img_title and (
-                    name.endswith(("（", "("))
-                    or (len(img_title) > len(name) and name.rstrip("（(") and name.rstrip("（(") in img_title)
-                ):
-                    name = img_title
-                avatar = _abs(base, img.get("src") or img.get("data-src")) if img else None
-                href = box.get("href") if hasattr(box, "get") else None
-                if not href and box.parent and getattr(box.parent, "name", None) == "a":
-                    href = box.parent.get("href")
-                _add_cast(name, avatar=avatar, star_id=_star_id(href))
-            for a in soup.select('.movie .info a[href*="/star/"], a[href*="/star/"]'):
-                _add_cast(
-                    a.get_text(" ", strip=True),
-                    star_id=_star_id(a.get("href")),
-                )
-            for name in actors:
-                _add_cast(name)
+                name = img_title
+            avatar = _abs(base, img.get("src") or img.get("data-src")) if img else None
+            href = box.get("href") if hasattr(box, "get") else None
+            if not href and box.parent and getattr(box.parent, "name", None) == "a":
+                href = box.parent.get("href")
+            _add_cast(name, avatar=avatar, star_id=_star_id(href))
+        for a in soup.select('.movie .info a[href*="/star/"], a[href*="/star/"]'):
+            _add_cast(
+                a.get_text(" ", strip=True),
+                star_id=_star_id(a.get("href")),
+            )
+        for name in actors:
+            _add_cast(name)
 
-            # 样品图
-            samples: list[str] = []
-            for a in soup.select("#sample-waterfall a.sample-box, #sample-waterfall a"):
-                href = a.get("href") or ""
-                url = _abs(base, href)
+        # 样品图
+        samples: list[str] = []
+        for a in soup.select("#sample-waterfall a.sample-box, #sample-waterfall a"):
+            href = a.get("href") or ""
+            url = _abs(base, href)
+            if url and url not in samples:
+                samples.append(url)
+        if not samples:
+            for img in soup.select("#sample-waterfall img"):
+                url = _abs(base, img.get("src") or img.get("data-src"))
                 if url and url not in samples:
                     samples.append(url)
-            if not samples:
-                for img in soup.select("#sample-waterfall img"):
-                    url = _abs(base, img.get("src") or img.get("data-src"))
-                    if url and url not in samples:
-                        samples.append(url)
 
-            studio = maker or publisher or None
-            item = _item(
-                source="javbus",
-                id_=code,
-                title=title,
-                code=code,
-                poster=poster,
-                year=_year_from(date_s),
-                date=date_s or None,
-                studio=studio,
-                actors=actors[:20],
-                tags=tags[:24],
-            )
-            item["runtime"] = runtime_m
-            item["director"] = director or None
-            item["maker"] = maker or None
-            item["publisher"] = publisher or None
-            item["series"] = series or None
-            item["cast"] = cast[:20]
-            item["samples"] = samples[:24]
-            item["provider"] = "javbus"
-            _remember_javbus(base)
-            _cache_set(key, item)
-            return item
-        except Exception as e:
-            last_err = e
-            log.warning("javbus detail %s @ %s: %s", code, base, e)
+        studio = maker or publisher or None
+        item = _item(
+            source="javbus",
+            id_=page_code,
+            title=title,
+            code=page_code,
+            poster=poster,
+            year=_year_from(date_s),
+            date=date_s or None,
+            studio=studio,
+            actors=actors[:20],
+            tags=tags[:24],
+        )
+        item["runtime"] = runtime_m
+        item["director"] = director or None
+        item["maker"] = maker or None
+        item["publisher"] = publisher or None
+        item["series"] = series or None
+        item["cast"] = cast[:20]
+        item["samples"] = samples[:24]
+        item["provider"] = "javbus"
+        return item
+
+    # 1) 直接路径：补零 / date6 slug 变体
+    for base in bases:
+        for cand in candidates:
+            path = quote(str(cand).strip(), safe="-_.~")
+            try:
+                html = _fetch_html(f"{base}/{path}", referer=f"{base}/", fast=True)
+                item = _parse_ok(html, base, str(cand))
+                if item is not None:
+                    _remember_javbus(base)
+                    _cache_set(key, item)
+                    return item
+            except Exception as e:
+                last_err = e
+                log.warning("javbus detail %s @ %s/%s: %s", display, base, cand, e)
+
+    # 2) search 回退（有码 /search、无码 /uncensored/search）
+    search_queries: list[str] = []
+    for c in candidates:
+        if c and c not in search_queries:
+            search_queries.append(c)
+        if len(search_queries) >= 6:
+            break
+    for base in bases:
+        for q in search_queries:
+            enc = quote(q)
+            for spath in (f"/search/{enc}", f"/uncensored/search/{enc}"):
+                try:
+                    html = _fetch_html(f"{base}{spath}", referer=f"{base}/", fast=True)
+                    slug = _javbus_search_detail_path(html, want, candidates)
+                    if not slug:
+                        continue
+                    path = quote(slug, safe="-_.~")
+                    detail_html = _fetch_html(
+                        f"{base}/{path}", referer=f"{base}{spath}", fast=True
+                    )
+                    item = _parse_ok(detail_html, base, slug)
+                    if item is not None:
+                        _remember_javbus(base)
+                        _cache_set(key, item)
+                        return item
+                except Exception as e:
+                    last_err = e
+                    log.warning(
+                        "javbus search-detail %s @ %s%s: %s", display, base, spath, e
+                    )
+
     raise HTTPException(
         status_code=502,
         detail=f"详情失败: {last_err}" if last_err else "未找到",

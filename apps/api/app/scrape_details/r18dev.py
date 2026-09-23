@@ -7,7 +7,7 @@ import re
 from typing import Any
 from urllib.parse import quote
 
-from .common import fetch_json, make_detail, std_code
+from .common import code_equiv, fetch_json, make_detail, std_code
 from app.core.maps_paths import load_json_map
 
 API_BASE = "https://r18.dev"
@@ -18,6 +18,32 @@ CONTENT_ID_PREFIXES: dict[str, list[str]] = {
     for k, v in dict(load_json_map("r18-content-id-prefixes.json")).items()
 }
 
+
+def r18dev_code_candidates(code: str) -> list[str]:
+    """检索用番号：原串 / 素人剥板号 / pad3·4（DVD id 查询侧会再压成 5 位）。"""
+    raw = str(code or "").strip()
+    if not raw:
+        return []
+    out: list[str] = []
+
+    def _add(val: str) -> None:
+        s = str(val or "").strip().upper()
+        if s and s not in out:
+            out.append(s)
+
+    _add(raw)
+    _add(std_code(raw))
+    try:
+        from app.search.av import parse_maker_code, std_code_key
+
+        parsed = parse_maker_code(raw)
+        if parsed and parsed.canonical:
+            _add(parsed.canonical)
+            _add(std_code_key(parsed.canonical, pad=3))
+            _add(std_code_key(parsed.canonical, pad=4))
+    except Exception:  # noqa: BLE001
+        pass
+    return out
 
 
 def _normalize_r18_id(id_: str) -> str:
@@ -34,19 +60,38 @@ def _parse_series_number(id_: str) -> tuple[str, str]:
     return (m.group(1), m.group(2)) if m else ("", "")
 
 
+def _series_number_for_match(code: str) -> tuple[str, str]:
+    """字母+数字；板号形先剥成 canonical 再拆。"""
+    series, num = _parse_series_number(code)
+    if series and num:
+        return series, num
+    try:
+        from app.search.av import parse_maker_code
+
+        parsed = parse_maker_code(code)
+        if parsed and parsed.canonical:
+            return _parse_series_number(parsed.canonical)
+    except Exception:  # noqa: BLE001
+        pass
+    return "", ""
+
+
 def _r18_detail_matches_code(detail: dict[str, Any] | None, code: str) -> bool:
-    """拒绝 dvd_id=juk00400 却命中 content_id=juk004（JUK-004）这类错配。"""
-    if not isinstance(detail, dict):
+    """拒绝 dvd_id=juk00400 却命中 content_id=juk004（JUK-004）这类错配。
+
+    空响应 / 无法解析的板号番号不得放行（旧逻辑对 ``259LUXU`` 会 ``return True``）。
+    """
+    if not isinstance(detail, dict) or not detail:
         return False
     want = std_code(code)
     if not want:
         return False
     dvd = str(detail.get("dvd_id") or "").strip()
     if dvd:
-        return std_code(dvd) == want
-    series, num = _parse_series_number(code)
+        return code_equiv(dvd, want)
+    series, num = _series_number_for_match(code)
     if not series or not num:
-        return True
+        return False
     cid = str(detail.get("content_id") or "").strip().lower()
     if not cid:
         return False
@@ -85,6 +130,7 @@ def _build_combined_url(content_id: str) -> str:
 
 
 def _resolve_detail_url(search: dict[str, Any], code: str) -> str | None:
+    del code
     content_id = search.get("content_id") or search.get("dvd_id")
     if not content_id:
         return None
@@ -245,22 +291,25 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
 
     detail: dict[str, Any] | None = None
 
-    search = _fetch_r18_json(_build_dvd_search_url(trimmed), cookie)
-    if search and _r18_detail_matches_code(search, trimmed):
-        detail_url = _resolve_detail_url(search, trimmed) or ""
-        if detail_url:
-            hit = _fetch_r18_json(detail_url, cookie)
-            if hit and _r18_detail_matches_code(hit, trimmed):
-                detail = hit
-        if not (detail and (detail.get("title_ja") or detail.get("title_en"))) and search.get(
-            "title_ja"
-        ):
-            detail = search
-    elif search and not _r18_detail_matches_code(search, trimmed):
-        search = None
+    for cand in r18dev_code_candidates(trimmed):
+        search = _fetch_r18_json(_build_dvd_search_url(cand), cookie)
+        if search and _r18_detail_matches_code(search, trimmed):
+            detail_url = _resolve_detail_url(search, trimmed) or ""
+            if detail_url:
+                hit = _fetch_r18_json(detail_url, cookie)
+                if hit and _r18_detail_matches_code(hit, trimmed):
+                    detail = hit
+            if not (detail and (detail.get("title_ja") or detail.get("title_en"))) and search.get(
+                "title_ja"
+            ):
+                detail = search
+        elif search and not _r18_detail_matches_code(search, trimmed):
+            search = None
 
-    if not detail or not (detail.get("dvd_id") or detail.get("title_ja") or detail.get("title_en")):
-        for cid in _generate_content_id_variations(trimmed):
+        if detail and (detail.get("dvd_id") or detail.get("title_ja") or detail.get("title_en")):
+            break
+
+        for cid in _generate_content_id_variations(cand):
             hit = _fetch_r18_json(_build_combined_url(cid), cookie)
             if not hit or not _r18_detail_matches_code(hit, trimmed):
                 continue
@@ -269,6 +318,8 @@ def scrape_detail(code: str, *, base_url: str = "", cookie: str = "", api_key: s
             ):
                 detail = hit
                 break
+        if detail and _r18_detail_matches_code(detail, trimmed):
+            break
 
     if not detail or not _r18_detail_matches_code(detail, trimmed):
         raise RuntimeError("未找到")

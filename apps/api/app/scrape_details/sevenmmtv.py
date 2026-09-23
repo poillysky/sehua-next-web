@@ -10,6 +10,8 @@ from urllib.parse import quote
 from .common import (
     abs_url,
     clean_title,
+    code_equiv,
+    date6_search_variants,
     fetch_html,
     fetch_html_result,
     folded_code_matches,
@@ -17,6 +19,7 @@ from .common import (
     is_junk_title,
     make_detail,
     page_mentions_code,
+    parse_fc2_id,
     pick_og_image,
     pick_og_title,
     std_code,
@@ -33,8 +36,54 @@ def _root(base_url: str) -> str:
     return re.sub(r"/zh/?$", "", str(base_url or DEFAULT_BASE).rstrip("/"), flags=re.I)
 
 
+def sevenmmtv_code_candidates(code: str) -> list[str]:
+    """搜索词候选：原串 / 素人剥板号 / 无码 date6 / FC2（含裸数字 id）。"""
+    raw = str(code or "").strip()
+    if not raw:
+        return []
+    out: list[str] = []
+
+    def _add(val: str) -> None:
+        s = str(val or "").strip()
+        if s and s not in out:
+            out.append(s)
+
+    _add(raw)
+    _add(std_code(raw))
+    try:
+        from app.search.av import parse_maker_code, std_code_key
+
+        parsed = parse_maker_code(raw)
+        if parsed and parsed.canonical:
+            _add(parsed.canonical)
+            _add(std_code_key(parsed.canonical, pad=3))
+            _add(std_code_key(parsed.canonical, pad=4))
+    except Exception:  # noqa: BLE001
+        pass
+    for v in date6_search_variants(raw):
+        _add(v)
+    fc2 = parse_fc2_id(raw)
+    if fc2:
+        fid, canon = fc2
+        _add(canon)
+        _add(f"FC2-PPV-{fid}")
+        _add(f"fc2-ppv-{fid}")
+        _add(fid)  # 搜索 ``976194`` 才能命中 ``fc2-ppv-976194``
+    return out
+
+
+def _href_matches_code(href: str, code: str) -> bool:
+    """slug 含板号/FC2-PPV 时用 ``code_equiv``；否则回落 folded endswith。"""
+    path = str(href or "").split("?")[0].split("#")[0]
+    slug = path.rsplit("/", 1)[-1]
+    slug = re.sub(r"\.html?$", "", slug, flags=re.I)
+    if slug and code_equiv(slug, code):
+        return True
+    return folded_code_matches(href, code, mode="endswith")
+
+
 def pick_sevenmmtv_detail_href(html: str, code: str) -> str:
-    """有码优先；必须折叠命中番号，禁止无番号 first-hit。"""
+    """有码优先；必须番号等价命中，禁止无番号 first-hit（``…/content.html``）。"""
     hrefs = [
         m.group(1)
         for m in re.finditer(
@@ -45,7 +94,7 @@ def pick_sevenmmtv_detail_href(html: str, code: str) -> str:
     ]
     scored: list[tuple[int, str]] = []
     for h in dict.fromkeys(hrefs):
-        if not folded_code_matches(h, code, mode="endswith"):
+        if not _href_matches_code(h, code):
             continue
         score = 0
         if re.search(r"censored_content", h, re.I) and not re.search(r"reducing", h, re.I):
@@ -61,7 +110,6 @@ def pick_sevenmmtv_detail_href(html: str, code: str) -> str:
         scored.append((score, h))
     scored.sort(key=lambda x: x[0], reverse=True)
     return scored[0][1] if scored else ""
-
 
 def normalize_sevenmmtv_title(raw: str, web_number: str) -> str:
     title = re.sub(r"\s+", " ", str(raw or "")).strip()
@@ -243,37 +291,41 @@ def parse_sevenmmtv_detail(html: str, page_url: str, code: str) -> dict[str, Any
 
 def _search_detail_path(root: str, code: str, *, cookie: str = "") -> str:
     ck = cookie or None
-    for search_url in (
-        f"{root}/zh/searchall_search/all/{quote(code)}/1.html",
-        f"{root}/zh/searchform_search/all/{quote(code)}/1.html",
-    ):
+    for cand in sevenmmtv_code_candidates(code):
+        for search_url in (
+            f"{root}/zh/searchall_search/all/{quote(cand)}/1.html",
+            f"{root}/zh/searchform_search/all/{quote(cand)}/1.html",
+        ):
+            try:
+                html = fetch_html(
+                    search_url, referer=f"{root}/zh/", cookie=ck, source_id=SOURCE
+                )
+            except Exception:
+                continue
+            # 用原始请求番号做等价匹配（cand 可能是裸 FC2 id）
+            path = pick_sevenmmtv_detail_href(html or "", code)
+            if path:
+                return path
+
+        # POST 搜索兜底（每个候选词试一次）
         try:
-            html = fetch_html(
-                search_url, referer=f"{root}/zh/", cookie=ck, source_id=SOURCE
+            from .common import fetch_post_form
+
+            body = f"search_keyword={quote(cand)}&search_type=searchall&op=search"
+            search_html = fetch_post_form(
+                f"{root}/zh/searchform_search/all/index.html",
+                body,
+                referer=f"{root}/zh/",
+                cookie=ck,
+                source_id=SOURCE,
+                timeout=20.0,
             )
+            path = pick_sevenmmtv_detail_href(search_html or "", code)
+            if path:
+                return path
         except Exception:
             continue
-        path = pick_sevenmmtv_detail_href(html or "", code)
-        if path:
-            return path
-
-    # POST 搜索兜底
-    try:
-        from .common import fetch_post_form
-
-        body = f"search_keyword={quote(code)}&search_type=searchall&op=search"
-        search_html = fetch_post_form(
-            f"{root}/zh/searchform_search/all/index.html",
-            body,
-            referer=f"{root}/zh/",
-            cookie=ck,
-            source_id=SOURCE,
-            timeout=20.0,
-        )
-        return pick_sevenmmtv_detail_href(search_html or "", code)
-    except Exception:
-        return ""
-
+    return ""
 
 def scrape_detail(
     code: str, *, base_url: str = "", cookie: str = "", api_key: str = ""

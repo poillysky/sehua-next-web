@@ -671,7 +671,7 @@ def _merge_got(
         field_sources["poster"] = ""
 
     # 女优：跨源「共识」合并——先各源映射到标准名，再按出现源数投票。
-    # 避免 javlibrary 错页女优与正确源并集成一长串（SDMUA-008 案例）。
+    # 避免单源错页女优与正确源并集成一长串（SDMUA-008 案例）。
     # 身份门禁已清空的源（无 title）不参与女优投票。
     actors_out: list[str] = []
     rejected_set = {str(x) for x in (rejected_ids or [])}
@@ -1431,7 +1431,9 @@ def merge_nfo_with_detail(
     except Exception:  # noqa: BLE001
         pass
     if _force("actors"):
-        fields["actors"] = list(actors)
+        # 覆盖：源有女优才替换；源空则保留原 NFO，避免重刮把已挂女优清空
+        if actors:
+            fields["actors"] = list(actors)
     elif actors:
         existing = [str(a).strip() for a in (fields.get("actors") or []) if str(a).strip()]
         # 已有 actor 也滤一遍垃圾标签

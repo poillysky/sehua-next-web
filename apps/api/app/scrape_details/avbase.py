@@ -10,15 +10,51 @@ from urllib.parse import quote
 
 from .common import (
     abs_url,
+    append_amateur_board_variants,
+    append_std_pad_variants,
     clean_title,
+    date6_search_variants,
     fetch_html,
     is_junk_cover_url,
     make_detail,
+    parse_fc2_id,
     std_code,
 )
 
 DEFAULT_BASE = "https://www.avbase.net"
 SOURCE = "avbase"
+
+
+def avbase_code_candidates(code: str) -> list[str]:
+    """直链 / 搜索词：pad / 素人加剥板 / FC2-PPV / 无码 date6。"""
+    raw = str(code or "").strip()
+    if not raw:
+        return []
+    out: list[str] = []
+
+    def _add(val: str) -> None:
+        s = str(val or "").strip()
+        if not s:
+            return
+        if "_" in s and re.search(r"\d{6}_\d+", s):
+            u = s
+        else:
+            u = std_code(s) or s
+        if u and u not in out:
+            out.append(u)
+
+    _add(raw)
+    append_std_pad_variants(_add, raw)
+    append_amateur_board_variants(_add, raw)
+    for v in date6_search_variants(raw):
+        _add(v)
+    fc2 = parse_fc2_id(raw)
+    if fc2:
+        fid, canon = fc2
+        _add(canon)
+        _add(f"FC2-PPV-{fid}")
+        _add(f"FC2-{fid}")
+    return out
 
 
 def is_avbase_actor_name(name: str) -> bool:
@@ -31,9 +67,13 @@ def is_avbase_actor_name(name: str) -> bool:
 
 
 def match_avbase_work_id(work_id: str, code: str) -> bool:
-    a = str(work_id or "").strip().upper()
-    b = std_code(code).upper()
-    return bool(a and b and a == b)
+    """work_id 与查询番号等价（含 pad / 素人板号）；带 ``source:CODE`` 前缀的异源条目不认。"""
+    from .common import code_equiv
+
+    raw = str(work_id or "").strip()
+    if not raw or ":" in raw:
+        return False
+    return code_equiv(raw, code)
 
 
 def parse_avbase_next_data(html: str) -> dict[str, Any] | None:
@@ -264,28 +304,38 @@ def scrape_detail(
         raise RuntimeError("番号为空")
     ck = cookie or None
     referer = f"{base}/"
+    candidates = avbase_code_candidates(code) or [std]
 
-    for path in (f"/works/{quote(std)}", f"/works/{quote(std.lower())}"):
-        url = f"{base}{path}"
+    seen_paths: set[str] = set()
+    for cand in candidates:
+        for path in (f"/works/{quote(cand)}", f"/works/{quote(cand.lower())}"):
+            if path in seen_paths:
+                continue
+            seen_paths.add(path)
+            url = f"{base}{path}"
+            try:
+                html = fetch_html(url, referer=referer, cookie=ck, source_id=SOURCE)
+            except RuntimeError:
+                continue
+            if len(html) < 500:
+                continue
+            parsed = parse_avbase_detail_html(html, url, std)
+            if parsed:
+                return parsed
+
+    work = None
+    search_url = ""
+    for cand in candidates:
+        search_url = f"{base}/works?q={quote(cand)}"
         try:
-            html = fetch_html(url, referer=referer, cookie=ck, source_id=SOURCE)
+            search_html = fetch_html(
+                search_url, referer=referer, cookie=ck, source_id=SOURCE
+            )
         except RuntimeError:
             continue
-        if len(html) < 500:
-            continue
-        parsed = parse_avbase_detail_html(html, url, std)
-        if parsed:
-            return parsed
-
-    search_url = f"{base}/works?q={quote(std)}"
-    try:
-        search_html = fetch_html(
-            search_url, referer=referer, cookie=ck, source_id=SOURCE
-        )
-    except RuntimeError as e:
-        raise RuntimeError("搜索无响应") from e
-
-    work = parse_avbase_search_html(search_html, std)
+        work = parse_avbase_search_html(search_html, std)
+        if work:
+            break
     if not work:
         raise RuntimeError("未找到")
 
@@ -295,7 +345,7 @@ def scrape_detail(
         detail_url = abs_url(detail_path, base) or f"{base}{detail_path}"
         try:
             detail_html = fetch_html(
-                detail_url, referer=search_url, cookie=ck, source_id=SOURCE
+                detail_url, referer=search_url or referer, cookie=ck, source_id=SOURCE
             )
             parsed = parse_avbase_detail_html(detail_html, detail_url, std)
             if parsed:
@@ -303,7 +353,7 @@ def scrape_detail(
         except RuntimeError:
             pass
 
-    from_search = parse_avbase_work(work, search_url, std)
+    from_search = parse_avbase_work(work, search_url or referer, std)
     if not from_search:
         raise RuntimeError("未找到")
     return from_search

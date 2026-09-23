@@ -73,6 +73,9 @@ def _detail_usable(detail: dict[str, Any] | None, *, code: str) -> bool:
         return True
     if tags and code_in_title and len(title) > len(code_u) + 2:
         return True
+    # 长实标题即可用（FC2 聚合站常无 poster 字段；盾页/停车场已被 junk markers 拦住）
+    if len(title) >= 12 and not _enrich._title_is_thin(title, code_u):
+        return True
     return False
 
 

@@ -1733,10 +1733,7 @@ def _payload_field_code(payload: dict[str, Any] | None) -> str:
 
 
 def _queue_log_demote_false_dones(region: str) -> int:
-    """成功/软成功/失败但无本地目录或字段番号串号 → 退回 pending 重刮。
-
-    磁盘校验在连接外做：持连接扫 10 万行会锁死其它状态接口。
-    """
+    """假成功/假失败校正：无目录或串号 → pending；有目录但无封面 → fail（不进未处理）。"""
     rid = _enrich._queue_log_region(region)
     if not rid:
         return 0
@@ -1750,101 +1747,142 @@ def _queue_log_demote_false_dones(region: str) -> int:
                     """
                     SELECT id, code, item_id, error, gaps_json, payload_json, status
                     FROM enrich_queue_log
-                    WHERE region=? AND status IN ('done', 'fail')
+                    WHERE region=? AND status IN ('done', 'fail', 'pending')
                     """,
                     (rid,),
                 ).fetchall()
                 or []
             )
-        # 连接已释放；下面只做磁盘判定
-        updates: list[tuple[str, str, str, int]] = []
-        for raw in rows:
-            if isinstance(raw, dict):
-                lid = int(raw.get("id") or 0)
-                code = str(raw.get("code") or "").strip().upper()
-                iid = str(raw.get("item_id") or "").strip()
-                payload_raw = raw.get("payload_json")
-                st = str(raw.get("status") or "").strip().lower()
-            else:
-                lid = int(raw[0] or 0)
-                code = str(raw[1] or "").strip().upper()
-                iid = str(raw[2] or "").strip()
-                payload_raw = raw[5]
-                st = str(raw[6] if len(raw) > 6 else "").strip().lower()
-            if lid <= 0:
-                continue
-            try:
-                payload = (
-                    json.loads(payload_raw)
-                    if isinstance(payload_raw, str)
-                    else (payload_raw if isinstance(payload_raw, dict) else {})
-                )
-            except Exception:  # noqa: BLE001
-                payload = {}
-            if not isinstance(payload, dict):
-                payload = {}
-            field_code = _payload_field_code(payload)
-            code_mismatch = bool(field_code and code and field_code != code)
-            folder = _enrich_detail._resolve_enrich_folder(
-                region=rid, code=code, item_id=iid
-            )
-            missing_disk = folder is None or not _enrich_cover._local_poster_ok(folder)
-            # fail：仅本地已删才回 pending（仍缺封面的 fail 保持失败）
-            if st == "fail" and not missing_disk and not code_mismatch:
-                continue
-            if not code_mismatch and not missing_disk:
-                continue
-            reason = (
-                f"串号回滚:{field_code}"
-                if code_mismatch
-                else "仍缺:封面 · 无本地目录"
-            )
-            gaps = [
-                "no_local",
-                "no_media",
-                "no_actress",
-                "no_studio",
-                "no_plot",
-                "thin_title",
-            ]
-            if folder is not None and folder.is_dir():
-                try:
-                    _, gaps = _enrich_scan._local_folder_gaps(folder)
-                except Exception:  # noqa: BLE001
-                    gaps = ["no_local"]
-            payload["partialOk"] = False
-            payload["gapsAfter"] = gaps
-            payload.pop("ok", None)
-            updates.append(
-                (
-                    reason[:500],
-                    json.dumps(gaps, ensure_ascii=False),
-                    json.dumps(payload, ensure_ascii=False, default=str),
-                    lid,
-                )
-            )
-        if not updates:
-            return 0
-        n = 0
-        with connect() as conn:
-            for i in range(0, len(updates), 200):
-                chunk = updates[i : i + 200]
-                for params in chunk:
-                    conn.execute(
-                        """
-                        UPDATE enrich_queue_log
-                        SET status='pending', error=?, gaps_json=?, payload_json=?,
-                            updated_at=NOW()
-                        WHERE id=? AND status IN ('done', 'fail')
-                        """,
-                        params,
-                    )
-                    n += 1
-                conn.commit()
-        return n
+        plans = _plan_false_done_corrections(rid, rows)
+        return _apply_false_done_corrections(plans)
     except Exception as e:  # noqa: BLE001
         log.warning("demote false enrich dones failed region=%s: %s", rid, e)
         return 0
+
+
+def _plan_false_done_corrections(
+    rid: str, rows: list[Any]
+) -> list[tuple[str, str, str, str, int]]:
+    """返回 (new_status, error, gaps_json, payload_json, id)。"""
+    out: list[tuple[str, str, str, str, int]] = []
+    for raw in rows:
+        if isinstance(raw, dict):
+            lid = int(raw.get("id") or 0)
+            code = str(raw.get("code") or "").strip().upper()
+            iid = str(raw.get("item_id") or "").strip()
+            payload_raw = raw.get("payload_json")
+            st = str(raw.get("status") or "").strip().lower()
+        else:
+            lid = int(raw[0] or 0)
+            code = str(raw[1] or "").strip().upper()
+            iid = str(raw[2] or "").strip()
+            payload_raw = raw[5]
+            st = str(raw[6] if len(raw) > 6 else "").strip().lower()
+        if lid <= 0:
+            continue
+        try:
+            payload = (
+                json.loads(payload_raw)
+                if isinstance(payload_raw, str)
+                else (payload_raw if isinstance(payload_raw, dict) else {})
+            )
+        except Exception:  # noqa: BLE001
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        field_code = _payload_field_code(payload)
+        code_mismatch = bool(field_code and code and field_code != code)
+        folder = _enrich_detail._resolve_enrich_folder(
+            region=rid, code=code, item_id=iid
+        )
+        folder_gone = folder is None or not folder.is_dir()
+        poster_ok = (not folder_gone) and _enrich_cover._local_poster_ok(folder)
+
+        # pending：只回收「有目录但封面不合格」的误入；真无目录/串号保持未处理
+        if st == "pending":
+            if folder_gone or code_mismatch or poster_ok:
+                continue
+        # fail：仅目录没了或串号才回 pending；仍缺封面保持失败
+        elif st == "fail" and not folder_gone and not code_mismatch:
+            continue
+        # done：封面仍在且未串号 → 不动
+        elif st == "done" and poster_ok and not code_mismatch:
+            continue
+        elif not code_mismatch and not folder_gone and poster_ok:
+            continue
+
+        gaps = [
+            "no_local",
+            "no_media",
+            "no_actress",
+            "no_studio",
+            "no_plot",
+            "thin_title",
+        ]
+        if not folder_gone:
+            try:
+                _, gaps = _enrich_scan._local_folder_gaps(folder)
+            except Exception:  # noqa: BLE001
+                gaps = ["no_local"]
+
+        if code_mismatch:
+            new_st = "pending"
+            reason = f"串号回滚:{field_code}"
+        elif folder_gone:
+            new_st = "pending"
+            reason = "仍缺:封面 · 无本地目录"
+        else:
+            # 有目录但封面不合格：应记失败，勿塞进未处理
+            new_st = "fail"
+            labels = _enrich_retry._gap_labels(
+                [g for g in gaps if g in _enrich._SUCCESS_BLOCK_GAPS] or ["no_local"]
+            )
+            reason = f"仍缺:{' · '.join(labels)}" if labels else "仍缺:封面"
+
+        payload["partialOk"] = False
+        payload["gapsAfter"] = gaps
+        payload.pop("ok", None)
+        out.append(
+            (
+                new_st,
+                reason[:500],
+                json.dumps(gaps, ensure_ascii=False),
+                json.dumps(payload, ensure_ascii=False, default=str),
+                lid,
+            )
+        )
+    return out
+
+
+def _apply_false_done_corrections(
+    plans: list[tuple[str, str, str, str, int]],
+) -> int:
+    if not plans:
+        return 0
+    n = 0
+    try:
+        from app.core.db import connect, init_db
+
+        init_db()
+        with connect() as conn:
+            for i in range(0, len(plans), 200):
+                chunk = plans[i : i + 200]
+                for new_st, err, gaps_json, payload_json, lid in chunk:
+                    conn.execute(
+                        """
+                        UPDATE enrich_queue_log
+                        SET status=?, error=?, gaps_json=?, payload_json=?,
+                            updated_at=NOW()
+                        WHERE id=? AND status IN ('done', 'fail', 'pending')
+                        """,
+                        (new_st, err, gaps_json, payload_json, lid),
+                    )
+                    n += 1
+                conn.commit()
+    except Exception as e:  # noqa: BLE001
+        log.warning("apply false done corrections failed: %s", e)
+        return 0
+    return n
 
 
 def _queue_log_demote_false_dones_budgeted(
@@ -1870,7 +1908,7 @@ def _queue_log_demote_false_dones_budgeted(
                     """
                     SELECT id, code, item_id, error, gaps_json, payload_json, status
                     FROM enrich_queue_log
-                    WHERE region=? AND status IN ('done', 'fail')
+                    WHERE region=? AND status IN ('done', 'fail', 'pending')
                     ORDER BY updated_at ASC NULLS FIRST, id ASC
                     LIMIT 4000
                     """,
@@ -1878,89 +1916,17 @@ def _queue_log_demote_false_dones_budgeted(
                 ).fetchall()
                 or []
             )
-        updates: list[tuple[str, str, str, int]] = []
+        # 预算内只处理前缀行
+        limited: list[Any] = []
         for raw in rows:
             if (time.monotonic() - t0) >= budget:
                 break
-            if isinstance(raw, dict):
-                lid = int(raw.get("id") or 0)
-                code = str(raw.get("code") or "").strip().upper()
-                iid = str(raw.get("item_id") or "").strip()
-                payload_raw = raw.get("payload_json")
-                st = str(raw.get("status") or "").strip().lower()
-            else:
-                lid = int(raw[0] or 0)
-                code = str(raw[1] or "").strip().upper()
-                iid = str(raw[2] or "").strip()
-                payload_raw = raw[5]
-                st = str(raw[6] if len(raw) > 6 else "").strip().lower()
-            if lid <= 0:
-                continue
-            try:
-                payload = (
-                    json.loads(payload_raw)
-                    if isinstance(payload_raw, str)
-                    else (payload_raw if isinstance(payload_raw, dict) else {})
-                )
-            except Exception:  # noqa: BLE001
-                payload = {}
-            if not isinstance(payload, dict):
-                payload = {}
-            field_code = _payload_field_code(payload)
-            code_mismatch = bool(field_code and code and field_code != code)
-            folder = _enrich_detail._resolve_enrich_folder(region=rid, code=code, item_id=iid)
-            missing_disk = folder is None or not _enrich_cover._local_poster_ok(folder)
-            if st == "fail" and not missing_disk and not code_mismatch:
-                continue
-            if not code_mismatch and not missing_disk:
-                continue
-            reason = (
-                f"串号回滚:{field_code}"
-                if code_mismatch
-                else "仍缺:封面 · 无本地目录"
-            )
-            gaps = [
-                "no_local",
-                "no_media",
-                "no_actress",
-                "no_studio",
-                "no_plot",
-                "thin_title",
-            ]
-            if folder is not None and folder.is_dir():
-                try:
-                    _, gaps = _enrich_scan._local_folder_gaps(folder)
-                except Exception:  # noqa: BLE001
-                    gaps = ["no_local"]
-            payload["partialOk"] = False
-            payload["gapsAfter"] = gaps
-            payload.pop("ok", None)
-            updates.append(
-                (
-                    reason[:500],
-                    json.dumps(gaps, ensure_ascii=False),
-                    json.dumps(payload, ensure_ascii=False, default=str),
-                    lid,
-                )
-            )
-        if not updates:
-            return 0
-        n = 0
-        with connect() as conn:
-            for i in range(0, len(updates), 200):
-                chunk = updates[i : i + 200]
-                for params in chunk:
-                    conn.execute(
-                        """
-                        UPDATE enrich_queue_log
-                        SET status='pending', error=?, gaps_json=?, payload_json=?,
-                            updated_at=NOW()
-                        WHERE id=? AND status IN ('done', 'fail')
-                        """,
-                        params,
-                    )
-                    n += 1
-                conn.commit()
+            limited.append(raw)
+            # 磁盘判定在 plan 里；这里先截断条数，避免预算被计划阶段吃光
+            if len(limited) >= 800:
+                break
+        plans = _plan_false_done_corrections(rid, limited)
+        n = _apply_false_done_corrections(plans)
         if n:
             log.info(
                 "budget demote region=%s n=%s spent=%.1fs",

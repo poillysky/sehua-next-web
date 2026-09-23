@@ -295,14 +295,11 @@ def _maybe_llm_fill_zh(
 
 _CN_TEXT_SOURCE_IDS = frozenset(
     {
-        "airav",
         "airav_io",
         "iqqtv",
         "javday",
         "miss_av",
         "sevenmmtv",
-        "avsex",
-        "lulubar",
     }
 )
 
@@ -340,7 +337,6 @@ _META_FILL_SOURCE_IDS = frozenset(
         "jav321",
         "libredmm",
         "avbase",
-        "avwikidb",
         "prestige",
     }
 )
