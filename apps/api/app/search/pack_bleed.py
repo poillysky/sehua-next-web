@@ -34,6 +34,16 @@ Smoke (manual)::
     assert len(out["ed2k_links"]) == 1 and h1.lower() in out["ed2k_links"][0].lower()
     assert out["title"] == "JUR-024.mp4"
     assert all("jur" in u.lower() for u in out["preview_images"])
+
+    # 未拆分合集：filename=帖标题，应保留全部兄弟链接
+    pack_title = "合集帖 A+B"
+    unsplit_row = {
+        **row,
+        "filename": pack_title,
+        "title": pack_title,
+    }
+    unsplit_out = format_resource(unsplit_row)
+    assert len(unsplit_out["ed2k_links"]) == 2
 """
 
 from __future__ import annotations
@@ -240,12 +250,81 @@ def link_matches_hash(link: str | None, hash_: str | None) -> bool:
     return True
 
 
+def _matched_download_names(links: list[str]) -> list[str]:
+    names: list[str] = []
+    for link in links:
+        ed2k = parse_ed2k_link(link) or {}
+        magnet = parse_magnet_link(link) or {}
+        name = str(ed2k.get("filename") or magnet.get("filename") or "").strip()
+        if name:
+            names.append(name)
+    return names
+
+
+def is_unsplit_multi_hash_row(
+    hash_: str | None,
+    filename: str | None = None,
+    title: str | None = None,
+    ed2k_links: Any = None,
+    fallback_link: str | None = None,
+) -> bool:
+    """合集帖多 ed2k 未拆成多行时：filename 仍是帖标题，兄弟 hash 挂在同一行。"""
+    if distinct_download_hash_count(ed2k_links, fallback_link) <= 1:
+        return False
+    primary = (fallback_link or "").strip()
+    from_meta = normalize_ed2k_links(ed2k_links, None)
+    out: list[str] = []
+    seen: set[str] = set()
+    for link in ([primary] if primary else []) + from_meta:
+        if not link or link in seen:
+            continue
+        low = link.lower()
+        if not (
+            is_public_download_link(link) or low.startswith("unavailable://")
+        ):
+            continue
+        seen.add(link)
+        out.append(link)
+
+    h = (hash_ or "").strip().upper()
+    if not h or not out:
+        return False
+
+    hashable = [
+        link
+        for link in out
+        if (parse_ed2k_link(link) or {}).get("hash")
+        or (parse_magnet_link(link) or {}).get("hash")
+    ]
+    matched = [link for link in hashable if link_matches_hash(link, h)]
+    if not matched or len(matched) >= len(hashable):
+        return False
+
+    fn = (filename or "").strip()
+    tit = (title or "").strip()
+    # 未拆分入库：资源名仍是整帖标题
+    if tit and fn and tit == fn:
+        return True
+    matched_names = _matched_download_names(matched)
+    if fn and matched_names and not any(
+        resource_names_align(fn, name) for name in matched_names
+    ):
+        return True
+    return False
+
+
 def links_for_resource_hash(
     hash_: str | None,
     ed2k_links: Any = None,
     fallback_link: str | None = None,
+    *,
+    filename: str | None = None,
+    title: str | None = None,
 ) -> list[str]:
-    """Current-hash download links; drop sibling hashes from pack rows."""
+    """Current-hash download links; drop sibling hashes from pack rows.
+
+    未拆分合集（兄弟 hash 不在独立行）保留全部链接，避免库里有多条却只显示一条。
+    """
     primary = (fallback_link or "").strip()
     from_meta = normalize_ed2k_links(ed2k_links, None)
 
@@ -293,6 +372,14 @@ def links_for_resource_hash(
                 matched.append(link)
         # drop non-hashable when hashable siblings exist
     if matched:
+        if is_unsplit_multi_hash_row(
+            hash_,
+            filename=filename,
+            title=title,
+            ed2k_links=ed2k_links,
+            fallback_link=fallback_link,
+        ):
+            return out
         return matched
     return [primary] if primary else []
 

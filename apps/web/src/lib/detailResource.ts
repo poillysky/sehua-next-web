@@ -39,10 +39,15 @@ export function getExtractPassword(item: {
 /** 当前 hash 下的下载链（等同 sehua linksForResourceHash） */
 export function linksForResource(item: {
   hash?: string | null;
+  name?: string | null;
+  title?: string | null;
   ed2k_link?: string | null;
   ed2k_links?: string[] | null;
 }): string[] {
-  return linksForResourceHash(item.hash, item.ed2k_links, item.ed2k_link);
+  return linksForResourceHash(item.hash, item.ed2k_links, item.ed2k_link, {
+    filename: item.name,
+    title: item.title,
+  });
 }
 
 export function getEd2kCopyText(item: {

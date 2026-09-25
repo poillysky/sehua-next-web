@@ -244,6 +244,7 @@ export function linksForResourceHash(
   hash: string | null | undefined,
   ed2kLinks?: string[] | null,
   fallbackLink?: string | null,
+  opts?: { filename?: string | null; title?: string | null },
 ): string[] {
   const primary = (fallbackLink || "").trim();
   const fromMeta = normalizeEd2kLinks(ed2kLinks, null);
@@ -279,8 +280,73 @@ export function linksForResourceHash(
     }
     return false;
   });
-  if (matched.length) return matched;
+  if (matched.length) {
+    if (
+      isUnsplitMultiHashRow(hash, ed2kLinks, fallbackLink, {
+        filename: opts?.filename,
+        title: opts?.title,
+      })
+    ) {
+      return out;
+    }
+    return matched;
+  }
   return primary ? [primary] : [];
+}
+
+/** 合集多 ed2k 未拆行：filename 仍是帖标题，兄弟 hash 挂在同一行。 */
+export function isUnsplitMultiHashRow(
+  hash: string | null | undefined,
+  ed2kLinks?: string[] | null,
+  fallbackLink?: string | null,
+  opts?: { filename?: string | null; title?: string | null },
+): boolean {
+  if (distinctDownloadHashCount(ed2kLinks, fallbackLink) <= 1) return false;
+  const primary = (fallbackLink || "").trim();
+  const fromMeta = normalizeEd2kLinks(ed2kLinks, null);
+  const out: string[] = [];
+  const push = (link: string) => {
+    if (!link || out.includes(link)) return;
+    if (
+      !isPublicDownloadLink(link) &&
+      !link.toLowerCase().startsWith("unavailable://")
+    ) {
+      return;
+    }
+    out.push(link);
+  };
+  if (primary) push(primary);
+  for (const link of fromMeta) push(link);
+
+  const h = (hash || "").trim().toUpperCase();
+  if (!h || !out.length) return false;
+
+  const hashable = out.filter(
+    (link) =>
+      Boolean(parseEd2kLink(link)?.hash || parseMagnetLink(link)?.hash),
+  );
+  const matched = hashable.filter((link) => linkMatchesResourceHash(link, h));
+  if (!matched.length || matched.length >= hashable.length) return false;
+
+  const fn = (opts?.filename || "").trim();
+  const tit = (opts?.title || "").trim();
+  if (tit && fn && tit === fn) return true;
+
+  const matchedNames = matched
+    .map(
+      (link) =>
+        parseEd2kLink(link)?.filename || parseMagnetLink(link)?.filename || "",
+    )
+    .map((n) => n.trim())
+    .filter(Boolean);
+  if (
+    fn &&
+    matchedNames.length &&
+    !matchedNames.some((name) => resourceNamesAlign(fn, name))
+  ) {
+    return true;
+  }
+  return false;
 }
 
 export function distinctDownloadHashCount(
@@ -619,7 +685,11 @@ export function formatDescriptionLinesForItem(
 }
 
 export function normalizeResourceView(item: ResourceItem): ResourceItem {
-  const bleed = isPackBleedItem(item);
+  const unsplit = isUnsplitMultiHashRow(item.hash, item.ed2k_links, item.ed2k_link, {
+    filename: item.name,
+    title: item.title,
+  });
+  const bleed = !unsplit && isPackBleedItem(item);
   const rawImgs = item.preview_images || [];
   const picked = pickPreviewsForResource(
     item.hash,
@@ -649,6 +719,7 @@ export function normalizeResourceView(item: ResourceItem): ResourceItem {
     item.hash,
     item.ed2k_links,
     item.ed2k_link,
+    { filename: item.name, title: item.title },
   );
   const primary = links[0] || item.ed2k_link || "";
   const name = (item.name || "").trim();

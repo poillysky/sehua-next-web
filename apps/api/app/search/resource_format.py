@@ -12,6 +12,7 @@ from app.search.pack_bleed import (
     gallery_preview_images,
     is_pack_bleed_item,
     is_public_download_link,
+    is_unsplit_multi_hash_row,
     links_for_resource_hash,
     parse_ed2k_link,
     parse_magnet_link,
@@ -229,10 +230,16 @@ def _enrich_magnet_files(info_hash: str) -> list[dict[str, Any]]:
 def _magnet_hashes_from_row(row: dict[str, Any]) -> list[str]:
     hash_ = str(row.get("hash") or "").upper()
     raw_link = (row.get("ed2k_link") or "").strip()
-    links = links_for_resource_hash(hash_, row.get("ed2k_links"), raw_link)
+    links = links_for_resource_hash(
+        hash_,
+        row.get("ed2k_links"),
+        raw_link,
+        filename=row.get("filename") or "",
+        title=(row.get("title") or "").strip() or None,
+    )
     out: list[str] = []
     for link in links:
-        if parse_ed2k(link):
+        if parse_ed2k_link(link):
             continue
         m = parse_magnet_link(link)
         if m and m.get("hash"):
@@ -281,7 +288,14 @@ def format_resource(
     raw_ed2k_links = row.get("ed2k_links")
 
     # Detect packBleed BEFORE filtering links (raw meta hashes)
-    pack_bleed = is_pack_bleed_item(
+    unsplit = is_unsplit_multi_hash_row(
+        hash_,
+        filename=filename,
+        title=raw_title,
+        ed2k_links=raw_ed2k_links,
+        fallback_link=raw_link,
+    )
+    pack_bleed = (not unsplit) and is_pack_bleed_item(
         raw_title,
         filename,
         raw_desc,
@@ -290,7 +304,13 @@ def format_resource(
         raw_ed2k_links,
     )
 
-    ed2k_links = links_for_resource_hash(hash_, raw_ed2k_links, raw_link)
+    ed2k_links = links_for_resource_hash(
+        hash_,
+        raw_ed2k_links,
+        raw_link,
+        filename=filename,
+        title=raw_title,
+    )
     primary = (
         (
             raw_link
