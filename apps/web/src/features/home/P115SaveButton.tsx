@@ -79,13 +79,14 @@ export function P115SaveButton({
         saveSource !== 'warehouse'
           ? ` → ${P115_SOURCE_LABEL[saveSource]}`
           : '';
-      const tip = wantExtract
-        ? result.extractScheduled
-          ? `已转存${destHint}，云解压已安排`
-          : result.message || `已转存${destHint}`
-        : kind === '115share'
-          ? `115 分享已接收${destHint}`
-          : `已加入离线下载${destHint}`;
+      // 以后端 extractScheduled 为准（避免前端误判导致提示「未解压」）
+      const tip = result.extractScheduled
+        ? `已转存${destHint}，云解压已安排`
+        : wantExtract
+          ? result.message || `已转存${destHint}`
+          : kind === '115share'
+            ? `115 分享已接收${destHint}`
+            : `已加入离线下载${destHint}`;
       onToast?.(tip);
     } catch (e) {
       onToast?.(e instanceof Error ? e.message : '转存失败');

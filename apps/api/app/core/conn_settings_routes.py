@@ -255,16 +255,20 @@ P115_SOURCES = (
     *P115_MAKER_REGION_SOURCES,
 )
 
-# 先入「最近接收」、再移到指定目录（影视 + 片商六区；仓库一并）
+# 先入「最近接收」、再移到指定目录：仅影视 + 片商六区
+# 仓库（ed2k/磁力）直存 warehouse 目录（云下载），不经「最近接收」
 P115_INBOX_RELOCATE_SOURCES = frozenset(
-    {"warehouse", "movie", "tv", "makers", "media", *P115_MAKER_REGION_SOURCES}
+    {"movie", "tv", "makers", "media", *P115_MAKER_REGION_SOURCES}
 )
 
 
 def _use_receive_inbox(source: str | None) -> bool:
+    """影视/片商走中转；warehouse / 未知默认直存目标目录。"""
     key = (source or "warehouse").strip().lower()
     if key == "media":
         key = "movie"
+    if key == "warehouse":
+        return False
     return key in P115_INBOX_RELOCATE_SOURCES
 
 
@@ -1374,7 +1378,7 @@ def post_p115_offline(
     body: P115OfflineBody,
     _user: dict[str, Any] = Depends(require_user),
 ) -> JSONResponse:
-    """离线转存：影视/片商/仓库均先入「最近接收」，完成后再移到指定目录（片商不再按分区建子目录）。"""
+    """离线转存：影视/片商先入「最近接收」再归位；仓库直存目标目录（云下载）。"""
     try:
         prev = settings_store.get_setting(settings_store.P115_KEY) or {}
         cookie = str(prev.get("cookie") or "").strip()
@@ -1402,7 +1406,7 @@ def post_p115_offline(
             region=body.region,
         )
 
-        # 影视 / 片商 / 仓库：先入根目录「最近接收」
+        # 影视 / 片商：先入「最近接收」；仓库：直存 dest（云下载）
         want_inbox = _use_receive_inbox(body.source)
         inbox = (
             p115_client.ensure_receive_inbox(cookie) if want_inbox else {"ok": False}
@@ -1414,9 +1418,22 @@ def post_p115_offline(
         result = p115_offline_svc.add_offline_tasks(cookie, urls, save_cid)
         password = (body.password or "").strip()
         looks_archive = any(_looks_archive_link(u) for u in urls)
+        # 补齐 infoHashes（ed2k 文件 hash），避免后台轮询匹配不到、不解压
+        info_hashes = [
+            str(h).lower()
+            for h in (result.get("infoHashes") or [])
+            if h
+        ]
+        for h in p115_offline_svc.hashes_from_offline_urls(urls):
+            if h not in info_hashes:
+                info_hashes.append(h)
+        result["infoHashes"] = info_hashes
+
+        added_n = int(result.get("added") or 0)
+        # 任务已存在(10008)时 added 也可能为 0，但仍需解压/归位
+        actionable = bool(result.get("ok")) and (added_n > 0 or bool(info_hashes))
         want_extract = (
-            bool(result.get("ok"))
-            and int(result.get("added") or 0) > 0
+            actionable
             and body.auto_extract is not False
             and (bool(password) or looks_archive or body.auto_extract is True)
         )
@@ -1424,8 +1441,7 @@ def post_p115_offline(
         relocate_scheduled = False
         extract_scheduled = False
         if (
-            result.get("ok")
-            and int(result.get("added") or 0) > 0
+            actionable
             and use_inbox
             and dest_cid not in {"", "0"}
             and inbox_cid != dest_cid
@@ -1436,20 +1452,20 @@ def post_p115_offline(
                     "inboxCid": inbox_cid,
                     "destCid": dest_cid,
                     "password": password,
-                    "infoHashes": result.get("infoHashes") or [],
+                    "infoHashes": info_hashes,
                     "titleHint": body.title_hint or "",
                     "wantExtract": want_extract,
                 }
             )
             relocate_scheduled = True
         elif want_extract:
-            # 未走接收目录时：保持原云解压轮询
+            # 仓库直存：在目标目录内轮询完成后云解压（不经最近接收）
             p115_extract.schedule_deferred_extract(
                 {
                     "cookie": cookie,
                     "folderCid": dest_cid,
                     "password": password,
-                    "infoHashes": result.get("infoHashes") or [],
+                    "infoHashes": info_hashes,
                     "titleHint": body.title_hint or "",
                 }
             )
@@ -1466,16 +1482,18 @@ def post_p115_offline(
             )
 
         message = str(result.get("message") or "")
+        dest_label = dest_name or "指定目录"
         if use_inbox:
             message = f"{message} · 已入「最近接收」"
+        else:
+            message = f"{message} · 直存「{dest_label}」"
         if relocate_scheduled:
-            dest_label = dest_name or "指定目录"
             message = (
                 f"{message} · 后台等待完成后移到「{dest_label}」"
                 + ("（含云解压）" if want_extract else "")
             )
         elif extract_scheduled:
-            message = f"{message} · 后台轮询转存（最长约 30 秒），完成后立即云解压"
+            message = f"{message} · 后台完成后在「{dest_label}」内云解压"
         if subs_info and subs_info.get("count"):
             message = f"{message} · {subs_info.get('message')}"
         elif subs_info and (body.attach_subs_code or body.scrap_item_id):
@@ -1516,7 +1534,7 @@ def post_p115_share(
     body: P115ShareBody,
     _user: dict[str, Any] = Depends(require_user),
 ) -> JSONResponse:
-    """分享转存：影视/片商/仓库均先入「最近接收」，再移到指定目录（片商不再按分区建子目录）。"""
+    """分享转存：影视/片商先入「最近接收」再归位；仓库直存目标目录。"""
     try:
         prev = settings_store.get_setting(settings_store.P115_KEY) or {}
         cookie = str(prev.get("cookie") or "").strip()
@@ -1539,7 +1557,7 @@ def post_p115_share(
             region=body.region,
         )
 
-        # 影视 / 片商 / 仓库：先入「最近接收」再转移
+        # 影视 / 片商：先入「最近接收」；仓库：直存 dest
         want_inbox = _use_receive_inbox(body.source)
         inbox = (
             p115_client.ensure_receive_inbox(cookie) if want_inbox else {"ok": False}
@@ -1589,6 +1607,8 @@ def post_p115_share(
         message = str(result.get("message") or "")
         if use_inbox:
             message = f"{message} · 已入「最近接收」"
+        else:
+            message = f"{message} · 直存「{dest_name or '指定目录'}」"
         if relocate_info and relocate_info.get("ok") and relocate_info.get("moved"):
             message = (
                 f"{message} · 已移到「{dest_name or '指定目录'}」"

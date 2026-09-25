@@ -69,6 +69,33 @@ def collect_info_hashes(raw: Any) -> list[str]:
     return list(out)
 
 
+def hashes_from_offline_urls(urls: list[str]) -> list[str]:
+    """从 ed2k / magnet URL 解析 hash，补齐 add 接口未回传 info_hash 的情况。"""
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in urls or []:
+        u = (raw or "").strip()
+        if not u:
+            continue
+        low = u.lower()
+        h = ""
+        if low.startswith("ed2k://"):
+            parts = u.split("|")
+            # ed2k://|file|name|size|HASH|/
+            if len(parts) >= 5:
+                cand = parts[4].strip()
+                if re.fullmatch(r"[A-Fa-f0-9]{32}", cand):
+                    h = cand.lower()
+        elif low.startswith("magnet:"):
+            m = re.search(r"xt=urn:btih:([A-Fa-f0-9]{40}|[A-Za-z2-7]{32})", u, re.I)
+            if m:
+                h = m.group(1).lower()
+        if h and h not in seen:
+            seen.add(h)
+            out.append(h)
+    return out
+
+
 def _is_add_ok(data: Any) -> bool:
     if not isinstance(data, dict):
         return False
@@ -338,6 +365,10 @@ def add_offline_tasks(
                 time.sleep(REQUEST_GAP_S)
 
     hashes = list(info_hashes)
+    # add 接口偶发不回 info_hash（含 10008 已存在）：用 URL 内嵌 hash 补齐
+    for h in hashes_from_offline_urls(cleaned):
+        if h not in hashes:
+            hashes.append(h)
 
     if added > 0 and not failed:
         soft = any(

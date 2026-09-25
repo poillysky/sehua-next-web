@@ -199,7 +199,7 @@ export async function runP115Save(opts: {
       shareCount: shareUrls.length || undefined,
       subsUploaded: subsCount || undefined,
       message: extractScheduled
-        ? `${shareHint}已转存 ${offlineUrls.length} 条；后台轮询（约 30 秒内）完成后自动云解压`
+        ? `${shareHint}已转存 ${offlineUrls.length} 条；后台完成后自动云解压并归位`
         : msg || `${shareHint}已转存 ${offlineUrls.length} 条到 115 云下载`,
     };
   } catch (err) {

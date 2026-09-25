@@ -83,7 +83,7 @@ services:
           memory: 512M
 
   scrape-worker:
-    image: poillysky/sehua-next-web:1.2.25
+    image: poillysky/sehua-next-web:1.2.26
     container_name: sehua-next-web-scrape
     restart: always
     # 刮削吞吐：4G mid 档；上限非预占，任务结束后会回落。
@@ -121,7 +121,7 @@ services:
         hard: 65535
 
   app:
-    image: poillysky/sehua-next-web:1.2.25
+    image: poillysky/sehua-next-web:1.2.26
     container_name: sehua-next-web
     restart: always
     # UI 优先：轻量上限，空闲不预占。

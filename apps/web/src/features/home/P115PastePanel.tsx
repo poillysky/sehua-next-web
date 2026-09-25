@@ -11,9 +11,8 @@ import {
 import { AppPush } from '@/components/ui/AppPush';
 import { AppMsg } from '@/components/ui/AppMsg';
 import { getP115, type P115Config, type P115SaveSource } from '@/lib/api';
-import { extractPasteLinks, extractPastePassword } from '@/lib/p115Paste';
+import { extractPasteLinks, extractPastePassword, COMMON_EXTRACT_PASSWORDS } from '@/lib/p115Paste';
 import { runP115Save } from '@/lib/p115SaveClient';
-import { readInheritedSaveSource, P115_SOURCE_LABEL, P115_SOURCE_ORDER } from '@/lib/p115Source';
 import { isArchiveDownloadLink, linkKindOf } from '@/lib/detailResource';
 import { useTabNavigation } from '@/shell';
 
@@ -23,15 +22,8 @@ type FolderHint = {
   folderName: string;
 };
 
-/** 可存目录来源（仓库 / 影视 / 片商六区） */
-const PASTE_SOURCES: Array<{ id: P115SaveSource; label: string }> =
-  P115_SOURCE_ORDER.map((id) => ({ id, label: P115_SOURCE_LABEL[id] }));
-
-/** 从 115 配置里取某来源的目录（warehouse 兼容顶层旧字段） */
-function folderFor(
-  data: P115Config,
-  source: P115SaveSource,
-): FolderHint | null {
+/** 从 115 配置取仓库目录（兼容顶层旧字段） */
+function folderFor(data: P115Config, source: P115SaveSource): FolderHint {
   const configured = Boolean(data.configured);
   if (source === 'warehouse') {
     const t = data.targets?.warehouse;
@@ -50,7 +42,7 @@ function folderFor(
   };
 }
 
-/** 粘贴转存 115 — 全屏 push，非弹窗（仓库入口） */
+/** 粘贴转存 115 — 全屏 push（首页入口：固定直存仓库/云下载） */
 export function P115PastePanel({ onBack }: { onBack: () => void }) {
   const tabCtx = useTabNavigation();
   const [paste, setPaste] = useState('');
@@ -58,13 +50,9 @@ export function P115PastePanel({ onBack }: { onBack: () => void }) {
   const [loading, setLoading] = useState(false);
   const [folder, setFolder] = useState<FolderHint | null>(null);
   const [msg, setMsg] = useState('');
-  // 落点来源：默认继承影视(movie/tv)/片商六区跳转上下文（惰性初始化，SSR 安全）；
-  // 否则回退仓库。避免从影视/片商"在资源库搜索"跳转而来时补粘磁力误存仓库。
-  const [source, setSource] = useState<P115SaveSource>(
-    () => readInheritedSaveSource() ?? 'warehouse',
-  );
+  // 首页粘贴页只进仓库目录（设置里的「云下载」）；影视/片商用详情页「转存 115」
+  const source: P115SaveSource = 'warehouse';
 
-  // 载入当前来源目录并展示（含挂载与切换来源时）
   useEffect(() => {
     let cancelled = false;
     void getP115()
@@ -91,17 +79,12 @@ export function P115PastePanel({ onBack }: { onBack: () => void }) {
       links.some((u) => linkKindOf(u) !== '115share' && isArchiveDownloadLink(u)));
 
   const hasCookie = Boolean(folder?.configured);
-  // 非仓库来源若未单独配目录，后端会回退到仓库目录——这里如实提示
-  const srcConfigured =
-    source === 'warehouse'
-      ? hasCookie
-      : hasCookie && Boolean(folder?.folderName);
-  const folderOk = srcConfigured;
-  const fallbackToWarehouse = source !== 'warehouse' && !srcConfigured && hasCookie;
+  const folderOk = hasCookie;
   const folderLabel = hasCookie
     ? folder?.folderName ||
       (folder?.folderCid === '0' ? '根目录' : `CID ${folder?.folderCid}`)
     : '未配置';
+  const destTitle = folderLabel === '未配置' ? '云下载' : folderLabel;
 
   const onSubmit = useCallback(async () => {
     if (!links.length) {
@@ -113,7 +96,7 @@ export function P115PastePanel({ onBack }: { onBack: () => void }) {
       const result = await runP115Save({
         urls: links,
         password: effectivePassword || undefined,
-        source,
+        source: 'warehouse',
       });
       if (!result.ok) {
         setMsg(result.message);
@@ -132,28 +115,12 @@ export function P115PastePanel({ onBack }: { onBack: () => void }) {
     } finally {
       setLoading(false);
     }
-  }, [effectivePassword, links, onBack, tabCtx, source]);
+  }, [effectivePassword, links, onBack, tabCtx]);
 
   return (
     <AppPush title="115 转存" onBack={onBack}>
       <div className="p115-paste-page">
         {msg ? <AppMsg onDismiss={() => setMsg('')}>{msg}</AppMsg> : null}
-
-        <p className="p115-paste__section">保存到</p>
-        <div className="p115-paste__src" role="radiogroup" aria-label="115 保存目录">
-          {PASTE_SOURCES.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              role="radio"
-              aria-checked={source === s.id}
-              className={`p115-paste__src-btn${source === s.id ? ' is-active' : ''}`}
-              onClick={() => setSource(s.id)}
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
 
         <p className="p115-paste__section">目标目录</p>
         <div className={`p115-paste__card${folderOk ? '' : ' is-warn'}`}>
@@ -165,15 +132,13 @@ export function P115PastePanel({ onBack }: { onBack: () => void }) {
               <Folder size={18} strokeWidth={2.2} />
             </span>
             <div className="p115-paste__dir-main">
-              <span className="p115-paste__dir-title">{folderLabel}</span>
+              <span className="p115-paste__dir-title">{destTitle}</span>
               <span className="p115-paste__dir-sub">
                 {!hasCookie
-                  ? '请到更多 → 115 填写 Cookie / 目录'
-                  : fallbackToWarehouse
-                    ? '未单独配置，将沿用「仓库」目录'
-                    : willExtract
-                      ? `${P115_SOURCE_LABEL[source]}目录 · 转存后自动云解压`
-                      : `${P115_SOURCE_LABEL[source]}目录 · 离线 / 分享转存`}
+                  ? '请到更多 → 115 填写 Cookie，并把仓库目录设为「云下载」'
+                  : willExtract
+                    ? '直存云下载 · 转存后自动云解压'
+                    : '直存云下载 · 离线 / 分享转存'}
               </span>
             </div>
             <span className={`p115-paste__badge${folderOk ? ' is-ok' : ' is-warn'}`}>
@@ -220,6 +185,26 @@ export function P115PastePanel({ onBack }: { onBack: () => void }) {
               onChange={(e) => setPassword(e.target.value)}
             />
           </label>
+          <div
+            className="p115-paste__pwd-presets"
+            role="group"
+            aria-label="常用解压密码"
+          >
+            {COMMON_EXTRACT_PASSWORDS.map((pwd) => {
+              const active = password.trim() === pwd;
+              return (
+                <button
+                  key={pwd}
+                  type="button"
+                  className={`p115-paste__pwd-chip${active ? ' is-active' : ''}`}
+                  aria-pressed={active}
+                  onClick={() => setPassword(active ? '' : pwd)}
+                >
+                  {pwd}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {links.length > 0 ? (
@@ -259,8 +244,8 @@ export function P115PastePanel({ onBack }: { onBack: () => void }) {
               {loading
                 ? '转存中…'
                 : willExtract
-                  ? `转存到 ${P115_SOURCE_LABEL[source]}并云解压`
-                  : `转存到 ${P115_SOURCE_LABEL[source]}`}
+                  ? `转存到${destTitle}并云解压`
+                  : `转存到${destTitle}`}
             </span>
           </button>
         </div>

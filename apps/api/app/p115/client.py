@@ -655,6 +655,7 @@ def list_dir_entries(
     parent_cid: str = "0",
     *,
     limit: int = 100,
+    offset: int = 0,
 ) -> dict[str, Any]:
     """列出目录下文件+文件夹（含 fid / cid）。"""
     bad = require_cookie_parts(cookie)
@@ -667,7 +668,7 @@ def list_dir_entries(
             "cid": cid,
             "o": "user_ptime",
             "asc": "0",
-            "offset": "0",
+            "offset": str(max(0, int(offset or 0))),
             "show_dir": "1",
             "limit": str(max(1, min(200, int(limit)))),
             "type": "0",

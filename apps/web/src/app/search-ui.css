@@ -1851,6 +1851,39 @@
   color: var(--login-blue);
 }
 
+.p115-paste__pwd-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 12px 12px;
+}
+
+.p115-paste__pwd-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  background: rgba(120, 120, 128, 0.12);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.p115-paste__pwd-chip:active {
+  transform: scale(0.98);
+}
+
+.p115-paste__pwd-chip.is-active {
+  color: #fff;
+  background: var(--login-blue);
+}
+
 .p115-paste__chips {
   display: flex;
   flex-wrap: wrap;

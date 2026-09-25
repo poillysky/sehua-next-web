@@ -6,6 +6,20 @@ const LINK_RE =
 const PASSWORD_RE =
   /(?:解压密码|访问码|分享码|提取码|密码|pwd|password)\s*[:：=\s]\s*([^\s，,;；]+)/i;
 
+/**
+ * 色花资源库 `resource_sources.extract_password` 频次前列（已去掉「無/没有密码」等无效项）。
+ * 供粘贴转存页一键填入。
+ */
+export const COMMON_EXTRACT_PASSWORDS: readonly string[] = [
+  '1998@www.98T.la',
+  'www.98T.la@',
+  '暴龙整理',
+  '1314',
+  '98tang',
+  'www.98T.la',
+  'sehuatang',
+] as const;
+
 function trimTrailingJunk(link: string) {
   return link.replace(/[)\]}>.,;，。；]+$/g, '').trim();
 }
